@@ -8,11 +8,39 @@
 // must be JSON-serializable.
 
 import { spawn } from 'node:child_process'
+import {
+  mkdir as fsMkdir,
+  readFile as fsReadFile,
+  readdir as fsReaddir,
+  stat as fsStat,
+  writeFile as fsWriteFile,
+} from 'node:fs/promises'
 
 type NotifyOptions = {
   title: string
   body?: string
   sound?: boolean
+}
+
+type OpenFileOptions = {
+  /** Window title for the dialog */
+  title?: string
+  /** Allow selecting multiple files */
+  multiple?: boolean
+  /** Allow selecting folders instead of files */
+  directory?: boolean
+}
+
+type SaveFileOptions = {
+  title?: string
+  /** Suggested filename (and extension) */
+  defaultName?: string
+}
+
+type DirEntry = {
+  name: string
+  isDirectory: boolean
+  isFile: boolean
 }
 
 function runSilent(cmd: string, args: string[], stdin?: string): Promise<void> {
@@ -110,6 +138,151 @@ export const nativeBridge = {
     return runSilent(cmd, args)
   },
 
+  // ── File system ────────────────────────────────────────────────────
+  /** Read a UTF-8 file. */
+  async fsReadFile(path: string): Promise<string> {
+    return fsReadFile(path, 'utf8')
+  },
+
+  /** Write a UTF-8 file (creates or overwrites). */
+  async fsWriteFile(path: string, content: string): Promise<void> {
+    return fsWriteFile(path, content, 'utf8')
+  },
+
+  /** Check if a path exists. */
+  async fsExists(path: string): Promise<boolean> {
+    try {
+      await fsStat(path)
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  /** Create a directory (recursive). */
+  async fsMkdir(path: string): Promise<void> {
+    await fsMkdir(path, { recursive: true })
+  },
+
+  /** List a directory's contents. */
+  async fsReadDir(path: string): Promise<DirEntry[]> {
+    const entries = await fsReaddir(path, { withFileTypes: true })
+    return entries.map((e) => ({
+      name: e.name,
+      isDirectory: e.isDirectory(),
+      isFile: e.isFile(),
+    }))
+  },
+
+  // ── File dialogs ──────────────────────────────────────────────────
+  /** Open a file picker. Returns selected paths (empty if cancelled). */
+  async openFile(opts: OpenFileOptions = {}): Promise<string[]> {
+    if (process.platform === 'darwin') return openFileMac(opts)
+    if (process.platform === 'win32') return openFileWindows(opts)
+    return openFileLinux(opts)
+  },
+
+  /** Save dialog. Returns selected path (empty if cancelled). */
+  async saveFile(opts: SaveFileOptions = {}): Promise<string> {
+    if (process.platform === 'darwin') return saveFileMac(opts)
+    if (process.platform === 'win32') return saveFileWindows(opts)
+    return saveFileLinux(opts)
+  },
+
   /** Murasaki version (debug/probe). */
-  version: '0.3.0',
+  version: '0.6.0',
+}
+
+// ── Dialog helpers (per-platform) ──────────────────────────────────
+async function openFileMac(opts: OpenFileOptions): Promise<string[]> {
+  const what = opts.directory ? 'choose folder' : 'choose file'
+  const withMultiple = opts.multiple ? ' with multiple selections allowed' : ''
+  const withTitle = opts.title ? ` with prompt "${escapeAppleScript(opts.title)}"` : ''
+  // AppleScript: returns POSIX path(s); on cancel, throws — we catch.
+  const script = opts.multiple
+    ? `set theFiles to ${what}${withTitle}${withMultiple}
+       set thePaths to {}
+       repeat with f in theFiles
+         set end of thePaths to POSIX path of f
+       end repeat
+       set AppleScript's text item delimiters to "\\n"
+       return thePaths as text`
+    : `POSIX path of (${what}${withTitle})`
+  try {
+    const out = await runCapture('osascript', ['-e', script])
+    return out
+      .trim()
+      .split('\n')
+      .filter((p) => p.length > 0)
+  } catch {
+    return []
+  }
+}
+
+async function saveFileMac(opts: SaveFileOptions): Promise<string> {
+  const withTitle = opts.title ? ` with prompt "${escapeAppleScript(opts.title)}"` : ''
+  const withDefault = opts.defaultName
+    ? ` default name "${escapeAppleScript(opts.defaultName)}"`
+    : ''
+  const script = `POSIX path of (choose file name${withTitle}${withDefault})`
+  try {
+    return (await runCapture('osascript', ['-e', script])).trim()
+  } catch {
+    return ''
+  }
+}
+
+async function openFileWindows(_opts: OpenFileOptions): Promise<string[]> {
+  // Best-effort: minimal PowerShell. Production-ready dialogs are a TODO.
+  const ps = `Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Multiselect = $true
+if ($d.ShowDialog() -eq 'OK') { $d.FileNames -join "\`n" }`
+  try {
+    const out = await runCapture('powershell', ['-Command', ps])
+    return out
+      .trim()
+      .split('\n')
+      .filter((p) => p.length > 0)
+  } catch {
+    return []
+  }
+}
+
+async function saveFileWindows(_opts: SaveFileOptions): Promise<string> {
+  const ps = `Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.SaveFileDialog
+if ($d.ShowDialog() -eq 'OK') { $d.FileName }`
+  try {
+    return (await runCapture('powershell', ['-Command', ps])).trim()
+  } catch {
+    return ''
+  }
+}
+
+async function openFileLinux(opts: OpenFileOptions): Promise<string[]> {
+  const args = ['--file-selection']
+  if (opts.multiple) args.push('--multiple', '--separator=\n')
+  if (opts.directory) args.push('--directory')
+  if (opts.title) args.push(`--title=${opts.title}`)
+  try {
+    const out = await runCapture('zenity', args)
+    return out
+      .trim()
+      .split('\n')
+      .filter((p) => p.length > 0)
+  } catch {
+    return []
+  }
+}
+
+async function saveFileLinux(opts: SaveFileOptions): Promise<string> {
+  const args = ['--file-selection', '--save', '--confirm-overwrite']
+  if (opts.title) args.push(`--title=${opts.title}`)
+  if (opts.defaultName) args.push(`--filename=${opts.defaultName}`)
+  try {
+    return (await runCapture('zenity', args)).trim()
+  } catch {
+    return ''
+  }
 }

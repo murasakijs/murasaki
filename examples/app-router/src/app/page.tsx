@@ -3,6 +3,8 @@
 import { Link } from 'murasaki'
 import {
   useClipboard,
+  useDialog,
+  useFs,
   useNotification,
   useShell,
   useState,
@@ -10,10 +12,23 @@ import {
 
 export default function HomePage() {
   const [count, setCount] = useState(0)
-  const [clipText, setClipText] = useState('')
+  const [fileContent, setFileContent] = useState('')
+  const [filePath, setFilePath] = useState('')
+
   const notify = useNotification()
   const clipboard = useClipboard()
   const shell = useShell()
+  const dialog = useDialog()
+  const fs = useFs()
+
+  async function pickAndRead() {
+    const paths = await dialog.openFile({ title: 'Pick a text file' })
+    if (paths.length === 0) return
+    const path = paths[0]
+    const text = await fs.readFile(path)
+    setFilePath(path)
+    setFileContent(text.slice(0, 500)) // first 500 chars
+  }
 
   return (
     <main>
@@ -33,31 +48,25 @@ export default function HomePage() {
       </div>
 
       <div className="actions">
-        <button
-          onClick={() =>
-            notify({ title: 'Murasaki', body: `Counter is at ${count}`, sound: true })
-          }
-        >
-          🔔 Send notification
+        <button onClick={() => notify({ title: 'Hello', body: `Count: ${count}` })}>
+          🔔 Notify
         </button>
-        <button
-          onClick={async () => {
-            await clipboard.write(`Counter value: ${count}`)
-            const text = await clipboard.read()
-            setClipText(text)
-          }}
-        >
-          📋 Copy &amp; read clipboard
+        <button onClick={() => clipboard.write(`Count: ${count}`)}>
+          📋 Copy to clipboard
         </button>
         <button onClick={() => shell.openExternal('https://github.com/murasakijs/murasaki')}>
           🔗 Open repo
         </button>
+        <button onClick={pickAndRead}>📂 Pick & read file</button>
       </div>
 
-      {clipText && (
-        <p className="hint">
-          Last clipboard read: <code>{clipText}</code>
-        </p>
+      {filePath && (
+        <div className="file-preview">
+          <p className="hint">
+            <code>{filePath}</code>
+          </p>
+          <pre>{fileContent}</pre>
+        </div>
       )}
 
       <nav className="links">

@@ -122,3 +122,24 @@ code {
 
 .actions button:hover { background: rgba(168, 85, 247, 0.15); }
 .actions button:active { transform: scale(0.97); }
+
+.file-preview {
+  margin-top: 24px;
+  text-align: left;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.file-preview pre {
+  background: rgba(168, 85, 247, 0.05);
+  border: 1px solid rgba(168, 85, 247, 0.15);
+  border-radius: 8px;
+  padding: 16px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
