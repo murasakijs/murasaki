@@ -27,9 +27,10 @@ const c = (code: string) => (noColor ? '' : code)
 
 // ── Project paths ─────────────────────────────────────────────────────
 const projectRoot = process.cwd()
-const SRC_DIR     = join(projectRoot, 'src')
-const APP_PATH    = join(SRC_DIR, 'app.tsx')
-const LAYOUT_PATH = join(SRC_DIR, 'layout.tsx')
+const SRC_DIR        = join(projectRoot, 'src')
+const APP_PATH       = join(SRC_DIR, 'app.tsx')
+const LAYOUT_PATH    = join(SRC_DIR, 'layout.tsx')
+const GLOBALS_CSS    = join(SRC_DIR, 'globals.css')
 
 // ── Resolve murasaki version (for the banner) ─────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -48,17 +49,21 @@ const WEBVIEW_ENGINE = (() => {
   }
 })()
 
-const WIN_TITLE = 'Murasaki App'
-const WIN_SIZE  = { width: 1280, height: 800 }
-const START_AT  = Date.now()
-const isDev     = process.env.MURASAKI_DEV === '1' || true  // dev runner always = dev
+const DEFAULT_WIN_TITLE = 'Murasaki App'
+const DEFAULT_WIN_SIZE  = { width: 1280, height: 800 }
+const START_AT          = Date.now()
+const isDev             = process.env.MURASAKI_DEV === '1' || true  // dev runner always = dev
+
+// Active window config (mutated when metadata is read)
+let winTitle = DEFAULT_WIN_TITLE
+let winSize  = { ...DEFAULT_WIN_SIZE }
 
 // ── Banner ────────────────────────────────────────────────────────────
 function printBanner() {
   process.stdout.write('\n')
   process.stdout.write(`   ${c(BOLD)}${c(BRIGHT)}🦋 Murasaki${c(RESET)} ${c(DIM)}${VERSION}${c(RESET)}\n\n`)
   process.stdout.write(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Project    ${c(RESET)}${projectRoot}\n`)
-  process.stdout.write(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Window     ${c(RESET)}${WIN_TITLE} ${c(DIM)}(${WIN_SIZE.width}×${WIN_SIZE.height})${c(RESET)}\n`)
+  process.stdout.write(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Window     ${c(RESET)}${winTitle} ${c(DIM)}(${winSize.width}×${winSize.height})${c(RESET)}\n`)
   process.stdout.write(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Webview    ${c(RESET)}${WEBVIEW_ENGINE}\n`)
   process.stdout.write(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Runtime    ${c(RESET)}Node ${process.version}\n`)
   process.stdout.write(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Mode       ${c(RESET)}development ${c(DIM)}(HMR active)${c(RESET)}\n\n`)
@@ -76,6 +81,14 @@ function printError(msg: string) { process.stdout.write(` ${c(RED)}${c(BOLD)}✗
 // ── Routing: load app/page.tsx (+ optional app/layout.tsx) ────────────
 type ReactComponent = ComponentType<{ children?: ReactNode }>
 
+type AppMetadata = {
+  title?: string
+  description?: string
+  window?: { title?: string; width?: number; height?: number }
+}
+
+type LayoutModule = { component: ReactComponent; metadata?: AppMetadata } | null
+
 async function dynImport(path: string) {
   // Cache-bust so file edits are picked up without restarting the process.
   const url = pathToFileURL(path).href + `?v=${Date.now()}`
@@ -88,21 +101,58 @@ async function loadApp(): Promise<ReactComponent | null> {
   return mod.default as ReactComponent
 }
 
-async function loadLayout(): Promise<ReactComponent | null> {
+async function loadLayout(): Promise<LayoutModule> {
   if (!existsSync(LAYOUT_PATH)) return null
   const mod = await dynImport(LAYOUT_PATH)
-  return mod.default as ReactComponent
+  if (!mod.default) return null
+  return { component: mod.default as ReactComponent, metadata: mod.metadata as AppMetadata | undefined }
 }
 
-async function renderApp(): Promise<string> {
+function loadGlobalsCss(): string {
+  if (!existsSync(GLOBALS_CSS)) return ''
+  try { return readFileSync(GLOBALS_CSS, 'utf8') } catch { return '' }
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+async function renderApp(): Promise<{ html: string; metadata?: AppMetadata }> {
   const App = await loadApp()
   if (!App) {
-    return '<!doctype html><html><body style="font-family:system-ui;padding:40px;"><h1 style="color:#A855F7">src/app.tsx not found</h1><p>Create one and the window will reload.</p></body></html>'
+    return { html: '<!doctype html><html><body style="font-family:system-ui;padding:40px;"><h1 style="color:#A855F7">src/app.tsx not found</h1><p>Create one and the window will reload.</p></body></html>' }
   }
-  const Layout = await loadLayout()
+  const layoutData = await loadLayout()
+  const metadata = layoutData?.metadata
   const appEl = createElement(App)
-  const tree = Layout ? createElement(Layout, null, appEl) : appEl
-  return '<!doctype html>' + renderToStaticMarkup(tree)
+  const tree = layoutData ? createElement(layoutData.component, null, appEl) : appEl
+  let html = '<!doctype html>' + renderToStaticMarkup(tree)
+
+  // Inject <title> + <meta description> from metadata if not present in head
+  const headInjects: string[] = []
+  if (metadata?.title && !/<title>.*?<\/title>/i.test(html)) {
+    headInjects.push(`<title>${escapeHtml(metadata.title)}</title>`)
+  }
+  if (metadata?.description && !/<meta[^>]+name=["']description["']/i.test(html)) {
+    headInjects.push(`<meta name="description" content="${escapeHtml(metadata.description)}">`)
+  }
+
+  // Inject src/globals.css (auto, like Next.js's import './globals.css')
+  const css = loadGlobalsCss()
+  if (css) {
+    headInjects.push(`<style data-murasaki="globals.css">${css}</style>`)
+  }
+
+  if (headInjects.length) {
+    const blob = headInjects.join('')
+    if (html.includes('</head>')) {
+      html = html.replace('</head>', blob + '</head>')
+    } else {
+      html = html.replace('<body', blob + '<body')
+    }
+  }
+
+  return { html, metadata }
 }
 
 // ── Window lifecycle ──────────────────────────────────────────────────
@@ -113,20 +163,36 @@ let webview: ReturnType<NonNullable<typeof win>['createWebview']> | null = null
 app.onEvent((event) => {
   const kind = event && ((event as any).kind || (event as any).event)
   if (kind === 'window-close-requested') {
+    // Dispose the window so the OS close completes — without this the
+    // close button hangs / appears frozen.
+    if (win) {
+      try { win.dispose() } catch {}
+    }
     win = null
     webview = null
     printClosed()
   }
 })
 
+function applyMetadataToWindowConfig(metadata?: AppMetadata) {
+  if (!metadata) return
+  if (metadata.window?.title) winTitle = metadata.window.title
+  else if (metadata.title)    winTitle = metadata.title
+  if (metadata.window?.width)  winSize.width  = metadata.window.width
+  if (metadata.window?.height) winSize.height = metadata.window.height
+}
+
 async function openWindow() {
   if (win) { printHint('Window is already open'); return }
+  // Render first so we can read metadata and apply window config
+  const { html, metadata } = await renderApp()
+  applyMetadataToWindowConfig(metadata)
   win = app.createBrowserWindow({
-    title: WIN_TITLE,
-    width: WIN_SIZE.width,
-    height: WIN_SIZE.height,
+    title: winTitle,
+    width: winSize.width,
+    height: winSize.height,
   })
-  webview = win.createWebview({ html: await renderApp() })
+  webview = win.createWebview({ html })
   printOpened()
 }
 
@@ -140,7 +206,8 @@ function closeWindow() {
 async function reload(triggerFile: string) {
   if (!webview) return
   try {
-    webview.loadHtml(await renderApp())
+    const { html } = await renderApp()
+    webview.loadHtml(html)
     printReloaded(triggerFile.replace(projectRoot + '/', ''))
   } catch (e: any) {
     printError(`Reload failed: ${e.message}`)

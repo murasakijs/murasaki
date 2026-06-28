@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
   "keywords": [
     "desktop",
@@ -26,6 +26,12 @@
   "bin": {
     "murasaki": "./bin/murasaki.js"
   },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
   "files": [
     "bin",
     "src",
@@ -33,7 +39,6 @@
     "LICENSE"
   ],
   "scripts": {
-    "example:hello": "MURASAKI_DEV=1 tsx examples/hello/index.tsx",
     "example:app-router": "cd examples/app-router && pnpm dev"
   },
   "dependencies": {
