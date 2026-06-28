@@ -28,9 +28,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: 'https://registry.npmjs.org'
           # Trusted Publishing reads OIDC; no NODE_AUTH_TOKEN needed
+
+      # npm 11.5+ has full Trusted Publisher / OIDC support. Even though Node 24
+      # ships a recent npm, force-upgrading guarantees we get the latest CLI
+      # that handles registry-url + OIDC token exchange correctly.
+      - name: Upgrade npm to latest
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         # Not --frozen-lockfile because the committed pnpm-lock.yaml was
