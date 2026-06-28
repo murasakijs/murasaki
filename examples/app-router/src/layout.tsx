@@ -1,8 +1,8 @@
 // src/layout.tsx — wraps your app. Edit me to change the global shell.
 // Global styles live in src/globals.css (auto-injected by murasaki).
 
-import type { ReactNode } from 'react'
 import type { Metadata } from 'murasaki'
+import type { ReactNode } from 'react'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',

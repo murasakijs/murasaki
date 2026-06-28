@@ -2,10 +2,9 @@
 // Murasaki CLI entry point.
 // Usage: murasaki dev
 
-import 'tsx/esm'  // Register the TS+JSX ESM loader
-import { fileURLToPath } from 'node:url'
+import 'tsx/esm' // Register the TS+JSX ESM loader
 import { dirname, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const cmd = process.argv[2]
