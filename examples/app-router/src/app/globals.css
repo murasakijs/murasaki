@@ -61,3 +61,37 @@ code {
 }
 
 .links a:hover { border-bottom-color: #A855F7; }
+
+.counter {
+  margin-top: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 24px;
+  border-radius: 12px;
+  background: rgba(168, 85, 247, 0.08);
+}
+
+.counter strong {
+  font-variant-numeric: tabular-nums;
+  font-size: 32px;
+  min-width: 56px;
+  text-align: center;
+  color: #A855F7;
+}
+
+.counter button {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+  background: transparent;
+  color: #A855F7;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.06s;
+}
+
+.counter button:hover { background: rgba(168, 85, 247, 0.15); }
+.counter button:active { transform: scale(0.94); }

@@ -24,6 +24,7 @@ import type { Metadata } from '../index.ts'
 import { jsx, raw, renderToString } from '../jsx/runtime.ts'
 import type { Child, Component } from '../jsx/types.ts'
 import type { RenderResult } from '../types.ts'
+import { bundleClient } from './bundle.ts'
 import { discoverRoutes, type Route } from './routes.ts'
 
 const NO_APP_HTML =
@@ -192,19 +193,37 @@ async function renderAppRouter(): Promise<RenderResult> {
   const rootLayoutMod = rootLayoutFile ? await loadModule(rootLayoutFile) : null
   const metadata = rootLayoutMod?.metadata
 
-  // 2. Render each page (wrapped in its nested layouts, excluding root)
+  // 2. Server pre-render each page (gives a usable first paint before the
+  //    client bundle boots — pre-hydration shell). Each block goes inside
+  //    the mount root and is replaced by the client renderer on boot.
   const blocks: string[] = []
   for (const route of routes) {
     const inner = await renderPageInner(route, rootLayoutFile)
     blocks.push(`<div data-murasaki-route="${escapeHtml(route.path)}" hidden>${inner}</div>`)
   }
-  const switcher = raw(blocks.join('') + NAV_SCRIPT)
 
-  // 3. Render root layout with switcher as children
-  const bodyContent = await renderRootLayout(rootLayoutMod, switcher)
+  // 3. Wrap the server-rendered content + nav script in the mount container.
+  //    The client bundle will clear this container on boot and re-render
+  //    interactively (useState/onClick actually fire after that).
+  const mountInner = blocks.join('') + NAV_SCRIPT
+  const mountRoot = `<div id="murasaki-root">${mountInner}</div>`
+
+  // 4. Build + inline client bundle (esbuild, IIFE)
+  let clientScript = ''
+  try {
+    const code = await bundleClient({ routes, rootLayoutFile })
+    clientScript = `<script type="module" data-murasaki="client">${code}</script>`
+  } catch (e: any) {
+    // Render an inline error overlay so the WebView shows what broke
+    const msg = escapeHtml(String(e?.message ?? e))
+    clientScript = `<script>document.body.insertAdjacentHTML('beforeend','<pre style=\\'position:fixed;inset:0;background:#1a0a33;color:#A855F7;padding:24px;font-family:SF Mono,Menlo,monospace;font-size:13px;overflow:auto;z-index:9999\\'>client bundle failed:\\n${msg.replace(/[\\'\\\\]/g, '\\\\$&')}</pre>')</script>`
+  }
+
+  // 5. Render root layout with mount root + client script as children
+  const bodyContent = await renderRootLayout(rootLayoutMod, raw(mountRoot + clientScript))
   let html = '<!doctype html>' + bodyContent
 
-  // 4. Inject metadata + globals.css
+  // 6. Inject metadata + globals.css
   html = injectHead(html, metadata, loadGlobalsCss())
 
   return { html, metadata }
