@@ -1,0 +1,30 @@
+{
+  "name": "murasaki",
+  "version": "0.0.0",
+  "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
+  "keywords": [
+    "desktop",
+    "framework",
+    "nextjs",
+    "react",
+    "node",
+    "webview",
+    "tauri-alternative",
+    "electron-alternative"
+  ],
+  "homepage": "https://github.com/murasakijs/murasaki",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murasakijs/murasaki.git"
+  },
+  "bugs": {
+    "url": "https://github.com/murasakijs/murasaki/issues"
+  },
+  "license": "MIT",
+  "author": "ichi",
+  "type": "module",
+  "files": [
+    "README.md",
+    "LICENSE"
+  ]
+}
