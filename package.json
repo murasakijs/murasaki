@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
   "keywords": [
     "desktop",
@@ -28,29 +28,31 @@
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./jsx": {
-      "types": "./src/jsx/index.ts",
-      "default": "./src/jsx/index.ts"
+      "types": "./dist/jsx/index.d.ts",
+      "default": "./dist/jsx/index.js"
     },
     "./jsx-runtime": {
-      "types": "./src/jsx/jsx-runtime.ts",
-      "default": "./src/jsx/jsx-runtime.ts"
+      "types": "./dist/jsx/jsx-runtime.d.ts",
+      "default": "./dist/jsx/jsx-runtime.js"
     },
     "./jsx-dev-runtime": {
-      "types": "./src/jsx/jsx-dev-runtime.ts",
-      "default": "./src/jsx/jsx-dev-runtime.ts"
+      "types": "./dist/jsx/jsx-dev-runtime.d.ts",
+      "default": "./dist/jsx/jsx-dev-runtime.js"
     }
   },
   "files": [
     "bin",
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "pnpm run build",
     "example:app-router": "cd examples/app-router && pnpm dev",
     "check": "biome check",
     "lint": "biome lint",

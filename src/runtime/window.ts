@@ -18,8 +18,12 @@ const config: WindowConfig = {
 }
 
 export const app = new Application({ controlFlow: ControlFlow.Wait })
-let win: ReturnType<typeof app.createBrowserWindow> | null = null
-let webview: ReturnType<NonNullable<typeof win>['createWebview']> | null = null
+
+type BrowserWindow = ReturnType<typeof app.createBrowserWindow>
+type Webview = ReturnType<BrowserWindow['createWebview']>
+
+let win: BrowserWindow | null = null
+let webview: Webview | null = null
 
 app.onEvent((event) => {
   const kind = event && ((event as any).kind || (event as any).event)

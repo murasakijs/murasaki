@@ -7,4 +7,6 @@
 //   <></> → jsx(Fragment, { children: [...] })
 
 export { Fragment, jsx, jsx as jsxs } from './runtime.ts'
-export type { JSX } from './types.ts'
+
+// JSX namespace is declared globally in ./types.ts — picked up automatically
+// by the JSX compiler without needing an explicit re-export here.
