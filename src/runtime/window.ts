@@ -26,11 +26,28 @@ type Webview = ReturnType<BrowserWindow['createWebview']>
 let win: BrowserWindow | null = null
 let webview: Webview | null = null
 
-// @webviewjs/webview uses TC39 explicit-resource-management semantics:
-// the only "dispose" entry point is the [Symbol.dispose] method, not
-// a plain .dispose(). Calling win.dispose() does nothing (no such method),
-// which is why the close button hangs once exposed IPC handlers hold the
-// window alive.
+// @webviewjs/webview is built on winit. The `window-close-requested` event
+// fires when the user clicks the OS close button, and winit completes the
+// close automatically on the next pump_events tick UNLESS we interfere.
+//
+// Earlier versions called win.dispose() / webview.dispose() in this handler,
+// thinking that was required. It isn't — and once webview.expose() registered
+// native-bridge handlers, calling dispose synchronously from inside the
+// event tick wedged the window into an "not responding" state.
+//
+// The right move: let winit handle the close itself, and just drop our
+// JS-side references so subsequent reload/openWindow doesn't see stale state.
+app.onEvent((event) => {
+  const kind = event && ((event as any).kind || (event as any).event)
+  if (kind === 'window-close-requested') {
+    webview = null
+    win = null
+    printClosed()
+  }
+})
+
+// Manual close (e.g. the `r` shortcut for restart). We DO want explicit
+// disposal here because we'll reopen a fresh window immediately afterward.
 function disposeSafely(target: unknown): void {
   if (!target) return
   const sym = (target as { [Symbol.dispose]?: () => void })[Symbol.dispose]
@@ -40,18 +57,6 @@ function disposeSafely(target: unknown): void {
     } catch {}
   }
 }
-
-app.onEvent((event) => {
-  const kind = event && ((event as any).kind || (event as any).event)
-  if (kind === 'window-close-requested') {
-    // Webview first (drops exposed namespaces + in-flight IPC), then window.
-    disposeSafely(webview)
-    disposeSafely(win)
-    webview = null
-    win = null
-    printClosed()
-  }
-})
 
 function applyMetadata(metadata?: Metadata) {
   if (!metadata) return
