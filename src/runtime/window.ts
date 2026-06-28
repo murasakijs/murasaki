@@ -26,23 +26,27 @@ type Webview = ReturnType<BrowserWindow['createWebview']>
 let win: BrowserWindow | null = null
 let webview: Webview | null = null
 
+// @webviewjs/webview uses TC39 explicit-resource-management semantics:
+// the only "dispose" entry point is the [Symbol.dispose] method, not
+// a plain .dispose(). Calling win.dispose() does nothing (no such method),
+// which is why the close button hangs once exposed IPC handlers hold the
+// window alive.
+function disposeSafely(target: unknown): void {
+  if (!target) return
+  const sym = (target as { [Symbol.dispose]?: () => void })[Symbol.dispose]
+  if (typeof sym === 'function') {
+    try {
+      sym.call(target)
+    } catch {}
+  }
+}
+
 app.onEvent((event) => {
   const kind = event && ((event as any).kind || (event as any).event)
   if (kind === 'window-close-requested') {
-    // Dispose webview FIRST so its exposed IPC namespace, event listeners,
-    // and any in-flight Promises get torn down before we kill the window.
-    // (Skipping this is what makes the close button appear unresponsive
-    // once webview.expose() has registered native bridge handlers.)
-    if (webview) {
-      try {
-        (webview as { dispose?: () => void }).dispose?.()
-      } catch {}
-    }
-    if (win) {
-      try {
-        win.dispose()
-      } catch {}
-    }
+    // Webview first (drops exposed namespaces + in-flight IPC), then window.
+    disposeSafely(webview)
+    disposeSafely(win)
     webview = null
     win = null
     printClosed()
@@ -83,16 +87,8 @@ export async function openWindow(): Promise<void> {
 }
 
 export function closeWindow(): void {
-  if (webview) {
-    try {
-      (webview as { dispose?: () => void }).dispose?.()
-    } catch {}
-  }
-  if (win) {
-    try {
-      win.dispose()
-    } catch {}
-  }
+  disposeSafely(webview)
+  disposeSafely(win)
   webview = null
   win = null
 }
