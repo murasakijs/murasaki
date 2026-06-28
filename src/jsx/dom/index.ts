@@ -11,3 +11,6 @@ export {
   useRef,
   useState,
 } from './runtime.ts'
+
+export { useNotification, useClipboard, useShell } from './native.ts'
+export type { NotifyOptions } from './native.ts'

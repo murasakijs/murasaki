@@ -9,6 +9,7 @@ import { printClosed, printError, printHint, printReloaded } from '../cli/log.ts
 import { DEFAULT_WIN_SIZE, DEFAULT_WIN_TITLE, projectRoot } from '../env.ts'
 import type { Metadata } from '../index.ts'
 import type { WindowConfig } from '../types.ts'
+import { nativeBridge } from './native.ts'
 import { renderApp } from './render.tsx'
 
 const config: WindowConfig = {
@@ -65,6 +66,12 @@ export async function openWindow(): Promise<void> {
     height: config.height,
   })
   webview = win.createWebview({ html })
+  // Expose native bridge under window.murasaki for client hooks.
+  try {
+    webview.expose('murasaki', nativeBridge)
+  } catch (e: any) {
+    printError(`Native bridge expose failed: ${e.message}`)
+  }
 }
 
 export function closeWindow(): void {

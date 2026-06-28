@@ -1,14 +1,20 @@
 // src/app/page.tsx — the "/" route.
-//
-// useState is imported from murasaki/jsx/dom. On the server it returns the
-// initial value with a no-op setter (so SSR works); in the WebView the
-// client bundle hydrates and the setter triggers re-renders.
 
 import { Link } from 'murasaki'
-import { useState } from 'murasaki/jsx/dom'
+import {
+  useClipboard,
+  useNotification,
+  useShell,
+  useState,
+} from 'murasaki/jsx/dom'
 
 export default function HomePage() {
   const [count, setCount] = useState(0)
+  const [clipText, setClipText] = useState('')
+  const notify = useNotification()
+  const clipboard = useClipboard()
+  const shell = useShell()
+
   return (
     <main>
       <h1>Hello, Murasaki 🦋</h1>
@@ -26,10 +32,33 @@ export default function HomePage() {
         </button>
       </div>
 
-      <p className="hint">
-        Click the buttons — that's <code>useState</code> from
-        <code>murasaki/jsx/dom</code> running inside the WebView.
-      </p>
+      <div className="actions">
+        <button
+          onClick={() =>
+            notify({ title: 'Murasaki', body: `Counter is at ${count}`, sound: true })
+          }
+        >
+          🔔 Send notification
+        </button>
+        <button
+          onClick={async () => {
+            await clipboard.write(`Counter value: ${count}`)
+            const text = await clipboard.read()
+            setClipText(text)
+          }}
+        >
+          📋 Copy &amp; read clipboard
+        </button>
+        <button onClick={() => shell.openExternal('https://github.com/murasakijs/murasaki')}>
+          🔗 Open repo
+        </button>
+      </div>
+
+      {clipText && (
+        <p className="hint">
+          Last clipboard read: <code>{clipText}</code>
+        </p>
+      )}
 
       <nav className="links">
         <Link href="/about">About →</Link>
