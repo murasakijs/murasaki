@@ -29,14 +29,22 @@ let webview: Webview | null = null
 app.onEvent((event) => {
   const kind = event && ((event as any).kind || (event as any).event)
   if (kind === 'window-close-requested') {
-    // Dispose so the OS close completes — without this the close button hangs.
+    // Dispose webview FIRST so its exposed IPC namespace, event listeners,
+    // and any in-flight Promises get torn down before we kill the window.
+    // (Skipping this is what makes the close button appear unresponsive
+    // once webview.expose() has registered native bridge handlers.)
+    if (webview) {
+      try {
+        (webview as { dispose?: () => void }).dispose?.()
+      } catch {}
+    }
     if (win) {
       try {
         win.dispose()
       } catch {}
     }
-    win = null
     webview = null
+    win = null
     printClosed()
   }
 })
@@ -75,12 +83,18 @@ export async function openWindow(): Promise<void> {
 }
 
 export function closeWindow(): void {
-  if (!win) return
-  try {
-    win.dispose()
-  } catch {}
-  win = null
+  if (webview) {
+    try {
+      (webview as { dispose?: () => void }).dispose?.()
+    } catch {}
+  }
+  if (win) {
+    try {
+      win.dispose()
+    } catch {}
+  }
   webview = null
+  win = null
 }
 
 export async function reloadWindow(triggerFile: string): Promise<void> {
