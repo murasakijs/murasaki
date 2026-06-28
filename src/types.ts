@@ -1,12 +1,12 @@
 // Internal shared types (the public Metadata type is re-exported from index.ts).
 
-import type { ComponentType, ReactNode } from 'react'
 import type { Metadata } from './index.ts'
+import type { Component } from './jsx/types.ts'
 
-export type ReactComponent = ComponentType<{ children?: ReactNode }>
+export type AppComponent = Component
 
 export type LayoutModule = {
-  component: ReactComponent
+  component: AppComponent
   metadata?: Metadata
 } | null
 

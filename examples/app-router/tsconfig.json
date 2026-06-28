@@ -11,8 +11,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "noEmit": true,
-    "types": ["node"]
+    "noEmit": true
   },
-  "include": ["examples/**/*", "src/**/*", "tests/**/*", "scripts/**/*"]
+  "include": ["src/**/*"]
 }

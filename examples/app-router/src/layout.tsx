@@ -2,7 +2,7 @@
 // Global styles live in src/globals.css (auto-injected by murasaki).
 
 import type { Metadata } from 'murasaki'
-import type { ReactNode } from 'react'
+import type { Child } from 'murasaki/jsx'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   },
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+export default function Layout({ children }: { children?: Child }) {
   return (
     <html lang="en">
       <head>

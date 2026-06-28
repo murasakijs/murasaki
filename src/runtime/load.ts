@@ -6,17 +6,17 @@ import { existsSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { APP_PATH, GLOBALS_CSS, LAYOUT_PATH } from '../env.ts'
 import type { Metadata } from '../index.ts'
-import type { LayoutModule, ReactComponent } from '../types.ts'
+import type { AppComponent, LayoutModule } from '../types.ts'
 
 async function dynImport(path: string) {
   const url = pathToFileURL(path).href + `?v=${Date.now()}`
   return import(url)
 }
 
-export async function loadApp(): Promise<ReactComponent | null> {
+export async function loadApp(): Promise<AppComponent | null> {
   if (!existsSync(APP_PATH)) return null
   const mod = await dynImport(APP_PATH)
-  return mod.default as ReactComponent
+  return mod.default as AppComponent
 }
 
 export async function loadLayout(): Promise<LayoutModule> {
@@ -24,7 +24,7 @@ export async function loadLayout(): Promise<LayoutModule> {
   const mod = await dynImport(LAYOUT_PATH)
   if (!mod.default) return null
   return {
-    component: mod.default as ReactComponent,
+    component: mod.default as AppComponent,
     metadata: mod.metadata as Metadata | undefined,
   }
 }

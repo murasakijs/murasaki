@@ -1,8 +1,12 @@
 // Renders <Layout><App /></Layout> to an HTML string and injects
 // metadata (<title>, <meta description>) + src/globals.css.
+//
+// Uses murasaki/jsx (no React dependency).
+// The user's src/app.tsx / src/layout.tsx is transformed by tsx with
+// `jsxImportSource: "murasaki"` so their <div> calls into our jsx().
 
-import { createElement } from 'react'
-import { renderToStaticMarkup } from 'react-dom/server'
+import { jsx, renderToString } from '../jsx/runtime.ts'
+import type { Child, Component } from '../jsx/types.ts'
 import type { RenderResult } from '../types.ts'
 import { loadApp, loadGlobalsCss, loadLayout } from './load.ts'
 
@@ -25,9 +29,14 @@ export async function renderApp(): Promise<RenderResult> {
 
   const layoutData = await loadLayout()
   const metadata = layoutData?.metadata
-  const appEl = createElement(App)
-  const tree = layoutData ? createElement(layoutData.component, null, appEl) : appEl
-  let html = '<!doctype html>' + renderToStaticMarkup(tree)
+
+  // Build the tree: <Layout><App /></Layout> or just <App />
+  const appNode = jsx(App as Component, null)
+  const tree: Child = layoutData
+    ? jsx(layoutData.component as Component, { children: appNode })
+    : appNode
+
+  let html = '<!doctype html>' + renderToString(tree)
 
   const headInjects: string[] = []
   if (metadata?.title && !/<title>.*?<\/title>/i.test(html)) {

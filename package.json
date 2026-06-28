@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.0.4",
+  "version": "0.1.0",
   "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
   "keywords": [
     "desktop",
@@ -30,6 +30,18 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./jsx": {
+      "types": "./src/jsx/index.ts",
+      "default": "./src/jsx/index.ts"
+    },
+    "./jsx-runtime": {
+      "types": "./src/jsx/jsx-runtime.ts",
+      "default": "./src/jsx/jsx-runtime.ts"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./src/jsx/jsx-dev-runtime.ts",
+      "default": "./src/jsx/jsx-dev-runtime.ts"
     }
   },
   "files": [
@@ -47,15 +59,11 @@
   },
   "dependencies": {
     "@webviewjs/webview": "^0.3.2",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
     "tsx": "^4.22.4"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
     "@types/node": "^26.0.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
     "typescript": "^6.0.3"
   }
 }
