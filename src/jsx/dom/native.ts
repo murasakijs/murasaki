@@ -42,6 +42,21 @@ type Bridge = {
   fsReadDir(path: string): Promise<DirEntry[]>
   openFile(opts?: OpenFileOptions): Promise<string[]>
   saveFile(opts?: SaveFileOptions): Promise<string>
+  windowMinimize(): Promise<void>
+  windowMaximize(): Promise<void>
+  windowUnmaximize(): Promise<void>
+  windowSetFullscreen(full: boolean): Promise<void>
+  windowSetTitle(title: string): Promise<void>
+  windowSetSize(width: number, height: number): Promise<void>
+  windowSetPosition(x: number, y: number): Promise<void>
+  windowSetResizable(resizable: boolean): Promise<void>
+  windowCenter(): Promise<void>
+  windowFocus(): Promise<void>
+  windowHide(): Promise<void>
+  windowShow(): Promise<void>
+  windowIsMaximized(): Promise<boolean>
+  windowIsMinimized(): Promise<boolean>
+  windowIsVisible(): Promise<boolean>
 }
 
 declare global {
@@ -182,6 +197,54 @@ export function useFs() {
         return []
       }
     },
+  }
+}
+
+/**
+ * Window control — minimize / maximize / fullscreen / title / size / etc.
+ *
+ *   const win = useWindow()
+ *   win.minimize()
+ *   win.setTitle('New title')
+ *   win.setSize(1440, 900)
+ *   win.setFullscreen(true)
+ *   if (await win.isMaximized()) win.unmaximize()
+ *   else win.maximize()
+ */
+export function useWindow() {
+  const safe = async <T>(fn: () => Promise<T> | undefined, fallback: T): Promise<T> => {
+    const b = bridge()
+    if (!b) return fallback
+    try {
+      const r = await fn()
+      return r === undefined ? fallback : (r as T)
+    } catch {
+      return fallback
+    }
+  }
+  return {
+    minimize: () => safe(() => bridge()?.windowMinimize(), undefined),
+    maximize: () => safe(() => bridge()?.windowMaximize(), undefined),
+    unmaximize: () => safe(() => bridge()?.windowUnmaximize(), undefined),
+    async toggleMaximize() {
+      const max = await safe(() => bridge()?.windowIsMaximized(), false)
+      if (max) await safe(() => bridge()?.windowUnmaximize(), undefined)
+      else await safe(() => bridge()?.windowMaximize(), undefined)
+    },
+    setFullscreen: (full: boolean) => safe(() => bridge()?.windowSetFullscreen(full), undefined),
+    setTitle: (title: string) => safe(() => bridge()?.windowSetTitle(title), undefined),
+    setSize: (width: number, height: number) =>
+      safe(() => bridge()?.windowSetSize(width, height), undefined),
+    setPosition: (x: number, y: number) => safe(() => bridge()?.windowSetPosition(x, y), undefined),
+    setResizable: (resizable: boolean) =>
+      safe(() => bridge()?.windowSetResizable(resizable), undefined),
+    center: () => safe(() => bridge()?.windowCenter(), undefined),
+    focus: () => safe(() => bridge()?.windowFocus(), undefined),
+    hide: () => safe(() => bridge()?.windowHide(), undefined),
+    show: () => safe(() => bridge()?.windowShow(), undefined),
+    isMaximized: () => safe(() => bridge()?.windowIsMaximized(), false),
+    isMinimized: () => safe(() => bridge()?.windowIsMinimized(), false),
+    isVisible: () => safe(() => bridge()?.windowIsVisible(), true),
   }
 }
 

@@ -12,5 +12,12 @@ export {
   useState,
 } from './runtime.ts'
 
-export { useNotification, useClipboard, useShell, useFs, useDialog } from './native.ts'
+export {
+  useNotification,
+  useClipboard,
+  useShell,
+  useFs,
+  useDialog,
+  useWindow,
+} from './native.ts'
 export type { NotifyOptions, OpenFileOptions, SaveFileOptions, DirEntry } from './native.ts'

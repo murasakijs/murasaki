@@ -190,7 +190,76 @@ export const nativeBridge = {
   },
 
   /** Murasaki version (debug/probe). */
-  version: '0.6.0',
+  version: '0.7.0',
+}
+
+// ── Window methods (need a closure over the active window) ────────
+// window.ts merges this into the namespace exposed via webview.expose().
+export function createWindowBridge(getWin: () => unknown) {
+  type Win = {
+    setMinimized?: (v: boolean) => void
+    setMaximized?: (v: boolean) => void
+    setFullscreen?: (kind?: string | null) => void
+    setTitle?: (t: string) => void
+    setSize?: (w: number, h: number, logical?: boolean) => unknown
+    setPosition?: (x: number, y: number, logical?: boolean) => void
+    setResizable?: (v: boolean) => void
+    center?: () => void
+    focus?: () => void
+    hide?: () => void
+    show?: () => void
+    isMaximized?: () => boolean
+    isMinimized?: () => boolean
+    isVisible?: () => boolean
+  }
+  const w = () => getWin() as Win | null
+  return {
+    windowMinimize: async (): Promise<void> => {
+      w()?.setMinimized?.(true)
+    },
+    windowMaximize: async (): Promise<void> => {
+      w()?.setMaximized?.(true)
+    },
+    windowUnmaximize: async (): Promise<void> => {
+      w()?.setMaximized?.(false)
+    },
+    windowSetFullscreen: async (full: boolean): Promise<void> => {
+      w()?.setFullscreen?.(full ? 'normal' : null)
+    },
+    windowSetTitle: async (title: string): Promise<void> => {
+      w()?.setTitle?.(title)
+    },
+    windowSetSize: async (width: number, height: number): Promise<void> => {
+      w()?.setSize?.(width, height, true)
+    },
+    windowSetPosition: async (x: number, y: number): Promise<void> => {
+      w()?.setPosition?.(x, y, true)
+    },
+    windowSetResizable: async (resizable: boolean): Promise<void> => {
+      w()?.setResizable?.(resizable)
+    },
+    windowCenter: async (): Promise<void> => {
+      w()?.center?.()
+    },
+    windowFocus: async (): Promise<void> => {
+      w()?.focus?.()
+    },
+    windowHide: async (): Promise<void> => {
+      w()?.hide?.()
+    },
+    windowShow: async (): Promise<void> => {
+      w()?.show?.()
+    },
+    windowIsMaximized: async (): Promise<boolean> => {
+      return w()?.isMaximized?.() ?? false
+    },
+    windowIsMinimized: async (): Promise<boolean> => {
+      return w()?.isMinimized?.() ?? false
+    },
+    windowIsVisible: async (): Promise<boolean> => {
+      return w()?.isVisible?.() ?? true
+    },
+  }
 }
 
 // ── Dialog helpers (per-platform) ──────────────────────────────────

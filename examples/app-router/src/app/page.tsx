@@ -8,6 +8,7 @@ import {
   useNotification,
   useShell,
   useState,
+  useWindow,
 } from 'murasaki/jsx/dom'
 
 export default function HomePage() {
@@ -20,6 +21,7 @@ export default function HomePage() {
   const shell = useShell()
   const dialog = useDialog()
   const fs = useFs()
+  const win = useWindow()
 
   async function pickAndRead() {
     const paths = await dialog.openFile({ title: 'Pick a text file' })
@@ -58,6 +60,15 @@ export default function HomePage() {
           🔗 Open repo
         </button>
         <button onClick={pickAndRead}>📂 Pick & read file</button>
+      </div>
+
+      <div className="actions">
+        <button onClick={() => win.minimize()}>🟡 Minimize</button>
+        <button onClick={() => win.toggleMaximize()}>🟢 Toggle max</button>
+        <button onClick={() => win.setSize(1440, 900)}>↔ Resize 1440×900</button>
+        <button onClick={() => win.setTitle(`Murasaki — count ${count}`)}>
+          🪟 Title = count
+        </button>
       </div>
 
       {filePath && (

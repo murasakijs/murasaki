@@ -6,7 +6,7 @@ import { DEFAULT_WIN_SIZE, DEFAULT_WIN_TITLE, projectRoot } from '../env.ts'
 import type { Metadata } from '../index.ts'
 import type { WindowConfig } from '../types.ts'
 import { teardownHmr } from './hmr.ts'
-import { nativeBridge } from './native.ts'
+import { createWindowBridge, nativeBridge } from './native.ts'
 import { renderApp } from './render.tsx'
 import { teardownStdin } from './shortcuts.ts'
 
@@ -91,7 +91,10 @@ export async function openWindow(): Promise<void> {
   webview = win.createWebview({ html })
   // Expose native bridge under window.murasaki for client hooks.
   try {
-    webview.expose('murasaki', nativeBridge)
+    webview.expose('murasaki', {
+      ...nativeBridge,
+      ...createWindowBridge(() => win),
+    })
   } catch (e: any) {
     printError(`Native bridge expose failed: ${e.message}`)
   }
