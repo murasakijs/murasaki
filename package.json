@@ -26,5 +26,13 @@
   "files": [
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "scripts": {
+    "dev": "MURASAKI_DEV=1 node --watch examples/hello/index.mjs",
+    "start": "node examples/hello/index.mjs",
+    "example:hello": "node examples/hello/index.mjs"
+  },
+  "dependencies": {
+    "@webviewjs/webview": "^0.3.2"
+  }
 }
