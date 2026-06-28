@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
   "keywords": [
     "desktop",
@@ -24,7 +24,7 @@
   "author": "ichi",
   "type": "module",
   "bin": {
-    "murasaki": "./bin/murasaki.mjs"
+    "murasaki": "./bin/murasaki.js"
   },
   "files": [
     "bin",
