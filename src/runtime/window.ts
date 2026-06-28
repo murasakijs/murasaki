@@ -1,14 +1,11 @@
 // Owns the Application + BrowserWindow lifecycle.
-//
-// The EventLoop is created exactly once (winit/tao limitation). ControlFlow.Wait
-// keeps the loop alive even when no windows are open, so the user can press
-// `o` in the terminal to re-open the window.
 
-import { Application, ControlFlow } from '@webviewjs/webview'
-import { printClosed, printError, printHint, printReloaded } from '../cli/log.ts'
+import { Application } from '@webviewjs/webview'
+import { printBye, printClosed, printError, printHint, printReloaded } from '../cli/log.ts'
 import { DEFAULT_WIN_SIZE, DEFAULT_WIN_TITLE, projectRoot } from '../env.ts'
 import type { Metadata } from '../index.ts'
 import type { WindowConfig } from '../types.ts'
+import { teardownHmr } from './hmr.ts'
 import { nativeBridge } from './native.ts'
 import { renderApp } from './render.tsx'
 
@@ -18,7 +15,11 @@ const config: WindowConfig = {
   height: DEFAULT_WIN_SIZE.height,
 }
 
-export const app = new Application({ controlFlow: ControlFlow.Wait })
+// Default event-loop mode (pump_events at ~60 FPS). ControlFlow.Wait used to
+// be set here to allow `o` re-open after close, but it caused the close
+// button to hang waiting for the next pump tick, which macOS interpreted
+// as "not responding". Plain run-loop is responsive and just as cheap.
+export const app = new Application()
 
 type BrowserWindow = ReturnType<typeof app.createBrowserWindow>
 type Webview = ReturnType<BrowserWindow['createWebview']>
@@ -26,28 +27,31 @@ type Webview = ReturnType<BrowserWindow['createWebview']>
 let win: BrowserWindow | null = null
 let webview: Webview | null = null
 
-// @webviewjs/webview is built on winit. The `window-close-requested` event
-// fires when the user clicks the OS close button, and winit completes the
-// close automatically on the next pump_events tick UNLESS we interfere.
-//
-// Earlier versions called win.dispose() / webview.dispose() in this handler,
-// thinking that was required. It isn't — and once webview.expose() registered
-// native-bridge handlers, calling dispose synchronously from inside the
-// event tick wedged the window into an "not responding" state.
-//
-// The right move: let winit handle the close itself, and just drop our
-// JS-side references so subsequent reload/openWindow doesn't see stale state.
+// winit/wry distinguishes two close events:
+//   - window-close-requested      → one window's red button
+//   - application-close-requested → last window closed → app should exit
+// We MUST handle the latter and call app.exit(), otherwise the OS sees
+// the process as alive but unresponsive (no pending GUI work, no exit).
 app.onEvent((event) => {
   const kind = event && ((event as any).kind || (event as any).event)
   if (kind === 'window-close-requested') {
     webview = null
     win = null
     printClosed()
+    return
+  }
+  if (kind === 'application-close-requested') {
+    teardownHmr()
+    printBye()
+    try {
+      app.exit()
+    } catch {}
+    process.exit(0)
   }
 })
 
-// Manual close (e.g. the `r` shortcut for restart). We DO want explicit
-// disposal here because we'll reopen a fresh window immediately afterward.
+// Manual close path (the `r` shortcut for restart). We reopen immediately
+// after, so explicit dispose is desirable.
 function disposeSafely(target: unknown): void {
   if (!target) return
   const sym = (target as { [Symbol.dispose]?: () => void })[Symbol.dispose]

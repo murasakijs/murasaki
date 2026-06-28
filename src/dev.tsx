@@ -1,24 +1,13 @@
-// src/dev.tsx
-// Murasaki dev runner — Next.js-like file-based routing without Next.js.
-//
-// Reads the consumer's src/ directory:
-//   src/layout.tsx   (optional, can export `metadata`)
-//   src/app.tsx      (required)
-//   src/globals.css  (optional, auto-injected)
-//
-// Renders <Layout><App /></Layout> with React, ships HTML to the WebView,
-// and reloads in place on file change.
+// src/dev.tsx — boot entry for `murasaki dev`.
 
 import {
   printBanner,
   printBye,
-  printOpened,
   printReady,
-  printShortcuts,
   printStarting,
 } from './cli/log.ts'
 import { setupHmr } from './runtime/hmr.ts'
-import { setupShortcuts, teardownStdin } from './runtime/shortcuts.ts'
+import { setupShortcuts } from './runtime/shortcuts.ts'
 import {
   closeWindow,
   exitApp,
@@ -30,24 +19,21 @@ import {
 
 const startAt = Date.now()
 
-// Boot: render once (applies metadata) → banner → ready
 await openWindow()
 printBanner(getConfig().title, getConfig())
-printShortcuts()
 printStarting()
 printReady(Date.now() - startAt)
 
 setupShortcuts({
   onOpen: () => {
-    void openWindow().then(printOpened)
+    void openWindow()
   },
   onRestart: () => {
     closeWindow()
-    void openWindow().then(printOpened)
+    void openWindow()
   },
   onQuit: () => {
     printBye()
-    teardownStdin()
     exitApp()
     process.exit(0)
   },

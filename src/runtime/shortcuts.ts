@@ -1,9 +1,10 @@
-// Terminal keyboard shortcuts (raw mode stdin).
+// Quit handler. We previously had `o`/`r`/`q` keypress shortcuts via stdin
+// raw mode, but attaching any listener to stdin caused the OS close button
+// to hang (stdin polling conflicted with the Cocoa main loop).
 //
-//   o   open the window
-//   r   restart (close + open)
-//   q   quit
-//   Ctrl+C   quit
+// Now: just listen for SIGINT/SIGTERM (Ctrl+C, kill signal). The OS close
+// button + Ctrl+C cover quit. Future work: bring back o/r via the native
+// menu API (webview's Menu/Tray surface), which doesn't touch stdin.
 
 export type ShortcutHandlers = {
   onOpen: () => void
@@ -12,20 +13,11 @@ export type ShortcutHandlers = {
 }
 
 export function setupShortcuts(handlers: ShortcutHandlers): void {
-  if (!process.stdin.isTTY) return
-  process.stdin.setRawMode(true)
-  process.stdin.resume()
-  process.stdin.setEncoding('utf8')
-  process.stdin.on('data', (key) => {
-    const k = key.toString()
-    if (k === 'o' || k === 'O') handlers.onOpen()
-    else if (k === 'r' || k === 'R') handlers.onRestart()
-    else if (k === 'q' || k === 'Q' || k === '\x03' /* Ctrl+C */) handlers.onQuit()
-  })
+  const quit = () => handlers.onQuit()
+  process.on('SIGINT', quit)
+  process.on('SIGTERM', quit)
 }
 
 export function teardownStdin(): void {
-  try {
-    process.stdin.setRawMode(false)
-  } catch {}
+  // no-op (we never touched stdin)
 }
