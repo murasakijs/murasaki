@@ -23,16 +23,28 @@
   "license": "MIT",
   "author": "ichi",
   "type": "module",
+  "bin": {
+    "murasaki": "./bin/murasaki.mjs"
+  },
   "files": [
+    "bin",
+    "src",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "dev": "MURASAKI_DEV=1 node --watch examples/hello/index.mjs",
-    "start": "node examples/hello/index.mjs",
-    "example:hello": "node examples/hello/index.mjs"
+    "example:hello": "MURASAKI_DEV=1 tsx examples/hello/index.tsx",
+    "example:app-router": "cd examples/app-router && pnpm dev"
   },
   "dependencies": {
-    "@webviewjs/webview": "^0.3.2"
+    "@webviewjs/webview": "^0.3.2",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsx": "^4.22.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
   }
 }
