@@ -21,7 +21,7 @@ export function printBanner(winTitle: string, winSize: { width: number; height: 
 
 export function printShortcuts() {
   out(
-    `   ${c(DIM)}Shortcuts  ${c(RESET)}${c(BOLD)}r${c(RESET)} ${c(DIM)}reload${c(RESET)}   ${c(BOLD)}R${c(RESET)} ${c(DIM)}restart${c(RESET)}   ${c(BOLD)}q${c(RESET)} ${c(DIM)}quit${c(RESET)}\n\n`,
+    `   ${c(DIM)}Shortcuts  ${c(RESET)}${c(BOLD)}r${c(RESET)} ${c(DIM)}restart${c(RESET)}   ${c(BOLD)}q${c(RESET)} ${c(DIM)}quit${c(RESET)}\n\n`,
   )
 }
 

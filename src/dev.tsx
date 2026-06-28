@@ -40,11 +40,8 @@ setupAppMenu(app, {
   onQuit: quit,
 })
 
-// Terminal single-key shortcuts (r / R / q) + signals.
+// Terminal single-key shortcuts (r / q) + signals.
 setupShortcuts({
-  onReload: () => {
-    void reloadWindow('manual')
-  },
   onRestart: () => {
     closeWindow()
     void openWindow()
