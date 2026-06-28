@@ -8,6 +8,7 @@ import type { WindowConfig } from '../types.ts'
 import { teardownHmr } from './hmr.ts'
 import { nativeBridge } from './native.ts'
 import { renderApp } from './render.tsx'
+import { teardownStdin } from './shortcuts.ts'
 
 const config: WindowConfig = {
   title: DEFAULT_WIN_TITLE,
@@ -42,6 +43,7 @@ app.onEvent((event) => {
   }
   if (kind === 'application-close-requested') {
     teardownHmr()
+    teardownStdin()
     printBye()
     try {
       app.exit()
