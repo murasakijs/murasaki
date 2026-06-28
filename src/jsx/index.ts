@@ -7,6 +7,7 @@ export {
   isValidElement,
   JSXNode,
   jsx,
+  raw,
   renderToString,
 } from './runtime.ts'
 

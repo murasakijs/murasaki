@@ -1,5 +1,5 @@
-// src/layout.tsx — wraps your app. Edit me to change the global shell.
-// Global styles live in src/globals.css (auto-injected by murasaki).
+// src/app/layout.tsx — root layout. Wraps every route.
+// Global styles live in src/app/globals.css (auto-injected by murasaki).
 
 import type { Metadata } from 'murasaki'
 import type { Child } from 'murasaki/jsx'
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   },
 }
 
-export default function Layout({ children }: { children?: Child }) {
+export default function RootLayout({ children }: { children?: Child }) {
   return (
     <html lang="en">
       <head>

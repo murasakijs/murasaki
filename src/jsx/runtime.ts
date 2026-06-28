@@ -178,6 +178,26 @@ function renderAttrs(props: Props): string {
   return out
 }
 
+// ── Raw HTML escape hatch (pre-rendered HTML as a child) ─────────────
+class RawHtml {
+  readonly __isJSXNode = true as const
+  tag = '__raw__'
+  props: Props = {}
+  children: Child[] = []
+  html: string
+  constructor(html: string) {
+    this.html = html
+  }
+  toString(): string {
+    return this.html
+  }
+}
+
+/** Wrap pre-rendered HTML so it's emitted verbatim as a JSX child. */
+export function raw(html: string): JSXNodeLike {
+  return new RawHtml(html)
+}
+
 // ── Children rendering ───────────────────────────────────────────────
 function renderChild(c: Child): string {
   if (c == null || c === false || c === true) return ''

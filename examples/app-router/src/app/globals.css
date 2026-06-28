@@ -1,4 +1,4 @@
-/* src/globals.css — global styles. Edit me. */
+/* src/app/globals.css — global styles. Edit me. */
 
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -23,7 +23,7 @@ body {
 main { text-align: center; padding: 40px; }
 
 h1 {
-  font-size: 96px;
+  font-size: 72px;
   margin: 0;
   background: linear-gradient(135deg, #5B21B6 0%, #A855F7 100%);
   -webkit-background-clip: text;
@@ -43,3 +43,21 @@ code {
   border-radius: 4px;
   font-size: 0.9em;
 }
+
+.links {
+  margin-top: 32px;
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}
+
+.links a {
+  color: #A855F7;
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  padding: 4px 0;
+  transition: border-color 0.15s;
+}
+
+.links a:hover { border-bottom-color: #A855F7; }

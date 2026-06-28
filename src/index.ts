@@ -2,6 +2,10 @@
 //
 // Import like:
 //   import type { Metadata } from 'murasaki'
+//   import { Link }            from 'murasaki'
+
+export type { LinkProps } from './components/Link.tsx'
+export { Link } from './components/Link.tsx'
 
 export type Metadata = {
   /** Default <title> for the app (overridden by <title> tag inside <head>) */
