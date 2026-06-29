@@ -1,6 +1,9 @@
-// src/app/page.tsx — the "/" route.
+// src/app/page.tsx — Home, rebuilt with murasaki primitives + desktop layout.
+//
+// Mixes Murasaki components (<TitleBar>/<Sidebar>/<Pane>/<View>/<Text>) with
+// plain HTML where it makes sense (<button>, <code>). Both coexist.
 
-import { Link } from 'murasaki'
+import { Link, NoDrag, Pane, Row, Sidebar, SidebarItem, Stack, Text, TitleBar, Toolbar, View } from 'murasaki'
 import {
   useClipboard,
   useDialog,
@@ -13,7 +16,7 @@ import {
 
 export default function HomePage() {
   const [count, setCount] = useState(0)
-  const [fileContent, setFileContent] = useState('')
+  const [section, setSection] = useState('counter')
   const [filePath, setFilePath] = useState('')
 
   const notify = useNotification()
@@ -26,63 +29,95 @@ export default function HomePage() {
   async function pickAndRead() {
     const paths = await dialog.openFile({ title: 'Pick a text file' })
     if (paths.length === 0) return
-    const path = paths[0]
-    const text = await fs.readFile(path)
-    setFilePath(path)
-    setFileContent(text.slice(0, 500)) // first 500 chars
+    setFilePath(paths[0])
+    const text = await fs.readFile(paths[0])
+    notify({ title: 'File loaded', body: `${text.length} chars from ${paths[0]}` })
   }
 
   return (
-    <main>
-      <h1>Hello, Murasaki 🦋</h1>
-      <p>
-        This view lives in <code>src/app/page.tsx</code>.
-      </p>
+    <View style={{ height: '100vh' }}>
+      <TitleBar>
+        <Text size={13} weight="medium">
+          Murasaki Example
+        </Text>
+      </TitleBar>
 
-      <div className="counter">
-        <button onClick={() => setCount(count - 1)} aria-label="decrement">
-          −
-        </button>
-        <strong>{count}</strong>
-        <button onClick={() => setCount(count + 1)} aria-label="increment">
-          +
-        </button>
-      </div>
+      <Row grow>
+        <Sidebar width={200}>
+          <SidebarItem active={section === 'counter'} onClick={() => setSection('counter')}>
+            Counter
+          </SidebarItem>
+          <SidebarItem active={section === 'native'} onClick={() => setSection('native')}>
+            Native APIs
+          </SidebarItem>
+          <SidebarItem active={section === 'window'} onClick={() => setSection('window')}>
+            Window
+          </SidebarItem>
+          <SidebarItem onClick={() => shell.openExternal('https://github.com/murasakijs/murasaki')}>
+            GitHub ↗
+          </SidebarItem>
+        </Sidebar>
 
-      <div className="actions">
-        <button onClick={() => notify({ title: 'Hello', body: `Count: ${count}` })}>
-          🔔 Notify
-        </button>
-        <button onClick={() => clipboard.write(`Count: ${count}`)}>
-          📋 Copy to clipboard
-        </button>
-        <button onClick={() => shell.openExternal('https://github.com/murasakijs/murasaki')}>
-          🔗 Open repo
-        </button>
-        <button onClick={pickAndRead}>📂 Pick & read file</button>
-      </div>
+        <Pane>
+          {section === 'counter' && (
+            <Stack gap={16}>
+              <Text as="h1" size={28} weight="bold">
+                Counter
+              </Text>
+              <Text color="#666">A small useState demo.</Text>
+              <Row gap={12} align="center">
+                <button onClick={() => setCount(count - 1)}>−</button>
+                <Text size={24} weight="bold">
+                  {count}
+                </Text>
+                <button onClick={() => setCount(count + 1)}>+</button>
+              </Row>
+              <nav>
+                <Link href="/about">About →</Link>
+              </nav>
+            </Stack>
+          )}
 
-      <div className="actions">
-        <button onClick={() => win.minimize()}>🟡 Minimize</button>
-        <button onClick={() => win.toggleMaximize()}>🟢 Toggle max</button>
-        <button onClick={() => win.setSize(1440, 900)}>↔ Resize 1440×900</button>
-        <button onClick={() => win.setTitle(`Murasaki — count ${count}`)}>
-          🪟 Title = count
-        </button>
-      </div>
+          {section === 'native' && (
+            <Stack gap={16}>
+              <Text as="h1" size={28} weight="bold">
+                Native APIs
+              </Text>
+              <Row gap={8} wrap>
+                <button onClick={() => notify({ title: 'Hello', body: `Count: ${count}` })}>
+                  🔔 Notify
+                </button>
+                <button onClick={() => clipboard.write(`Count: ${count}`)}>📋 Copy</button>
+                <button onClick={pickAndRead}>📂 Pick & read</button>
+                <button onClick={() => shell.openExternal('https://github.com/murasakijs/murasaki')}>
+                  🔗 Open repo
+                </button>
+              </Row>
+              {filePath && (
+                <Text size={12} color="#888">
+                  Last picked: <code>{filePath}</code>
+                </Text>
+              )}
+            </Stack>
+          )}
 
-      {filePath && (
-        <div className="file-preview">
-          <p className="hint">
-            <code>{filePath}</code>
-          </p>
-          <pre>{fileContent}</pre>
-        </div>
-      )}
-
-      <nav className="links">
-        <Link href="/about">About →</Link>
-      </nav>
-    </main>
+          {section === 'window' && (
+            <Stack gap={16}>
+              <Text as="h1" size={28} weight="bold">
+                Window control
+              </Text>
+              <Row gap={8} wrap>
+                <button onClick={() => win.minimize()}>🟡 Minimize</button>
+                <button onClick={() => win.toggleMaximize()}>🟢 Toggle max</button>
+                <button onClick={() => win.setSize(1440, 900)}>↔ Resize 1440×900</button>
+                <button onClick={() => win.setTitle(`Murasaki — ${count}`)}>
+                  🪟 Title = count
+                </button>
+              </Row>
+            </Stack>
+          )}
+        </Pane>
+      </Row>
+    </View>
   )
 }

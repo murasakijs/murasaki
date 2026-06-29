@@ -7,6 +7,21 @@
 export type { LinkProps } from './components/Link.tsx'
 export { Link } from './components/Link.tsx'
 
+// React Native–style layout primitives.
+export { Row, Stack, Text, View } from './components/primitives.tsx'
+export type { TextProps, ViewProps } from './components/primitives.tsx'
+
+// Desktop-shaped components (macOS-first).
+export {
+  NoDrag,
+  Pane,
+  Sidebar,
+  SidebarItem,
+  StatusBar,
+  TitleBar,
+  Toolbar,
+} from './components/desktop.tsx'
+
 export type Metadata = {
   /** Default <title> for the app (overridden by <title> tag inside <head>) */
   title?: string
