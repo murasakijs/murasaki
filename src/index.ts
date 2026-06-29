@@ -22,6 +22,18 @@ export {
   Toolbar,
 } from './components/desktop.tsx'
 
+// UI components.
+export {
+  Button,
+  Card,
+  Input,
+  List,
+  ListItem,
+  Modal,
+  Textarea,
+} from './components/ui.tsx'
+export type { ButtonSize, ButtonVariant } from './components/ui.tsx'
+
 export type Metadata = {
   /** Default <title> for the app (overridden by <title> tag inside <head>) */
   title?: string
