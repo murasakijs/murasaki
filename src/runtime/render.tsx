@@ -41,7 +41,17 @@ function escapeHtml(s: string): string {
 }
 
 async function dynImport(path: string) {
-  const url = pathToFileURL(path).href + `?v=${Date.now()}`
+  // CJS bundles (production via `murasaki build`) stash require on globalThis
+  // via the banner so we can transform user .tsx files through tsx/cjs.
+  // ESM (dev) lacks require entirely and falls through to dynamic import.
+  const req = (globalThis as { __murasakiRequire?: NodeRequire }).__murasakiRequire
+  if (typeof req === 'function') {
+    try {
+      delete req.cache?.[req.resolve(path)]
+    } catch {}
+    return req(path)
+  }
+  const url = `${pathToFileURL(path).href}?v=${Date.now()}`
   return import(url)
 }
 

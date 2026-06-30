@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
   "keywords": [
     "desktop",
@@ -66,6 +66,7 @@
   "dependencies": {
     "@webviewjs/webview": "^0.3.2",
     "esbuild": "^0.28.1",
+    "postject": "1.0.0-alpha.6",
     "tsx": "^4.22.4"
   },
   "devDependencies": {

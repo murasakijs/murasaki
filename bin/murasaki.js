@@ -25,12 +25,17 @@ if (cmd === 'dev') {
   await loadModule('dev')
 } else if (cmd === 'build') {
   const mod = await loadModule('build')
-  await mod.build()
+  await mod.build({
+    binary: process.argv.includes('--binary') || process.argv.includes('--app'),
+    app: process.argv.includes('--app'),
+  })
 } else {
   process.stdout.write(`
 Usage:
-  murasaki dev      Start the development server (HMR)
-  murasaki build    Bundle for production → dist/server.js
+  murasaki dev               Start the development server (HMR)
+  murasaki build             Bundle for production → dist/server.js
+  murasaki build --binary    + Single-executable (Node SEA) → dist/<name>
+  murasaki build --app       + macOS .app bundle → dist/<Name>.app (implies --binary)
 
 `)
   process.exit(cmd ? 1 : 0)
