@@ -22,7 +22,7 @@ export {
   Toolbar,
 } from './components/desktop.tsx'
 
-// UI components.
+// UI components (Tier 1).
 export {
   Button,
   Card,
@@ -33,6 +33,20 @@ export {
   Textarea,
 } from './components/ui.tsx'
 export type { ButtonSize, ButtonVariant } from './components/ui.tsx'
+
+// Form controls (Tier 2).
+export { Checkbox, Radio, RadioGroup, Switch } from './components/forms.tsx'
+
+// Overlay & navigation (Tier 2).
+export {
+  ContextMenu,
+  Tab,
+  TabList,
+  TabPanel,
+  Tabs,
+  Tooltip,
+} from './components/overlay.tsx'
+export type { ContextMenuItem } from './components/overlay.tsx'
 
 export type Metadata = {
   /** Default <title> for the app (overridden by <title> tag inside <head>) */

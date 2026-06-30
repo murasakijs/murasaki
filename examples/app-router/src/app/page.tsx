@@ -1,21 +1,31 @@
-// src/app/page.tsx — Home. Now using murasaki's UI components.
+// src/app/page.tsx — Home. Tier 1 + Tier 2 components in action.
 
 import {
   Button,
   Card,
+  Checkbox,
+  ContextMenu,
   Input,
   Link,
   List,
   ListItem,
   Modal,
   Pane,
+  Radio,
+  RadioGroup,
   Row,
   Sidebar,
   SidebarItem,
   Stack,
+  Switch,
+  Tab,
+  TabList,
+  TabPanel,
+  Tabs,
   Text,
   Textarea,
   TitleBar,
+  Tooltip,
   View,
 } from 'murasaki'
 import {
@@ -29,14 +39,20 @@ import {
 } from 'murasaki/jsx/dom'
 
 export default function HomePage() {
+  const [section, setSection] = useState('basics')
+
+  // Form state (used in Form tab)
   const [count, setCount] = useState(0)
-  const [section, setSection] = useState('counter')
   const [name, setName] = useState('Murasaki')
-  const [note, setNote] = useState('')
+  const [agree, setAgree] = useState(false)
+  const [notify, setNotify] = useState(true)
+  const [color, setColor] = useState('purple')
+  const [tab, setTab] = useState('counter')
   const [modalOpen, setModalOpen] = useState(false)
+  const [note, setNote] = useState('')
   const [filePath, setFilePath] = useState('')
 
-  const notify = useNotification()
+  const notification = useNotification()
   const clipboard = useClipboard()
   const shell = useShell()
   const dialog = useDialog()
@@ -61,53 +77,84 @@ export default function HomePage() {
 
       <Row grow>
         <Sidebar width={200}>
-          <SidebarItem active={section === 'counter'} onClick={() => setSection('counter')}>
-            Counter
+          <SidebarItem active={section === 'basics'} onClick={() => setSection('basics')}>
+            Basics
           </SidebarItem>
-          <SidebarItem active={section === 'form'} onClick={() => setSection('form')}>
-            Form
+          <SidebarItem active={section === 'forms'} onClick={() => setSection('forms')}>
+            Forms
+          </SidebarItem>
+          <SidebarItem active={section === 'overlay'} onClick={() => setSection('overlay')}>
+            Overlay
           </SidebarItem>
           <SidebarItem active={section === 'native'} onClick={() => setSection('native')}>
             Native APIs
           </SidebarItem>
-          <SidebarItem active={section === 'list'} onClick={() => setSection('list')}>
-            List
-          </SidebarItem>
-          <SidebarItem active={section === 'window'} onClick={() => setSection('window')}>
-            Window
-          </SidebarItem>
         </Sidebar>
 
         <Pane>
-          {section === 'counter' && (
+          {section === 'basics' && (
             <Stack gap={16}>
               <Text as="h1" size={28} weight="bold">
-                Counter
+                Basics
               </Text>
-              <Card>
-                <Row gap={12} align="center" justify="center">
-                  <Button variant="secondary" onClick={() => setCount(count - 1)}>
-                    −
-                  </Button>
-                  <Text size={28} weight="bold" style={{ minWidth: '64px', textAlign: 'center' }}>
-                    {count}
-                  </Text>
-                  <Button onClick={() => setCount(count + 1)}>+</Button>
-                </Row>
-              </Card>
+
+              <Tabs value={tab} onChange={setTab}>
+                <TabList>
+                  <Tab value="counter" active={tab === 'counter'} onClick={() => setTab('counter')}>
+                    Counter
+                  </Tab>
+                  <Tab value="list" active={tab === 'list'} onClick={() => setTab('list')}>
+                    List
+                  </Tab>
+                  <Tab value="modal" active={tab === 'modal'} onClick={() => setTab('modal')}>
+                    Modal
+                  </Tab>
+                </TabList>
+
+                <TabPanel value="counter" active={tab}>
+                  <Card>
+                    <Row gap={12} align="center" justify="center">
+                      <Button variant="secondary" onClick={() => setCount(count - 1)}>
+                        −
+                      </Button>
+                      <Text size={28} weight="bold" style={{ minWidth: '64px', textAlign: 'center' }}>
+                        {count}
+                      </Text>
+                      <Button onClick={() => setCount(count + 1)}>+</Button>
+                    </Row>
+                  </Card>
+                </TabPanel>
+
+                <TabPanel value="list" active={tab}>
+                  <List>
+                    <ListItem active>Inbox</ListItem>
+                    <ListItem>Sent</ListItem>
+                    <ListItem>Drafts</ListItem>
+                    <ListItem>Trash</ListItem>
+                  </List>
+                </TabPanel>
+
+                <TabPanel value="modal" active={tab}>
+                  <Button onClick={() => setModalOpen(true)}>Open modal</Button>
+                  <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Hello">
+                    <Text>Modal content. Click ✕ or outside to close.</Text>
+                  </Modal>
+                </TabPanel>
+              </Tabs>
+
               <nav>
                 <Link href="/about">About →</Link>
               </nav>
             </Stack>
           )}
 
-          {section === 'form' && (
+          {section === 'forms' && (
             <Stack gap={16} style={{ maxWidth: '480px' }}>
               <Text as="h1" size={28} weight="bold">
-                Form
+                Forms
               </Text>
               <Card>
-                <Stack gap={12}>
+                <Stack gap={14}>
                   <Stack gap={4}>
                     <Text size={12} weight="medium" color="#666">
                       Name
@@ -115,28 +162,113 @@ export default function HomePage() {
                     <Input
                       value={name}
                       onInput={(e) => setName((e.target as HTMLInputElement).value)}
-                      placeholder="Your name"
                     />
                   </Stack>
+
                   <Stack gap={4}>
                     <Text size={12} weight="medium" color="#666">
                       Note
                     </Text>
                     <Textarea
                       value={note}
-                      rows={4}
+                      rows={3}
                       onInput={(e) => setNote((e.target as HTMLTextAreaElement).value)}
-                      placeholder="Anything…"
                     />
                   </Stack>
+
+                  <Switch
+                    checked={notify}
+                    onChange={setNotify}
+                    label="Send a notification on submit"
+                  />
+
+                  <Checkbox checked={agree} onChange={setAgree} label="I agree to the terms" />
+
+                  <Stack gap={6}>
+                    <Text size={12} weight="medium" color="#666">
+                      Theme color
+                    </Text>
+                    <Row gap={12}>
+                      <Radio
+                        value="purple"
+                        groupValue={color}
+                        groupChange={setColor}
+                        label="Purple"
+                      />
+                      <Radio
+                        value="blue"
+                        groupValue={color}
+                        groupChange={setColor}
+                        label="Blue"
+                      />
+                      <Radio
+                        value="pink"
+                        groupValue={color}
+                        groupChange={setColor}
+                        label="Pink"
+                      />
+                    </Row>
+                  </Stack>
+
                   <Row gap={8} justify="end">
-                    <Button variant="ghost" onClick={() => setNote('')}>
-                      Clear
+                    <Button
+                      disabled={!agree}
+                      onClick={() => {
+                        if (notify) notification({ title: name, body: `${color}; ${note}` })
+                      }}
+                    >
+                      Submit
                     </Button>
-                    <Button onClick={() => setModalOpen(true)}>Preview</Button>
                   </Row>
                 </Stack>
               </Card>
+            </Stack>
+          )}
+
+          {section === 'overlay' && (
+            <Stack gap={20} style={{ maxWidth: '520px' }}>
+              <Text as="h1" size={28} weight="bold">
+                Overlay
+              </Text>
+
+              <Stack gap={8}>
+                <Text weight="medium">Tooltip</Text>
+                <Row gap={12}>
+                  <Tooltip text="Top tooltip">
+                    <Button variant="secondary">Hover top</Button>
+                  </Tooltip>
+                  <Tooltip text="Bottom tooltip" position="bottom">
+                    <Button variant="secondary">Hover bottom</Button>
+                  </Tooltip>
+                </Row>
+              </Stack>
+
+              <Stack gap={8}>
+                <Text weight="medium">Context menu (right-click)</Text>
+                <ContextMenu
+                  items={[
+                    {
+                      label: 'Copy',
+                      onClick: () => clipboard.write(`Right-clicked: ${name}`),
+                    },
+                    {
+                      label: 'Notify',
+                      onClick: () => notification({ title: 'From menu', body: name }),
+                    },
+                    { type: 'separator' },
+                    { label: 'Disabled item', disabled: true },
+                    {
+                      label: 'Delete',
+                      danger: true,
+                      onClick: () => setName(''),
+                    },
+                  ]}
+                >
+                  <Card padding={32}>
+                    <Text>Right-click anywhere in this card</Text>
+                  </Card>
+                </ContextMenu>
+              </Stack>
             </Stack>
           )}
 
@@ -146,7 +278,7 @@ export default function HomePage() {
                 Native APIs
               </Text>
               <Row gap={8} wrap>
-                <Button onClick={() => notify({ title: 'Hello', body: `${name} — ${count}` })}>
+                <Button onClick={() => notification({ title: 'Hello', body: name })}>
                   🔔 Notify
                 </Button>
                 <Button variant="secondary" onClick={() => clipboard.write(name)}>
@@ -161,6 +293,9 @@ export default function HomePage() {
                 >
                   🔗 Repo
                 </Button>
+                <Button variant="ghost" onClick={() => win.toggleMaximize()}>
+                  🟢 Toggle max
+                </Button>
               </Row>
               {filePath && (
                 <Text size={12} color="#888">
@@ -169,52 +304,8 @@ export default function HomePage() {
               )}
             </Stack>
           )}
-
-          {section === 'list' && (
-            <Stack gap={16}>
-              <Text as="h1" size={28} weight="bold">
-                List
-              </Text>
-              <List>
-                <ListItem active onClick={() => notify({ title: 'Picked', body: 'Inbox' })}>
-                  Inbox
-                </ListItem>
-                <ListItem onClick={() => notify({ title: 'Picked', body: 'Sent' })}>Sent</ListItem>
-                <ListItem onClick={() => notify({ title: 'Picked', body: 'Drafts' })}>
-                  Drafts
-                </ListItem>
-                <ListItem onClick={() => notify({ title: 'Picked', body: 'Trash' })}>
-                  Trash
-                </ListItem>
-              </List>
-            </Stack>
-          )}
-
-          {section === 'window' && (
-            <Stack gap={16}>
-              <Text as="h1" size={28} weight="bold">
-                Window control
-              </Text>
-              <Row gap={8} wrap>
-                <Button variant="secondary" onClick={() => win.minimize()}>
-                  🟡 Minimize
-                </Button>
-                <Button variant="secondary" onClick={() => win.toggleMaximize()}>
-                  🟢 Toggle max
-                </Button>
-                <Button variant="secondary" onClick={() => win.setSize(1440, 900)}>
-                  ↔ Resize 1440×900
-                </Button>
-                <Button onClick={() => win.setTitle(`Murasaki — ${name}`)}>🪟 Title = name</Button>
-              </Row>
-            </Stack>
-          )}
         </Pane>
       </Row>
-
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={`Preview: ${name}`}>
-        <Text>{note || '(empty)'}</Text>
-      </Modal>
     </View>
   )
 }
