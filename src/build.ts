@@ -41,11 +41,14 @@ const bold = (s: string) => (noColor ? s : BOLD + s + RESET)
 const bright = (s: string) => (noColor ? s : BRIGHT + s + RESET)
 
 type BuildOptions = {
-  /** Produce a native distributable for the current platform. */
+  /** Produce a native distributable folder/.app for the current platform. */
   pack?: boolean
+  /** Wrap the --pack output in a per-OS installer/archive. Implies --pack. */
+  installer?: boolean
 }
 
 export async function build(opts: BuildOptions = {}): Promise<void> {
+  if (opts.installer) opts.pack = true
   const startAt = Date.now()
   const distDir = join(projectRoot, 'dist')
   if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true })
@@ -63,6 +66,13 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
     else packPath = await packLinux(distDir, serverPath)
   }
 
+  let installerPath: string | null = null
+  if (opts.installer && packPath) {
+    if (process.platform === 'darwin') installerPath = await makeDmg(distDir, packPath)
+    else if (process.platform === 'win32') installerPath = await makeZip(distDir, packPath)
+    else installerPath = await makeTarGz(distDir, packPath)
+  }
+
   const elapsed = ((Date.now() - startAt) / 1000).toFixed(1)
   out(`\n   ${green('✓')} done ${dim(`(${elapsed}s)`)}\n\n`)
   out(`   ${dim('Run:')} ${bold('node ' + serverPath)}\n`)
@@ -72,6 +82,7 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
       out(`   ${dim('     ')}${bold(join(packPath, readAppName() + '.bat'))}\n`)
     else out(`   ${dim('     ')}${bold(join(packPath, readAppName() + '.sh'))}\n`)
   }
+  if (installerPath) out(`   ${dim('Ship:')} ${bold(installerPath)}\n`)
   out('\n')
 }
 
@@ -343,6 +354,79 @@ exec "$DIR/node" "$DIR/server.cjs"
 
   out(`     ${green('✓')} ${dim('built')} ${dir}\n`)
   return dir
+}
+
+// ── stage 3: installers / archives ─────────────────────────────────
+
+async function makeDmg(distDir: string, appPath: string): Promise<string> {
+  const appName = readAppName()
+  const displayName = capitalize(appName)
+  const dmgPath = join(distDir, `${displayName}-${readVersion()}.dmg`)
+
+  out(`   ${dim('3.')} packaging macOS ${bold(displayName + '.dmg')}\n`)
+
+  // Remove any existing artefact (hdiutil refuses to overwrite).
+  try {
+    rmSync(dmgPath, { force: true })
+  } catch {}
+
+  await runOrFail(
+    'hdiutil',
+    [
+      'create',
+      '-volname',
+      displayName,
+      '-srcfolder',
+      appPath,
+      '-ov',
+      '-format',
+      'UDZO', // compressed read-only
+      dmgPath,
+    ],
+    { label: 'hdiutil create .dmg' },
+  )
+  out(`     ${green('✓')} ${dim('built')} ${dmgPath}\n`)
+  return dmgPath
+}
+
+async function makeZip(distDir: string, folderPath: string): Promise<string> {
+  const appName = readAppName()
+  const zipPath = join(distDir, `${appName}-${readVersion()}.zip`)
+
+  out(`   ${dim('3.')} packaging windows ${bold(appName + '.zip')}\n`)
+  try {
+    rmSync(zipPath, { force: true })
+  } catch {}
+
+  // PowerShell Compress-Archive — built into Windows.
+  await runOrFail(
+    'powershell',
+    [
+      '-Command',
+      `Compress-Archive -Path "${folderPath}\\*" -DestinationPath "${zipPath}" -Force`,
+    ],
+    { label: 'powershell Compress-Archive' },
+  )
+  out(`     ${green('✓')} ${dim('built')} ${zipPath}\n`)
+  return zipPath
+}
+
+async function makeTarGz(distDir: string, folderPath: string): Promise<string> {
+  const appName = readAppName()
+  const tarPath = join(distDir, `${appName}-${readVersion()}.tar.gz`)
+
+  out(`   ${dim('3.')} packaging linux ${bold(appName + '.tar.gz')}\n`)
+  try {
+    rmSync(tarPath, { force: true })
+  } catch {}
+
+  const parentDir = dirname(folderPath)
+  const baseName = folderPath.slice(parentDir.length + 1)
+  await runOrFail('tar', ['-C', parentDir, '-czf', tarPath, baseName], {
+    label: 'tar -czf',
+  })
+  out(`     ${green('✓')} ${dim('built')} ${tarPath}\n`)
+  return tarPath
 }
 
 // ── helpers ────────────────────────────────────────────────────────

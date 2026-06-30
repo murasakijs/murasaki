@@ -27,17 +27,22 @@ if (cmd === 'dev') {
 } else if (cmd === 'build') {
   const mod = await loadModule('build')
   await mod.build({
-    pack: process.argv.includes('--pack'),
+    pack: process.argv.includes('--pack') || process.argv.includes('--installer'),
+    installer: process.argv.includes('--installer'),
   })
 } else {
   process.stdout.write(`
 Usage:
-  murasaki dev          Start the development server (HMR)
-  murasaki build        Bundle for production -> dist/server.cjs
-  murasaki build --pack Native distributable for the current platform:
-                          darwin -> dist/<App>.app
-                          win32  -> dist/<app>/<app>.bat (+ <app>.vbs silent)
-                          linux  -> dist/<app>/<app>.sh
+  murasaki dev               Start the development server (HMR)
+  murasaki build             Bundle for production -> dist/server.cjs
+  murasaki build --pack      Native distributable for current platform:
+                               darwin -> dist/<App>.app
+                               win32  -> dist/<app>/<app>.bat (+ .vbs)
+                               linux  -> dist/<app>/<app>.sh
+  murasaki build --installer Per-OS archive/installer (implies --pack):
+                               darwin -> dist/<App>-<ver>.dmg
+                               win32  -> dist/<app>-<ver>.zip
+                               linux  -> dist/<app>-<ver>.tar.gz
 
 `)
   process.exit(cmd ? 1 : 0)
