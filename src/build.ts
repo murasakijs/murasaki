@@ -23,6 +23,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { currentTarget, ensureNodeBinary, ensureWebviewPrebuild, type Target, TARGETS } from './download.ts'
 import { APP_DIR, APP_GLOBALS_CSS, projectRoot } from './env.ts'
 import { discoverRoutes, type Route } from './runtime/routes.ts'
 
@@ -41,10 +42,12 @@ const bold = (s: string) => (noColor ? s : BOLD + s + RESET)
 const bright = (s: string) => (noColor ? s : BRIGHT + s + RESET)
 
 type BuildOptions = {
-  /** Produce a native distributable folder/.app for the current platform. */
+  /** Produce a native distributable folder/.app. */
   pack?: boolean
   /** Wrap the --pack output in a per-OS installer/archive. Implies --pack. */
   installer?: boolean
+  /** Target platform id (e.g. "win-x64"). Defaults to the current host. */
+  target?: Target['id']
 }
 
 export async function build(opts: BuildOptions = {}): Promise<void> {
@@ -53,24 +56,36 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
   const distDir = join(projectRoot, 'dist')
   if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true })
 
+  const target = opts.target ? TARGETS[opts.target] : currentTarget()
+  const isCross = target.id !== currentTarget().id
+
   out(`\n   ${bold(bright('🦋 Murasaki'))} — production build\n\n`)
   out(`   ${dim('Project ')}${projectRoot}\n`)
+  out(`   ${dim('Target  ')}${target.id}${isCross ? dim(' (cross-compiled)') : ''}\n`)
   out(`   ${dim('Out     ')}${distDir}/\n\n`)
 
   const serverPath = await bundleServer(distDir)
 
   let packPath: string | null = null
   if (opts.pack) {
-    if (process.platform === 'darwin') packPath = await packMacApp(distDir, serverPath)
-    else if (process.platform === 'win32') packPath = await packWindows(distDir, serverPath)
-    else packPath = await packLinux(distDir, serverPath)
+    if (target.os === 'darwin') packPath = await packMacApp(distDir, serverPath, target)
+    else if (target.os === 'win32') packPath = await packWindows(distDir, serverPath, target)
+    else packPath = await packLinux(distDir, serverPath, target)
   }
 
   let installerPath: string | null = null
   if (opts.installer && packPath) {
-    if (process.platform === 'darwin') installerPath = await makeDmg(distDir, packPath)
-    else if (process.platform === 'win32') installerPath = await makeZip(distDir, packPath)
-    else installerPath = await makeTarGz(distDir, packPath)
+    if (target.os === 'darwin') {
+      if (process.platform !== 'darwin') {
+        out(`   ${red('!')} .dmg requires hdiutil (macOS host) — skipping installer step\n`)
+      } else {
+        installerPath = await makeDmg(distDir, packPath)
+      }
+    } else if (target.os === 'win32') {
+      installerPath = await makeZipCross(distDir, packPath)
+    } else {
+      installerPath = await makeTarGz(distDir, packPath)
+    }
   }
 
   const elapsed = ((Date.now() - startAt) / 1000).toFixed(1)
@@ -211,7 +226,7 @@ async function resolveDepRoot(dep: string): Promise<string | null> {
   }
 }
 
-async function copyRuntimeDeps(targetNodeModules: string): Promise<string[]> {
+async function copyRuntimeDeps(targetNodeModules: string, target: Target): Promise<string[]> {
   mkdirSync(targetNodeModules, { recursive: true })
   const copied: string[] = []
   for (const dep of RUNTIME_DEPS) {
@@ -219,21 +234,44 @@ async function copyRuntimeDeps(targetNodeModules: string): Promise<string[]> {
     if (!src) continue
     const dst = join(targetNodeModules, dep)
     rmSync(dst, { recursive: true, force: true })
-    // dereference so we copy the actual files (not pnpm's symlink chain)
+    // dereference so we copy actual files (not pnpm's symlink chain)
     cpSync(src, dst, { recursive: true, dereference: true })
     copied.push(dep)
+  }
+  // Cross-compile: swap in the target-platform @webviewjs/webview prebuild.
+  if (target.id !== currentTarget().id) {
+    try {
+      const targetPrebuildRoot = await ensureWebviewPrebuild(target)
+      if (targetPrebuildRoot) {
+        const platformPart =
+          target.os === 'win32'
+            ? `${target.os}-${target.arch}-msvc`
+            : target.os === 'linux'
+              ? `${target.os}-${target.arch}-gnu`
+              : `${target.os}-${target.arch}`
+        const pkgName = `@webviewjs/webview-${platformPart}`
+        const dst = join(targetNodeModules, pkgName)
+        rmSync(dst, { recursive: true, force: true })
+        cpSync(targetPrebuildRoot, dst, { recursive: true, dereference: true })
+        copied.push(pkgName)
+      }
+    } catch (e) {
+      out(
+        `     ${red('!')} could not fetch webview prebuild for ${target.id}: ${(e as Error).message}\n`,
+      )
+    }
   }
   return copied
 }
 
 // ── stage 2a: macOS .app ──────────────────────────────────────────
-async function packMacApp(distDir: string, serverPath: string): Promise<string> {
+async function packMacApp(distDir: string, serverPath: string, target: Target): Promise<string> {
   const appName = readAppName()
   const displayName = capitalize(appName)
   const bundleId = readBundleId() ?? `app.${appName.replace(/[^a-z0-9]/gi, '')}.murasaki`
   const appBundle = join(distDir, `${displayName}.app`)
 
-  out(`   ${dim('2.')} packaging macOS ${bold(displayName + '.app')}\n`)
+  out(`   ${dim('2.')} packaging macOS ${bold(displayName + '.app')} ${dim('(' + target.id + ')')}\n`)
 
   try {
     rmSync(appBundle, { recursive: true, force: true })
@@ -243,8 +281,9 @@ async function packMacApp(distDir: string, serverPath: string): Promise<string> 
   mkdirSync(macOSDir, { recursive: true })
   mkdirSync(resourcesDir, { recursive: true })
 
-  // Node binary into Resources/
-  cpSync(process.execPath, join(resourcesDir, 'node'))
+  // Node binary (cross-compile aware)
+  const nodeBinary = await ensureNodeBinary(target)
+  cpSync(nodeBinary, join(resourcesDir, 'node'))
   chmodSync(join(resourcesDir, 'node'), 0o755)
   out(`     ${green('✓')} ${dim('node      →')} Resources/node\n`)
 
@@ -253,7 +292,7 @@ async function packMacApp(distDir: string, serverPath: string): Promise<string> 
   out(`     ${green('✓')} ${dim('server.cjs →')} Resources/server.cjs\n`)
 
   // node_modules (selected runtime deps) into Resources/
-  const deps = await copyRuntimeDeps(join(resourcesDir, 'node_modules'))
+  const deps = await copyRuntimeDeps(join(resourcesDir, 'node_modules'), target)
   out(`     ${green('✓')} ${dim('node_modules →')} Resources/node_modules (${deps.join(', ')})\n`)
 
   // launcher script (must be executable by MacOS/<displayName>)
@@ -282,24 +321,25 @@ exec "$DIR/node" "$DIR/server.cjs"
 }
 
 // ── stage 2b: Windows folder + .bat launcher ───────────────────────
-async function packWindows(distDir: string, serverPath: string): Promise<string> {
+async function packWindows(distDir: string, serverPath: string, target: Target): Promise<string> {
   const appName = readAppName()
   const dir = join(distDir, appName)
 
-  out(`   ${dim('2.')} packaging windows folder ${bold(appName + '/')}\n`)
+  out(`   ${dim('2.')} packaging windows folder ${bold(appName + '/')} ${dim('(' + target.id + ')')}\n`)
 
   try {
     rmSync(dir, { recursive: true, force: true })
   } catch {}
   mkdirSync(dir, { recursive: true })
 
-  cpSync(process.execPath, join(dir, 'node.exe'))
+  const nodeBinary = await ensureNodeBinary(target)
+  cpSync(nodeBinary, join(dir, 'node.exe'))
   out(`     ${green('✓')} ${dim('node.exe')}\n`)
 
   cpSync(serverPath, join(dir, 'server.cjs'))
   out(`     ${green('✓')} ${dim('server.cjs')}\n`)
 
-  const deps = await copyRuntimeDeps(join(dir, 'node_modules'))
+  const deps = await copyRuntimeDeps(join(dir, 'node_modules'), target)
   out(`     ${green('✓')} ${dim('node_modules')} (${deps.join(', ')})\n`)
 
   // Double-click launcher: .bat for command, .vbs for "no console window"
@@ -320,25 +360,26 @@ ws.Run """" & WScript.ScriptFullName & "\\..\\${appName}.bat" & """", 0
 }
 
 // ── stage 2c: Linux folder + sh launcher ───────────────────────────
-async function packLinux(distDir: string, serverPath: string): Promise<string> {
+async function packLinux(distDir: string, serverPath: string, target: Target): Promise<string> {
   const appName = readAppName()
   const dir = join(distDir, appName)
 
-  out(`   ${dim('2.')} packaging linux folder ${bold(appName + '/')}\n`)
+  out(`   ${dim('2.')} packaging linux folder ${bold(appName + '/')} ${dim('(' + target.id + ')')}\n`)
 
   try {
     rmSync(dir, { recursive: true, force: true })
   } catch {}
   mkdirSync(dir, { recursive: true })
 
-  cpSync(process.execPath, join(dir, 'node'))
+  const nodeBinary = await ensureNodeBinary(target)
+  cpSync(nodeBinary, join(dir, 'node'))
   chmodSync(join(dir, 'node'), 0o755)
   out(`     ${green('✓')} ${dim('node')}\n`)
 
   cpSync(serverPath, join(dir, 'server.cjs'))
   out(`     ${green('✓')} ${dim('server.cjs')}\n`)
 
-  const deps = await copyRuntimeDeps(join(dir, 'node_modules'))
+  const deps = await copyRuntimeDeps(join(dir, 'node_modules'), target)
   out(`     ${green('✓')} ${dim('node_modules')} (${deps.join(', ')})\n`)
 
   const shPath = join(dir, `${appName}.sh`)
@@ -387,6 +428,43 @@ async function makeDmg(distDir: string, appPath: string): Promise<string> {
   )
   out(`     ${green('✓')} ${dim('built')} ${dmgPath}\n`)
   return dmgPath
+}
+
+/**
+ * Cross-platform zip — uses zip(1) on POSIX, Compress-Archive on Windows.
+ * Works regardless of which host you build on.
+ */
+async function makeZipCross(distDir: string, folderPath: string): Promise<string> {
+  const appName = readAppName()
+  const zipPath = join(distDir, `${appName}-${readVersion()}.zip`)
+
+  out(`   ${dim('3.')} packaging zip ${bold(appName + '.zip')}\n`)
+  try {
+    rmSync(zipPath, { force: true })
+  } catch {}
+
+  const parentDir = dirname(folderPath)
+  const baseName = folderPath.slice(parentDir.length + 1)
+
+  if (process.platform === 'win32') {
+    await runOrFail(
+      'powershell',
+      [
+        '-Command',
+        `Compress-Archive -Path "${folderPath}\\*" -DestinationPath "${zipPath}" -Force`,
+      ],
+      { label: 'powershell Compress-Archive' },
+    )
+  } else {
+    // POSIX zip(1) — preserves file modes (chmod +x on launcher).
+    // Run from parentDir so the archive paths are relative to the folder.
+    await runOrFail('zip', ['-r', '-q', zipPath, baseName], {
+      label: 'zip -r',
+      cwd: parentDir,
+    })
+  }
+  out(`     ${green('✓')} ${dim('built')} ${zipPath}\n`)
+  return zipPath
 }
 
 async function makeZip(distDir: string, folderPath: string): Promise<string> {
@@ -508,7 +586,13 @@ require(${JSON.stringify(prodEntry)});
 function readAppName(): string {
   try {
     const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
-    return (pkg.name || 'app').replace(/[^a-z0-9-]/gi, '-').toLowerCase() || 'app'
+    let raw = pkg.name || 'app'
+    // Strip the scope prefix on scoped packages: "@scope/name" → "name".
+    if (raw.startsWith('@')) {
+      const slash = raw.indexOf('/')
+      raw = slash > 0 ? raw.slice(slash + 1) : raw.slice(1)
+    }
+    return raw.replace(/[^a-z0-9-]/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'app'
   } catch {
     return 'app'
   }
@@ -542,10 +626,10 @@ function capitalize(s: string): string {
 function runOrFail(
   cmd: string,
   args: string[],
-  opts: { label: string; allowFail?: boolean } = { label: cmd },
+  opts: { label: string; allowFail?: boolean; cwd?: string } = { label: cmd },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+    const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: opts.cwd })
     let stderr = ''
     p.stdout.on('data', () => {})
     p.stderr.on('data', (c) => {

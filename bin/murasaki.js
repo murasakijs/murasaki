@@ -17,31 +17,54 @@ async function loadModule(name) {
   return import(pathToFileURL(target).href)
 }
 
+function flagValue(name) {
+  const i = process.argv.indexOf(`--${name}`)
+  if (i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')) {
+    return process.argv[i + 1]
+  }
+  return undefined
+}
+
 if (cmd === 'dev') {
   process.env.MURASAKI_DEV = '1'
   await loadModule('dev')
 } else if (cmd === 'build') {
   const mod = await loadModule('build')
-  await mod.build({})
+  await mod.build({ target: flagValue('target') })
 } else if (cmd === 'bundle') {
   const mod = await loadModule('build')
-  await mod.build({ pack: true })
+  await mod.build({ pack: true, target: flagValue('target') })
 } else if (cmd === 'installer') {
   const mod = await loadModule('build')
-  await mod.build({ pack: true, installer: true })
+  await mod.build({ pack: true, installer: true, target: flagValue('target') })
 } else {
   process.stdout.write(`
 Usage:
-  murasaki dev         Start the development server (HMR)
-  murasaki build       Production JS bundle  -> dist/server.cjs
-  murasaki bundle      Native folder / .app for the current platform:
-                         darwin -> dist/<App>.app
-                         win32  -> dist/<app>/<app>.bat (+ .vbs silent)
-                         linux  -> dist/<app>/<app>.sh
-  murasaki installer   Distributable archive / disk image for the current OS:
-                         darwin -> dist/<App>-<ver>.dmg
-                         win32  -> dist/<app>-<ver>.zip
-                         linux  -> dist/<app>-<ver>.tar.gz
+  murasaki dev                       Start the development server (HMR)
+  murasaki build                     Production JS bundle  -> dist/server.cjs
+  murasaki bundle                    Native folder / .app for the target:
+                                       darwin -> dist/<App>.app
+                                       win32  -> dist/<app>/<app>.bat (+ .vbs silent)
+                                       linux  -> dist/<app>/<app>.sh
+  murasaki installer                 Distributable archive for the target:
+                                       darwin -> dist/<App>-<ver>.dmg
+                                       win32  -> dist/<app>-<ver>.zip
+                                       linux  -> dist/<app>-<ver>.tar.gz
+
+Cross-compile flag (available on all build/bundle/installer commands):
+  --target <id>                      darwin-arm64 | darwin-x64 |
+                                     win-x64 | win-arm64 |
+                                     linux-x64 | linux-arm64
+
+  Examples:
+    murasaki bundle --target win-x64
+    murasaki installer --target linux-arm64
+
+Host requirements for installer formats:
+    .dmg  → only on macOS host (uses hdiutil)
+    .msi  → upcoming via WiX v4 (.NET tool, cross-platform)
+    .zip  → cross-platform (zip/Compress-Archive)
+    .tar.gz → cross-platform
 
 `)
   process.exit(cmd ? 1 : 0)
