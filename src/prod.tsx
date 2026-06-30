@@ -1,15 +1,13 @@
 // src/prod.tsx — production boot.
 // Same window + render path as dev, minus HMR and stdin shortcuts.
 //
-// User pages (src/app/*.tsx) are dynamic-imported at runtime. We import
-// tsx/cjs statically here so the build step bundles it (instead of leaving
-// it as an external require) — that way Node SEA can run the bundle
-// because SEA's require only resolves built-in modules.
+// User pages are statically pre-bundled by `murasaki build`'s synthetic
+// entry (see src/build.ts → buildSyntheticEntry), so we do NOT need to
+// register tsx at runtime. That makes Node SEA happy.
 //
 // Top-level await is wrapped in an async IIFE so the bundle compiles
 // cleanly to CJS for Node SEA.
 
-import 'tsx/cjs'
 import { printBanner, printReady, printStarting } from './cli/log.ts'
 import { getConfig, openWindow, runApp } from './runtime/window.ts'
 

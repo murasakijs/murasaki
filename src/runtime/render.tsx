@@ -26,6 +26,7 @@ import type { Child, Component } from '../jsx/types.ts'
 import type { RenderResult } from '../types.ts'
 import { bundleClient } from './bundle.ts'
 import { discoverRoutes, type Route } from './routes.ts'
+import { getStaticRoutes, type LoadedModule, type StaticRouteEntry } from './static-routes.ts'
 
 const NO_APP_HTML =
   '<!doctype html><html><body style="font-family:system-ui;padding:40px;">' +
@@ -87,7 +88,7 @@ async function renderPageInner(route: Route, rootLayoutFile: string | null): Pro
 }
 
 // ── Root layout + metadata ──────────────────────────────────────────
-async function renderRootLayout(rootLayout: Loaded | null, body: Child): Promise<string> {
+async function renderRootLayout(rootLayout: Loaded | LoadedModule | null, body: Child): Promise<string> {
   if (!rootLayout) {
     // Fallback root if user didn't write src/app/layout.tsx
     const fallback = jsx('html', {
@@ -181,7 +182,10 @@ function injectHead(html: string, metadata: Metadata | undefined, css: string): 
 
 // ── Main entry ──────────────────────────────────────────────────────
 export async function renderApp(): Promise<RenderResult> {
-  // 1. Try app-router convention first
+  // 0. Production: prefer pre-bundled static routes (no .tsx runtime needed)
+  const staticRoutes = getStaticRoutes()
+  if (staticRoutes) return renderStaticRoutes(staticRoutes)
+  // 1. Dev/app-router convention via filesystem walk
   if (existsSync(APP_DIR)) {
     return renderAppRouter()
   }
@@ -190,6 +194,44 @@ export async function renderApp(): Promise<RenderResult> {
     return renderLegacy()
   }
   return { html: NO_APP_HTML }
+}
+
+async function renderStaticRoutes(s: ReturnType<typeof getStaticRoutes> & object): Promise<RenderResult> {
+  if (!s || s.routes.length === 0) return { html: NO_APP_HTML }
+
+  const rootLayout = s.rootLayout
+  const metadata = rootLayout?.metadata
+
+  const blocks: string[] = []
+  for (const r of s.routes) {
+    const inner = renderStaticPageInner(r, rootLayout)
+    blocks.push(`<div data-murasaki-route="${escapeHtml(r.path)}" hidden>${inner}</div>`)
+  }
+
+  const mountInner = blocks.join('') + NAV_SCRIPT
+  const mountRoot = `<div id="murasaki-root">${mountInner}</div>`
+
+  // Client bundle: built with the same static-route entry would be ideal,
+  // but for now we fall back to "no client bundle" in static mode — the
+  // SSR + nav script alone gives counter-less but navigable pages.
+  // Interactive hydration in SEA is a follow-up (needs bundle pre-built too).
+  const clientScript = ''
+
+  const bodyContent = await renderRootLayout(rootLayout, raw(mountRoot + clientScript))
+  let html = '<!doctype html>' + bodyContent
+  html = injectHead(html, metadata, s.globalsCss ?? loadGlobalsCss())
+  return { html, metadata }
+}
+
+function renderStaticPageInner(r: StaticRouteEntry, rootLayout: LoadedModule | null): string {
+  // Apply nested layouts innermost-first, skipping the root (which wraps everything later).
+  const Page = r.page.default
+  let tree: Child = jsx(Page, null)
+  const wrappers = r.layouts.filter((l) => l !== rootLayout).reverse()
+  for (const l of wrappers) {
+    tree = jsx(l.default, { children: tree })
+  }
+  return renderToString(tree)
 }
 
 async function renderAppRouter(): Promise<RenderResult> {

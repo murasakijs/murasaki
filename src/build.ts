@@ -31,7 +31,8 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { projectRoot } from './env.ts'
+import { APP_DIR, APP_GLOBALS_CSS, projectRoot } from './env.ts'
+import { discoverRoutes, type Route } from './runtime/routes.ts'
 
 const out = (s: string) => process.stdout.write(s)
 const RESET = '\x1b[0m'
@@ -93,24 +94,50 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
 async function bundleServer(distDir: string): Promise<string> {
   const esbuild = await import('esbuild')
 
-  // Locate murasaki/dist/prod.js
+  // Locate murasaki/dist/prod.js so the synthetic entry can re-export it.
   const here = dirname(fileURLToPath(import.meta.url))
   const candidates = [
     join(here, 'prod.js'),
     join(here, '../dist/prod.js'),
     join(projectRoot, 'node_modules/murasaki/dist/prod.js'),
   ]
-  const entry = candidates.find((p) => existsSync(p))
-  if (!entry) {
+  const prodEntry = candidates.find((p) => existsSync(p))
+  if (!prodEntry) {
     out(`   ${red('✗')} could not locate murasaki/dist/prod.js\n`)
     process.exit(1)
   }
 
+  // Also locate murasaki's static-routes registry.
+  const staticRoutesPath =
+    candidates
+      .map((p) => p.replace(/prod\.js$/, 'runtime/static-routes.js'))
+      .find((p) => existsSync(p)) ?? ''
+
+  // Walk src/app/ to enumerate pages we want to pre-bundle.
+  const routes = existsSync(APP_DIR) ? discoverRoutes(APP_DIR) : []
+  const hasRoutes = routes.length > 0 && Boolean(staticRoutesPath)
+
   out(`   ${dim('1.')} bundling server (esbuild)\n`)
-  out(`     ${dim('entry  ')}${entry}\n`)
+  out(`     ${dim('entry  ')}${prodEntry}\n`)
+  if (hasRoutes) {
+    out(`     ${dim('routes ')}${routes.length} page${routes.length === 1 ? '' : 's'}\n`)
+  }
+
+  // Synthetic entry that:
+  //   1) static-imports each user page + layout (so esbuild bundles them)
+  //   2) registers them with murasaki's static-routes registry
+  //   3) finally imports prod.tsx to actually boot
+  const entryContents = hasRoutes
+    ? buildSyntheticEntry({ routes, staticRoutesPath, prodEntry })
+    : `import ${JSON.stringify(prodEntry)};`
 
   const result = await esbuild.build({
-    entryPoints: [entry],
+    stdin: {
+      contents: entryContents,
+      resolveDir: projectRoot,
+      sourcefile: '<murasaki-prod-entry>.cjs',
+      loader: 'js',
+    },
     bundle: true,
     write: false,
     platform: 'node',
@@ -120,7 +147,7 @@ async function bundleServer(distDir: string): Promise<string> {
     format: 'cjs',
     // tsx is bundled (not external) so SEA mode can find it via globalThis
     // require — SEA's require only resolves Node built-ins.
-    external: ['@webviewjs/webview', 'esbuild', 'fsevents'],
+    external: ['@webviewjs/webview', 'esbuild', 'tsx', 'fsevents'],
     loader: { '.css': 'text' },
     minify: false,
     sourcemap: 'inline',
@@ -345,6 +372,84 @@ async function buildMacApp(distDir: string, binaryPath: string): Promise<string>
 }
 
 // ── helpers ────────────────────────────────────────────────────────
+// Generate a synthetic entry that statically imports user pages + the
+// optional root layout, registers them with murasaki/internal/static-routes,
+// then defers to murasaki/dist/prod.js for the actual boot.
+function buildSyntheticEntry(args: {
+  routes: Route[]
+  staticRoutesPath: string
+  prodEntry: string
+}): string {
+  const { routes, staticRoutesPath, prodEntry } = args
+
+  // Figure out the root layout (src/app/layout.tsx) — first entry of the
+  // first route's layoutFiles, if any, and it must literally end in
+  // /app/layout.tsx.
+  const rootLayoutFile =
+    routes[0]?.layoutFiles.find((p) => p.endsWith('/app/layout.tsx')) ?? null
+
+  // Each unique layout/page file gets one import.
+  const layoutFiles = Array.from(
+    new Set(routes.flatMap((r) => r.layoutFiles)),
+  )
+
+  const pageImports = routes
+    .map((r, i) => `import * as page${i} from ${JSON.stringify(r.pageFile)};`)
+    .join('\n')
+  const layoutImports = layoutFiles
+    .map((p, i) => `import * as layout${i} from ${JSON.stringify(p)};`)
+    .join('\n')
+  const layoutVar = (file: string) => `layout${layoutFiles.indexOf(file)}`
+
+  const routeEntries = routes
+    .map(
+      (r, i) =>
+        `  { path: ${JSON.stringify(r.path)}, page: page${i}, layouts: [${r.layoutFiles
+          .map(layoutVar)
+          .join(', ')}] }`,
+    )
+    .join(',\n')
+
+  // Optionally bundle globals.css contents
+  const globalsImport = existsSync(APP_GLOBALS_CSS)
+    ? `import globalsCss from ${JSON.stringify(APP_GLOBALS_CSS)};`
+    : `const globalsCss = '';`
+
+  // We use CJS require here so the execution order is strictly top-to-bottom.
+  // ESM `import` hoisting would evaluate the `prod.js` boot before our
+  // setStaticRoutes call, defeating the whole point.
+  const pageRequires = routes
+    .map((r, i) => `const page${i} = require(${JSON.stringify(r.pageFile)});`)
+    .join('\n')
+  const layoutRequires = layoutFiles
+    .map((p, i) => `const layout${i} = require(${JSON.stringify(p)});`)
+    .join('\n')
+  const globalsRequire = existsSync(APP_GLOBALS_CSS)
+    ? `const globalsCss = require(${JSON.stringify(APP_GLOBALS_CSS)});`
+    : `const globalsCss = '';`
+
+  // Suppress unused vars from the lint pass.
+  void pageImports
+  void layoutImports
+  void globalsImport
+
+  return `${pageRequires}
+${layoutRequires}
+${globalsRequire}
+const { setStaticRoutes } = require(${JSON.stringify(staticRoutesPath)});
+
+setStaticRoutes({
+  rootLayout: ${rootLayoutFile ? layoutVar(rootLayoutFile) : 'null'},
+  routes: [
+${routeEntries}
+  ],
+  globalsCss: typeof globalsCss === 'string' ? globalsCss : (globalsCss && globalsCss.default) || '',
+});
+
+require(${JSON.stringify(prodEntry)});
+`
+}
+
 function readAppName(): string {
   try {
     const pkg = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
