@@ -61,6 +61,10 @@ type Bridge = {
   windowCloseById(id: string): Promise<void>
   windowList(): Promise<string[]>
   windowMainId(): Promise<string | null>
+  trayCreate(opts?: TrayCreateOptions): Promise<string>
+  trayUpdate(id: string, opts: TrayUpdateOptions): Promise<void>
+  trayDestroy(id: string): Promise<void>
+  trayList(): Promise<string[]>
 }
 
 export type WindowOpenOptions = {
@@ -72,6 +76,20 @@ export type WindowOpenOptions = {
   url?: string
   /** Direct HTML override. */
   html?: string
+}
+
+export type TrayCreateOptions = {
+  id?: string
+  title?: string
+  tooltip?: string
+  /** Absolute path to a PNG/ICO icon file. */
+  iconPath?: string
+  /** Tint icon for macOS menu-bar (default true). */
+  iconIsTemplate?: boolean
+}
+
+export type TrayUpdateOptions = {
+  title?: string
 }
 
 declare global {
@@ -269,6 +287,42 @@ export function useWindow() {
     list: () => safe(() => bridge()?.windowList(), [] as string[]),
     /** Id of the main (first-opened) window. */
     mainId: () => safe(() => bridge()?.windowMainId(), null as string | null),
+  }
+}
+
+/**
+ * System tray / menu-bar icon control.
+ *
+ *   const tray = useTray()
+ *   const id = await tray.create({ title: '🦋', tooltip: 'Murasaki' })
+ *   await tray.update(id, { title: '🦋 5' })   // badge text on macOS
+ *   await tray.destroy(id)
+ *
+ * MVP: title / tooltip / iconPath / update / destroy.
+ * Tray menu items + click events come in a follow-up release.
+ */
+export function useTray() {
+  return {
+    create: (opts: TrayCreateOptions = {}) => {
+      const b = bridge()
+      if (!b) return Promise.resolve('')
+      return b.trayCreate(opts).catch(() => '')
+    },
+    update: (id: string, opts: TrayUpdateOptions) => {
+      const b = bridge()
+      if (!b) return Promise.resolve()
+      return b.trayUpdate(id, opts).catch(() => {})
+    },
+    destroy: (id: string) => {
+      const b = bridge()
+      if (!b) return Promise.resolve()
+      return b.trayDestroy(id).catch(() => {})
+    },
+    list: () => {
+      const b = bridge()
+      if (!b) return Promise.resolve([] as string[])
+      return b.trayList().catch(() => [] as string[])
+    },
   }
 }
 

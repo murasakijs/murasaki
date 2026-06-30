@@ -10,7 +10,7 @@ import { DEFAULT_WIN_SIZE, DEFAULT_WIN_TITLE, projectRoot } from '../env.ts'
 import type { Metadata } from '../index.ts'
 import type { WindowConfig } from '../types.ts'
 import { teardownHmr } from './hmr.ts'
-import { createWindowBridge, nativeBridge } from './native.ts'
+import { createTrayBridge, createWindowBridge, nativeBridge } from './native.ts'
 import { renderApp } from './render.tsx'
 import { teardownStdin } from './shortcuts.ts'
 
@@ -151,6 +151,7 @@ export async function openWindow(opts: OpenWindowOptions = {}): Promise<string> 
     webview.expose('murasaki', {
       ...nativeBridge,
       ...createWindowBridge(() => win),
+      ...createTrayBridge(app),
       // Window-list operations (same names usable from any window).
       windowList: async () => [...windows.keys()],
       windowOpen: async (o?: OpenWindowOptions) => openWindow(o ?? {}),

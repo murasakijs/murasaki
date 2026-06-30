@@ -13,11 +13,12 @@ export {
 } from './runtime.ts'
 
 export {
-  useNotification,
   useClipboard,
-  useShell,
-  useFs,
   useDialog,
+  useFs,
+  useNotification,
+  useShell,
+  useTray,
   useWindow,
 } from './native.ts'
 export type {
@@ -25,5 +26,7 @@ export type {
   NotifyOptions,
   OpenFileOptions,
   SaveFileOptions,
+  TrayCreateOptions,
+  TrayUpdateOptions,
   WindowOpenOptions,
 } from './native.ts'

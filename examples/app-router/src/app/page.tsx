@@ -39,6 +39,7 @@ import {
   useNotification,
   useShell,
   useState,
+  useTray,
   useWindow,
 } from 'murasaki/jsx/dom'
 
@@ -64,7 +65,9 @@ export default function HomePage() {
   const dialog = useDialog()
   const fs = useFs()
   const win = useWindow()
+  const tray = useTray()
   const toast = useToast()
+  const [trayId, setTrayId] = useState('')
 
   // Progress auto-tick when feedback section is shown.
   useEffect(() => {
@@ -410,6 +413,35 @@ export default function HomePage() {
                 >
                   🪟 New window
                 </Button>
+                {trayId ? (
+                  <Button
+                    variant="ghost"
+                    onClick={async () => {
+                      await tray.destroy(trayId)
+                      setTrayId('')
+                      toast.show({ title: 'Tray removed' })
+                    }}
+                  >
+                    🍱 Remove tray
+                  </Button>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    onClick={async () => {
+                      const id = await tray.create({
+                        title: '🦋 ' + count,
+                        tooltip: 'Murasaki example',
+                      })
+                      setTrayId(id)
+                      toast.show({
+                        title: 'Tray added',
+                        body: 'Look at the macOS menu bar →',
+                      })
+                    }}
+                  >
+                    🍱 Add tray
+                  </Button>
+                )}
               </Row>
               {filePath && (
                 <Text size={12} color="#888">

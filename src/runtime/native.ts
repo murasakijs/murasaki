@@ -193,6 +193,84 @@ export const nativeBridge = {
   version: '0.7.0',
 }
 
+// ── Tray icons ───────────────────────────────────────────────────
+// Keeps track of created TrayIcon native handles by id so client code
+// can update / destroy them later.
+type TrayHandle = {
+  setTitle?: (t?: string | null) => void
+  [Symbol.dispose]?: () => void
+}
+const trays = new Map<string, TrayHandle>()
+let nextTrayId = 0
+
+type TrayCreateOptions = {
+  id?: string
+  title?: string
+  tooltip?: string
+  /** Absolute path to a PNG/ICO/etc. icon file. */
+  iconPath?: string
+  /** Treat the icon as a template (macOS menu-bar style: gets tinted black/white). */
+  iconIsTemplate?: boolean
+}
+
+type TrayUpdateOptions = {
+  title?: string
+}
+
+export function createTrayBridge(appRef: unknown) {
+  const app = appRef as {
+    createTrayIcon?: (opts: Record<string, unknown>) => TrayHandle
+  }
+  return {
+    /** Create a tray icon. Returns its id. */
+    async trayCreate(opts: TrayCreateOptions = {}): Promise<string> {
+      const id = opts.id ?? `tray${++nextTrayId}`
+      if (trays.has(id)) return id
+      const payload: Record<string, unknown> = {
+        id,
+        title: opts.title,
+        tooltip: opts.tooltip,
+      }
+      if (opts.iconPath) {
+        payload.icon = { iconPath: opts.iconPath, iconAsTemplate: opts.iconIsTemplate ?? true }
+      }
+      try {
+        const handle = app.createTrayIcon?.(payload)
+        if (handle) trays.set(id, handle)
+      } catch {
+        // Backend may refuse if no display server (Linux headless etc.)
+      }
+      return id
+    },
+
+    /** Update a tray's title (the only field most platforms allow runtime updates on). */
+    async trayUpdate(id: string, opts: TrayUpdateOptions): Promise<void> {
+      const t = trays.get(id)
+      if (!t) return
+      if (opts.title !== undefined) {
+        try {
+          t.setTitle?.(opts.title)
+        } catch {}
+      }
+    },
+
+    /** Destroy and forget a tray icon. */
+    async trayDestroy(id: string): Promise<void> {
+      const t = trays.get(id)
+      if (!t) return
+      try {
+        t[Symbol.dispose]?.()
+      } catch {}
+      trays.delete(id)
+    },
+
+    /** Currently registered tray ids. */
+    async trayList(): Promise<string[]> {
+      return [...trays.keys()]
+    },
+  }
+}
+
 // ── Window methods (need a closure over the active window) ────────
 // window.ts merges this into the namespace exposed via webview.expose().
 export function createWindowBridge(getWin: () => unknown) {
