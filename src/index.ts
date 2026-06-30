@@ -7,6 +7,10 @@
 export type { LinkProps } from './components/Link.tsx'
 export { Link } from './components/Link.tsx'
 
+// Build / runtime configuration.
+export { defineConfig, loadConfig } from './config.ts'
+export type { MurasakiConfig } from './config.ts'
+
 // React Native–style layout primitives.
 export { Row, Stack, Text, View } from './components/primitives.tsx'
 export type { TextProps, ViewProps } from './components/primitives.tsx'

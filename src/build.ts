@@ -23,6 +23,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadConfig, resolveAppMeta } from './config.ts'
 import { currentTarget, ensureNodeBinary, ensureWebviewPrebuild, type Target, TARGETS } from './download.ts'
 import { APP_DIR, APP_GLOBALS_CSS, projectRoot } from './env.ts'
 import { discoverRoutes, type Route } from './runtime/routes.ts'
@@ -266,9 +267,10 @@ async function copyRuntimeDeps(targetNodeModules: string, target: Target): Promi
 
 // ── stage 2a: macOS .app ──────────────────────────────────────────
 async function packMacApp(distDir: string, serverPath: string, target: Target): Promise<string> {
+  const meta = await resolveAppMeta()
   const appName = readAppName()
-  const displayName = capitalize(appName)
-  const bundleId = readBundleId() ?? `app.${appName.replace(/[^a-z0-9]/gi, '')}.murasaki`
+  const displayName = meta.name ?? capitalize(appName)
+  const bundleId = meta.bundleId
   const appBundle = join(distDir, `${displayName}.app`)
 
   out(`   ${dim('2.')} packaging macOS ${bold(displayName + '.app')} ${dim('(' + target.id + ')')}\n`)
@@ -307,7 +309,27 @@ exec "$DIR/node" "$DIR/server.cjs"
   out(`     ${green('✓')} ${dim('launcher  →')} MacOS/${displayName}\n`)
 
   // Info.plist
-  writeFileSync(join(appBundle, 'Contents/Info.plist'), macInfoPlist({ displayName, bundleId }))
+  writeFileSync(
+    join(appBundle, 'Contents/Info.plist'),
+    macInfoPlist({
+      displayName,
+      bundleId,
+      version: meta.version,
+      category: meta.category ?? 'public.app-category.utilities',
+      copyright: meta.copyright,
+    }),
+  )
+
+  // Optional icon
+  if (meta.icon) {
+    try {
+      const iconSrc = join(projectRoot, meta.icon)
+      if (existsSync(iconSrc)) {
+        cpSync(iconSrc, join(resourcesDir, 'AppIcon.icns'))
+        out(`     ${green('✓')} ${dim('icon       →')} Resources/AppIcon.icns\n`)
+      }
+    } catch {}
+  }
   out(`     ${green('✓')} ${dim('Info.plist')}\n`)
 
   // Ad-hoc codesign (re-sign because we modified contents)
@@ -322,6 +344,7 @@ exec "$DIR/node" "$DIR/server.cjs"
 
 // ── stage 2b: Windows folder + .bat launcher ───────────────────────
 async function packWindows(distDir: string, serverPath: string, target: Target): Promise<string> {
+  const meta = await resolveAppMeta()
   const appName = readAppName()
   const dir = join(distDir, appName)
 
@@ -355,12 +378,24 @@ ws.Run """" & WScript.ScriptFullName & "\\..\\${appName}.bat" & """", 0
   writeFileSync(vbsPath, vbs)
   out(`     ${green('✓')} ${dim('launcher  →')} ${appName}.vbs (silent)\n`)
 
+  // Optional icon
+  if (meta.icon) {
+    try {
+      const iconSrc = join(projectRoot, meta.icon)
+      if (existsSync(iconSrc)) {
+        cpSync(iconSrc, join(dir, 'app.ico'))
+        out(`     ${green('✓')} ${dim('icon       →')} app.ico\n`)
+      }
+    } catch {}
+  }
+
   out(`     ${green('✓')} ${dim('built')} ${dir}\n`)
   return dir
 }
 
 // ── stage 2c: Linux folder + sh launcher ───────────────────────────
 async function packLinux(distDir: string, serverPath: string, target: Target): Promise<string> {
+  const meta = await resolveAppMeta()
   const appName = readAppName()
   const dir = join(distDir, appName)
 
@@ -392,6 +427,17 @@ exec "$DIR/node" "$DIR/server.cjs"
   )
   chmodSync(shPath, 0o755)
   out(`     ${green('✓')} ${dim('launcher  →')} ${appName}.sh\n`)
+
+  // Optional icon
+  if (meta.icon) {
+    try {
+      const iconSrc = join(projectRoot, meta.icon)
+      if (existsSync(iconSrc)) {
+        cpSync(iconSrc, join(dir, 'app.png'))
+        out(`     ${green('✓')} ${dim('icon       →')} app.png\n`)
+      }
+    } catch {}
+  }
 
   out(`     ${green('✓')} ${dim('built')} ${dir}\n`)
   return dir
@@ -508,23 +554,34 @@ async function makeTarGz(distDir: string, folderPath: string): Promise<string> {
 }
 
 // ── helpers ────────────────────────────────────────────────────────
-function macInfoPlist(opts: { displayName: string; bundleId: string }): string {
+function macInfoPlist(opts: {
+  displayName: string
+  bundleId: string
+  version: string
+  category: string
+  copyright?: string
+}): string {
+  const copyrightLine = opts.copyright
+    ? `  <key>NSHumanReadableCopyright</key>\n  <string>${escapeXml(opts.copyright)}</string>\n`
+    : ''
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>${opts.displayName}</string>
+  <string>${escapeXml(opts.displayName)}</string>
   <key>CFBundleIdentifier</key>
-  <string>${opts.bundleId}</string>
+  <string>${escapeXml(opts.bundleId)}</string>
   <key>CFBundleName</key>
-  <string>${opts.displayName}</string>
+  <string>${escapeXml(opts.displayName)}</string>
   <key>CFBundleDisplayName</key>
-  <string>${opts.displayName}</string>
+  <string>${escapeXml(opts.displayName)}</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
-  <string>${readVersion()}</string>
+  <string>${escapeXml(opts.version)}</string>
   <key>CFBundleVersion</key>
-  <string>${readVersion()}</string>
+  <string>${escapeXml(opts.version)}</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
@@ -532,10 +589,19 @@ function macInfoPlist(opts: { displayName: string; bundleId: string }): string {
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>LSApplicationCategoryType</key>
-  <string>public.app-category.utilities</string>
-</dict>
+  <string>${escapeXml(opts.category)}</string>
+${copyrightLine}</dict>
 </plist>
 `
+}
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
 }
 
 function buildSyntheticEntry(args: {
