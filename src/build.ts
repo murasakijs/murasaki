@@ -27,6 +27,7 @@ import { loadConfig, resolveAppMeta } from './config.ts'
 import { currentTarget, ensureNodeBinary, ensureWebviewPrebuild, type Target, TARGETS } from './download.ts'
 import { APP_DIR, APP_GLOBALS_CSS, projectRoot } from './env.ts'
 import { discoverRoutes, type Route } from './runtime/routes.ts'
+import { detectWix, makeMsi } from './wix.ts'
 
 const out = (s: string) => process.stdout.write(s)
 const RESET = '\x1b[0m'
@@ -83,7 +84,36 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
         installerPath = await makeDmg(distDir, packPath)
       }
     } else if (target.os === 'win32') {
-      installerPath = await makeZipCross(distDir, packPath)
+      // Try .msi via WiX v4 first; fall back to .zip if wix isn't on PATH.
+      const meta2 = await resolveAppMeta()
+      const appName2 = readAppName()
+      if (detectWix()) {
+        out(`   ${dim('3.')} packaging windows ${bold(appName2 + '.msi')} ${dim('(via WiX v4)')}\n`)
+        try {
+          installerPath = await makeMsi({
+            distDir,
+            folderPath: packPath,
+            appName: appName2,
+            displayName: meta2.name ?? capitalize(appName2),
+            version: meta2.version,
+            manufacturer: meta2.copyright?.replace(/^©\s*\d+\s+/, '') ?? meta2.name ?? appName2,
+            bundleId: meta2.bundleId,
+          })
+          out(`     ${green('✓')} ${dim('built')} ${installerPath}\n`)
+        } catch (e) {
+          out(`     ${red('✗')} wix build failed: ${(e as Error).message} — falling back to .zip\n`)
+          installerPath = null
+        }
+      }
+      if (!installerPath) {
+        if (!detectWix()) {
+          out(
+            `   ${dim('!')} ${dim('wix not found — falling back to .zip. Install with:')}\n` +
+              `      ${dim('dotnet tool install -g wix')}\n`,
+          )
+        }
+        installerPath = await makeZipCross(distDir, packPath)
+      }
     } else {
       installerPath = await makeTarGz(distDir, packPath)
     }
