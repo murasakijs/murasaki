@@ -1,23 +1,15 @@
-// `murasaki build [--binary] [--app]` — production build pipeline.
+// `murasaki build [--pack]` — production build pipeline.
 //
 // Stages:
-//   1. esbuild bundles murasaki/prod + the runtime into dist/server.js
-//      (always)
-//   2. --binary  → Node SEA (Single Executable Application):
-//        - write sea-config.json
-//        - `node --experimental-sea-config` produces sea-prep.blob
-//        - copy current Node binary to dist/<app>
-//        - postject inject the blob
-//        - ad-hoc codesign on macOS
-//   3. --app     → macOS .app bundle wrapping the binary
-//        - implies --binary
-//        - dist/<AppName>.app/Contents/{Info.plist,MacOS/<app>,Resources/}
+//   1. esbuild bundles user pages + the murasaki runtime into dist/server.cjs
+//   2. --pack → ship-ready distributable for the current OS:
+//        - darwin → dist/<App>.app  (Electron-style: Resources/{node, server.cjs, node_modules})
+//        - win32  → dist/<app>/      (folder: node.exe + server.cjs + launcher.bat + node_modules)
+//        - linux  → dist/<app>/      (folder: node + server.cjs + launcher.sh + node_modules)
 //
-// Native dep caveat: @webviewjs/webview is still external (it's a .node
-// binary). Distribute dist/<app> + node_modules/@webviewjs/webview side
-// by side, or copy the @webviewjs build artefact into the .app's
-// Resources/ folder. Real "single, self-contained file" requires bundling
-// the .node, which is in the v0.17 roadmap.
+// Cross-compilation (build a Windows .exe from macOS, etc.) is a follow-up:
+// it requires downloading the foreign Node binary + a foreign-arch
+// @webviewjs/webview prebuild. For now, build on the same OS you ship for.
 
 import { spawn } from 'node:child_process'
 import {
@@ -49,12 +41,11 @@ const bold = (s: string) => (noColor ? s : BOLD + s + RESET)
 const bright = (s: string) => (noColor ? s : BRIGHT + s + RESET)
 
 type BuildOptions = {
-  binary?: boolean
-  app?: boolean
+  /** Produce a native distributable for the current platform. */
+  pack?: boolean
 }
 
 export async function build(opts: BuildOptions = {}): Promise<void> {
-  if (opts.app) opts.binary = true
   const startAt = Date.now()
   const distDir = join(projectRoot, 'dist')
   if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true })
@@ -63,38 +54,32 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
   out(`   ${dim('Project ')}${projectRoot}\n`)
   out(`   ${dim('Out     ')}${distDir}/\n\n`)
 
-  // ── 1. esbuild bundle ───────────────────────────────────────────
   const serverPath = await bundleServer(distDir)
 
-  // ── 2. Optional Node SEA ────────────────────────────────────────
-  let binaryPath: string | null = null
-  if (opts.binary) {
-    binaryPath = await buildBinary(distDir, serverPath)
-  }
-
-  // ── 3. Optional macOS .app wrap ─────────────────────────────────
-  let appPath: string | null = null
-  if (opts.app) {
-    if (process.platform !== 'darwin') {
-      out(`   ${red('!')} --app is macOS-only; skipping bundle wrap\n`)
-    } else if (binaryPath) {
-      appPath = await buildMacApp(distDir, binaryPath)
-    }
+  let packPath: string | null = null
+  if (opts.pack) {
+    if (process.platform === 'darwin') packPath = await packMacApp(distDir, serverPath)
+    else if (process.platform === 'win32') packPath = await packWindows(distDir, serverPath)
+    else packPath = await packLinux(distDir, serverPath)
   }
 
   const elapsed = ((Date.now() - startAt) / 1000).toFixed(1)
   out(`\n   ${green('✓')} done ${dim(`(${elapsed}s)`)}\n\n`)
   out(`   ${dim('Run:')} ${bold('node ' + serverPath)}\n`)
-  if (binaryPath) out(`   ${dim('     ')}${bold(binaryPath)}\n`)
-  if (appPath) out(`   ${dim('     ')}${bold('open ' + appPath)}\n`)
+  if (packPath) {
+    if (process.platform === 'darwin') out(`   ${dim('     ')}${bold('open ' + packPath)}\n`)
+    else if (process.platform === 'win32')
+      out(`   ${dim('     ')}${bold(join(packPath, readAppName() + '.bat'))}\n`)
+    else out(`   ${dim('     ')}${bold(join(packPath, readAppName() + '.sh'))}\n`)
+  }
   out('\n')
 }
 
-// ── stage 1 ────────────────────────────────────────────────────────
+// ── stage 1: server bundle ─────────────────────────────────────────
 async function bundleServer(distDir: string): Promise<string> {
   const esbuild = await import('esbuild')
 
-  // Locate murasaki/dist/prod.js so the synthetic entry can re-export it.
+  // Locate murasaki/dist/prod.js.
   const here = dirname(fileURLToPath(import.meta.url))
   const candidates = [
     join(here, 'prod.js'),
@@ -106,14 +91,11 @@ async function bundleServer(distDir: string): Promise<string> {
     out(`   ${red('✗')} could not locate murasaki/dist/prod.js\n`)
     process.exit(1)
   }
-
-  // Also locate murasaki's static-routes registry.
   const staticRoutesPath =
     candidates
       .map((p) => p.replace(/prod\.js$/, 'runtime/static-routes.js'))
       .find((p) => existsSync(p)) ?? ''
 
-  // Walk src/app/ to enumerate pages we want to pre-bundle.
   const routes = existsSync(APP_DIR) ? discoverRoutes(APP_DIR) : []
   const hasRoutes = routes.length > 0 && Boolean(staticRoutesPath)
 
@@ -123,13 +105,9 @@ async function bundleServer(distDir: string): Promise<string> {
     out(`     ${dim('routes ')}${routes.length} page${routes.length === 1 ? '' : 's'}\n`)
   }
 
-  // Synthetic entry that:
-  //   1) static-imports each user page + layout (so esbuild bundles them)
-  //   2) registers them with murasaki's static-routes registry
-  //   3) finally imports prod.tsx to actually boot
   const entryContents = hasRoutes
     ? buildSyntheticEntry({ routes, staticRoutesPath, prodEntry })
-    : `import ${JSON.stringify(prodEntry)};`
+    : `require(${JSON.stringify(prodEntry)});`
 
   const result = await esbuild.build({
     stdin: {
@@ -142,37 +120,19 @@ async function bundleServer(distDir: string): Promise<string> {
     write: false,
     platform: 'node',
     target: 'node22',
-    // CJS so the bundle is compatible with Node SEA (which currently
-    // requires the main entry to be CommonJS).
     format: 'cjs',
-    // tsx is bundled (not external) so SEA mode can find it via globalThis
-    // require — SEA's require only resolves Node built-ins.
     external: ['@webviewjs/webview', 'esbuild', 'tsx', 'fsevents'],
     loader: { '.css': 'text' },
     minify: false,
     sourcemap: 'inline',
-    // banner:
-    //   - shebang for direct execution
-    //   - require('tsx/cjs') so user .tsx pages can be required at runtime
-    //   - __murasaki_meta_url = a real file URL for the bundle, fed into
-    //     code that uses `import.meta.url` (rewritten via define below).
     banner: {
       js: [
         '#!/usr/bin/env node',
-        // tsx/cjs is statically imported by prod.tsx, so the bundle
-        // registers the .tsx loader itself when it boots — no banner
-        // require needed (and SEA can't resolve external requires anyway).
         'var __murasaki_meta_url = require("url").pathToFileURL(__filename).href;',
-        // Expose CJS require to bundled code that runs in a "could be ESM
-        // too" environment (render.tsx falls back to dynamic import without it).
         'globalThis.__murasakiRequire = require;',
       ].join('\n'),
     },
-    // esbuild stubs `import.meta` to {} in CJS by default. Rewrite the
-    // .url access to our pre-computed identifier (entity-name only here).
-    define: {
-      'import.meta.url': '__murasaki_meta_url',
-    },
+    define: { 'import.meta.url': '__murasaki_meta_url' },
     logLevel: 'silent',
   })
   if (result.errors.length) {
@@ -181,8 +141,6 @@ async function bundleServer(distDir: string): Promise<string> {
     process.exit(1)
   }
 
-  // .cjs extension so Node treats it as CommonJS regardless of any
-  // upstream package.json "type": "module".
   const serverPath = join(distDir, 'server.cjs')
   writeFileSync(serverPath, result.outputFiles[0].text)
   try {
@@ -191,7 +149,7 @@ async function bundleServer(distDir: string): Promise<string> {
   const kb = (result.outputFiles[0].text.length / 1024).toFixed(1)
   out(`     ${green('✓')} ${dim('built')} ${serverPath} ${dim(`(${kb} KB)`)}\n\n`)
 
-  // Minimal package.json hint for distribution
+  // Minimal package.json next to server.cjs for "just node-execute and ship"
   try {
     const consumerPkgPath = join(projectRoot, 'package.json')
     if (existsSync(consumerPkgPath)) {
@@ -207,7 +165,6 @@ async function bundleServer(distDir: string): Promise<string> {
             dependencies: {
               '@webviewjs/webview': pkg.dependencies?.['@webviewjs/webview'] ?? '*',
               esbuild: pkg.dependencies?.esbuild ?? '*',
-              tsx: pkg.dependencies?.tsx ?? '*',
             },
           },
           null,
@@ -220,130 +177,188 @@ async function bundleServer(distDir: string): Promise<string> {
   return serverPath
 }
 
-// ── stage 2: Node SEA ──────────────────────────────────────────────
-async function buildBinary(distDir: string, serverPath: string): Promise<string> {
-  const appName = readAppName()
-  const binaryPath = join(distDir, appName)
+// ── stage 2: native distributables ─────────────────────────────────
 
-  out(`   ${dim('2.')} packaging as single-executable (Node SEA)\n`)
-  out(
-    `     ${red('!')} ${dim('experimental:')} tsx + esbuild can't fully resolve inside SEA;\n`,
-  )
-  out(`        ${dim('the binary may fail at runtime — prefer `node server.cjs` for now.')}\n`)
+/** Native dependencies we need to ship alongside server.cjs. */
+const RUNTIME_DEPS = ['@webviewjs/webview', 'esbuild']
 
-  // 2a. sea-config.json
-  const seaConfigPath = join(distDir, 'sea-config.json')
-  const blobPath = join(distDir, 'sea-prep.blob')
-  writeFileSync(
-    seaConfigPath,
-    JSON.stringify(
-      {
-        main: serverPath,
-        output: blobPath,
-        disableExperimentalSEAWarning: true,
-        useSnapshot: false,
-        useCodeCache: true,
-      },
-      null,
-      2,
-    ),
-  )
-
-  // 2b. Generate blob via current Node binary
-  await runOrFail(process.execPath, ['--experimental-sea-config', seaConfigPath], {
-    label: 'sea-config → blob',
-  })
-  out(`     ${green('✓')} ${dim('blob')} ${blobPath}\n`)
-
-  // 2c. Copy current Node binary as the target
-  cpSync(process.execPath, binaryPath)
+/**
+ * Locate a dependency's installed root directory by resolving its
+ * package.json. Works through pnpm symlink chains and transitive deps
+ * (`@webviewjs/webview` is a dep of murasaki, not the user's app).
+ */
+async function resolveDepRoot(dep: string): Promise<string | null> {
   try {
-    chmodSync(binaryPath, 0o755)
-  } catch {}
-  out(`     ${green('✓')} ${dim('copied node →')} ${binaryPath}\n`)
-
-  // 2d. Remove macOS code signature before postject (it would invalidate it).
-  if (process.platform === 'darwin') {
-    await runOrFail('codesign', ['--remove-signature', binaryPath], {
-      label: 'remove old signature',
-      allowFail: true,
-    })
+    const { createRequire } = await import('node:module')
+    const req = createRequire(join(projectRoot, 'package.json'))
+    // Resolve the dep's package.json explicitly so we get the dir, not
+    // the resolved main entry (which would be inside dist/ or similar).
+    const pkgJson = req.resolve(`${dep}/package.json`)
+    return dirname(pkgJson)
+  } catch {
+    return null
   }
-
-  // 2e. Inject the blob via postject (Node API). It has no .d.ts so suppress.
-  // @ts-expect-error - no types shipped
-  const postjectMod = await import('postject')
-  const postject = postjectMod as {
-    inject: (
-      binary: string,
-      resource: string,
-      data: Buffer,
-      opts: { sentinelFuse: string; machoSegmentName?: string },
-    ) => Promise<void>
-  }
-  const blob = readFileSync(blobPath)
-  await postject.inject(binaryPath, 'NODE_SEA_BLOB', blob, {
-    sentinelFuse: 'NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2',
-    machoSegmentName: process.platform === 'darwin' ? 'NODE_SEA' : undefined,
-  })
-  out(`     ${green('✓')} ${dim('postject injected')}\n`)
-
-  // 2f. macOS: re-sign (ad-hoc — no Developer ID required)
-  if (process.platform === 'darwin') {
-    await runOrFail('codesign', ['--sign', '-', '--force', binaryPath], {
-      label: 'codesign --sign -',
-    })
-    out(`     ${green('✓')} ${dim('ad-hoc signed')}\n`)
-  }
-
-  // 2g. Cleanup
-  try {
-    rmSync(blobPath)
-    rmSync(seaConfigPath)
-  } catch {}
-
-  return binaryPath
 }
 
-// ── stage 3: macOS .app wrap ───────────────────────────────────────
-async function buildMacApp(distDir: string, binaryPath: string): Promise<string> {
+async function copyRuntimeDeps(targetNodeModules: string): Promise<string[]> {
+  mkdirSync(targetNodeModules, { recursive: true })
+  const copied: string[] = []
+  for (const dep of RUNTIME_DEPS) {
+    const src = await resolveDepRoot(dep)
+    if (!src) continue
+    const dst = join(targetNodeModules, dep)
+    rmSync(dst, { recursive: true, force: true })
+    // dereference so we copy the actual files (not pnpm's symlink chain)
+    cpSync(src, dst, { recursive: true, dereference: true })
+    copied.push(dep)
+  }
+  return copied
+}
+
+// ── stage 2a: macOS .app ──────────────────────────────────────────
+async function packMacApp(distDir: string, serverPath: string): Promise<string> {
   const appName = readAppName()
   const displayName = capitalize(appName)
   const bundleId = readBundleId() ?? `app.${appName.replace(/[^a-z0-9]/gi, '')}.murasaki`
   const appBundle = join(distDir, `${displayName}.app`)
 
-  out(`   ${dim('3.')} wrapping as ${displayName}.app\n`)
+  out(`   ${dim('2.')} packaging macOS ${bold(displayName + '.app')}\n`)
 
-  // Clean any prior bundle.
   try {
     rmSync(appBundle, { recursive: true, force: true })
   } catch {}
-
   const macOSDir = join(appBundle, 'Contents/MacOS')
   const resourcesDir = join(appBundle, 'Contents/Resources')
   mkdirSync(macOSDir, { recursive: true })
   mkdirSync(resourcesDir, { recursive: true })
 
-  // Move the binary into the bundle
-  const innerBinary = join(macOSDir, displayName)
-  cpSync(binaryPath, innerBinary)
-  try {
-    chmodSync(innerBinary, 0o755)
-  } catch {}
+  // Node binary into Resources/
+  cpSync(process.execPath, join(resourcesDir, 'node'))
+  chmodSync(join(resourcesDir, 'node'), 0o755)
+  out(`     ${green('✓')} ${dim('node      →')} Resources/node\n`)
+
+  // server.cjs into Resources/
+  cpSync(serverPath, join(resourcesDir, 'server.cjs'))
+  out(`     ${green('✓')} ${dim('server.cjs →')} Resources/server.cjs\n`)
+
+  // node_modules (selected runtime deps) into Resources/
+  const deps = await copyRuntimeDeps(join(resourcesDir, 'node_modules'))
+  out(`     ${green('✓')} ${dim('node_modules →')} Resources/node_modules (${deps.join(', ')})\n`)
+
+  // launcher script (must be executable by MacOS/<displayName>)
+  const launcherPath = join(macOSDir, displayName)
+  const launcher = `#!/bin/bash
+DIR="$(cd "$(dirname "$0")/.." && pwd)/Resources"
+cd "$DIR"
+exec "$DIR/node" "$DIR/server.cjs"
+`
+  writeFileSync(launcherPath, launcher)
+  chmodSync(launcherPath, 0o755)
+  out(`     ${green('✓')} ${dim('launcher  →')} MacOS/${displayName}\n`)
 
   // Info.plist
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+  writeFileSync(join(appBundle, 'Contents/Info.plist'), macInfoPlist({ displayName, bundleId }))
+  out(`     ${green('✓')} ${dim('Info.plist')}\n`)
+
+  // Ad-hoc codesign (re-sign because we modified contents)
+  await runOrFail('codesign', ['--sign', '-', '--force', '--deep', appBundle], {
+    label: 'codesign .app',
+    allowFail: true,
+  })
+
+  out(`     ${green('✓')} ${dim('built')} ${appBundle}\n`)
+  return appBundle
+}
+
+// ── stage 2b: Windows folder + .bat launcher ───────────────────────
+async function packWindows(distDir: string, serverPath: string): Promise<string> {
+  const appName = readAppName()
+  const dir = join(distDir, appName)
+
+  out(`   ${dim('2.')} packaging windows folder ${bold(appName + '/')}\n`)
+
+  try {
+    rmSync(dir, { recursive: true, force: true })
+  } catch {}
+  mkdirSync(dir, { recursive: true })
+
+  cpSync(process.execPath, join(dir, 'node.exe'))
+  out(`     ${green('✓')} ${dim('node.exe')}\n`)
+
+  cpSync(serverPath, join(dir, 'server.cjs'))
+  out(`     ${green('✓')} ${dim('server.cjs')}\n`)
+
+  const deps = await copyRuntimeDeps(join(dir, 'node_modules'))
+  out(`     ${green('✓')} ${dim('node_modules')} (${deps.join(', ')})\n`)
+
+  // Double-click launcher: .bat for command, .vbs for "no console window"
+  const batPath = join(dir, `${appName}.bat`)
+  writeFileSync(batPath, `@echo off\r\n"%~dp0node.exe" "%~dp0server.cjs"\r\n`)
+  out(`     ${green('✓')} ${dim('launcher  →')} ${appName}.bat\n`)
+
+  // VBS wrapper to avoid the black console window flash on double-click
+  const vbsPath = join(dir, `${appName}.vbs`)
+  const vbs = `Set ws = CreateObject("Wscript.Shell")
+ws.Run """" & WScript.ScriptFullName & "\\..\\${appName}.bat" & """", 0
+`
+  writeFileSync(vbsPath, vbs)
+  out(`     ${green('✓')} ${dim('launcher  →')} ${appName}.vbs (silent)\n`)
+
+  out(`     ${green('✓')} ${dim('built')} ${dir}\n`)
+  return dir
+}
+
+// ── stage 2c: Linux folder + sh launcher ───────────────────────────
+async function packLinux(distDir: string, serverPath: string): Promise<string> {
+  const appName = readAppName()
+  const dir = join(distDir, appName)
+
+  out(`   ${dim('2.')} packaging linux folder ${bold(appName + '/')}\n`)
+
+  try {
+    rmSync(dir, { recursive: true, force: true })
+  } catch {}
+  mkdirSync(dir, { recursive: true })
+
+  cpSync(process.execPath, join(dir, 'node'))
+  chmodSync(join(dir, 'node'), 0o755)
+  out(`     ${green('✓')} ${dim('node')}\n`)
+
+  cpSync(serverPath, join(dir, 'server.cjs'))
+  out(`     ${green('✓')} ${dim('server.cjs')}\n`)
+
+  const deps = await copyRuntimeDeps(join(dir, 'node_modules'))
+  out(`     ${green('✓')} ${dim('node_modules')} (${deps.join(', ')})\n`)
+
+  const shPath = join(dir, `${appName}.sh`)
+  writeFileSync(
+    shPath,
+    `#!/bin/bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/node" "$DIR/server.cjs"
+`,
+  )
+  chmodSync(shPath, 0o755)
+  out(`     ${green('✓')} ${dim('launcher  →')} ${appName}.sh\n`)
+
+  out(`     ${green('✓')} ${dim('built')} ${dir}\n`)
+  return dir
+}
+
+// ── helpers ────────────────────────────────────────────────────────
+function macInfoPlist(opts: { displayName: string; bundleId: string }): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>${displayName}</string>
+  <string>${opts.displayName}</string>
   <key>CFBundleIdentifier</key>
-  <string>${bundleId}</string>
+  <string>${opts.bundleId}</string>
   <key>CFBundleName</key>
-  <string>${displayName}</string>
+  <string>${opts.displayName}</string>
   <key>CFBundleDisplayName</key>
-  <string>${displayName}</string>
+  <string>${opts.displayName}</string>
   <key>CFBundleShortVersionString</key>
   <string>${readVersion()}</string>
   <key>CFBundleVersion</key>
@@ -359,48 +374,25 @@ async function buildMacApp(distDir: string, binaryPath: string): Promise<string>
 </dict>
 </plist>
 `
-  writeFileSync(join(appBundle, 'Contents/Info.plist'), plist)
-
-  // Re-codesign the .app bundle
-  await runOrFail('codesign', ['--sign', '-', '--force', '--deep', appBundle], {
-    label: 'codesign .app',
-    allowFail: true,
-  })
-
-  out(`     ${green('✓')} ${dim('built')} ${appBundle}\n`)
-  return appBundle
 }
 
-// ── helpers ────────────────────────────────────────────────────────
-// Generate a synthetic entry that statically imports user pages + the
-// optional root layout, registers them with murasaki/internal/static-routes,
-// then defers to murasaki/dist/prod.js for the actual boot.
 function buildSyntheticEntry(args: {
   routes: Route[]
   staticRoutesPath: string
   prodEntry: string
 }): string {
   const { routes, staticRoutesPath, prodEntry } = args
-
-  // Figure out the root layout (src/app/layout.tsx) — first entry of the
-  // first route's layoutFiles, if any, and it must literally end in
-  // /app/layout.tsx.
   const rootLayoutFile =
     routes[0]?.layoutFiles.find((p) => p.endsWith('/app/layout.tsx')) ?? null
+  const layoutFiles = Array.from(new Set(routes.flatMap((r) => r.layoutFiles)))
 
-  // Each unique layout/page file gets one import.
-  const layoutFiles = Array.from(
-    new Set(routes.flatMap((r) => r.layoutFiles)),
-  )
-
-  const pageImports = routes
-    .map((r, i) => `import * as page${i} from ${JSON.stringify(r.pageFile)};`)
+  const pageRequires = routes
+    .map((r, i) => `const page${i} = require(${JSON.stringify(r.pageFile)});`)
     .join('\n')
-  const layoutImports = layoutFiles
-    .map((p, i) => `import * as layout${i} from ${JSON.stringify(p)};`)
+  const layoutRequires = layoutFiles
+    .map((p, i) => `const layout${i} = require(${JSON.stringify(p)});`)
     .join('\n')
   const layoutVar = (file: string) => `layout${layoutFiles.indexOf(file)}`
-
   const routeEntries = routes
     .map(
       (r, i) =>
@@ -410,34 +402,14 @@ function buildSyntheticEntry(args: {
     )
     .join(',\n')
 
-  // Optionally bundle globals.css contents
-  const globalsImport = existsSync(APP_GLOBALS_CSS)
-    ? `import globalsCss from ${JSON.stringify(APP_GLOBALS_CSS)};`
-    : `const globalsCss = '';`
-
-  // We use CJS require here so the execution order is strictly top-to-bottom.
-  // ESM `import` hoisting would evaluate the `prod.js` boot before our
-  // setStaticRoutes call, defeating the whole point.
-  const pageRequires = routes
-    .map((r, i) => `const page${i} = require(${JSON.stringify(r.pageFile)});`)
-    .join('\n')
-  const layoutRequires = layoutFiles
-    .map((p, i) => `const layout${i} = require(${JSON.stringify(p)});`)
-    .join('\n')
   const globalsRequire = existsSync(APP_GLOBALS_CSS)
     ? `const globalsCss = require(${JSON.stringify(APP_GLOBALS_CSS)});`
     : `const globalsCss = '';`
-
-  // Suppress unused vars from the lint pass.
-  void pageImports
-  void layoutImports
-  void globalsImport
 
   return `${pageRequires}
 ${layoutRequires}
 ${globalsRequire}
 const { setStaticRoutes } = require(${JSON.stringify(staticRoutesPath)});
-
 setStaticRoutes({
   rootLayout: ${rootLayoutFile ? layoutVar(rootLayoutFile) : 'null'},
   routes: [
@@ -445,7 +417,6 @@ ${routeEntries}
   ],
   globalsCss: typeof globalsCss === 'string' ? globalsCss : (globalsCss && globalsCss.default) || '',
 });
-
 require(${JSON.stringify(prodEntry)});
 `
 }

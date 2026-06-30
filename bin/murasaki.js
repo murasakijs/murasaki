@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Murasaki CLI entry point.
 // Usage:
-//   murasaki dev      Start the development server (HMR + native menu)
-//   murasaki build    Bundle for production → dist/server.js
+//   murasaki dev          Start the development server (HMR + native menu)
+//   murasaki build        Bundle for production -> dist/server.cjs
+//   murasaki build --pack Native distributable for the current platform
 
 import 'tsx/esm' // Register the TS+JSX ESM loader (for the user's src/)
 import { existsSync } from 'node:fs'
@@ -26,16 +27,17 @@ if (cmd === 'dev') {
 } else if (cmd === 'build') {
   const mod = await loadModule('build')
   await mod.build({
-    binary: process.argv.includes('--binary') || process.argv.includes('--app'),
-    app: process.argv.includes('--app'),
+    pack: process.argv.includes('--pack'),
   })
 } else {
   process.stdout.write(`
 Usage:
-  murasaki dev               Start the development server (HMR)
-  murasaki build             Bundle for production → dist/server.js
-  murasaki build --binary    + Single-executable (Node SEA) → dist/<name>
-  murasaki build --app       + macOS .app bundle → dist/<Name>.app (implies --binary)
+  murasaki dev          Start the development server (HMR)
+  murasaki build        Bundle for production -> dist/server.cjs
+  murasaki build --pack Native distributable for the current platform:
+                          darwin -> dist/<App>.app
+                          win32  -> dist/<app>/<app>.bat (+ <app>.vbs silent)
+                          linux  -> dist/<app>/<app>.sh
 
 `)
   process.exit(cmd ? 1 : 0)
