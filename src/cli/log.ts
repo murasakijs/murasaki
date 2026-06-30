@@ -14,9 +14,9 @@ export function printBanner(winTitle: string, winSize: { width: number; height: 
   )
   out(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Webview    ${c(RESET)}${WEBVIEW_ENGINE}\n`)
   out(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Runtime    ${c(RESET)}Node ${process.version}\n`)
-  out(
-    `   ${c(DIM)}-${c(RESET)} ${c(DIM)}Mode       ${c(RESET)}development ${c(DIM)}(HMR active)${c(RESET)}\n\n`,
-  )
+  const isDev = process.env.MURASAKI_DEV === '1'
+  const mode = isDev ? `development ${c(DIM)}(HMR active)${c(RESET)}` : 'production'
+  out(`   ${c(DIM)}-${c(RESET)} ${c(DIM)}Mode       ${c(RESET)}${mode}\n\n`)
 }
 
 export function printShortcuts() {
