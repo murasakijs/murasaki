@@ -3,6 +3,7 @@
 import { useState } from '../jsx/dom/runtime.ts'
 import { jsx } from '../jsx/runtime.ts'
 import type { Child } from '../jsx/types.ts'
+import { T } from '../theme.ts'
 
 // ── Tooltip (CSS-only hover) ────────────────────────────────────────
 // Pure CSS solution: wraps child in a span, the tooltip bubble is
@@ -28,14 +29,14 @@ export function Tooltip(props: {
   const [hover, setHover] = useState(false)
   const bubble: Record<string, unknown> = {
     position: 'absolute',
-    [pos === 'top' ? 'bottom' : 'top']: 'calc(100% + 6px)',
+    [pos === 'top' ? 'bottom' : 'top']: `calc(100% + ${T.spacingXs})`,
     left: '50%',
     transform: 'translateX(-50%)',
     background: 'rgba(0,0,0,0.85)',
     color: '#fff',
-    fontSize: '11px',
-    padding: '4px 8px',
-    borderRadius: '6px',
+    fontSize: T.fontSizeXs,
+    padding: `${T.spacingXs} ${T.spacingSm}`,
+    borderRadius: T.radiusSm,
     whiteSpace: 'nowrap',
     pointerEvents: 'none',
     opacity: hover ? 1 : 0,
@@ -112,12 +113,14 @@ export function Tab(props: {
   style?: Record<string, unknown>
 }) {
   const style: Record<string, unknown> = {
-    padding: '8px 14px',
-    fontSize: '13px',
-    fontWeight: 500,
+    padding: `${T.spacingSm} ${T.spacingMd}`,
+    fontSize: T.fontSizeMd,
+    fontWeight: props.active ? 600 : 500,
     cursor: 'pointer',
-    color: props.active ? '#5B21B6' : 'inherit',
-    borderBottom: `2px solid ${props.active ? '#A855F7' : 'transparent'}`,
+    // secondaryFg: light=#5B21B6 (dark purple, contrasts on light)
+    //              dark=#d8b4fe  (light purple, contrasts on dark)
+    color: props.active ? T.secondaryFg : T.textMuted,
+    borderBottom: `2px solid ${props.active ? T.primary : 'transparent'}`,
     marginBottom: '-1px',
     transition: 'color 0.1s, border-color 0.1s',
     ...(props.style ?? {}),
@@ -188,12 +191,13 @@ export function ContextMenu(props: {
             top: `${pos.y}px`,
             left: `${pos.x}px`,
             minWidth: '180px',
-            background: '#fff',
-            border: '1px solid rgba(0,0,0,0.08)',
-            borderRadius: '8px',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-            padding: '4px',
-            fontSize: '13px',
+            background: T.background,
+            color: T.text,
+            border: `1px solid ${T.border}`,
+            borderRadius: T.radiusMd,
+            boxShadow: T.shadowLg,
+            padding: T.spacingXs,
+            fontSize: T.fontSizeMd,
           },
           onClick: (e: Event) => {
             // Stop propagation so menu items can fire onClick first
@@ -205,23 +209,22 @@ export function ContextMenu(props: {
                   key: `sep-${i}`,
                   style: {
                     height: '1px',
-                    background: 'rgba(0,0,0,0.08)',
-                    margin: '4px 0',
+                    background: T.border,
+                    margin: `${T.spacingXs} 0`,
                   },
                 })
               : jsx('div', {
                   key: `it-${i}`,
                   style: {
-                    padding: '6px 12px',
-                    borderRadius: '4px',
-                    cursor:
-                      'disabled' in it && it.disabled ? 'not-allowed' : 'pointer',
+                    padding: `${T.spacingXs} ${T.spacingSm}`,
+                    borderRadius: T.radiusSm,
+                    cursor: 'disabled' in it && it.disabled ? 'not-allowed' : 'pointer',
                     color:
                       'danger' in it && it.danger
-                        ? '#dc2626'
+                        ? T.danger
                         : 'disabled' in it && it.disabled
-                          ? 'rgba(0,0,0,0.4)'
-                          : 'inherit',
+                          ? T.textMuted
+                          : T.text,
                   },
                   onClick: () => {
                     if ('disabled' in it && it.disabled) return
