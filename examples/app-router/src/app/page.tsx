@@ -1,6 +1,8 @@
 // src/app/page.tsx — Home. Tier 1 + Tier 2 components in action.
 
 import {
+  Avatar,
+  Badge,
   Button,
   Card,
   Checkbox,
@@ -11,11 +13,12 @@ import {
   ListItem,
   Modal,
   Pane,
+  Progress,
   Radio,
-  RadioGroup,
   Row,
   Sidebar,
   SidebarItem,
+  Spinner,
   Stack,
   Switch,
   Tab,
@@ -24,13 +27,14 @@ import {
   Tabs,
   Text,
   Textarea,
-  TitleBar,
   Tooltip,
+  useToast,
   View,
 } from 'murasaki'
 import {
   useClipboard,
   useDialog,
+  useEffect,
   useFs,
   useNotification,
   useShell,
@@ -51,6 +55,8 @@ export default function HomePage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [note, setNote] = useState('')
   const [filePath, setFilePath] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [loading, setLoading] = useState(false)
 
   const notification = useNotification()
   const clipboard = useClipboard()
@@ -58,6 +64,16 @@ export default function HomePage() {
   const dialog = useDialog()
   const fs = useFs()
   const win = useWindow()
+  const toast = useToast()
+
+  // Progress auto-tick when feedback section is shown.
+  useEffect(() => {
+    if (section !== 'feedback') return
+    const t = setInterval(() => {
+      setProgress((p) => (p >= 100 ? 0 : p + 8))
+    }, 240)
+    return () => clearInterval(t)
+  }, [section])
 
   async function pickAndRead() {
     const paths = await dialog.openFile({ title: 'Pick a text file' })
@@ -69,12 +85,6 @@ export default function HomePage() {
 
   return (
     <View style={{ height: '100vh' }}>
-      <TitleBar>
-        <Text size={13} weight="medium">
-          Murasaki Example
-        </Text>
-      </TitleBar>
-
       <Row grow>
         <Sidebar width={200}>
           <SidebarItem active={section === 'basics'} onClick={() => setSection('basics')}>
@@ -85,6 +95,9 @@ export default function HomePage() {
           </SidebarItem>
           <SidebarItem active={section === 'overlay'} onClick={() => setSection('overlay')}>
             Overlay
+          </SidebarItem>
+          <SidebarItem active={section === 'feedback'} onClick={() => setSection('feedback')}>
+            Feedback
           </SidebarItem>
           <SidebarItem active={section === 'native'} onClick={() => setSection('native')}>
             Native APIs
@@ -268,6 +281,93 @@ export default function HomePage() {
                     <Text>Right-click anywhere in this card</Text>
                   </Card>
                 </ContextMenu>
+              </Stack>
+            </Stack>
+          )}
+
+          {section === 'feedback' && (
+            <Stack gap={24} style={{ maxWidth: '520px' }}>
+              <Text as="h1" size={28} weight="bold">
+                Feedback
+              </Text>
+
+              <Stack gap={8}>
+                <Text weight="medium">Badge</Text>
+                <Row gap={8} wrap>
+                  <Badge>New</Badge>
+                  <Badge variant="secondary">Beta</Badge>
+                  <Badge variant="success">Active</Badge>
+                  <Badge variant="danger">3</Badge>
+                  <Badge variant="neutral">Done</Badge>
+                  <Badge variant="primary" dot />
+                  <Badge variant="danger" dot />
+                </Row>
+              </Stack>
+
+              <Stack gap={8}>
+                <Text weight="medium">Avatar</Text>
+                <Row gap={12} align="center">
+                  <Avatar name="Ichi" size={24} />
+                  <Avatar name="Murasaki" size={32} />
+                  <Avatar name="Hono" size={40} />
+                  <Avatar name="Tauri" size={56} />
+                </Row>
+              </Stack>
+
+              <Stack gap={8}>
+                <Text weight="medium">Spinner</Text>
+                <Row gap={12} align="center">
+                  <Spinner size={14} />
+                  <Spinner size={20} />
+                  <Spinner size={28} />
+                  <Button
+                    loading={loading}
+                    onClick={() => {
+                      setLoading(true)
+                      setTimeout(() => setLoading(false), 1500)
+                    }}
+                  >
+                    {loading ? 'Saving…' : 'Save (1.5s)'}
+                  </Button>
+                </Row>
+              </Stack>
+
+              <Stack gap={8}>
+                <Text weight="medium">Progress</Text>
+                <Progress value={progress} />
+                <Text size={12} color="#888">
+                  Indeterminate:
+                </Text>
+                <Progress indeterminate />
+              </Stack>
+
+              <Stack gap={8}>
+                <Text weight="medium">Toast</Text>
+                <Row gap={8} wrap>
+                  <Button onClick={() => toast.show({ title: 'Hello', body: name })}>
+                    Default
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      toast.show({ title: 'Saved', body: 'Your changes are saved.', variant: 'success' })
+                    }
+                  >
+                    Success
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() =>
+                      toast.show({
+                        title: 'Failed',
+                        body: 'Network unreachable.',
+                        variant: 'danger',
+                      })
+                    }
+                  >
+                    Danger
+                  </Button>
+                </Row>
               </Stack>
             </Stack>
           )}

@@ -53,6 +53,19 @@ export { ThemeProvider, useTheme } from './components/theme.tsx'
 export { defaultDarkTheme, defaultLightTheme, T, themeToCss } from './theme.ts'
 export type { Theme } from './theme.ts'
 
+// Feedback / indicators (Tier 3).
+export {
+  Avatar,
+  Badge,
+  dismissToast,
+  Progress,
+  Spinner,
+  toast,
+  ToastProvider,
+  useToast,
+} from './components/feedback.tsx'
+export type { BadgeVariant, ToastOptions } from './components/feedback.tsx'
+
 export type Metadata = {
   /** Default <title> for the app (overridden by <title> tag inside <head>) */
   title?: string
