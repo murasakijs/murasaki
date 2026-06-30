@@ -27,6 +27,7 @@ import { loadConfig, resolveAppMeta } from './config.ts'
 import { currentTarget, ensureNodeBinary, ensureWebviewPrebuild, type Target, TARGETS } from './download.ts'
 import { APP_DIR, APP_GLOBALS_CSS, projectRoot } from './env.ts'
 import { discoverRoutes, type Route } from './runtime/routes.ts'
+import { detectMksquashfs, makeAppImage } from './appimage.ts'
 import { detectWix, makeMsi } from './wix.ts'
 
 const out = (s: string) => process.stdout.write(s)
@@ -115,7 +116,39 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
         installerPath = await makeZipCross(distDir, packPath)
       }
     } else {
-      installerPath = await makeTarGz(distDir, packPath)
+      // Linux: try .AppImage via mksquashfs first; fall back to .tar.gz.
+      const meta3 = await resolveAppMeta()
+      const appName3 = readAppName()
+      if (detectMksquashfs()) {
+        out(`   ${dim('3.')} packaging linux ${bold(appName3 + '.AppImage')} ${dim('(via mksquashfs)')}\n`)
+        try {
+          installerPath = await makeAppImage({
+            distDir,
+            folderPath: packPath,
+            appName: appName3,
+            displayName: meta3.name ?? capitalize(appName3),
+            version: meta3.version,
+            arch: target.arch,
+            iconPath: meta3.icon ? join(projectRoot, meta3.icon) : undefined,
+          })
+          if (installerPath) {
+            out(`     ${green('✓')} ${dim('built')} ${installerPath}\n`)
+          }
+        } catch (e) {
+          out(`     ${red('✗')} appimage build failed: ${(e as Error).message} — falling back to .tar.gz\n`)
+          installerPath = null
+        }
+      }
+      if (!installerPath) {
+        if (!detectMksquashfs()) {
+          out(
+            `   ${dim('!')} ${dim('mksquashfs not found — falling back to .tar.gz. Install with:')}\n` +
+              `      ${dim('macOS: brew install squashfs')}\n` +
+              `      ${dim('Linux: apt install squashfs-tools  (or dnf install squashfs-tools)')}\n`,
+          )
+        }
+        installerPath = await makeTarGz(distDir, packPath)
+      }
     }
   }
 
