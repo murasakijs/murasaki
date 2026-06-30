@@ -20,4 +20,10 @@ export {
   useDialog,
   useWindow,
 } from './native.ts'
-export type { NotifyOptions, OpenFileOptions, SaveFileOptions, DirEntry } from './native.ts'
+export type {
+  DirEntry,
+  NotifyOptions,
+  OpenFileOptions,
+  SaveFileOptions,
+  WindowOpenOptions,
+} from './native.ts'

@@ -57,6 +57,21 @@ type Bridge = {
   windowIsMaximized(): Promise<boolean>
   windowIsMinimized(): Promise<boolean>
   windowIsVisible(): Promise<boolean>
+  windowOpen(opts?: WindowOpenOptions): Promise<string>
+  windowCloseById(id: string): Promise<void>
+  windowList(): Promise<string[]>
+  windowMainId(): Promise<string | null>
+}
+
+export type WindowOpenOptions = {
+  id?: string
+  title?: string
+  width?: number
+  height?: number
+  /** Hash route to load (e.g. "/settings"). */
+  url?: string
+  /** Direct HTML override. */
+  html?: string
 }
 
 declare global {
@@ -245,6 +260,15 @@ export function useWindow() {
     isMaximized: () => safe(() => bridge()?.windowIsMaximized(), false),
     isMinimized: () => safe(() => bridge()?.windowIsMinimized(), false),
     isVisible: () => safe(() => bridge()?.windowIsVisible(), true),
+
+    /** Open a new window. Returns its id. */
+    open: (opts: WindowOpenOptions = {}) => safe(() => bridge()?.windowOpen(opts), ''),
+    /** Close a specific window by id. */
+    closeById: (id: string) => safe(() => bridge()?.windowCloseById(id), undefined),
+    /** List all open window ids. */
+    list: () => safe(() => bridge()?.windowList(), [] as string[]),
+    /** Id of the main (first-opened) window. */
+    mainId: () => safe(() => bridge()?.windowMainId(), null as string | null),
   }
 }
 

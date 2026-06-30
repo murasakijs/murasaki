@@ -396,6 +396,20 @@ export default function HomePage() {
                 <Button variant="ghost" onClick={() => win.toggleMaximize()}>
                   🟢 Toggle max
                 </Button>
+                <Button
+                  variant="ghost"
+                  onClick={async () => {
+                    const id = await win.open({
+                      title: 'About — new window',
+                      url: '/about',
+                      width: 540,
+                      height: 360,
+                    })
+                    toast.show({ title: 'Opened', body: `window id: ${id}` })
+                  }}
+                >
+                  🪟 New window
+                </Button>
               </Row>
               {filePath && (
                 <Text size={12} color="#888">
