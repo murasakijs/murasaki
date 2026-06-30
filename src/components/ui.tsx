@@ -3,6 +3,7 @@
 
 import { jsx } from '../jsx/runtime.ts'
 import type { Child } from '../jsx/types.ts'
+import { T } from '../theme.ts'
 
 // ── Button ─────────────────────────────────────────────────────────
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -13,7 +14,7 @@ const BUTTON_BASE: Record<string, unknown> = {
   alignItems: 'center',
   justifyContent: 'center',
   gap: '6px',
-  borderRadius: '8px',
+  borderRadius: T.radiusMd,
   fontFamily: 'inherit',
   fontWeight: 600,
   cursor: 'pointer',
@@ -23,27 +24,27 @@ const BUTTON_BASE: Record<string, unknown> = {
 }
 
 const SIZE: Record<ButtonSize, Record<string, unknown>> = {
-  sm: { padding: '4px 10px', fontSize: '12px' },
-  md: { padding: '8px 14px', fontSize: '13px' },
-  lg: { padding: '10px 20px', fontSize: '15px' },
+  sm: { padding: `${T.spacingXs} ${T.spacingSm}`, fontSize: T.fontSizeSm },
+  md: { padding: `${T.spacingSm} ${T.spacingMd}`, fontSize: T.fontSizeMd },
+  lg: { padding: `${T.spacingMd} ${T.spacingLg}`, fontSize: T.fontSizeLg },
 }
 
 const VARIANT: Record<ButtonVariant, Record<string, unknown>> = {
   primary: {
-    background: 'linear-gradient(180deg, #A855F7, #7C3AED)',
-    color: '#fff',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.12)',
+    background: `linear-gradient(180deg, ${T.primary}, ${T.primaryDeep})`,
+    color: T.primaryFg,
+    boxShadow: T.shadowSm,
   },
   secondary: {
-    background: 'rgba(168, 85, 247, 0.08)',
-    color: '#5B21B6',
-    borderColor: 'rgba(168, 85, 247, 0.22)',
+    background: T.secondary,
+    color: T.secondaryFg,
+    borderColor: T.borderStrong,
   },
-  ghost: { background: 'transparent', color: '#5B21B6' },
+  ghost: { background: 'transparent', color: T.secondaryFg },
   danger: {
-    background: 'linear-gradient(180deg, #ef4444, #b91c1c)',
-    color: '#fff',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.12)',
+    background: `linear-gradient(180deg, ${T.danger}, #b91c1c)`,
+    color: T.dangerFg,
+    boxShadow: T.shadowSm,
   },
 }
 
@@ -91,13 +92,14 @@ export function Card(props: {
   style?: Record<string, unknown>
 }) {
   const style: Record<string, unknown> = {
-    background: 'rgba(255,255,255,0.65)',
-    border: '1px solid rgba(0,0,0,0.06)',
-    borderRadius: '12px',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(168,85,247,0.04)',
-    padding: typeof props.padding === 'number' ? `${props.padding}px` : '20px',
+    background: T.surface,
+    border: `1px solid ${T.border}`,
+    borderRadius: T.radiusLg,
+    boxShadow: `${T.shadowSm}, ${T.shadowMd}`,
+    padding: typeof props.padding === 'number' ? `${props.padding}px` : T.spacingLg,
     backdropFilter: 'blur(20px)',
     WebkitBackdropFilter: 'blur(20px)',
+    color: T.text,
     ...(props.style ?? {}),
   }
   return jsx('div', { className: props.className, style, children: props.children })
@@ -106,12 +108,12 @@ export function Card(props: {
 // ── Input ──────────────────────────────────────────────────────────
 const INPUT_BASE: Record<string, unknown> = {
   fontFamily: 'inherit',
-  fontSize: '13px',
-  padding: '8px 12px',
-  borderRadius: '8px',
-  border: '1px solid rgba(0,0,0,0.12)',
-  background: 'rgba(255,255,255,0.8)',
-  color: 'inherit',
+  fontSize: T.fontSizeMd,
+  padding: `${T.spacingSm} ${T.spacingMd}`,
+  borderRadius: T.radiusMd,
+  border: `1px solid ${T.borderStrong}`,
+  background: T.surface,
+  color: T.text,
   outline: 'none',
   transition: 'border-color 0.12s, box-shadow 0.12s',
   width: '100%',
@@ -164,8 +166,8 @@ export function Textarea(props: {
 }) {
   const style: Record<string, unknown> = {
     ...INPUT_BASE,
-    fontFamily: '"SF Mono", Menlo, monospace',
-    fontSize: '12.5px',
+    fontFamily: T.fontMono,
+    fontSize: T.fontSizeSm,
     resize: 'vertical',
     opacity: props.disabled ? 0.5 : 1,
     ...(props.style ?? {}),
@@ -214,13 +216,14 @@ export function Modal(props: {
     backdropFilter: 'blur(2px)',
   }
   const dialogStyle: Record<string, unknown> = {
-    background: '#fff',
-    borderRadius: '14px',
-    boxShadow: '0 24px 80px rgba(0,0,0,0.24)',
+    background: T.background,
+    color: T.text,
+    borderRadius: T.radiusLg,
+    boxShadow: T.shadowLg,
     width: props.width ? `${props.width}px` : 'min(560px, 92vw)',
     maxHeight: '88vh',
     overflow: 'auto',
-    padding: '24px',
+    padding: T.spacingXl,
     ...(props.style ?? {}),
   }
   const onOverlayClick = (e: Event) => {
@@ -272,9 +275,9 @@ export function List(props: {
     display: 'flex',
     flexDirection: 'column',
     gap: '1px',
-    background: 'rgba(0,0,0,0.04)',
-    border: '1px solid rgba(0,0,0,0.06)',
-    borderRadius: '10px',
+    background: T.border,
+    border: `1px solid ${T.border}`,
+    borderRadius: T.radiusMd,
     overflow: 'hidden',
     ...(props.style ?? {}),
   }
@@ -289,11 +292,11 @@ export function ListItem(props: {
   style?: Record<string, unknown>
 }) {
   const style: Record<string, unknown> = {
-    padding: '10px 14px',
-    background: props.active ? 'rgba(168, 85, 247, 0.14)' : 'rgba(255,255,255,0.9)',
-    color: props.active ? '#5B21B6' : 'inherit',
+    padding: `${T.spacingSm} ${T.spacingMd}`,
+    background: props.active ? T.secondary : T.surface,
+    color: props.active ? T.secondaryFg : T.text,
     fontWeight: props.active ? 600 : 400,
-    fontSize: '13px',
+    fontSize: T.fontSizeMd,
     cursor: props.onClick ? 'pointer' : 'default',
     transition: 'background 0.1s',
     ...(props.style ?? {}),

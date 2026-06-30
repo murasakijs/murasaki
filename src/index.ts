@@ -48,6 +48,11 @@ export {
 } from './components/overlay.tsx'
 export type { ContextMenuItem } from './components/overlay.tsx'
 
+// Theme.
+export { ThemeProvider, useTheme } from './components/theme.tsx'
+export { defaultDarkTheme, defaultLightTheme, T, themeToCss } from './theme.ts'
+export type { Theme } from './theme.ts'
+
 export type Metadata = {
   /** Default <title> for the app (overridden by <title> tag inside <head>) */
   title?: string

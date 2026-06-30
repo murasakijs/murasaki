@@ -1,7 +1,7 @@
 // src/app/layout.tsx — root layout. Wraps every route.
-// Global styles live in src/app/globals.css (auto-injected by murasaki).
+// ThemeProvider injects CSS variables for all murasaki components.
 
-import type { Metadata } from 'murasaki'
+import { ThemeProvider, type Metadata } from 'murasaki'
 import type { Child } from 'murasaki/jsx'
 
 export const metadata: Metadata = {
@@ -19,7 +19,9 @@ export default function RootLayout({ children }: { children?: Child }) {
       <head>
         <meta charSet="utf-8" />
       </head>
-      <body>{children}</body>
+      <body>
+        <ThemeProvider theme="auto">{children}</ThemeProvider>
+      </body>
     </html>
   )
 }
