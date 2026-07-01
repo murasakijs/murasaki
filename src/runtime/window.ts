@@ -162,6 +162,16 @@ export async function openWindow(opts: OpenWindowOptions = {}): Promise<string> 
     printError(`Native bridge expose failed: ${e.message}`)
   }
 
+  // Register the RPC dispatcher so client-side callAction() reaches
+  // handlers defined via defineAction().
+  try {
+    const { attachRpc } = await import('../rpc-server.ts')
+    attachRpc(webview as unknown as {
+      onIpcMessage: (h: (m: { body: Buffer }) => void) => void
+      evaluate: (js: string) => void
+    })
+  } catch {}
+
   windows.set(id, { id, win, webview })
   if (!mainWindowId) mainWindowId = id
   return id

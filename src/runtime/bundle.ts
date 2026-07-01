@@ -38,6 +38,10 @@ export async function bundleClient({ routes, rootLayoutFile }: BundleInput): Pro
 ${pageImports}
 ${layoutImport}
 import { createRoot, jsx } from 'murasaki/jsx/dom'
+import { installClientRpc } from 'murasaki'
+
+// Wire up the client-side RPC dispatcher so callAction / useAction work.
+installClientRpc()
 
 const ROUTES = {
 ${routesMap}

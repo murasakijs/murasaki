@@ -11,6 +11,13 @@ export { Link } from './components/Link.tsx'
 export { defineConfig, loadConfig } from './config.ts'
 export type { MurasakiConfig } from './config.ts'
 
+// Server actions (RPC) — server side.
+export { defineAction } from './rpc-server.ts'
+
+// Server actions (RPC) — client side.
+export { callAction, installClientRpc, useAction } from './rpc-client.ts'
+export type { ActionState, UseActionResult } from './rpc-client.ts'
+
 // React Native–style layout primitives.
 export { Row, Stack, Text, View } from './components/primitives.tsx'
 export type { TextProps, ViewProps } from './components/primitives.tsx'
