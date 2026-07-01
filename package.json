@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.25.2",
+  "version": "0.25.3",
   "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
   "keywords": [
     "desktop",
@@ -46,6 +46,10 @@
     "./jsx/dom": {
       "types": "./dist/jsx/dom/index.d.ts",
       "default": "./dist/jsx/dom/index.js"
+    },
+    "./context-menu-client": {
+      "types": "./dist/context-menu-client.d.ts",
+      "default": "./dist/context-menu-client.js"
     }
   },
   "files": [

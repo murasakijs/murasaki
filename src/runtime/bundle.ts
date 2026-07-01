@@ -79,7 +79,7 @@ export async function bundleClient({ routes, rootLayoutFile, webview }: BundleIn
     .join('\n')
 
   const contextMenuInstall = hasCustomContextMenu
-    ? `import { installGlobalContextMenu } from 'murasaki/dist/context-menu-client.js';
+    ? `import { installGlobalContextMenu } from 'murasaki/context-menu-client';
 installGlobalContextMenu(${JSON.stringify(contextMenuItems)});`
     : ''
 
