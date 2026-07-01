@@ -1,7 +1,7 @@
 // Feedback / indicator components — Badge, Avatar, Spinner, Progress, Toast.
 
 import { useEffect, useState } from '../jsx/dom/runtime.ts'
-import { jsx } from '../jsx/runtime.ts'
+import { Fragment, jsx } from '../jsx/runtime.ts'
 import type { Child } from '../jsx/types.ts'
 import { T } from '../theme.ts'
 
@@ -244,6 +244,10 @@ export function useToast() {
 export function ToastProvider(props: {
   position?: 'top-right' | 'top-left' | 'bottom-right' | 'bottom-left'
   className?: string
+  // NOTE: <ToastProvider>{children}</ToastProvider> is the natural way to
+  // wrap the whole app with a toast host. Without this, the JSX runtime
+  // silently dropped every child that lived under it — mount root and all.
+  children?: Child
 }) {
   const [items, setItems] = useState<ToastInstance[]>([])
 
@@ -281,7 +285,7 @@ export function ToastProvider(props: {
     alignItems: position.endsWith('right') ? 'flex-end' : 'flex-start',
   }
 
-  return jsx('div', {
+  const cornerNode = jsx('div', {
     className: props.className,
     style: corner,
     children: items.map((t) =>
@@ -320,4 +324,6 @@ export function ToastProvider(props: {
       }),
     ),
   })
+
+  return jsx(Fragment, { children: [props.children, cornerNode] })
 }
