@@ -17,8 +17,10 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -29,6 +31,13 @@ import { APP_DIR, APP_GLOBALS_CSS, projectRoot } from './env.ts'
 import { discoverRoutes, type Route } from './runtime/routes.ts'
 import { detectMksquashfs, makeAppImage } from './appimage.ts'
 import { detectWix, makeMsi } from './wix.ts'
+
+/**
+ * Node runtime version murasaki pins by default. `--slim` bundles download
+ * exactly this version at first launch; regular bundles ship it inline.
+ * Users can override with `runtime: { node: 'v22.x.x' }` in murasaki.config.ts.
+ */
+const DEFAULT_NODE_VERSION = `v${process.versions.node}`
 
 const out = (s: string) => process.stdout.write(s)
 const RESET = '\x1b[0m'
@@ -51,6 +60,11 @@ type BuildOptions = {
   installer?: boolean
   /** Target platform id (e.g. "win-x64"). Defaults to the current host. */
   target?: Target['id']
+  /**
+   * Ship a launcher-only package that downloads Node runtime on first
+   * launch instead of bundling it. ~5 MB instead of ~40 MB.
+   */
+  slim?: boolean
 }
 
 export async function build(opts: BuildOptions = {}): Promise<void> {
@@ -71,9 +85,10 @@ export async function build(opts: BuildOptions = {}): Promise<void> {
 
   let packPath: string | null = null
   if (opts.pack) {
-    if (target.os === 'darwin') packPath = await packMacApp(distDir, serverPath, target)
-    else if (target.os === 'win32') packPath = await packWindows(distDir, serverPath, target)
-    else packPath = await packLinux(distDir, serverPath, target)
+    const packOpts = { slim: opts.slim ?? false }
+    if (target.os === 'darwin') packPath = await packMacApp(distDir, serverPath, target, packOpts)
+    else if (target.os === 'win32') packPath = await packWindows(distDir, serverPath, target, packOpts)
+    else packPath = await packLinux(distDir, serverPath, target, packOpts)
   }
 
   let installerPath: string | null = null
@@ -195,8 +210,29 @@ async function bundleServer(distDir: string): Promise<string> {
     out(`     ${dim('routes ')}${routes.length} page${routes.length === 1 ? '' : 's'}\n`)
   }
 
+  // Pre-build the client-side hydration bundle from user source. Doing
+  // this here — while the source files are still on disk — is what makes
+  // installed .apps hydrate at all: their filesystem does not contain
+  // src/app/**, so runtime esbuild bundling would fail.
+  let clientBundleCode = ''
+  if (hasRoutes) {
+    const rootLayoutFileForClient =
+      routes[0]?.layoutFiles.find((p) => p.endsWith('/app/layout.tsx')) ?? null
+    try {
+      const { bundleClient } = await import('./runtime/bundle.ts')
+      clientBundleCode = await bundleClient({
+        routes,
+        rootLayoutFile: rootLayoutFileForClient,
+      })
+      out(`     ${green('✓')} ${dim('client bundle')} ${dim(`(${(clientBundleCode.length / 1024).toFixed(1)} KB)`)}\n`)
+    } catch (e) {
+      out(`     ${red('!')} client bundle failed: ${(e as Error).message}\n`)
+      out(`     ${dim('  interactive components (Tabs, Sidebar, useState) will not hydrate')}\n`)
+    }
+  }
+
   const entryContents = hasRoutes
-    ? buildSyntheticEntry({ routes, staticRoutesPath, prodEntry })
+    ? buildSyntheticEntry({ routes, staticRoutesPath, prodEntry, clientBundleCode })
     : `require(${JSON.stringify(prodEntry)});`
 
   const result = await esbuild.build({
@@ -290,6 +326,63 @@ async function resolveDepRoot(dep: string): Promise<string | null> {
   }
 }
 
+/**
+ * Locate a @webviewjs/webview-<platform>[-<arch>[-msvc|-gnu]] prebuild
+ * package. pnpm doesn't hoist optionalDependencies to the consumer's
+ * node_modules, so a plain resolveDepRoot from projectRoot can miss it.
+ * Instead we first find @webviewjs/webview and resolve the prebuild from
+ * that package's own base — which always works because the prebuild is
+ * declared in webview's optionalDependencies.
+ */
+async function resolvePrebuildFromWebview(prebuildPkg: string): Promise<string | null> {
+  // First try the consumer's direct hoisted layout (works for npm/yarn).
+  const direct = await resolveDepRoot(prebuildPkg)
+  if (direct) return direct
+
+  // Fallback: resolve via the webview package's own node_modules.
+  const webviewRoot = await resolveDepRoot('@webviewjs/webview')
+  if (!webviewRoot) return null
+  try {
+    const { createRequire } = await import('node:module')
+    const req = createRequire(join(webviewRoot, 'package.json'))
+    const pkgJson = req.resolve(`${prebuildPkg}/package.json`)
+    return dirname(pkgJson)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * strip -x the given Node binary in place. Reduces size ~20% (115 MB → 92 MB
+ * on macOS arm64). On macOS the code signature is invalidated by strip, so
+ * we re-sign ad-hoc afterwards. Failures are non-fatal — we log a warning
+ * and ship the unstripped binary.
+ */
+async function stripNodeBinary(binaryPath: string, target: Target): Promise<boolean> {
+  // Windows: no equivalent tool in the standard PATH. Handled via WiX cab
+  // compression on the .msi side instead.
+  if (target.os === 'win32') return false
+  try {
+    await runOrFail('strip', ['-x', binaryPath], {
+      label: 'strip',
+      allowFail: false,
+    })
+    if (target.os === 'darwin') {
+      // strip invalidates the code signature; ad-hoc re-sign.
+      await runOrFail('codesign', ['--sign', '-', '--force', binaryPath], {
+        label: 'codesign (post-strip)',
+        allowFail: false,
+      })
+    }
+    return true
+  } catch (e) {
+    out(
+      `     ${red('!')} strip failed: ${(e as Error).message} — shipping unstripped (~20 MB larger)\n`,
+    )
+    return false
+  }
+}
+
 async function copyRuntimeDeps(targetNodeModules: string, target: Target): Promise<string[]> {
   mkdirSync(targetNodeModules, { recursive: true })
   const copied: string[] = []
@@ -302,41 +395,95 @@ async function copyRuntimeDeps(targetNodeModules: string, target: Target): Promi
     cpSync(src, dst, { recursive: true, dereference: true })
     copied.push(dep)
   }
-  // Cross-compile: swap in the target-platform @webviewjs/webview prebuild.
-  if (target.id !== currentTarget().id) {
+  // Always ship the target-platform-specific @webviewjs/webview native
+  // prebuild package. The main package's js-bindings.js dynamically requires
+  // it (e.g. `require('@webviewjs/webview-darwin-arm64')`); without it, the
+  // bundled app aborts with "Cannot find native binding" the moment the
+  // webview is imported. Works from pnpm's hoisted node_modules for the host
+  // target and via npm registry download for cross-compile targets.
+  const platformPart =
+    target.os === 'win32'
+      ? `${target.os}-${target.arch}-msvc`
+      : target.os === 'linux'
+        ? `${target.os}-${target.arch}-gnu`
+        : `${target.os}-${target.arch}`
+  const pkgName = `@webviewjs/webview-${platformPart}`
+
+  let prebuildSrc: string | null = null
+  let prebuildFetchError: Error | null = null
+
+  if (target.id === currentTarget().id) {
+    // Prefer a local copy: the prebuild is @webviewjs/webview's own
+    // optionalDependency, so pnpm keeps it inside webview's private
+    // node_modules rather than hoisting it to the consumer. Resolve from
+    // the webview package's base so it works regardless of hoist layout.
+    prebuildSrc = await resolvePrebuildFromWebview(pkgName)
+  }
+
+  if (!prebuildSrc) {
+    // Fall back to fetching it straight from the npm registry. This handles
+    // both cross-compile targets and hosts whose pnpm strict layout blocks
+    // even the nested resolve above.
     try {
-      const targetPrebuildRoot = await ensureWebviewPrebuild(target)
-      if (targetPrebuildRoot) {
-        const platformPart =
-          target.os === 'win32'
-            ? `${target.os}-${target.arch}-msvc`
-            : target.os === 'linux'
-              ? `${target.os}-${target.arch}-gnu`
-              : `${target.os}-${target.arch}`
-        const pkgName = `@webviewjs/webview-${platformPart}`
-        const dst = join(targetNodeModules, pkgName)
-        rmSync(dst, { recursive: true, force: true })
-        cpSync(targetPrebuildRoot, dst, { recursive: true, dereference: true })
-        copied.push(pkgName)
-      }
-    } catch (e) {
       out(
-        `     ${red('!')} could not fetch webview prebuild for ${target.id}: ${(e as Error).message}\n`,
+        `     ${dim('· ' + pkgName + ' not resolvable locally — downloading from npm registry')}\n`,
       )
+      prebuildSrc = await ensureWebviewPrebuild(target)
+    } catch (e) {
+      prebuildFetchError = e as Error
     }
   }
+
+  if (!prebuildSrc) {
+    // The bundle will not run without this. Fail loudly rather than shipping
+    // a broken .app.
+    const msg = [
+      `Cannot locate ${pkgName}.`,
+      `The bundled app will crash on launch without it because @webviewjs/webview's`,
+      `js-bindings dynamically requires this native prebuild package.`,
+      '',
+      `Tried:`,
+      `  1. resolving from the consumer's node_modules`,
+      `  2. resolving from @webviewjs/webview's own node_modules`,
+      `  3. downloading from https://registry.npmjs.org/${pkgName.replace('/', '%2F')}`,
+      prebuildFetchError ? `     (last error: ${prebuildFetchError.message})` : '',
+      '',
+      `Fix:`,
+      `  pnpm add ${pkgName}          # (recommended, pins the version)`,
+      `  npm i --include=optional     # (if you use npm)`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+    throw new Error(msg)
+  }
+
+  const dst = join(targetNodeModules, pkgName)
+  rmSync(dst, { recursive: true, force: true })
+  cpSync(prebuildSrc, dst, { recursive: true, dereference: true })
+  copied.push(pkgName)
+
   return copied
 }
 
+type PackOpts = { slim: boolean }
+
 // ── stage 2a: macOS .app ──────────────────────────────────────────
-async function packMacApp(distDir: string, serverPath: string, target: Target): Promise<string> {
+async function packMacApp(
+  distDir: string,
+  serverPath: string,
+  target: Target,
+  packOpts: PackOpts,
+): Promise<string> {
   const meta = await resolveAppMeta()
   const appName = readAppName()
   const displayName = meta.name ?? capitalize(appName)
   const bundleId = meta.bundleId
   const appBundle = join(distDir, `${displayName}.app`)
+  const nodeVersion = meta.runtime?.node ?? DEFAULT_NODE_VERSION
 
-  out(`   ${dim('2.')} packaging macOS ${bold(displayName + '.app')} ${dim('(' + target.id + ')')}\n`)
+  out(
+    `   ${dim('2.')} packaging macOS ${bold(displayName + '.app')} ${dim('(' + target.id + (packOpts.slim ? ', slim' : '') + ')')}\n`,
+  )
 
   try {
     rmSync(appBundle, { recursive: true, force: true })
@@ -346,11 +493,18 @@ async function packMacApp(distDir: string, serverPath: string, target: Target): 
   mkdirSync(macOSDir, { recursive: true })
   mkdirSync(resourcesDir, { recursive: true })
 
-  // Node binary (cross-compile aware)
-  const nodeBinary = await ensureNodeBinary(target)
-  cpSync(nodeBinary, join(resourcesDir, 'node'))
-  chmodSync(join(resourcesDir, 'node'), 0o755)
-  out(`     ${green('✓')} ${dim('node      →')} Resources/node\n`)
+  // Node binary — in slim mode, the launcher downloads it on first launch
+  // instead of bundling ~90 MB into the .app.
+  if (!packOpts.slim) {
+    const nodeBinary = await ensureNodeBinary(target)
+    const nodeDest = join(resourcesDir, 'node')
+    cpSync(nodeBinary, nodeDest)
+    chmodSync(nodeDest, 0o755)
+    const stripped = await stripNodeBinary(nodeDest, target)
+    out(`     ${green('✓')} ${dim('node      →')} Resources/node${stripped ? dim(' (stripped)') : ''}\n`)
+  } else {
+    out(`     ${dim('· node       skipped (slim: downloaded at first launch)')}\n`)
+  }
 
   // server.cjs into Resources/
   cpSync(serverPath, join(resourcesDir, 'server.cjs'))
@@ -362,14 +516,16 @@ async function packMacApp(distDir: string, serverPath: string, target: Target): 
 
   // launcher script (must be executable by MacOS/<displayName>)
   const launcherPath = join(macOSDir, displayName)
-  const launcher = `#!/bin/bash
+  const launcher = packOpts.slim
+    ? macSlimLauncher({ displayName, bundleId, nodeVersion, arch: target.arch })
+    : `#!/bin/bash
 DIR="$(cd "$(dirname "$0")/.." && pwd)/Resources"
 cd "$DIR"
 exec "$DIR/node" "$DIR/server.cjs"
 `
   writeFileSync(launcherPath, launcher)
   chmodSync(launcherPath, 0o755)
-  out(`     ${green('✓')} ${dim('launcher  →')} MacOS/${displayName}\n`)
+  out(`     ${green('✓')} ${dim('launcher  →')} MacOS/${displayName}${packOpts.slim ? dim(' (slim)') : ''}\n`)
 
   // Info.plist
   writeFileSync(
@@ -406,7 +562,15 @@ exec "$DIR/node" "$DIR/server.cjs"
 }
 
 // ── stage 2b: Windows folder + .bat launcher ───────────────────────
-async function packWindows(distDir: string, serverPath: string, target: Target): Promise<string> {
+async function packWindows(
+  distDir: string,
+  serverPath: string,
+  target: Target,
+  packOpts: PackOpts,
+): Promise<string> {
+  if (packOpts.slim) {
+    out(`   ${red('!')} --slim is currently macOS-only; falling back to bundled runtime on Windows\n`)
+  }
   const meta = await resolveAppMeta()
   const appName = readAppName()
   const dir = join(distDir, appName)
@@ -420,6 +584,8 @@ async function packWindows(distDir: string, serverPath: string, target: Target):
 
   const nodeBinary = await ensureNodeBinary(target)
   cpSync(nodeBinary, join(dir, 'node.exe'))
+  // Windows: no host-tool for shrinking .exe; WiX cab compression handles it
+  // on the installer side.
   out(`     ${green('✓')} ${dim('node.exe')}\n`)
 
   cpSync(serverPath, join(dir, 'server.cjs'))
@@ -457,7 +623,15 @@ ws.Run """" & WScript.ScriptFullName & "\\..\\${appName}.bat" & """", 0
 }
 
 // ── stage 2c: Linux folder + sh launcher ───────────────────────────
-async function packLinux(distDir: string, serverPath: string, target: Target): Promise<string> {
+async function packLinux(
+  distDir: string,
+  serverPath: string,
+  target: Target,
+  packOpts: PackOpts,
+): Promise<string> {
+  if (packOpts.slim) {
+    out(`   ${red('!')} --slim is currently macOS-only; falling back to bundled runtime on Linux\n`)
+  }
   const meta = await resolveAppMeta()
   const appName = readAppName()
   const dir = join(distDir, appName)
@@ -470,9 +644,11 @@ async function packLinux(distDir: string, serverPath: string, target: Target): P
   mkdirSync(dir, { recursive: true })
 
   const nodeBinary = await ensureNodeBinary(target)
-  cpSync(nodeBinary, join(dir, 'node'))
-  chmodSync(join(dir, 'node'), 0o755)
-  out(`     ${green('✓')} ${dim('node')}\n`)
+  const nodeDest = join(dir, 'node')
+  cpSync(nodeBinary, nodeDest)
+  chmodSync(nodeDest, 0o755)
+  const stripped = await stripNodeBinary(nodeDest, target)
+  out(`     ${green('✓')} ${dim('node')}${stripped ? dim(' (stripped)') : ''}\n`)
 
   cpSync(serverPath, join(dir, 'server.cjs'))
   out(`     ${green('✓')} ${dim('server.cjs')}\n`)
@@ -509,34 +685,163 @@ exec "$DIR/node" "$DIR/server.cjs"
 // ── stage 3: installers / archives ─────────────────────────────────
 
 async function makeDmg(distDir: string, appPath: string): Promise<string> {
+  const meta = await resolveAppMeta()
   const appName = readAppName()
-  const displayName = capitalize(appName)
+  const displayName = meta.name ?? capitalize(appName)
   const dmgPath = join(distDir, `${displayName}-${readVersion()}.dmg`)
+  const stagingPath = join(distDir, `.dmg-staging-${Date.now()}.dmg`)
+  const volumeName = displayName
+  const mountPoint = join('/Volumes', volumeName)
 
-  out(`   ${dim('3.')} packaging macOS ${bold(displayName + '.dmg')}\n`)
+  const dmgOpts = meta.dmg ?? {}
+  const [winW, winH] = dmgOpts.windowSize ?? [540, 380]
+  const iconSize = dmgOpts.iconSize ?? 128
+  const [appX, appY] = dmgOpts.appPosition ?? [140, 190]
+  const [asX, asY] = dmgOpts.applicationsPosition ?? [400, 190]
+  const backgroundSrc = dmgOpts.background ? join(projectRoot, dmgOpts.background) : null
 
-  // Remove any existing artefact (hdiutil refuses to overwrite).
+  out(`   ${dim('3.')} packaging macOS ${bold(displayName + '.dmg')} ${dim('(drag-to-install layout)')}\n`)
+
+  // Clean up any leftovers.
   try {
     rmSync(dmgPath, { force: true })
   } catch {}
+  try {
+    rmSync(stagingPath, { force: true })
+  } catch {}
+  // Detach any pre-existing mount at this point (interrupted previous run).
+  await runOrFail('hdiutil', ['detach', mountPoint, '-force'], {
+    label: 'hdiutil detach (pre)',
+    allowFail: true,
+  })
 
+  // 1. Create a writable staging image big enough for the app + slack.
+  //    Sized dynamically at 1.25x the app footprint, min 60 MB.
+  const appSizeBytes = folderSize(appPath)
+  const paddedMb = Math.max(60, Math.ceil((appSizeBytes * 1.25) / 1024 / 1024))
   await runOrFail(
     'hdiutil',
     [
       'create',
-      '-volname',
-      displayName,
       '-srcfolder',
       appPath,
-      '-ov',
+      '-volname',
+      volumeName,
+      '-fs',
+      'HFS+',
+      '-fsargs',
+      '-c c=64,a=16,e=16',
       '-format',
-      'UDZO', // compressed read-only
-      dmgPath,
+      'UDRW',
+      '-size',
+      `${paddedMb}m`,
+      stagingPath,
     ],
-    { label: 'hdiutil create .dmg' },
+    { label: 'hdiutil create (staging)' },
   )
+  out(`     ${green('✓')} ${dim('staging image')} ${dim(`(${paddedMb} MB)`)}\n`)
+
+  // 2. Mount the staging image.
+  await runOrFail(
+    'hdiutil',
+    ['attach', stagingPath, '-readwrite', '-noverify', '-noautoopen', '-mountpoint', mountPoint],
+    { label: 'hdiutil attach' },
+  )
+
+  try {
+    // 3. Symlink /Applications so users can drag straight in.
+    await runOrFail('ln', ['-s', '/Applications', join(mountPoint, 'Applications')], {
+      label: 'ln -s Applications',
+    })
+
+    // 4. Optional background image.
+    let backgroundStanza = ''
+    if (backgroundSrc && existsSync(backgroundSrc)) {
+      const bgDir = join(mountPoint, '.background')
+      mkdirSync(bgDir, { recursive: true })
+      const ext = backgroundSrc.toLowerCase().endsWith('.jpg') ? 'jpg' : 'png'
+      const bgFile = `background.${ext}`
+      cpSync(backgroundSrc, join(bgDir, bgFile))
+      backgroundStanza = `      set background picture of viewOptions to file ".background:${bgFile}"\n`
+      out(`     ${green('✓')} ${dim('background   →')} .background/${bgFile}\n`)
+    }
+
+    // 5. Configure Finder view via osascript. Runs against the mounted volume.
+    const applescript = `tell application "Finder"
+  tell disk "${volumeName}"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 120, ${200 + winW}, ${120 + winH}}
+    set viewOptions to the icon view options of container window
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to ${iconSize}
+    set text size of viewOptions to 13
+    set label position of viewOptions to bottom
+${backgroundStanza}    set position of item "${displayName}.app" of container window to {${appX}, ${appY}}
+    set position of item "Applications" of container window to {${asX}, ${asY}}
+    update without registering applications
+    delay 0.5
+    close
+  end tell
+end tell
+`
+    await runOrFail('osascript', ['-e', applescript], {
+      label: 'osascript (Finder layout)',
+      allowFail: true, // osascript layout is nice-to-have; don't abort if it hiccups
+    })
+    out(`     ${green('✓')} ${dim('finder layout applied')}\n`)
+
+    // Give Finder a moment to write .DS_Store, then flush.
+    await new Promise((r) => setTimeout(r, 800))
+    await runOrFail('sync', [], { label: 'sync', allowFail: true })
+  } finally {
+    // 6. Detach.
+    await runOrFail('hdiutil', ['detach', mountPoint, '-force'], {
+      label: 'hdiutil detach',
+      allowFail: true,
+    })
+  }
+
+  // 7. Convert staging (UDRW) → final (UDZO compressed, read-only).
+  await runOrFail(
+    'hdiutil',
+    ['convert', stagingPath, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', dmgPath],
+    { label: 'hdiutil convert (UDZO)' },
+  )
+
+  // 8. Clean up staging.
+  try {
+    rmSync(stagingPath, { force: true })
+  } catch {}
+
   out(`     ${green('✓')} ${dim('built')} ${dmgPath}\n`)
   return dmgPath
+}
+
+function folderSize(root: string): number {
+  let total = 0
+  const stack = [root]
+  while (stack.length) {
+    const p = stack.pop() as string
+    let s
+    try {
+      s = statSync(p)
+    } catch {
+      continue
+    }
+    if (s.isDirectory()) {
+      let entries: string[] = []
+      try {
+        entries = readdirSync(p)
+      } catch {}
+      for (const e of entries) stack.push(join(p, e))
+    } else {
+      total += s.size
+    }
+  }
+  return total
 }
 
 /**
@@ -617,6 +922,57 @@ async function makeTarGz(distDir: string, folderPath: string): Promise<string> {
 }
 
 // ── helpers ────────────────────────────────────────────────────────
+/**
+ * Slim-mode launcher for macOS. On first launch it asks the user via a
+ * native `osascript` dialog whether to download the Node runtime
+ * (~30 MB), extracts it to ~/.murasaki/runtime/<bundleId>/node-<version>/,
+ * and re-executes itself.
+ */
+function macSlimLauncher(opts: {
+  displayName: string
+  bundleId: string
+  nodeVersion: string
+  arch: 'x64' | 'arm64'
+}): string {
+  const dl = `https://nodejs.org/dist/${opts.nodeVersion}/node-${opts.nodeVersion}-darwin-${opts.arch}.tar.gz`
+  // shell-escape only the strings that vary; the rest is a static template.
+  const displayName = opts.displayName.replace(/"/g, '\\"')
+  return `#!/bin/bash
+set -e
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+RESOURCES="$APP_DIR/Resources"
+
+RUNTIME_ROOT="$HOME/.murasaki/runtime/${opts.bundleId}"
+NODE_DIR="$RUNTIME_ROOT/node-${opts.nodeVersion}-darwin-${opts.arch}"
+NODE_BIN="$NODE_DIR/bin/node"
+
+if [ ! -x "$NODE_BIN" ]; then
+  ANSWER=$(osascript -e 'display dialog "${displayName} needs the Node.js runtime (~30 MB). Download now?" buttons {"Cancel", "Download"} default button "Download" with title "${displayName}" with icon note' 2>/dev/null || echo "cancel")
+  case "$ANSWER" in
+    *"Download"*) ;;
+    *) exit 1 ;;
+  esac
+
+  mkdir -p "$RUNTIME_ROOT"
+  # Progress dialog runs in a subshell we kill after extraction.
+  ( osascript -e 'display dialog "Setting up runtime for ${displayName}…\\n\\nThis only happens once." buttons {} giving up after 999' 2>/dev/null ) &
+  PROGRESS_PID=$!
+
+  # Download + extract in one pipe.
+  if ! curl -fsSL "${dl}" | tar -xzC "$RUNTIME_ROOT"; then
+    kill "$PROGRESS_PID" 2>/dev/null || true
+    osascript -e 'display alert "Runtime download failed" message "Check your network connection and try again."' 2>/dev/null || true
+    exit 1
+  fi
+
+  kill "$PROGRESS_PID" 2>/dev/null || true
+fi
+
+cd "$RESOURCES"
+exec "$NODE_BIN" "$RESOURCES/server.cjs"
+`
+}
+
 function macInfoPlist(opts: {
   displayName: string
   bundleId: string
@@ -671,8 +1027,9 @@ function buildSyntheticEntry(args: {
   routes: Route[]
   staticRoutesPath: string
   prodEntry: string
+  clientBundleCode: string
 }): string {
-  const { routes, staticRoutesPath, prodEntry } = args
+  const { routes, staticRoutesPath, prodEntry, clientBundleCode } = args
   const rootLayoutFile =
     routes[0]?.layoutFiles.find((p) => p.endsWith('/app/layout.tsx')) ?? null
   const layoutFiles = Array.from(new Set(routes.flatMap((r) => r.layoutFiles)))
@@ -689,7 +1046,7 @@ function buildSyntheticEntry(args: {
       (r, i) =>
         `  { path: ${JSON.stringify(r.path)}, page: page${i}, layouts: [${r.layoutFiles
           .map(layoutVar)
-          .join(', ')}] }`,
+          .join(', ')}], pageFile: ${JSON.stringify(r.pageFile)}, layoutFiles: ${JSON.stringify(r.layoutFiles)} }`,
     )
     .join(',\n')
 
@@ -703,10 +1060,12 @@ ${globalsRequire}
 const { setStaticRoutes } = require(${JSON.stringify(staticRoutesPath)});
 setStaticRoutes({
   rootLayout: ${rootLayoutFile ? layoutVar(rootLayoutFile) : 'null'},
+  rootLayoutFile: ${rootLayoutFile ? JSON.stringify(rootLayoutFile) : 'null'},
   routes: [
 ${routeEntries}
   ],
   globalsCss: typeof globalsCss === 'string' ? globalsCss : (globalsCss && globalsCss.default) || '',
+  clientBundle: ${JSON.stringify(clientBundleCode)},
 });
 require(${JSON.stringify(prodEntry)});
 `

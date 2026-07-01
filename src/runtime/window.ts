@@ -173,6 +173,27 @@ export async function openWindow(opts: OpenWindowOptions = {}): Promise<string> 
   } catch {}
 
   windows.set(id, { id, win, webview })
+
+  // TEMPORARY: probe hydration by reading document.title back after a
+  // couple seconds. Removes when the hydration path is confirmed.
+  if (process.env.MURASAKI_PROBE) {
+    setTimeout(() => {
+      try {
+        const wv = webview as unknown as {
+          evaluateScriptWithCallback: (js: string, cb: (err: Error | null, v: string) => void) => void
+        }
+        wv.evaluateScriptWithCallback(
+          'JSON.stringify({title:document.title, hasClientScript:!!document.querySelector("script[data-murasaki=client]"), scriptText:(document.querySelector("script[data-murasaki=client]")||{}).textContent?.length||0, ready:document.readyState})',
+          (err, val) => {
+            if (err) console.error('[probe] error', err.message)
+            else console.error('[probe]', val)
+          },
+        )
+      } catch (e) {
+        console.error('[probe] setup failed', (e as Error).message)
+      }
+    }, 2500)
+  }
   if (!mainWindowId) mainWindowId = id
   return id
 }

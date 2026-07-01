@@ -100,17 +100,36 @@ pnpm exec murasaki installer --target linux-x64    # → .AppImage (要 squashfs
 
 ## なぜ Murasaki?
 
-|                     | **Murasaki**       | Electron     | Tauri          | NW.js     |
-| ------------------- | ------------------ | ------------ | -------------- | --------- |
-| 言語                | TypeScript         | TypeScript   | Rust + JS      | JS        |
-| レンダリング        | OS WebView         | Chromium     | OS WebView     | Chromium  |
-| ランタイム          | **Node.js**        | Node.js      | Rust           | Node.js   |
-| インストーラサイズ  | **~40 MB**         | ~90 MB       | ~5 MB          | ~110 MB   |
-| Next.js 風 DX       | ★★★ ネイティブ     | ★★           | ★ (SSG 経由)   | ★         |
-| 組込コンポーネント  | **34 + 13 フック** | なし         | なし           | なし      |
-| サーバーアクション  | **`defineAction`** | 手動 IPC     | 手動 IPC       | 手動      |
-| クロスコンパイル    | **組込 `--target`** | 手動        | matrix         | 手動      |
-| 自動 publish CI     | **Trusted Publisher OIDC** | 手動  | 手動           | 手動      |
+|                     | **Murasaki**                                    | Electron     | Tauri          | NW.js     |
+| ------------------- | ----------------------------------------------- | ------------ | -------------- | --------- |
+| 書く言語            | TypeScript (サーバー + クライアント)              | TypeScript   | Rust + JS      | JS        |
+| レンダリング        | OS WebView                                      | Chromium     | OS WebView     | Chromium  |
+| ランタイム同梱      | Node.js                                         | Chromium + Node | なし        | Chromium + Node |
+| インストーラサイズ  | **~30 MB** デフォルト / **~500 KB** `--slim`\*  | ~90 MB       | ~5 MB          | ~110 MB   |
+| npm エコシステム    | ✅ フル                                          | ✅ フル       | ⚠️ クライアント側のみ | ✅ フル |
+| サーバー側 HMR      | ✅                                               | ⚠️ 手動      | ❌              | ⚠️ 手動   |
+| 組込コンポーネント  | **34 + 13 フック**                              | なし         | なし           | なし      |
+| サーバーアクション  | **`defineAction`**                              | 手動 IPC     | 手動 IPC       | 手動      |
+| クロスコンパイル    | **組込 `--target`**                             | 手動         | matrix         | 手動      |
+| 自動 publish CI     | **Trusted Publisher OIDC**                      | 手動         | 手動           | 手動      |
+
+<sub>\* `--slim` は Node.js を同梱せず、初回起動時に (~30 MB) ダウンロードするランチャを ship します。</sub>
+
+### Murasaki を選ぶ場合
+
+- ✅ すでに **Next.js / Node** を書いていて、Rust を学ぶ気はない
+- ✅ サーバー側で `pnpm add express` (や他の何か) を使いたい
+- ✅ **社内ツール** や **開発ツール** で 30 MB は問題ない
+- ✅ **クライアント/サーバー両方の HMR** が欲しい
+
+### Tauri を選ぶ場合
+
+- ❌ **10 MB 未満** のエンドユーザ向けアプリが必要で、サーバー側を Rust で書いても OK
+- ❌ **バイナリサイズ** > **JS エコシステム**
+
+### Electron を選ぶ場合
+
+- ❌ **Chromium 保証** が必須 (特定の Web API、DevTools プロトコル)
 
 Murasaki が唯一提供する組み合わせ:
 

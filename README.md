@@ -99,17 +99,36 @@ pnpm exec murasaki installer --target linux-x64    # → .AppImage (needs squash
 
 ## Why Murasaki?
 
-|                     | **Murasaki**       | Electron     | Tauri          | NW.js     |
-| ------------------- | ------------------ | ------------ | -------------- | --------- |
-| Language            | TypeScript         | TypeScript   | Rust + JS      | JS        |
-| Rendering           | OS WebView         | Chromium     | OS WebView     | Chromium  |
-| Runtime             | **Node.js**        | Node.js      | Rust           | Node.js   |
-| Installer size      | **~40 MB**         | ~90 MB       | ~5 MB          | ~110 MB   |
-| Next.js-style DX    | ★★★ native         | ★★           | ★ via SSG      | ★         |
-| Built-in components | **34 + 13 hooks**  | none         | none           | none      |
-| Server actions      | **`defineAction`** | manual IPC   | manual IPC     | manual    |
-| Cross-compile       | **built-in `--target`** | manual  | matrix         | manual    |
-| Auto-publish CI     | **Trusted Publisher OIDC** | manual | manual     | manual    |
+|                     | **Murasaki**                                    | Electron     | Tauri          | NW.js     |
+| ------------------- | ----------------------------------------------- | ------------ | -------------- | --------- |
+| What you write      | TypeScript (server + client)                    | TypeScript   | Rust + JS      | JS        |
+| Rendering           | OS WebView                                      | Chromium     | OS WebView     | Chromium  |
+| Runtime bundled     | Node.js                                         | Chromium+Node| none           | Chromium+Node |
+| Installer size      | **~30 MB** default / **~500 KB** `--slim`\*     | ~90 MB       | ~5 MB          | ~110 MB   |
+| npm ecosystem       | ✅ full                                          | ✅ full       | ⚠️ client only  | ✅ full    |
+| Server-side HMR     | ✅                                               | ⚠️ manual     | ❌              | ⚠️ manual  |
+| Built-in components | **34 + 13 hooks**                               | none         | none           | none      |
+| Server actions      | **`defineAction`**                              | manual IPC   | manual IPC     | manual    |
+| Cross-compile       | **built-in `--target`**                         | manual       | matrix         | manual    |
+| Auto-publish CI     | **Trusted Publisher OIDC**                      | manual       | manual         | manual    |
+
+<sub>\* `--slim` ships a launcher that fetches Node.js (~30 MB) on first launch instead of bundling it.</sub>
+
+### Choose Murasaki if...
+
+- ✅ You already write **Next.js / Node** and don't want to learn Rust
+- ✅ You want to `pnpm add express` (or anything else) on the server side
+- ✅ You're building **internal tools** or **dev tools** where 30 MB is fine
+- ✅ You want **HMR that works on both client and server code**
+
+### Choose Tauri if...
+
+- ❌ You need a **<10 MB** consumer app and are willing to write Rust on the server side
+- ❌ You care more about **binary size** than about **the JS ecosystem**
+
+### Choose Electron if...
+
+- ❌ You need a **guaranteed Chromium** environment (specific web APIs, DevTools protocol)
 
 Murasaki is the only framework that combines:
 

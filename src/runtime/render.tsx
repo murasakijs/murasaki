@@ -184,7 +184,19 @@ function injectHead(html: string, metadata: Metadata | undefined, css: string): 
 export async function renderApp(): Promise<RenderResult> {
   // 0. Production: prefer pre-bundled static routes (no .tsx runtime needed)
   const staticRoutes = getStaticRoutes()
-  if (staticRoutes) return renderStaticRoutes(staticRoutes)
+  if (staticRoutes) {
+    const r = await renderStaticRoutes(staticRoutes)
+    if (process.env.MURASAKI_DUMP_HTML) {
+      try {
+        const dumpPath = process.env.MURASAKI_DUMP_HTML
+        require('node:fs').writeFileSync(dumpPath, r.html)
+        console.error(`[murasaki] dumped rendered HTML (${r.html.length} bytes) → ${dumpPath}`)
+      } catch (e) {
+        console.error('[murasaki] dump failed:', (e as Error).message)
+      }
+    }
+    return r
+  }
   // 1. Dev/app-router convention via filesystem walk
   if (existsSync(APP_DIR)) {
     return renderAppRouter()
@@ -211,11 +223,33 @@ async function renderStaticRoutes(s: ReturnType<typeof getStaticRoutes> & object
   const mountInner = blocks.join('') + NAV_SCRIPT
   const mountRoot = `<div id="murasaki-root">${mountInner}</div>`
 
-  // Client bundle: built with the same static-route entry would be ideal,
-  // but for now we fall back to "no client bundle" in static mode — the
-  // SSR + nav script alone gives counter-less but navigable pages.
-  // Interactive hydration in SEA is a follow-up (needs bundle pre-built too).
-  const clientScript = ''
+  // Prefer the client bundle that build.ts pre-generated. That's the only
+  // path that works in installed .apps, whose filesystem does not carry
+  // the user's src/app/**. If it's absent (dev, or a build step failure)
+  // fall back to bundling on demand from the source files.
+  let clientScript = ''
+  try {
+    let code = s.clientBundle
+    if (!code) {
+      const clientRoutes: Route[] = s.routes.map((r) => ({
+        path: r.path,
+        pageFile: r.pageFile,
+        layoutFiles: r.layoutFiles,
+      }))
+      if (clientRoutes.every((r) => r.pageFile)) {
+        code = await bundleClient({
+          routes: clientRoutes,
+          rootLayoutFile: s.rootLayoutFile ?? null,
+        })
+      }
+    }
+    if (code) {
+      clientScript = `<script data-murasaki="client">${code}</script>`
+    }
+  } catch (e: any) {
+    const msg = escapeHtml(String(e?.message ?? e))
+    clientScript = `<script>document.body.insertAdjacentHTML('beforeend','<pre style=\\'position:fixed;inset:0;background:#1a0a33;color:#A855F7;padding:24px;font-family:SF Mono,Menlo,monospace;font-size:13px;overflow:auto;z-index:9999\\'>client bundle failed:\\n${msg.replace(/[\\'\\\\]/g, '\\\\$&')}</pre>')</script>`
+  }
 
   const bodyContent = await renderRootLayout(rootLayout, raw(mountRoot + clientScript))
   let html = '<!doctype html>' + bodyContent
@@ -264,7 +298,7 @@ async function renderAppRouter(): Promise<RenderResult> {
   let clientScript = ''
   try {
     const code = await bundleClient({ routes, rootLayoutFile })
-    clientScript = `<script type="module" data-murasaki="client">${code}</script>`
+    clientScript = `<script data-murasaki="client">${code}</script>`
   } catch (e: any) {
     // Render an inline error overlay so the WebView shows what broke
     const msg = escapeHtml(String(e?.message ?? e))

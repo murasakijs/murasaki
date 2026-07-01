@@ -115,13 +115,65 @@ function findNodeBinary(root: string, exe: string): string | null {
 
 // ── @webviewjs/webview prebuild ────────────────────────────────────
 /** Returns absolute path to the .node prebuild file for the given target. */
-export async function ensureWebviewPrebuild(target: Target): Promise<string> {
-  if (target.id === currentTarget().id) {
-    // The host already has it via the project's node_modules
-    // (resolved by build.ts → resolveDepRoot('@webviewjs/webview')).
-    // The caller can locate the matching .node file there.
-    return '' // signal: use existing node_modules
+/**
+ * Locates the exact version of a webview prebuild package the consumer
+ * needs, by reading @webviewjs/webview's optionalDependencies map. That
+ * map pins each prebuild to the same version as the main package (per
+ * napi-rs convention), so downloading anything else — including 'latest'
+ * from the registry — risks an ABI / API mismatch at runtime.
+ *
+ * Returns null when the main package can't be located at all; the caller
+ * decides how to handle that.
+ */
+export async function detectWebviewPrebuildVersion(prebuildPkg: string): Promise<string | null> {
+  try {
+    const { createRequire } = await import('node:module')
+    const { fileURLToPath } = await import('node:url')
+
+    // Try resolving @webviewjs/webview/package.json from multiple bases.
+    // In strict pnpm consumer layouts the main webview package isn't
+    // reachable from the consumer's own node_modules — but it IS a direct
+    // dep of murasaki itself, so resolving from murasaki's own file
+    // always works, no matter how the consumer's project is set up.
+    const bases = [
+      // 1. Consumer's own package.json — works with npm / yarn / non-strict
+      //    pnpm hoisting.
+      join(process.cwd(), 'package.json'),
+      // 2. This module's own file. Since @webviewjs/webview is a direct
+      //    dep of murasaki, it's always resolvable from anywhere inside
+      //    the murasaki package's tree — including under pnpm's
+      //    virtual store nesting.
+      fileURLToPath(import.meta.url),
+    ]
+
+    for (const base of bases) {
+      try {
+        const req = createRequire(base)
+        const webviewPkg = req(`@webviewjs/webview/package.json`) as {
+          version?: string
+          optionalDependencies?: Record<string, string>
+        }
+        const pinned = webviewPkg.optionalDependencies?.[prebuildPkg]
+        if (pinned) return pinned
+        // Fallback: assume the prebuild version tracks the main package
+        // version. napi-rs projects follow this convention by default.
+        if (webviewPkg.version) return webviewPkg.version
+      } catch {
+        // try next base
+      }
+    }
+  } catch {
+    // ignore
   }
+  return null
+}
+
+export async function ensureWebviewPrebuild(target: Target): Promise<string> {
+  // Note: we no longer short-circuit for the host target. Whether the
+  // requested target matches the host or not, some strict pnpm layouts
+  // won't hoist the prebuild package to the consumer's node_modules —
+  // so build.ts always calls into this function as a reliable fallback
+  // and copies the resulting directory into the app bundle.
 
   // Map target → npm package name
   const webviewPkg = mapWebviewPackage(target)
@@ -129,15 +181,34 @@ export async function ensureWebviewPrebuild(target: Target): Promise<string> {
     throw new Error(`No @webviewjs/webview prebuild for ${target.id}`)
   }
 
-  const cacheRoot = join(cacheDir(), 'webview', webviewPkg)
+  // Resolve the exact pin BEFORE we look at the cache. Including the
+  // version in the cache path means a webview upgrade in the consumer's
+  // node_modules invalidates the cache automatically — otherwise a
+  // second build after `pnpm add @webviewjs/webview@latest` would silently
+  // reuse the wrong ABI and crash the packaged app at runtime.
+  const version = await detectWebviewPrebuildVersion(webviewPkg)
+  if (!version) {
+    throw new Error(
+      `Cannot determine the correct version of ${webviewPkg} to download.\n` +
+        `The main @webviewjs/webview package must be installed (as a direct or\n` +
+        `transitive dependency of your project) so its optionalDependencies\n` +
+        `pin can be read.`,
+    )
+  }
+
+  const cacheRoot = join(cacheDir(), 'webview', webviewPkg, version)
   if (existsSync(cacheRoot) && readdirSync(cacheRoot).length > 0) return cacheRoot
 
   mkdirSync(cacheRoot, { recursive: true })
 
-  // Use `npm pack` style — fetch the tarball from registry and extract.
-  const tarballUrl = await resolveNpmTarball(webviewPkg)
-  // Flatten the package name (it contains a `/`) for the local archive path.
-  const safeName = webviewPkg.replace(/[/@]/g, '-')
+  // Fetch the tarball at the exact pinned version. Skip resolveNpmTarball
+  // here because we already have the version — passing it around removes
+  // the risk of a second lookup returning a different answer under a race.
+  const tarballUrl = `https://registry.npmjs.org/${webviewPkg.replace(
+    '/',
+    '%2F',
+  )}/-/${webviewPkg.split('/')[1]}-${version}.tgz`
+  const safeName = `${webviewPkg.replace(/[/@]/g, '-')}-${version}`
   const archivePath = join(tmpdir(), `${safeName}.tgz`)
   await fetchToFile(tarballUrl, archivePath)
   await runOrThrow('tar', ['-xf', archivePath, '-C', cacheRoot, '--strip-components=1'])
@@ -153,21 +224,6 @@ function mapWebviewPackage(target: Target): string | null {
   return null
 }
 
-async function resolveNpmTarball(pkgName: string): Promise<string> {
-  // Use the registry's "latest" version that matches the host's
-  // @webviewjs/webview version. We read the consumer project's resolved
-  // version via the package.json from the existing node_modules.
-  let version = 'latest'
-  try {
-    const { createRequire } = await import('node:module')
-    const req = createRequire(join(homedir(), 'package.json')) // dummy base
-    const local = req(`@webviewjs/webview/package.json`)
-    version = local.version
-  } catch {
-    // Best effort — fall back to latest.
-  }
-  return `https://registry.npmjs.org/${pkgName.replace('/', '%2F')}/-/${pkgName.split('/')[1]}-${version}.tgz`
-}
 
 // ── helpers ────────────────────────────────────────────────────────
 function fetchToFile(url: string, dest: string): Promise<void> {

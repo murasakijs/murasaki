@@ -38,10 +38,40 @@ export async function bundleClient({ routes, rootLayoutFile }: BundleInput): Pro
 ${pageImports}
 ${layoutImport}
 import { createRoot, jsx } from 'murasaki/jsx/dom'
-import { installClientRpc } from 'murasaki'
 
-// Wire up the client-side RPC dispatcher so callAction / useAction work.
-installClientRpc()
+// Inlined installClientRpc() — we can't import it via 'murasaki' because
+// the package's main entry re-exports Node-only modules (config, env)
+// that esbuild refuses to bundle for the browser target.
+;(function installClientRpc() {
+  if (typeof window === 'undefined' || window.__murasakiRpc__) return
+  const pending = new Map()
+  let counter = 0
+  window.__murasakiRpc__ = {
+    call(name, args) {
+      return new Promise((resolve, reject) => {
+        if (!window.ipc || !window.ipc.postMessage) {
+          reject(new Error('[murasaki] window.ipc is not available'))
+          return
+        }
+        const id = 'r' + (++counter)
+        pending.set(id, { resolve, reject })
+        window.ipc.postMessage(JSON.stringify({ kind: 'call', id: id, name: name, args: args }))
+      })
+    },
+    resolve(id, value) {
+      const p = pending.get(id)
+      if (!p) return
+      pending.delete(id)
+      p.resolve(value)
+    },
+    reject(id, err) {
+      const p = pending.get(id)
+      if (!p) return
+      pending.delete(id)
+      p.reject(new Error(err))
+    },
+  }
+})()
 
 const ROUTES = {
 ${routesMap}
@@ -90,6 +120,76 @@ document.addEventListener('click', function (e) {
 })
 `
 
+  // Any code path that reaches a Node built-in (`node:fs`, `node:path`, …)
+  // is dead in the browser. murasaki's index re-exports server-only helpers
+  // like defineConfig/loadConfig, which pull those in through config.ts and
+  // env.ts. Rather than split the package into two entry points (and force
+  // every consumer to change their imports), we replace `node:*` specifiers
+  // with an empty ESM module — tree-shaking then discards the server-only
+  // functions that used them, leaving only the components/hooks the client
+  // actually calls.
+  // Enumerated export names for the Node built-ins murasaki's server code
+  // touches. These are the names esbuild's ESM/CJS interop pipeline copies
+  // via getOwnPropertyNames; a Proxy alone doesn't expose named getters in
+  // that iteration, so we materialise real properties on a stub function.
+  const NODE_STUB_EXPORTS: Record<string, string[]> = {
+    fs: [
+      'readFileSync', 'writeFileSync', 'existsSync', 'mkdirSync', 'statSync',
+      'lstatSync', 'readdirSync', 'unlinkSync', 'rmSync', 'renameSync',
+      'chmodSync', 'cpSync', 'createReadStream', 'createWriteStream',
+      'watch', 'promises', 'default',
+    ],
+    path: [
+      'join', 'resolve', 'dirname', 'basename', 'extname', 'normalize',
+      'relative', 'isAbsolute', 'parse', 'format', 'sep', 'delimiter',
+      'posix', 'win32', 'default',
+    ],
+    url: [
+      'pathToFileURL', 'fileURLToPath', 'URL', 'URLSearchParams',
+      'format', 'parse', 'resolve', 'default',
+    ],
+    os: [
+      'homedir', 'tmpdir', 'platform', 'arch', 'release', 'type',
+      'cpus', 'freemem', 'totalmem', 'hostname', 'default',
+    ],
+    child_process: [
+      'spawn', 'exec', 'execSync', 'spawnSync', 'fork', 'execFile',
+      'execFileSync', 'default',
+    ],
+    module: ['createRequire', 'Module', 'default'],
+    crypto: ['createHash', 'randomBytes', 'randomUUID', 'default'],
+    events: ['EventEmitter', 'default'],
+    stream: ['Readable', 'Writable', 'Transform', 'Duplex', 'default'],
+    util: ['promisify', 'inherits', 'format', 'default'],
+    process: ['default'],
+  }
+  const stubForBuiltin = (name: string): string => {
+    const exports = NODE_STUB_EXPORTS[name] ?? ['default']
+    // Build an object literal we can attach real getters onto, so
+    // getOwnPropertyNames(stub) enumerates the names esbuild's interop
+    // pipeline copies.
+    return (
+      'var noop = function(){}; ' +
+      'var stub = {};' +
+      exports.map((k) => `stub[${JSON.stringify(k)}] = noop;`).join(' ') +
+      'stub.__esModule = true; ' +
+      'module.exports = stub;'
+    )
+  }
+  const stubNodeBuiltins: esbuild.Plugin = {
+    name: 'murasaki-stub-node-builtins',
+    setup(build) {
+      build.onResolve({ filter: /^node:/ }, (args) => ({
+        path: args.path,
+        namespace: 'murasaki-node-stub',
+      }))
+      build.onLoad({ filter: /.*/, namespace: 'murasaki-node-stub' }, (args) => {
+        const builtin = args.path.replace(/^node:/, '')
+        return { contents: stubForBuiltin(builtin), loader: 'js' }
+      })
+    },
+  }
+
   const result = await esbuild.build({
     stdin: {
       contents: entry,
@@ -101,10 +201,33 @@ document.addEventListener('click', function (e) {
     write: false,
     format: 'iife',
     target: ['safari16', 'chrome120', 'firefox120'],
+    platform: 'browser',
     jsx: 'automatic',
     jsxImportSource: 'murasaki',
     minify: false,
     sourcemap: 'inline',
+    plugins: [stubNodeBuiltins],
+    // A minimal `process` shim so bundled code that reads `process.env.*`
+    // or dereferences `process.cwd()` / `process.platform` at module init
+    // doesn't crash the entire hydration in the browser. The server-only
+    // code paths that touch these are dead in the client, but ESM top-level
+    // statements still execute before tree-shaking can help.
+    banner: {
+      js:
+        'var process = typeof process !== "undefined" ? process : { ' +
+        'env: { NODE_ENV: "production", MURASAKI_DEV: "0" }, ' +
+        'versions: {}, platform: "browser", ' +
+        'cwd: function(){ return "/" }, ' +
+        'argv: [], ' +
+        'nextTick: function(fn){ Promise.resolve().then(fn) } ' +
+        '};',
+    },
+    define: {
+      'process.env.NODE_ENV': '"production"',
+      // Server-side branches like `typeof window === 'undefined'` become
+      // dead code and get eliminated.
+      'process.env.MURASAKI_DEV': '"0"',
+    },
     logLevel: 'silent',
   })
 
@@ -114,5 +237,18 @@ document.addEventListener('click', function (e) {
     )
   }
 
-  return result.outputFiles[0].text
+  // Wrap the IIFE with an outer try/catch so any exception thrown while the
+  // static-imported modules initialise is written to a DOM attribute Node
+  // can probe. WKWebView redacts inline-script exceptions to 'Script error.'
+  // on window.onerror, which makes debugging otherwise impossible.
+  const body = result.outputFiles[0].text
+  return (
+    'try{' +
+    body +
+    '}catch(__murasaki_boot_err){try{' +
+    "document.body.setAttribute('data-murasaki-boot-error', " +
+    'String((__murasaki_boot_err && __murasaki_boot_err.stack) || __murasaki_boot_err));' +
+    "document.title='[BOOT-ERR] '+String(__murasaki_boot_err&&__murasaki_boot_err.message||__murasaki_boot_err);" +
+    '}catch(__e){}}'
+  )
 }

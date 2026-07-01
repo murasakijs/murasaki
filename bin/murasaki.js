@@ -33,10 +33,19 @@ if (cmd === 'dev') {
   await mod.build({ target: flagValue('target') })
 } else if (cmd === 'bundle') {
   const mod = await loadModule('build')
-  await mod.build({ pack: true, target: flagValue('target') })
+  await mod.build({
+    pack: true,
+    target: flagValue('target'),
+    slim: process.argv.includes('--slim'),
+  })
 } else if (cmd === 'installer') {
   const mod = await loadModule('build')
-  await mod.build({ pack: true, installer: true, target: flagValue('target') })
+  await mod.build({
+    pack: true,
+    installer: true,
+    target: flagValue('target'),
+    slim: process.argv.includes('--slim'),
+  })
 } else {
   process.stdout.write(`
 Usage:
@@ -62,9 +71,23 @@ Cross-compile flag (available on all build/bundle/installer commands):
 
 Host requirements for installer formats:
     .dmg  → only on macOS host (uses hdiutil)
-    .msi  → upcoming via WiX v4 (.NET tool, cross-platform)
+    .msi  → any host + WiX v4 (dotnet tool install -g wix)
+    .AppImage → any host + squashfs-tools
     .zip  → cross-platform (zip/Compress-Archive)
     .tar.gz → cross-platform
+
+Size reduction:
+  --slim                             Ship a ~5 MB launcher instead of bundling
+                                     Node runtime (~90 MB). The Node runtime
+                                     is downloaded to
+                                     ~/.murasaki/runtime/<bundleId>/ on first
+                                     launch, with a native confirm dialog.
+                                     (Currently macOS-only; Windows/Linux
+                                     fall back to the bundled runtime.)
+
+  Examples:
+    murasaki bundle    --slim
+    murasaki installer --slim
 
 `)
   process.exit(cmd ? 1 : 0)

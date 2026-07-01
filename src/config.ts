@@ -70,6 +70,36 @@ export type MurasakiConfig = {
     maxWidth?: number
     resizable?: boolean
   }
+
+  /**
+   * Runtime configuration. Currently controls which Node version the
+   * bundled runtime and `--slim` launcher use.
+   */
+  runtime?: {
+    /**
+     * Node.js version to bundle / download (e.g. "v24.16.0"). Defaults
+     * to the Node the current murasaki release was built against.
+     */
+    node?: string
+  }
+
+  /**
+   * macOS .dmg installer look-and-feel — drag-to-install layout
+   * (like Discord / VS Code / Slack ship). Optional; leave empty and
+   * you get a sensible default without a background image.
+   */
+  dmg?: {
+    /** Path (relative to project root) to a background image (PNG). */
+    background?: string
+    /** Finder window size [width, height]. Default: [540, 380]. */
+    windowSize?: [number, number]
+    /** Icon size in points. Default: 128. */
+    iconSize?: number
+    /** App icon position [x, y] within the window. Default: [140, 190]. */
+    appPosition?: [number, number]
+    /** Applications shortcut position. Default: [400, 190]. */
+    applicationsPosition?: [number, number]
+  }
 }
 
 /**
