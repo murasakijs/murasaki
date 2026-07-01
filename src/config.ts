@@ -1,4 +1,7 @@
 // murasaki.config.{ts,js,json} — user-facing build/runtime configuration.
+export type { GlobalContextMenuItem, GlobalContextMenuAction } from './runtime/context-menu.ts'
+import type { GlobalContextMenuItem } from './runtime/context-menu.ts'
+
 //
 // Lookup order (first match wins):
 //   1. murasaki.config.ts            (typed, runs through tsx)
@@ -81,6 +84,34 @@ export type MurasakiConfig = {
      * to the Node the current murasaki release was built against.
      */
     node?: string
+  }
+
+  /**
+   * WebView-level toggles. Defaults trim browser-y affordances that
+   * don't belong in a native app.
+   */
+  webview?: {
+    /**
+     * Right-click context menu configuration:
+     *   false             — completely disable the browser's default menu (default)
+     *   'browser'         — keep the browser default (Reload / Inspect / etc)
+     *   GlobalContextMenuItem[] — render a custom menu made up of these items
+     *
+     * When set to an item array, the client-side `useGlobalContextMenu()`
+     * hook can further override or extend the list per page.
+     */
+    contextMenu?: false | 'browser' | GlobalContextMenuItem[]
+    /**
+     * Open developer tools on launch. Default: false. During `murasaki dev`
+     * you'd typically leave this off and rely on Cmd+Option+I anyway.
+     */
+    devtools?: boolean
+    /**
+     * Prevent common browser-style shortcuts inside the WebView:
+     * Cmd+R / Cmd+Shift+R reload, F5, Cmd+L, drag-to-navigate, etc.
+     * Default: true.
+     */
+    suppressBrowserShortcuts?: boolean
   }
 
   /**

@@ -12,14 +12,28 @@
 
 import * as esbuild from 'esbuild'
 import { projectRoot } from '../env.ts'
+import type { GlobalContextMenuItem } from './context-menu.ts'
 import type { Route } from './routes.ts'
 
 type BundleInput = {
   routes: Route[]
   rootLayoutFile: string | null
+  /**
+   * WebView chrome tweaks resolved from murasaki.config.ts.
+   * Defaults trim browser-y affordances that don't belong in a native app.
+   */
+  webview?: {
+    contextMenu?: false | 'browser' | GlobalContextMenuItem[]
+    suppressBrowserShortcuts?: boolean
+  }
 }
 
-export async function bundleClient({ routes, rootLayoutFile }: BundleInput): Promise<string> {
+export async function bundleClient({ routes, rootLayoutFile, webview }: BundleInput): Promise<string> {
+  const contextMenu = webview?.contextMenu ?? false
+  const suppressBrowserShortcuts = webview?.suppressBrowserShortcuts ?? true
+  const contextMenuItems: GlobalContextMenuItem[] = Array.isArray(contextMenu) ? contextMenu : []
+  const hasCustomContextMenu = contextMenuItems.length > 0
+  const useBrowserContextMenu = contextMenu === 'browser'
   // Each route gets a numbered Page import so we can wire them by URL path.
   const pageImports = routes
     .map((r, i) => `import Page${i} from ${JSON.stringify(r.pageFile)}`)
@@ -34,10 +48,47 @@ export async function bundleClient({ routes, rootLayoutFile }: BundleInput): Pro
 
   const wrap = rootLayoutFile ? 'jsx(RootLayout, { children: jsx(Page, null) })' : 'jsx(Page, null)'
 
+  // Trim browser affordances that make a WebView app feel like a browser:
+  // right-click context menu with Reload/Inspect, F5/Cmd+R page refresh,
+  // drag-to-navigate, Cmd+L address bar, etc. Both are opt-outable via
+  // murasaki.config.ts.
+  //
+  // Order of precedence for contextmenu:
+  //   1. contextMenu: 'browser'         → leave the WebView default in place
+  //   2. contextMenu: GlobalContextMenuItem[] → install murasaki's custom renderer
+  //   3. contextMenu: false / omitted   → block preventDefault, no UI
+  const chromeSuppressors = [
+    useBrowserContextMenu || hasCustomContextMenu
+      ? ''
+      : "document.addEventListener('contextmenu', function(e){ e.preventDefault() }, true);",
+    suppressBrowserShortcuts
+      ? "document.addEventListener('keydown', function(e){" +
+        "  var k = e.key;" +
+        "  var mod = e.metaKey || e.ctrlKey;" +
+        // Cmd+R / Ctrl+R / F5 / Cmd+Shift+R — reload
+        "  if ((mod && (k === 'r' || k === 'R')) || k === 'F5') { e.preventDefault(); return }" +
+        // Cmd+L — focus address bar
+        "  if (mod && (k === 'l' || k === 'L')) { e.preventDefault(); return }" +
+        // Cmd+D — bookmark
+        "  if (mod && (k === 'd' || k === 'D')) { e.preventDefault(); return }" +
+        // Cmd+F is a legitimate app shortcut (search). Leave it alone.
+        "}, true);"
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const contextMenuInstall = hasCustomContextMenu
+    ? `import { installGlobalContextMenu } from 'murasaki/dist/context-menu-client.js';
+installGlobalContextMenu(${JSON.stringify(contextMenuItems)});`
+    : ''
+
   const entry = `
+${chromeSuppressors}
 ${pageImports}
 ${layoutImport}
 import { createRoot, jsx } from 'murasaki/jsx/dom'
+${contextMenuInstall}
 
 // Inlined installClientRpc() — we can't import it via 'murasaki' because
 // the package's main entry re-exports Node-only modules (config, env)

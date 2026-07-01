@@ -15,74 +15,96 @@ export type MenuHandlers = {
   onQuit: () => void
 }
 
-export function setupAppMenu(app: Application, handlers: MenuHandlers): void {
-  try {
-    ;(app as { setMenu?: (config: unknown) => void }).setMenu?.({
-      items: [
-        {
-          // First item is conventionally the app's own menu on macOS.
-          label: 'Murasaki',
-          submenu: {
-            items: [
-              { role: 'about' },
-              { role: 'separator' },
-              { role: 'services' },
-              { role: 'separator' },
-              { role: 'hide' },
-              { role: 'hideOthers' },
-              { role: 'showAll' },
-              { role: 'separator' },
-              { role: 'quit' },
-            ],
+export type MenuOptions = {
+  /** Display name — used for the first-position app menu title on macOS. */
+  appName?: string
+  /** Show the Develop submenu (Reload / Restart). Default: true in dev, false in production. */
+  includeDevMenu?: boolean
+}
+
+export function setupAppMenu(
+  app: Application,
+  handlers: MenuHandlers,
+  opts: MenuOptions = {},
+): void {
+  const appName = opts.appName ?? 'Murasaki'
+  const includeDevMenu = opts.includeDevMenu ?? true
+
+  const items: Array<Record<string, unknown>> = [
+    {
+      // First item is conventionally the app's own menu on macOS.
+      // Its label is what shows up in the top-left menu bar AND in the
+      // "About …" menu item that macOS synthesises.
+      label: appName,
+      submenu: {
+        items: [
+          { role: 'about' },
+          { role: 'separator' },
+          { role: 'services' },
+          { role: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'showAll' },
+          { role: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+    },
+  ]
+
+  if (includeDevMenu) {
+    items.push({
+      // Use "Develop" to avoid mixing dev commands into a standard "View" bar.
+      label: 'Develop',
+      submenu: {
+        items: [
+          {
+            id: 'murasaki:reload',
+            label: 'Reload',
+            accelerator: 'CmdOrCtrl+R',
           },
-        },
-        {
-          // Use "Develop" to avoid mixing dev commands into a standard "View" bar.
-          label: 'Develop',
-          submenu: {
-            items: [
-              {
-                id: 'murasaki:reload',
-                label: 'Reload',
-                accelerator: 'CmdOrCtrl+R',
-              },
-              {
-                id: 'murasaki:restart',
-                // Cmd+Shift+R is "hard reload" in Safari/Chrome — avoid the clash.
-                label: 'Restart Window',
-                accelerator: 'CmdOrCtrl+Alt+R',
-              },
-            ],
+          {
+            id: 'murasaki:restart',
+            // Cmd+Shift+R is "hard reload" in Safari/Chrome — avoid the clash.
+            label: 'Restart Window',
+            accelerator: 'CmdOrCtrl+Alt+R',
           },
-        },
-        {
-          label: 'View',
-          submenu: {
-            items: [{ role: 'fullscreen' }],
-          },
-        },
-        {
-          label: 'Edit',
-          submenu: {
-            items: [
-              { role: 'undo' },
-              { role: 'redo' },
-              { role: 'separator' },
-              { role: 'cut' },
-              { role: 'copy' },
-              { role: 'paste' },
-              { role: 'selectAll' },
-            ],
-          },
-        },
-        {
-          label: 'Window',
-          submenu: {
-            items: [{ role: 'minimize' }, { role: 'zoom' }],
-          },
-        },
-      ],
+        ],
+      },
     })
+  }
+
+  items.push(
+    {
+      label: 'View',
+      submenu: {
+        items: [{ role: 'fullscreen' }],
+      },
+    },
+    {
+      label: 'Edit',
+      submenu: {
+        items: [
+          { role: 'undo' },
+          { role: 'redo' },
+          { role: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectAll' },
+        ],
+      },
+    },
+    {
+      label: 'Window',
+      submenu: {
+        items: [{ role: 'minimize' }, { role: 'zoom' }],
+      },
+    },
+  )
+
+  try {
+    ;(app as { setMenu?: (config: unknown) => void }).setMenu?.({ items })
   } catch {
     // Older webview versions may not support setMenu — fail silent.
   }

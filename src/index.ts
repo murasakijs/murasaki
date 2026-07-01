@@ -11,6 +11,10 @@ export { Link } from './components/Link.tsx'
 export { defineConfig, loadConfig } from './config.ts'
 export type { MurasakiConfig } from './config.ts'
 
+// Right-click context menu API.
+export { useGlobalContextMenu } from './context-menu-client.ts'
+export type { GlobalContextMenuItem, GlobalContextMenuAction } from './runtime/context-menu.ts'
+
 // Server actions (RPC) — server side.
 export { defineAction } from './rpc-server.ts'
 

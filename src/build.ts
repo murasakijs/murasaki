@@ -220,9 +220,11 @@ async function bundleServer(distDir: string): Promise<string> {
       routes[0]?.layoutFiles.find((p) => p.endsWith('/app/layout.tsx')) ?? null
     try {
       const { bundleClient } = await import('./runtime/bundle.ts')
+      const configForBundle = await loadConfig()
       clientBundleCode = await bundleClient({
         routes,
         rootLayoutFile: rootLayoutFileForClient,
+        webview: configForBundle.webview,
       })
       out(`     ${green('✓')} ${dim('client bundle')} ${dim(`(${(clientBundleCode.length / 1024).toFixed(1)} KB)`)}\n`)
     } catch (e) {
@@ -516,12 +518,19 @@ async function packMacApp(
 
   // launcher script (must be executable by MacOS/<displayName>)
   const launcherPath = join(macOSDir, displayName)
+  // NOTE: don't `exec node` — that replaces the current PID and macOS
+  // loses the bundle context (Info.plist / CFBundleName), so the About
+  // dialog and Dock name fall back to "node". Spawn node as a child and
+  // wait on it instead. Trap SIGTERM/INT to propagate a clean shutdown.
   const launcher = packOpts.slim
     ? macSlimLauncher({ displayName, bundleId, nodeVersion, arch: target.arch })
     : `#!/bin/bash
 DIR="$(cd "$(dirname "$0")/.." && pwd)/Resources"
 cd "$DIR"
-exec "$DIR/node" "$DIR/server.cjs"
+"$DIR/node" "$DIR/server.cjs" &
+CHILD=$!
+trap 'kill -TERM $CHILD 2>/dev/null' TERM INT
+wait $CHILD
 `
   writeFileSync(launcherPath, launcher)
   chmodSync(launcherPath, 0o755)

@@ -9,11 +9,35 @@
 // cleanly to CJS for Node SEA.
 
 import { printBanner, printReady, printStarting } from './cli/log.ts'
-import { getConfig, openWindow, runApp } from './runtime/window.ts'
+import { resolveAppMeta } from './config.ts'
+import { setupAppMenu } from './runtime/menu.ts'
+import { app, closeWindow, getConfig, openWindow, runApp } from './runtime/window.ts'
 
 async function main() {
   const startAt = Date.now()
   await openWindow()
+
+  // Wire up the native menu bar so the app menu / About dialog / Cmd+Q
+  // all show the correct display name instead of falling back to "node".
+  try {
+    const meta = await resolveAppMeta()
+    if (app) {
+      setupAppMenu(
+        app,
+        {
+          onReload: () => {},
+          onRestart: () => {},
+          onQuit: () => {
+            try {
+              closeWindow()
+            } catch {}
+          },
+        },
+        { appName: meta.name, includeDevMenu: false },
+      )
+    }
+  } catch {}
+
   printBanner(getConfig().title, getConfig())
   printStarting()
   printReady(Date.now() - startAt)
