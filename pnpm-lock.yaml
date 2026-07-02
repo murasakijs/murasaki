@@ -27,7 +27,7 @@ importers:
   packages/murasaki:
     dependencies:
       '@murasakijs/native':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../crates/native
       '@vitejs/plugin-react':
         specifier: ^4.3.0

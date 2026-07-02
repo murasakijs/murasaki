@@ -128,6 +128,35 @@ function runInstall(targetDir, pm) {
   return result.status === 0
 }
 
+function hasGit() {
+  const result = spawnSync('git', ['--version'], { stdio: 'ignore' })
+  return !result.error && result.status === 0
+}
+
+function isInsideGitRepo(targetDir) {
+  const result = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
+    cwd: targetDir,
+    stdio: 'ignore',
+  })
+  return result.status === 0
+}
+
+function initGit(targetDir) {
+  const run = (args) => spawnSync('git', args, { cwd: targetDir, stdio: 'ignore' })
+  const init = run(['init'])
+  if (init.status !== 0) {
+    log(c(DIM) + '  → git init failed, skipping.' + c(RESET))
+    return
+  }
+  run(['add', '-A'])
+  const commit = run(['commit', '-m', 'Initial commit from create-murasaki'])
+  if (commit.status !== 0) {
+    log(c(DIM) + '  → git initialized, but the initial commit failed.' + c(RESET))
+    return
+  }
+  log(c(DIM) + '  → git initialized' + c(RESET))
+}
+
 function exitIfCancel(value) {
   if (isCancel(value)) {
     cancel('Cancelled.')
@@ -252,13 +281,25 @@ async function copyTemplate(templateDir, targetDir, appName) {
   await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
 }
 
+function parseArgs(argv) {
+  let name
+  let skipInstall = false
+  let noGit = false
+  for (const arg of argv) {
+    if (arg === '--skip-install') skipInstall = true
+    else if (arg === '--no-git') noGit = true
+    else if (!arg.startsWith('-') && name === undefined) name = arg
+  }
+  return { name, skipInstall, noGit }
+}
+
 async function main() {
   const __filename = fileURLToPath(import.meta.url)
   const __dirname = dirname(__filename)
 
   process.stdout.write('\n' + renderBanner() + '\n\n')
 
-  const argName = process.argv[2]
+  const { name: argName, skipInstall, noGit } = parseArgs(process.argv.slice(2))
   const name = argName && isValidPackageName(argName) ? argName : await promptForName()
   const linter = await promptForLinter()
 
@@ -275,12 +316,20 @@ async function main() {
   else if (linter === 'eslint') await applyEslint(target)
 
   const pm = detectPackageManager()
-  log(c(DIM) + `  → installing with ${pm}…` + c(RESET))
-  const ok = runInstall(target, pm)
-  if (!ok) {
-    log(c(RED) + `  ✗ install failed. run it yourself:` + c(RESET))
-    log(`      cd ${name} && ${pm} install`)
-    process.exit(1)
+  let installed = false
+  if (!skipInstall) {
+    log(c(DIM) + `  → installing with ${pm}…` + c(RESET))
+    const ok = runInstall(target, pm)
+    if (!ok) {
+      log(c(RED) + `  ✗ install failed. run it yourself:` + c(RESET))
+      log(`      cd ${name} && ${pm} install`)
+      process.exit(1)
+    }
+    installed = true
+  }
+
+  if (!noGit && hasGit() && !isInsideGitRepo(target)) {
+    initGit(target)
   }
 
   log('')
@@ -290,6 +339,7 @@ async function main() {
   log('')
   log(c(DIM) + '  Next:' + c(RESET))
   log(`    cd ${name}`)
+  if (!installed) log(`    ${pm} install`)
   log(`    ${pm} run dev`)
   log('')
 }

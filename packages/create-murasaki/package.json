@@ -1,6 +1,6 @@
 {
   "name": "create-murasaki",
-  "version": "1.0.0-alpha.1",
+  "version": "0.26.0",
   "description": "Scaffolder for Murasaki apps.",
   "license": "MIT",
   "type": "module",

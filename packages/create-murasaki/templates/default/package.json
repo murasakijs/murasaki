@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "murasaki": "^1.0.0-alpha.1",
+    "murasaki": "^0.26.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
