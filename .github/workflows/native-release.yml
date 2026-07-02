@@ -17,7 +17,10 @@ jobs:
         include:
           - host: macos-14
             target: aarch64-apple-darwin
-          - host: macos-13
+          # Cross-compile the Intel target on an ARM mac runner: macos-13
+          # (Intel) runners are scarce/being retired, and Apple's toolchain is
+          # universal so a macos-14 host builds x86_64 fine.
+          - host: macos-14
             target: x86_64-apple-darwin
           - host: windows-2022
             target: x86_64-pc-windows-msvc
