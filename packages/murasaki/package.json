@@ -1,0 +1,65 @@
+{
+  "name": "murasaki",
+  "version": "0.26.0",
+  "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
+  "keywords": [
+    "desktop",
+    "framework",
+    "nextjs",
+    "react",
+    "vite",
+    "tauri-alternative",
+    "electron-alternative"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murasakijs/murasaki.git",
+    "directory": "packages/murasaki"
+  },
+  "type": "module",
+  "bin": {
+    "murasaki": "./bin/murasaki.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./vite-plugin": {
+      "types": "./dist/vite-plugin/index.d.ts",
+      "default": "./dist/vite-plugin/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "default": "./dist/react/index.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist",
+    "assets"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch"
+  },
+  "dependencies": {
+    "@murasakijs/native": "workspace:^",
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "picocolors": "^1.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  }
+}

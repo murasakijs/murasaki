@@ -1,15 +1,34 @@
+# node
 node_modules/
+.pnpm-store/
+
+# build outputs
 dist/
 build/
 out/
-.next/
-*.log
+*.tsbuildinfo
+
+# rust
+target/
+**/*.rs.bk
+
+# napi-rs
+crates/native/*.node
+crates/native/npm/**/*.node
+
+# system
 .DS_Store
-.env
-.env.local
-.env.*.local
+Thumbs.db
+
+# editor
 .vscode/
 .idea/
-coverage/
-*.tsbuildinfo
-.cache/
+
+# logs / temp
+*.log
+.tmp/
+tmp/
+
+# env
+.env
+.env.local

@@ -1,0 +1,22 @@
+{
+  "name": "create-murasaki",
+  "version": "0.26.0",
+  "description": "Scaffolder for Murasaki apps.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murasakijs/murasaki.git",
+    "directory": "packages/create-murasaki"
+  },
+  "type": "module",
+  "bin": {
+    "create-murasaki": "./index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "templates"
+  ],
+  "dependencies": {
+    "@clack/prompts": "^0.11.0"
+  }
+}

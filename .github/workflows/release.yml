@@ -10,7 +10,9 @@ on:
         description: 'Optional version to publish (defaults to package.json)'
         required: false
 
-# Permissions needed for OIDC trusted publishing + provenance attestation
+# Permissions needed for OIDC Trusted Publishing (id-token) + checkout (contents).
+# No NPM_TOKEN is used: npm publish authenticates via the GitHub Actions OIDC
+# token exchanged for a short-lived npm token at publish time.
 permissions:
   contents: read
   id-token: write
@@ -30,11 +32,9 @@ jobs:
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
-          # Trusted Publishing reads OIDC; no NODE_AUTH_TOKEN needed
 
-      # npm 11.5+ has full Trusted Publisher / OIDC support. Even though Node 24
-      # ships a recent npm, force-upgrading guarantees we get the latest CLI
-      # that handles registry-url + OIDC token exchange correctly.
+      # OIDC Trusted Publishing requires npm 11.5+. Even though Node 24 ships a
+      # recent npm, force-upgrading guarantees we get a CLI that supports it.
       - name: Upgrade npm to latest
         run: npm install -g npm@latest
 
@@ -44,19 +44,63 @@ jobs:
         # that don't exist here. Standard install is enough for CI.
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build
-        run: pnpm run build
+      - name: Build murasaki
+        run: pnpm --filter murasaki build
 
-      - name: Verify version matches tag (if triggered by tag)
+      - name: Verify package versions match tag (if triggered by tag)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+          for pkg in packages/murasaki packages/create-murasaki; do
+            PKG_VERSION=$(node -p "require('./$pkg/package.json').version")
+            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::$pkg version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+              exit 1
+            fi
+            echo "$pkg version OK: $PKG_VERSION"
+          done
+
+      # `npm publish` (unlike `pnpm publish`) does not rewrite the
+      # workspace:^ dependency on @murasakijs/native. Replace it here with the
+      # real published version before publishing. This mutation is CI-only:
+      # the committed packages/murasaki/package.json keeps workspace:^ so the
+      # monorepo's local link keeps working.
+      - name: Resolve workspace:^ dependency to real version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const pkgPath = 'packages/murasaki/package.json';
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const nativeVersion = require('./crates/native/package.json').version;
+          pkg.dependencies['@murasakijs/native'] = '^' + nativeVersion;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          DEP=$(node -p "require('./packages/murasaki/package.json').dependencies['@murasakijs/native']")
+          echo "Resolved @murasakijs/native to: $DEP"
+          if [[ "$DEP" == workspace:* ]] || ! [[ "$DEP" =~ ^\^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::@murasakijs/native dependency was not resolved to a real version: $DEP"
             exit 1
           fi
-          echo "Version OK: $PKG_VERSION"
 
-      - name: Publish to npm
+      # Ordering guard: murasaki depends on @murasakijs/native, which is
+      # published separately by native-release.yml on its own native-v<x.y.z>
+      # tag. If that tag wasn't pushed (or its run hasn't finished) before this
+      # framework release, murasaki would publish with a dependency users can't
+      # install yet. Fail early instead of shipping a broken release.
+      - name: Verify @murasakijs/native is already published
+        run: |
+          NATIVE_VERSION=$(node -p "require('./crates/native/package.json').version")
+          if [ "$(npm view "@murasakijs/native@${NATIVE_VERSION}" version 2>/dev/null)" != "$NATIVE_VERSION" ]; then
+            echo "::error::@murasakijs/native@${NATIVE_VERSION} is not on npm yet. Push the native-v${NATIVE_VERSION} tag and let native-release.yml finish before releasing the framework."
+            exit 1
+          fi
+          echo "@murasakijs/native@${NATIVE_VERSION} is published — OK to release the framework."
+
+      # @murasakijs/native itself is published separately by native-release.yml.
+      - name: Publish packages/murasaki
+        working-directory: packages/murasaki
+        run: npm publish --provenance --access public
+
+      - name: Publish packages/create-murasaki
+        working-directory: packages/create-murasaki
         run: npm publish --provenance --access public

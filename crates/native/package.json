@@ -1,0 +1,34 @@
+{
+  "name": "@murasakijs/native",
+  "version": "0.26.0",
+  "description": "Native binding for murasaki (wry + tao + muda) exposed via napi-rs.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murasakijs/murasaki.git",
+    "directory": "crates/native"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "napi": {
+    "name": "murasaki-native"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "*.node"
+  ]
+}
