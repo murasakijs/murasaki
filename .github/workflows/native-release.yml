@@ -37,9 +37,9 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+      # No version pin: pnpm/action-setup@v4 reads it from the root
+      # package.json "packageManager" field (specifying both errors).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - name: Install linux deps
         if: contains(matrix.target, 'linux')
         run: |
@@ -72,9 +72,9 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           # OIDC trusted publishing: no NODE_AUTH_TOKEN needed. npm reads the
           # GitHub Actions OIDC token itself via the id-token: write permission.
+      # No version pin: pnpm/action-setup@v4 reads it from the root
+      # package.json "packageManager" field (specifying both errors).
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       # OIDC trusted publishing requires npm 11.5+. Node 24 ships a recent
       # npm, but force-upgrading guarantees we get a CLI that supports it.
