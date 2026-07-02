@@ -94,27 +94,27 @@ jobs:
           fi
           echo "Version OK: $PKG_VERSION"
 
+      # @murasakijs/native ships as a single package containing the .node
+      # binary for every target (files: ["index.js", "index.d.ts", "*.node"]).
+      # The napi-generated index.js loader tries each ./murasaki-native.<triple>.node
+      # locally before falling back to optionalDependencies, so bundling all
+      # of them here means no per-target packages or optionalDependencies are
+      # needed.
       - uses: actions/download-artifact@v4
         with:
-          path: crates/native/artifacts
+          path: crates/native
+          merge-multiple: true
 
-      # Create the per-target npm/<triple> package dirs before copying
-      # binaries into them (napi artifacts requires the dirs to exist).
-      - name: Create per-target npm package dirs
-        run: pnpm exec napi create-npm-dirs
-
-      - name: Move built .node binaries into per-target npm package dirs
-        run: pnpm exec napi artifacts
-
-      # Publishes each npm/<triple> package (@murasakijs/native-<triple>) via
-      # a plain `npm publish` (no --provenance, no token: OIDC trusted
-      # publishing is picked up automatically from the ambient npm/CI
-      # context) and injects them as optionalDependencies into this
-      # package's package.json. --no-gh-release skips GitHub release
-      # creation (ghRelease defaults to true in napi-rs v3, so this must be
-      # passed explicitly).
-      - name: Publish per-target packages and update optionalDependencies
-        run: pnpm exec napi pre-publish --no-gh-release
+      - name: Verify all 5 target binaries are present
+        run: |
+          NODE_COUNT=$(find . -maxdepth 1 -name '*.node' | wc -l | tr -d ' ')
+          if [ "$NODE_COUNT" != "5" ]; then
+            echo "::error::Expected 5 .node binaries (one per build matrix target), found $NODE_COUNT"
+            ls -la ./*.node 2>/dev/null || true
+            exit 1
+          fi
+          echo "Found 5 .node binaries:"
+          ls -la ./*.node
 
       - name: Publish @murasakijs/native
         run: npm publish --access public --provenance
