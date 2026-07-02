@@ -1,86 +1,15 @@
 {
-  "name": "murasaki",
-  "version": "0.25.4",
-  "description": "The desktop framework for Next.js developers. Node-powered. WebView-thin. No Rust. No Chromium.",
-  "keywords": [
-    "desktop",
-    "framework",
-    "nextjs",
-    "react",
-    "node",
-    "webview",
-    "tauri-alternative",
-    "electron-alternative"
-  ],
-  "homepage": "https://github.com/murasakijs/murasaki",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/murasakijs/murasaki.git"
-  },
-  "bugs": {
-    "url": "https://github.com/murasakijs/murasaki/issues"
-  },
-  "license": "MIT",
-  "author": "ichi",
-  "type": "module",
-  "bin": {
-    "murasaki": "./bin/murasaki.js"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./jsx": {
-      "types": "./dist/jsx/index.d.ts",
-      "default": "./dist/jsx/index.js"
-    },
-    "./jsx-runtime": {
-      "types": "./dist/jsx/jsx-runtime.d.ts",
-      "default": "./dist/jsx/jsx-runtime.js"
-    },
-    "./jsx-dev-runtime": {
-      "types": "./dist/jsx/jsx-dev-runtime.d.ts",
-      "default": "./dist/jsx/jsx-dev-runtime.js"
-    },
-    "./jsx/dom": {
-      "types": "./dist/jsx/dom/index.d.ts",
-      "default": "./dist/jsx/dom/index.js"
-    },
-    "./context-menu-client": {
-      "types": "./dist/context-menu-client.d.ts",
-      "default": "./dist/context-menu-client.js"
-    }
-  },
-  "files": [
-    "bin",
-    "dist",
-    "assets",
-    "README.md",
-    "README.ja.md",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "LICENSE"
-  ],
+  "name": "murasaki-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Monorepo root for murasaki — Next.js-DX desktop framework, Rust-native, React 19, Vite.",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "prepublishOnly": "pnpm run build",
-    "example:app-router": "cd examples/app-router && pnpm dev",
-    "check": "biome check",
-    "lint": "biome lint",
-    "format": "biome format --write",
-    "fix": "biome check --write"
-  },
-  "dependencies": {
-    "@webviewjs/webview": "^0.3.2",
-    "esbuild": "^0.28.1",
-    "postject": "1.0.0-alpha.6",
-    "tsx": "^4.22.4"
+    "build": "pnpm -r --filter='./packages/*' build",
+    "dev": "pnpm --filter murasaki dev",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@types/node": "^26.0.1",
-    "typescript": "^6.0.3"
+    "typescript": "^5.7.0"
   }
 }
