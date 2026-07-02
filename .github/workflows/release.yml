@@ -82,6 +82,20 @@ jobs:
             exit 1
           fi
 
+      # Ordering guard: murasaki depends on @murasakijs/native, which is
+      # published separately by native-release.yml on its own native-v<x.y.z>
+      # tag. If that tag wasn't pushed (or its run hasn't finished) before this
+      # framework release, murasaki would publish with a dependency users can't
+      # install yet. Fail early instead of shipping a broken release.
+      - name: Verify @murasakijs/native is already published
+        run: |
+          NATIVE_VERSION=$(node -p "require('./crates/native/package.json').version")
+          if [ "$(npm view "@murasakijs/native@${NATIVE_VERSION}" version 2>/dev/null)" != "$NATIVE_VERSION" ]; then
+            echo "::error::@murasakijs/native@${NATIVE_VERSION} is not on npm yet. Push the native-v${NATIVE_VERSION} tag and let native-release.yml finish before releasing the framework."
+            exit 1
+          fi
+          echo "@murasakijs/native@${NATIVE_VERSION} is published — OK to release the framework."
+
       # @murasakijs/native itself is published separately by native-release.yml.
       - name: Publish packages/murasaki
         working-directory: packages/murasaki
