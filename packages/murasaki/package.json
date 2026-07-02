@@ -12,6 +12,11 @@
     "electron-alternative"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murasakijs/murasaki.git",
+    "directory": "packages/murasaki"
+  },
   "type": "module",
   "bin": {
     "murasaki": "./bin/murasaki.mjs"

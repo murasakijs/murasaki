@@ -70,11 +70,17 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-          # registry-url makes setup-node write ~/.npmrc that reads the auth
-          # token from the NODE_AUTH_TOKEN env var (set on the publish steps).
+          # OIDC trusted publishing: no NODE_AUTH_TOKEN needed. npm reads the
+          # GitHub Actions OIDC token itself via the id-token: write permission.
       - uses: pnpm/action-setup@v4
         with:
           version: 9
+
+      # OIDC trusted publishing requires npm 11.5+. Node 24 ships a recent
+      # npm, but force-upgrading guarantees we get a CLI that supports it.
+      - name: Upgrade npm to latest
+        run: npm install -g npm@latest
+
       - name: pnpm install
         run: pnpm install --ignore-workspace
 
@@ -100,16 +106,15 @@ jobs:
       - name: Move built .node binaries into per-target npm package dirs
         run: pnpm exec napi artifacts
 
-      # Publishes each npm/<triple> package (@murasakijs/native-<triple>) and
-      # injects them as optionalDependencies into this package's package.json.
-      # --no-gh-release skips GitHub release creation (ghRelease defaults to
-      # true in napi-rs v3, so this must be passed explicitly).
+      # Publishes each npm/<triple> package (@murasakijs/native-<triple>) via
+      # a plain `npm publish` (no --provenance, no token: OIDC trusted
+      # publishing is picked up automatically from the ambient npm/CI
+      # context) and injects them as optionalDependencies into this
+      # package's package.json. --no-gh-release skips GitHub release
+      # creation (ghRelease defaults to true in napi-rs v3, so this must be
+      # passed explicitly).
       - name: Publish per-target packages and update optionalDependencies
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm exec napi pre-publish --no-gh-release
 
       - name: Publish @murasakijs/native
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance

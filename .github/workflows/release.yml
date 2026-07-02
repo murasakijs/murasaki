@@ -10,7 +10,9 @@ on:
         description: 'Optional version to publish (defaults to package.json)'
         required: false
 
-# Permissions needed for provenance attestation (id-token) + checkout (contents)
+# Permissions needed for OIDC Trusted Publishing (id-token) + checkout (contents).
+# No NPM_TOKEN is used: npm publish authenticates via the GitHub Actions OIDC
+# token exchanged for a short-lived npm token at publish time.
 permissions:
   contents: read
   id-token: write
@@ -30,11 +32,9 @@ jobs:
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
-          # registry-url makes setup-node write ~/.npmrc that reads the auth
-          # token from the NODE_AUTH_TOKEN env var (set on the publish steps).
 
-      # npm 11.5+ has full provenance support. Even though Node 24 ships a
-      # recent npm, force-upgrading guarantees we get the latest CLI.
+      # OIDC Trusted Publishing requires npm 11.5+. Even though Node 24 ships a
+      # recent npm, force-upgrading guarantees we get a CLI that supports it.
       - name: Upgrade npm to latest
         run: npm install -g npm@latest
 
@@ -60,17 +60,33 @@ jobs:
             echo "$pkg version OK: $PKG_VERSION"
           done
 
-      # pnpm publish (run from the package dir) rewrites the workspace:^
-      # dependency on @murasakijs/native to its real published version.
+      # `npm publish` (unlike `pnpm publish`) does not rewrite the
+      # workspace:^ dependency on @murasakijs/native. Replace it here with the
+      # real published version before publishing. This mutation is CI-only:
+      # the committed packages/murasaki/package.json keeps workspace:^ so the
+      # monorepo's local link keeps working.
+      - name: Resolve workspace:^ dependency to real version
+        run: |
+          node -e "
+          const fs = require('fs');
+          const pkgPath = 'packages/murasaki/package.json';
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          const nativeVersion = require('./crates/native/package.json').version;
+          pkg.dependencies['@murasakijs/native'] = '^' + nativeVersion;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+          "
+          DEP=$(node -p "require('./packages/murasaki/package.json').dependencies['@murasakijs/native']")
+          echo "Resolved @murasakijs/native to: $DEP"
+          if [[ "$DEP" == workspace:* ]] || ! [[ "$DEP" =~ ^\^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::@murasakijs/native dependency was not resolved to a real version: $DEP"
+            exit 1
+          fi
+
       # @murasakijs/native itself is published separately by native-release.yml.
       - name: Publish packages/murasaki
         working-directory: packages/murasaki
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm publish --access public --no-git-checks --provenance
+        run: npm publish --provenance --access public
 
       - name: Publish packages/create-murasaki
         working-directory: packages/create-murasaki
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm publish --access public --no-git-checks --provenance
+        run: npm publish --provenance --access public
