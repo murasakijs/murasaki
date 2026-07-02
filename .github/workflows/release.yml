@@ -10,7 +10,7 @@ on:
         description: 'Optional version to publish (defaults to package.json)'
         required: false
 
-# Permissions needed for OIDC trusted publishing + provenance attestation
+# Permissions needed for provenance attestation (id-token) + checkout (contents)
 permissions:
   contents: read
   id-token: write
@@ -30,11 +30,11 @@ jobs:
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
-          # Trusted Publishing reads OIDC; no NODE_AUTH_TOKEN needed
+          # registry-url makes setup-node write ~/.npmrc that reads the auth
+          # token from the NODE_AUTH_TOKEN env var (set on the publish steps).
 
-      # npm 11.5+ has full Trusted Publisher / OIDC support. Even though Node 24
-      # ships a recent npm, force-upgrading guarantees we get the latest CLI
-      # that handles registry-url + OIDC token exchange correctly.
+      # npm 11.5+ has full provenance support. Even though Node 24 ships a
+      # recent npm, force-upgrading guarantees we get the latest CLI.
       - name: Upgrade npm to latest
         run: npm install -g npm@latest
 
@@ -44,19 +44,33 @@ jobs:
         # that don't exist here. Standard install is enough for CI.
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build
-        run: pnpm run build
+      - name: Build murasaki
+        run: pnpm --filter murasaki build
 
-      - name: Verify version matches tag (if triggered by tag)
+      - name: Verify package versions match tag (if triggered by tag)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          PKG_VERSION=$(node -p "require('./package.json').version")
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
-            exit 1
-          fi
-          echo "Version OK: $PKG_VERSION"
+          for pkg in packages/murasaki packages/create-murasaki; do
+            PKG_VERSION=$(node -p "require('./$pkg/package.json').version")
+            if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::$pkg version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+              exit 1
+            fi
+            echo "$pkg version OK: $PKG_VERSION"
+          done
 
-      - name: Publish to npm
-        run: npm publish --provenance --access public
+      # pnpm publish (run from the package dir) rewrites the workspace:^
+      # dependency on @murasakijs/native to its real published version.
+      # @murasakijs/native itself is published separately by native-release.yml.
+      - name: Publish packages/murasaki
+        working-directory: packages/murasaki
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access public --no-git-checks --provenance
+
+      - name: Publish packages/create-murasaki
+        working-directory: packages/create-murasaki
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --access public --no-git-checks --provenance

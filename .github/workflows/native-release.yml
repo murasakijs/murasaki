@@ -70,14 +70,46 @@ jobs:
         with:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          # registry-url makes setup-node write ~/.npmrc that reads the auth
+          # token from the NODE_AUTH_TOKEN env var (set on the publish steps).
       - uses: pnpm/action-setup@v4
         with:
           version: 9
       - name: pnpm install
         run: pnpm install --ignore-workspace
+
+      - name: Verify package version matches tag
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF#refs/tags/native-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::crates/native package.json version ($PKG_VERSION) doesn't match tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version OK: $PKG_VERSION"
+
       - uses: actions/download-artifact@v4
         with:
           path: crates/native/artifacts
-      - run: pnpm exec napi artifacts
-      - run: pnpm exec napi create-npm-dirs
-      - run: pnpm publish --provenance --access public --no-git-checks
+
+      # Create the per-target npm/<triple> package dirs before copying
+      # binaries into them (napi artifacts requires the dirs to exist).
+      - name: Create per-target npm package dirs
+        run: pnpm exec napi create-npm-dirs
+
+      - name: Move built .node binaries into per-target npm package dirs
+        run: pnpm exec napi artifacts
+
+      # Publishes each npm/<triple> package (@murasakijs/native-<triple>) and
+      # injects them as optionalDependencies into this package's package.json.
+      # --no-gh-release skips GitHub release creation (ghRelease defaults to
+      # true in napi-rs v3, so this must be passed explicitly).
+      - name: Publish per-target packages and update optionalDependencies
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm exec napi pre-publish --no-gh-release
+
+      - name: Publish @murasakijs/native
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
