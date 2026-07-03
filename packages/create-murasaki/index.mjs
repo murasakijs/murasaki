@@ -6,7 +6,7 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { input, select } from '@inquirer/prompts'
 import { createSpinner } from 'nanospinner'
 
@@ -120,12 +120,21 @@ function installArgs(pm) {
   return ['install']
 }
 
+// Async on purpose: the caller shows a nanospinner while this runs, and the
+// spinner animates on a timer. A synchronous spawnSync would block the event
+// loop for the whole install, freezing the spinner on its first frame — so we
+// spawn and await instead, keeping the loop free to render frames.
 function runInstall(targetDir, pm) {
-  return spawnSync(pm, installArgs(pm), {
-    cwd: targetDir,
-    stdio: ['ignore', 'ignore', 'pipe'],   // capture stderr, keep the spinner clean
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
+  return new Promise((resolve) => {
+    const child = spawn(pm, installArgs(pm), {
+      cwd: targetDir,
+      stdio: ['ignore', 'ignore', 'pipe'],   // capture stderr, keep the spinner clean
+      shell: process.platform === 'win32',
+    })
+    let stderr = ''
+    child.stderr?.on('data', (d) => { stderr += d })
+    child.on('error', (err) => resolve({ status: 1, stderr: String(err?.message ?? err) }))
+    child.on('close', (code) => resolve({ status: code ?? 1, stderr }))
   })
 }
 
@@ -315,7 +324,7 @@ async function main() {
   let installed = false
   if (!skipInstall) {
     const spinner = createSpinner('Installing dependencies').start()
-    const res = runInstall(target, pm)
+    const res = await runInstall(target, pm)
     if (res.status === 0) {
       spinner.success({ text: 'Dependencies installed' })
       installed = true
