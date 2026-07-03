@@ -37,6 +37,25 @@ export {
 } from './react/rpc.js'
 
 export {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  Action,
+} from './react/context-menu.js'
+export type {
+  ContextMenuProps,
+  ContextMenuTriggerProps,
+  ContextMenuContentProps,
+  ContextMenuItemProps,
+  ContextMenuSubProps,
+  ActionNavigateProps,
+  ActionRunProps,
+} from './react/context-menu.js'
+
+export {
   UpdateButton,
   useUpdate,
 } from './react/updater.js'
