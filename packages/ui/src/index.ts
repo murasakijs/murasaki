@@ -69,6 +69,7 @@ export {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
+  TooltipPortal,
 } from './components/tooltip.js'
 
 export {
