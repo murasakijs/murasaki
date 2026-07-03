@@ -104,3 +104,65 @@ export type { AlertProps } from './components/alert.js'
 export { Skeleton } from './components/skeleton.js'
 
 export { Progress } from './components/progress.js'
+
+export {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandSeparator,
+  CommandItem,
+  CommandShortcut,
+} from './components/command.js'
+
+export {
+  Sheet,
+  SheetTrigger,
+  SheetClose,
+  SheetPortal,
+  SheetOverlay,
+  SheetContent,
+  SheetHeader,
+  SheetFooter,
+  SheetTitle,
+  SheetDescription,
+} from './components/sheet.js'
+export type { SheetContentProps } from './components/sheet.js'
+
+export {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from './components/accordion.js'
+
+export {
+  Table,
+  TableHeader,
+  TableBody,
+  TableFooter,
+  TableRow,
+  TableHead,
+  TableCell,
+  TableCaption,
+} from './components/table.js'
+
+export { ScrollArea, ScrollBar } from './components/scroll-area.js'
+
+export {
+  ToastProvider,
+  ToastViewport,
+  Toast,
+  ToastTitle,
+  ToastDescription,
+  ToastClose,
+  ToastAction,
+  toastVariants,
+} from './components/toast.js'
+export type { ToastProps, ToastActionElement } from './components/toast.js'
+
+export { Toaster } from './components/toaster.js'
+
+export { useToast, toast } from './hooks/use-toast.js'
