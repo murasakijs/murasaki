@@ -306,7 +306,7 @@ server — a Vite middleware in dev, a small bundled Node child server in prod.
 
 ## Roadmap
 
-murasaki is **pre-1.0** (currently `0.34.2`) — the API can still change
+murasaki is **pre-1.0** (currently `0.34.3`) — the API can still change
 before v1.0.
 
 - ✅ **Phase B** — App Router essentially done: routing, Server Actions,
