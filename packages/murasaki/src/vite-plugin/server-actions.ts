@@ -9,7 +9,7 @@ const ACTION_PATH_PREFIX = '/__murasaki/action/'
 
 /**
  * Stable id for a `'use server'` module: a project-root-relative POSIX path
- * (e.g. `src/actions.ts`). This is what the client stub embeds in its
+ * (e.g. `src/api/actions.ts`). This is what the client stub embeds in its
  * `fetch()` call and what both the dev middleware (below) and the prod
  * server (assets/prod-server.mjs, keyed off the registry built by
  * cli/build-server.ts) use to look the module back up — it has to be

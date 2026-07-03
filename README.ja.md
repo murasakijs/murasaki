@@ -245,7 +245,7 @@ export default defineConfig({
 React 19 スタイルのサーバーアクション——`useActionState` と同じ形です:
 
 ```ts
-// src/actions.ts
+// src/api/actions.ts
 'use server'
 import { defineAction } from 'murasaki'
 import type { ActionState } from 'murasaki'
@@ -261,7 +261,7 @@ export const greet = defineAction(
 ```tsx
 // src/app/page.tsx
 import { useAction } from 'murasaki'
-import { greet } from '../actions'
+import { greet } from '../api/actions'
 
 export default function Home() {
   const [state, run, isPending] = useAction(greet, {

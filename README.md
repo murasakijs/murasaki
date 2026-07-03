@@ -243,7 +243,7 @@ consumed by `useUpdate` / `UpdateButton`).
 React 19-style server actions — same shape as `useActionState`:
 
 ```ts
-// src/actions.ts
+// src/api/actions.ts
 'use server'
 import { defineAction } from 'murasaki'
 import type { ActionState } from 'murasaki'
@@ -259,7 +259,7 @@ export const greet = defineAction(
 ```tsx
 // src/app/page.tsx
 import { useAction } from 'murasaki'
-import { greet } from '../actions'
+import { greet } from '../api/actions'
 
 export default function Home() {
   const [state, run, isPending] = useAction(greet, {
