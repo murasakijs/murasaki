@@ -1,6 +1,8 @@
 import { Component, Suspense, useEffect, useMemo, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { ParamsContext, RouterContext } from './router.js'
+import { applyMetadata } from './metadata.js'
+import type { GenerateMetadata, Metadata } from './metadata.js'
 
 /**
  * Shape of a namespace import (`import * as mod from '...'`) for a page,
@@ -9,6 +11,8 @@ import { ParamsContext, RouterContext } from './router.js'
  */
 export interface RouteModule {
   default: ComponentType<any>
+  metadata?: Metadata
+  generateMetadata?: GenerateMetadata
 }
 
 /** Matches the entries emitted by `virtual:murasaki/routes`. */
@@ -91,6 +95,24 @@ function isAncestorOfPath(entryUrlPath: string, pathname: string): boolean {
 
 function byDepth(a: RouteEntry, b: RouteEntry) {
   return segmentsOf(a.urlPath).length - segmentsOf(b.urlPath).length
+}
+
+/** Shallow-merges `patch` over `base`, deep-merging `icons`/`openGraph` one level. */
+function mergeMetadata(base: Metadata, patch: Metadata): Metadata {
+  const merged: Metadata = { ...base, ...patch }
+  if (base.icons || patch.icons) merged.icons = { ...base.icons, ...patch.icons }
+  if (base.openGraph || patch.openGraph) merged.openGraph = { ...base.openGraph, ...patch.openGraph }
+  return merged
+}
+
+/** Root→leaf layout metadata, then the matched page's metadata on top. */
+function resolveStaticMetadata(layoutChain: RouteEntry[], route: RouteEntry): Metadata {
+  let meta: Metadata = {}
+  for (const entry of layoutChain) {
+    if (entry.layout?.metadata) meta = mergeMetadata(meta, entry.layout.metadata)
+  }
+  if (route.page?.metadata) meta = mergeMetadata(meta, route.page.metadata)
+  return meta
 }
 
 /** Root→leaf chain of entries carrying `key`, ancestors of the matched route's urlPath. */
@@ -200,6 +222,38 @@ export function AppRouter({ routes }: { routes: RouteEntry[] }) {
 
   const match = useMemo(() => matchRoute(routes, pathname), [routes, pathname])
 
+  const layoutChain = useMemo(
+    () => (match ? ancestorChain(routes, match.route.urlPath, 'layout') : []),
+    [routes, match],
+  )
+
+  const staticMetadata = useMemo(
+    () => (match ? resolveStaticMetadata(layoutChain, match.route) : null),
+    [match, layoutChain],
+  )
+
+  useEffect(() => {
+    if (!match || !staticMetadata) return
+    const generate = match.route.page?.generateMetadata
+    if (!generate) {
+      applyMetadata(staticMetadata)
+      return
+    }
+
+    let cancelled = false
+    Promise.resolve(generate({ params: match.params }))
+      .then((generated) => {
+        if (!cancelled) applyMetadata(mergeMetadata(staticMetadata, generated))
+      })
+      .catch((err) => {
+        console.error('[murasaki] generateMetadata failed:', err)
+        if (!cancelled) applyMetadata(staticMetadata)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [match, staticMetadata])
+
   let element: ReactNode
   let params: Record<string, string> = {}
 
@@ -221,7 +275,6 @@ export function AppRouter({ routes }: { routes: RouteEntry[] }) {
       </ErrorBoundary>
     )
 
-    const layoutChain = ancestorChain(routes, route.urlPath, 'layout')
     for (let i = layoutChain.length - 1; i >= 0; i--) {
       const Layout = layoutChain[i].layout!.default
       inner = <Layout>{inner}</Layout>

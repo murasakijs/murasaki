@@ -1,4 +1,9 @@
 import { Link } from 'murasaki'
+import type { Metadata } from 'murasaki'
+
+export const metadata: Metadata = {
+  title: 'About · Murasaki App',
+}
 
 export default function AboutPage() {
   return (

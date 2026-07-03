@@ -1,6 +1,12 @@
 import { useState } from 'react'
 import { Link, useGlobalContextMenu } from 'murasaki'
+import type { Metadata } from 'murasaki'
 import { greet } from '../actions'
+
+export const metadata: Metadata = {
+  title: 'Murasaki App',
+  description: 'A desktop app built with murasaki',
+}
 
 /**
  * "Hello, Murasaki 🦋" — the greeting stays.
