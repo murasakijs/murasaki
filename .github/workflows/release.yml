@@ -107,6 +107,23 @@ jobs:
           "
           echo "Template murasaki dep → $(node -p "require('./packages/create-murasaki/templates/default/package.json').dependencies.murasaki")"
 
+      # The default template also depends on @murasakijs/ui, which versions
+      # independently. Pin the template to the @murasakijs/ui version shipped in
+      # this monorepo (`^<packages/ui version>`) so a fresh `npm create murasaki`
+      # always pulls the UI library that matches this release. CI-only, like the
+      # murasaki sync above.
+      - name: Sync scaffolder template @murasakijs/ui dependency
+        run: |
+          UI_VERSION=$(node -p "require('./packages/ui/package.json').version")
+          node -e "
+          const fs = require('fs');
+          const f = 'packages/create-murasaki/templates/default/package.json';
+          const p = JSON.parse(fs.readFileSync(f, 'utf8'));
+          p.dependencies['@murasakijs/ui'] = '^' + '$UI_VERSION';
+          fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+          "
+          echo "Template @murasakijs/ui dep → $(node -p "require('./packages/create-murasaki/templates/default/package.json').dependencies['@murasakijs/ui']")"
+
       # Ordering guard: murasaki depends on @murasakijs/native, which is
       # published separately by native-release.yml on its own native-v<x.y.z>
       # tag. If that tag wasn't pushed (or its run hasn't finished) before this
@@ -135,28 +152,45 @@ jobs:
             npm publish --provenance --access public
           fi
 
-      - name: Publish packages/create-murasaki
-        working-directory: packages/create-murasaki
-        run: |
-          V=$(node -p "require('./package.json').version")
-          if npm view "create-murasaki@$V" version >/dev/null 2>&1; then
-            echo "create-murasaki@$V already published — skipping."
-          else
-            npm publish --provenance --access public
-          fi
-
       # @murasakijs/ui versions independently of the framework and publishes at
       # its own package.json version (idempotent: skip if that version is
-      # already on npm). The very first version must be published manually and
-      # its Trusted Publisher configured on npm before CI can OIDC-publish
-      # subsequent versions — until then this step simply skips the existing
-      # 0.1.0.
+      # already on npm). This runs BEFORE create-murasaki because the default
+      # template depends on @murasakijs/ui — the scaffolder must not ship
+      # pointing at a UI version that isn't on npm yet. The very first version
+      # must be published manually and its Trusted Publisher configured on npm
+      # before CI can OIDC-publish subsequent versions; until then this step
+      # simply skips the already-published 0.1.0.
       - name: Publish packages/ui
         working-directory: packages/ui
         run: |
           V=$(node -p "require('./package.json').version")
           if npm view "@murasakijs/ui@$V" version >/dev/null 2>&1; then
             echo "@murasakijs/ui@$V already published — skipping."
+          else
+            npm publish --provenance --access public
+          fi
+
+      # Ordering guard: the scaffolder template depends on @murasakijs/ui, so a
+      # fresh `npm create murasaki` will `npm install` it. Refuse to publish
+      # create-murasaki unless the exact @murasakijs/ui version the template
+      # pins is already on npm — otherwise scaffolded apps would fail to install.
+      # (Covers the first-publish/Trusted-Publisher-not-yet-configured case,
+      # where the publish step above can't OIDC-publish a brand-new version.)
+      - name: Verify @murasakijs/ui (template dependency) is published
+        run: |
+          UI_VERSION=$(node -p "require('./packages/ui/package.json').version")
+          if [ "$(npm view "@murasakijs/ui@${UI_VERSION}" version 2>/dev/null)" != "$UI_VERSION" ]; then
+            echo "::error::@murasakijs/ui@${UI_VERSION} is not on npm yet. Publish it (manually for the first version, then configure its Trusted Publisher) before releasing create-murasaki, or scaffolded apps will fail to install."
+            exit 1
+          fi
+          echo "@murasakijs/ui@${UI_VERSION} is published — OK to release create-murasaki."
+
+      - name: Publish packages/create-murasaki
+        working-directory: packages/create-murasaki
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "create-murasaki@$V" version >/dev/null 2>&1; then
+            echo "create-murasaki@$V already published — skipping."
           else
             npm publish --provenance --access public
           fi
