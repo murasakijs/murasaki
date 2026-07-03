@@ -116,7 +116,12 @@ function detectPackageManager() {
 }
 
 function installArgs(pm) {
-  if (pm === 'pnpm') return ['install', '--ignore-workspace']
+  // Note: no `--ignore-workspace` for pnpm — the scaffold ships its own
+  // pnpm-workspace.yaml (which also carries the build-script allow-list), so
+  // pnpm already treats the new app as its own root even inside a parent
+  // workspace. `--ignore-workspace` would make pnpm skip that file's settings,
+  // re-triggering ERR_PNPM_IGNORED_BUILDS.
+  if (pm === 'pnpm') return ['install']
   return ['install']
 }
 
@@ -230,14 +235,9 @@ async function applyBiome(targetDir) {
   pkg.scripts.format = 'biome format --write .'
   pkg.devDependencies = pkg.devDependencies || {}
   pkg.devDependencies['@biomejs/biome'] = '^2.5.1'
-  // pnpm v10 ignores dependency build scripts unless allow-listed — Biome ships
-  // a native binary via its postinstall, so let it build.
-  pkg.pnpm = pkg.pnpm || {}
-  pkg.pnpm.onlyBuiltDependencies = pkg.pnpm.onlyBuiltDependencies || []
-  if (!pkg.pnpm.onlyBuiltDependencies.includes('@biomejs/biome')) {
-    pkg.pnpm.onlyBuiltDependencies.push('@biomejs/biome')
-  }
   await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
+  // @biomejs/biome ships a native binary via a postinstall; it's already in the
+  // template's pnpm-workspace.yaml build allow-list, so nothing else is needed.
 }
 
 async function applyEslint(targetDir) {
@@ -279,12 +279,22 @@ async function copyTemplate(templateDir, targetDir, appName) {
     },
   })
 
+  const { rm } = await import('node:fs/promises')
+
   // Rename gitignore.tpl → .gitignore (npm strips leading dots)
   const gitignoreTpl = join(targetDir, 'gitignore.tpl')
   if (existsSync(gitignoreTpl)) {
     await cp(gitignoreTpl, join(targetDir, '.gitignore'))
-    const { rm } = await import('node:fs/promises')
     await rm(gitignoreTpl)
+  }
+
+  // Rename pnpm-workspace.yaml.tpl → pnpm-workspace.yaml. It ships as .tpl so a
+  // stray workspace file doesn't confuse the create-murasaki monorepo itself;
+  // in the scaffolded app it's the pnpm settings file (build-script allow-list).
+  const pnpmWsTpl = join(targetDir, 'pnpm-workspace.yaml.tpl')
+  if (existsSync(pnpmWsTpl)) {
+    await cp(pnpmWsTpl, join(targetDir, 'pnpm-workspace.yaml'))
+    await rm(pnpmWsTpl)
   }
 
   const pkgPath = join(targetDir, 'package.json')
