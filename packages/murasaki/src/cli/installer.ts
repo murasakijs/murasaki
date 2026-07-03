@@ -125,7 +125,9 @@ async function tryStyledDmg(opts: {
     return true
   } catch (err: any) {
     process.stdout.write(
-      `\n${warn(`installer: styled DMG failed (${String(err?.message ?? err).trim()}), falling back to a plain DMG`)}\n`,
+      `\n${warn(`installer: styled DMG failed (${String(err?.message ?? err).trim()}), falling back to a plain DMG`)}\n` +
+        `${dim('  ↳ the styled window needs permission to control Finder — grant it in')}\n` +
+        `${dim('    System Settings ▸ Privacy & Security ▸ Automation, then re-run.')}\n`,
     )
     if (mountPoint) {
       try {
@@ -200,6 +202,10 @@ async function styleVolume(
   const volume = escapeAppleScript(productName)
   const appItem = escapeAppleScript(`${productName}.app`)
 
+  // Set the background picture LAST, after the window is open and the icons are
+  // placed, with delays between steps — Finder needs a beat to notice the
+  // freshly-mounted volume's hidden `.background` folder, and setting the
+  // picture too early throws `-10006 (can't set background picture)`.
   const script = `
 tell application "Finder"
   tell disk "${volume}"
@@ -212,9 +218,11 @@ tell application "Finder"
     set theViewOptions to the icon view options of container window
     set arrangement of theViewOptions to not arranged
     set icon size of theViewOptions to ${iconSize}
-    set background picture of theViewOptions to file ".background:background.png"
     set position of item "${appItem}" of container window to {${appX}, ${iconY}}
     set position of item "Applications" of container window to {${appsX}, ${iconY}}
+    delay 1
+    set background picture of theViewOptions to file ".background:background.png"
+    delay 1
     update without registering applications
     delay 1
     close
@@ -222,10 +230,18 @@ tell application "Finder"
 end tell
 `
 
-  const result = spawnSync('osascript', ['-e', script], { encoding: 'utf8' })
-  if (result.status !== 0) {
-    throw new Error(`osascript styling failed: ${(result.stderr || result.stdout).trim()}`)
+  // Finder styling can be timing-sensitive; retry once with a short backoff to
+  // ride out a transient hiccup. The common *persistent* failure is a missing
+  // macOS Automation permission (see the caller's hint), which a retry won't
+  // fix — so keep it to two attempts and fall back to a plain DMG quickly.
+  let lastErr = ''
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const result = spawnSync('osascript', ['-e', script], { encoding: 'utf8' })
+    if (result.status === 0) return
+    lastErr = (result.stderr || result.stdout).trim()
+    if (attempt < 2) await delay(800)
   }
+  throw new Error(`osascript styling failed: ${lastErr}`)
 }
 
 /** `hdiutil detach`, retrying once (forcefully) if the volume is busy. */
