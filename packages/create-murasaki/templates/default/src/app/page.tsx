@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useGlobalContextMenu } from 'murasaki'
+import { greet } from '../actions'
 
 /**
  * "Hello, Murasaki 🦋" — the greeting stays.
@@ -9,6 +10,7 @@ import { Link, useGlobalContextMenu } from 'murasaki'
  */
 export default function Page() {
   const [count, setCount] = useState(0)
+  const [greeting, setGreeting] = useState<string | null>(null)
 
   useGlobalContextMenu(
     [
@@ -47,6 +49,17 @@ export default function Page() {
           About this app
         </Link>
       </p>
+      <div className="mt-8">
+        <button
+          onClick={async () => setGreeting(await greet('Murasaki'))}
+          className="rounded-md border border-slate-300 dark:border-slate-700 px-4 py-2 font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        >
+          Call server action
+        </button>
+        {greeting && (
+          <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">{greeting}</p>
+        )}
+      </div>
     </main>
   )
 }
