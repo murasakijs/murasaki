@@ -298,11 +298,24 @@ function parseArgs(argv) {
   return { name, skipInstall, noGit }
 }
 
+async function readCliVersion(dir) {
+  try {
+    const pkg = JSON.parse(await readFile(join(dir, 'package.json'), 'utf8'))
+    return pkg.version
+  } catch {
+    return null
+  }
+}
+
 async function main() {
   const __filename = fileURLToPath(import.meta.url)
   const __dirname = dirname(__filename)
 
-  process.stdout.write('\n' + renderBanner() + '\n\n')
+  const version = await readCliVersion(__dirname)
+  process.stdout.write('\n' + renderBanner() + '\n')
+  process.stdout.write(
+    `  ${c(DIM)}create-murasaki${c(RESET)}${version ? ` ${c(BRIGHT)}v${version}${c(RESET)}` : ''}\n\n`,
+  )
 
   const { name: argName, skipInstall, noGit } = parseArgs(process.argv.slice(2))
   const name = argName && isValidPackageName(argName) ? argName : await promptForName()
