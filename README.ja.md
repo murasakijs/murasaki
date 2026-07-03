@@ -34,28 +34,40 @@ npm run dev
 ```tsx
 // src/app/page.tsx
 import { useState } from 'react'
-import { useGlobalContextMenu } from 'murasaki'
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  Action,
+} from 'murasaki'
 
 export default function Page() {
   const [count, setCount] = useState(0)
 
-  useGlobalContextMenu(
-    [
-      { id: 'reload', label: 'Reload', accelerator: 'CmdOrCtrl+R' },
-      { role: 'separator' },
-      { role: 'copy' },
-      { role: 'paste' },
-    ],
-    (id) => {
-      if (id === 'reload') location.reload()
-    },
-  )
-
   return (
-    <main>
-      <h1>Hello, Murasaki 🦋</h1>
-      <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
-    </main>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <main>
+          <h1>Hello, Murasaki 🦋</h1>
+          <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
+        </main>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent>
+        <ContextMenuItem label="Increment" shortcut="command,I">
+          <Action.Run action={() => setCount((n) => n + 1)} />
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem label="Reload" shortcut="command,R">
+          <Action.Reload />
+        </ContextMenuItem>
+        <ContextMenuItem label="Copy">
+          <Action.Copy />
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 ```
@@ -164,9 +176,10 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
   `generateMetadata()` が document のタイトルと meta タグを設定し、
   `src/middleware.ts` が各ナビゲーションの前に走ってリダイレクトできます
   (ルートガード)。どちらも Next.js の形。
-- **ネイティブコンテキストメニュー** — `useGlobalContextMenu()` が Rust 側へ post し、
-  本物の OS メニュー(NSMenu / HMENU / GtkMenu)を表示、クリックされた項目を DOM の
-  `CustomEvent` として返します。HTML のポップアップは介在しません。
+- **ネイティブコンテキストメニュー** — shadcn/ui 風に書ける宣言的な `<ContextMenu>`
+  (`<Action.*>` を子に持つ)が Rust 側へ post し、本物の OS メニュー
+  (NSMenu / HMENU / GtkMenu)を表示してクリックされた項目を実行します。HTML の
+  ポップアップは介在しません。
 - **ネイティブメニュー、ダイアログ、クリップボード、通知、シェル** —
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 上に
   構築されています。open/save/directory ダイアログ、クリップボードの読み書き、OS 通知、

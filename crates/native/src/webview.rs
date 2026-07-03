@@ -18,7 +18,7 @@ use std::{borrow::Cow, cell::RefCell, path::Path, rc::Rc, sync::Arc};
 
 use wry::{
   http::{header::CONTENT_TYPE, Response, StatusCode},
-  WebView, WebViewBuilder,
+  WebContext, WebView, WebViewBuilder,
 };
 
 use crate::{
@@ -57,6 +57,29 @@ pub struct Webview {
   _window: SharedWindow,
 }
 
+/// A writable directory for WebView2's user-data folder, or `None` to accept
+/// wry's default.
+///
+/// On Windows, wry lets WebView2 default its user-data folder to a location
+/// next to the host executable. For `murasaki dev`/prod that host is `node.exe`
+/// — commonly `C:\Program Files\nodejs\`, which isn't writable — so WebView2
+/// aborts environment creation with `E_ACCESSDENIED` (0x80070005). Pin it under
+/// `%LOCALAPPDATA%` instead. macOS/Linux keep the default (`None`).
+///
+/// Uses `cfg!(..)` rather than `#[cfg]` so the whole function type-checks on
+/// every host (the Windows branch is dead code off-Windows, but still compiled).
+fn webview2_data_dir() -> Option<std::path::PathBuf> {
+  if cfg!(target_os = "windows") {
+    let base = std::env::var_os("LOCALAPPDATA")?;
+    let dir = std::path::PathBuf::from(base).join("murasaki").join("WebView2");
+    // Best-effort: WebView2 creates missing dirs itself, but only one level.
+    let _ = std::fs::create_dir_all(&dir);
+    Some(dir)
+  } else {
+    None
+  }
+}
+
 impl Webview {
   pub(crate) fn new(window: SharedWindow, opts: WebviewOptions) -> Result<Self> {
     let on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>> =
@@ -68,7 +91,15 @@ impl Webview {
     // the slot is filled. So the handler never observes an empty slot.
     let webview_slot: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
 
-    let mut builder = WebViewBuilder::new()
+    // Pin the WebView2 user-data directory to a writable location. wry's
+    // default puts it next to the host executable — for `murasaki dev`/prod
+    // that's `node.exe`, frequently under `C:\Program Files\nodejs\`, which
+    // isn't writable → `build webview` fails with E_ACCESSDENIED (0x80070005)
+    // on Windows. Leaked because the WebContext must outlive the webview and
+    // there's exactly one webview per app process.
+    let web_context: &'static mut WebContext =
+      Box::leak(Box::new(WebContext::new(webview2_data_dir())));
+    let mut builder = WebViewBuilder::new_with_web_context(web_context)
       .with_devtools(opts.devtools.unwrap_or(cfg!(debug_assertions)))
       .with_transparent(opts.transparent.unwrap_or(false));
 
