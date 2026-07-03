@@ -32,3 +32,6 @@ tmp/
 # env
 .env
 .env.local
+
+# agent worktrees / local
+.claude/

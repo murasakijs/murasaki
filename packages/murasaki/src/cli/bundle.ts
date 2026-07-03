@@ -5,8 +5,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
-import pc from 'picocolors'
 import build from './build.js'
+import { dim, success, warn } from './brand.js'
 import type { MurasakiConfig } from '../config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -26,9 +26,7 @@ export default async function bundle(argv: string[]) {
   if (!existsSync(resolve(cwd, 'dist/client'))) await build(argv)
 
   if (process.platform !== 'darwin') {
-    process.stdout.write(
-      `\n  ${pc.yellow('!')} bundle: only macOS is supported right now.\n\n`,
-    )
+    process.stdout.write(`\n${warn('bundle: only macOS is supported right now.')}\n\n`)
     return
   }
 
@@ -107,7 +105,7 @@ exec "$DIR/node" "$DIR/prod-launcher.mjs"
     infoPlist(config, productName, iconResource !== null),
   )
 
-  process.stdout.write(`\n  ${pc.green('✓')} bundle written  ${pc.gray(appDir)}\n\n`)
+  process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
 }
 
 function resolveNativeModuleDir(cwd: string): string {
@@ -130,7 +128,7 @@ async function buildIcon(
 ): Promise<string | null> {
   const src = resolve(cwd, iconPath)
   if (!existsSync(src)) {
-    process.stdout.write(`\n  ${pc.yellow('!')} icon: ${iconPath} not found, skipping\n\n`)
+    process.stdout.write(`\n${warn(`icon: ${iconPath} not found, skipping`)}\n\n`)
     return null
   }
 

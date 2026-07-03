@@ -48,6 +48,16 @@ export interface MurasakiConfig {
 
   /** Icon source (PNG). `murasaki icon` fans this out to .icns/.ico/set. */
   icon?: string
+
+  /** `murasaki installer` DMG styling. Omit to use murasaki's default background. */
+  installer?: {
+    /** Path (relative to project root) to a custom DMG background PNG. Overrides murasaki's default. */
+    background?: string
+    /** DMG window content size in points. Default { width: 640, height: 420 } (matches the default background). */
+    window?: { width: number; height: number }
+    /** Icon size in the DMG window. Default 128. */
+    iconSize?: number
+  }
 }
 
 export function defineConfig(config: MurasakiConfig): MurasakiConfig {

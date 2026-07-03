@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import http from 'node:http'
-import pc from 'picocolors'
 import { loadNative } from '../runtime/native.js'
 import type { MurasakiConfig } from '../config.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
  * `murasaki dev` — run Vite dev server in a child process (its own event loop),
@@ -18,8 +18,6 @@ export default async function dev(_argv: string[]) {
   const config = await loadUserConfig(cwd)
   const port = config.devPort ?? 5178
   const url = `http://localhost:${port}/`
-
-  process.stdout.write(`\n  ${pc.magenta('▲')} murasaki dev  ${pc.gray(url)}\n\n`)
 
   const vite = await startViteChild(cwd, port)
   try {
@@ -76,8 +74,11 @@ export default async function dev(_argv: string[]) {
 }
 
 function startViteChild(cwd: string, port: number) {
-  const viteBin = resolveViteBin(cwd)
-  const child = spawn(process.execPath, [viteBin, '--port', String(port), '--strictPort'], {
+  // Runs Vite via its JS API in a child process (see assets/dev-server.mjs) so
+  // murasaki can print its own branded banner instead of Vite's own CLI output —
+  // the vite CLI itself is never invoked here.
+  const devServerEntry = resolve(__dirname, '../../assets/dev-server.mjs')
+  const child = spawn(process.execPath, [devServerEntry, '--port', String(port)], {
     cwd,
     stdio: ['ignore', 'inherit', 'inherit'],
     env: process.env,
@@ -114,14 +115,6 @@ function waitForServer(url: string, timeoutMs: number): Promise<void> {
     }
     tryOnce()
   })
-}
-
-function resolveViteBin(cwd: string): string {
-  // Anchor from the resolved `vite/package.json` since the "vite/bin/…"
-  // subpath is not part of Vite's exports map.
-  const req = createRequire(resolve(cwd, 'package.json'))
-  const pkgJson = req.resolve('vite/package.json')
-  return resolve(pkgJson, '..', 'bin', 'vite.js')
 }
 
 async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
