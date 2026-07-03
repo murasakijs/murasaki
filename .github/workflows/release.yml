@@ -98,10 +98,25 @@ jobs:
           echo "@murasakijs/native@${NATIVE_VERSION} is published — OK to release the framework."
 
       # @murasakijs/native itself is published separately by native-release.yml.
+      # Each publish is idempotent: skip if that exact version is already on
+      # npm, so re-running after a partial failure (e.g. only one package
+      # published) doesn't error on the already-published one.
       - name: Publish packages/murasaki
         working-directory: packages/murasaki
-        run: npm publish --provenance --access public
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "murasaki@$V" version >/dev/null 2>&1; then
+            echo "murasaki@$V already published — skipping."
+          else
+            npm publish --provenance --access public
+          fi
 
       - name: Publish packages/create-murasaki
         working-directory: packages/create-murasaki
-        run: npm publish --provenance --access public
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "create-murasaki@$V" version >/dev/null 2>&1; then
+            echo "create-murasaki@$V already published — skipping."
+          else
+            npm publish --provenance --access public
+          fi
