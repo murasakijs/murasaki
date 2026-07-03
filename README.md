@@ -4,7 +4,7 @@
 
 **The desktop framework for Next.js developers.**
 
-Node-powered · WebView-thin · No Rust · No Chromium
+React 19 · Vite · OS WebView · Rust-native · No Chromium
 
 [![npm version](https://img.shields.io/npm/v/murasaki?color=A855F7&label=npm)](https://www.npmjs.com/package/murasaki)
 [![npm downloads](https://img.shields.io/npm/dm/murasaki?color=A855F7)](https://www.npmjs.com/package/murasaki)
@@ -18,54 +18,62 @@ Node-powered · WebView-thin · No Rust · No Chromium
 ---
 
 Murasaki is a TypeScript-first desktop framework with a **Next.js-inspired DX**:
-file-based routing, layouts, metadata, in-window HMR, server actions — all on
-plain Node.js, rendered through the **OS WebView that ships with your machine**.
+file-based project layout, layouts, metadata, and React 19 server actions,
+built on **React 19 + Vite**, rendered through the **OS WebView already
+installed on your machine** — no bundled Chromium. The native window, menus,
+and OS integrations are powered by a self-authored Rust binding,
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
+you write TypeScript; you never write Rust. Targets **macOS / Windows / Linux**.
 
 ```bash
-pnpm create murasaki@latest my-app
+npm create murasaki@latest my-app
 cd my-app
-pnpm dev
+npm run dev
 ```
 
 ```tsx
 // src/app/page.tsx
-import { Button, Card, Text, useAction } from 'murasaki'
-import { useState } from 'murasaki/jsx/dom'
-import type { greet } from '../actions'
+import { useState } from 'react'
+import { useGlobalContextMenu } from 'murasaki'
 
-export default function Home() {
+export default function Page() {
   const [count, setCount] = useState(0)
-  const g = useAction<typeof greet>('greet')
+
+  useGlobalContextMenu(
+    [
+      { id: 'reload', label: 'Reload', accelerator: 'CmdOrCtrl+R' },
+      { role: 'separator' },
+      { role: 'copy' },
+      { role: 'paste' },
+    ],
+    (id) => {
+      if (id === 'reload') location.reload()
+    },
+  )
 
   return (
-    <Card>
-      <Text size={24} weight="bold">Count: {count}</Text>
-      <Button onClick={() => setCount(count + 1)}>+</Button>
-      <Button variant="secondary" onClick={() => g.call('world')}>
-        Greet from Node
-      </Button>
-      {g.data && <Text>{g.data}</Text>}
-    </Card>
+    <main>
+      <h1>Hello, Murasaki 🦋</h1>
+      <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
+    </main>
   )
 }
 ```
 
-That's it. Your TypeScript app is now a desktop app. **macOS / Windows / Linux**,
-producible as `.app` / `.dmg` / `.msi` / `.AppImage` / `.zip` / `.tar.gz` — all
-from any host OS.
+That's a real Vite dev server with React Fast Refresh, rendered in a native
+window — and right-clicking anywhere shows a **real OS context menu** (NSMenu
+on macOS, HMENU on Windows, GtkMenu on Linux), not an HTML popup.
 
 ---
 
 ## Table of Contents
 
 - [Quick start](#quick-start)
-- [Why Murasaki?](#why-murasaki)
+- [Why murasaki?](#why-murasaki)
 - [Features](#features)
 - [CLI reference](#cli-reference)
 - [Configuration (`murasaki.config.ts`)](#configuration-murasakiconfigts)
 - [Server Actions](#server-actions)
-- [Cross-compile matrix](#cross-compile-matrix)
-- [Components (34) & Hooks (13)](#components-34--hooks-13)
 - [Architecture](#architecture)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -79,103 +87,110 @@ from any host OS.
 
 ```bash
 # scaffold
-pnpm create murasaki@latest my-app
+npm create murasaki@latest my-app
 
-# develop with HMR
+# develop with Vite HMR + React Fast Refresh
 cd my-app
-pnpm dev
+npm run dev
 
-# ship
-pnpm build          # dist/server.cjs                    (~400 KB)
-pnpm bundle         # dist/<App>.app                     (~120 MB)
-pnpm installer      # dist/<App>-<ver>.dmg               (~43 MB compressed)
-
-# cross-compile
-pnpm exec murasaki installer --target win-x64      # → .msi (needs WiX v4)
-pnpm exec murasaki installer --target linux-x64    # → .AppImage (needs squashfs)
+# ship (verified on macOS today — see CLI reference)
+npm run build       # dist/client            Vite production build
+npm run bundle      # dist/bundle/<App>.app  ~120 MB (bundles Node + your app)
+npm run installer   # dist/<App>-<ver>.dmg   ~43 MB compressed
 ```
+
+The scaffold gives you a React 19 + Vite + Tailwind app: `src/main.tsx` calls
+`installClientRpc()` and renders `<ThemeProvider><Layout><Page /></ThemeProvider>`,
+and `murasaki.config.ts` describes your app's identity and window.
 
 ---
 
-## Why Murasaki?
+## Why murasaki?
 
-|                     | **Murasaki**                                    | Electron     | Tauri          | NW.js     |
-| ------------------- | ----------------------------------------------- | ------------ | -------------- | --------- |
-| What you write      | TypeScript (server + client)                    | TypeScript   | Rust + JS      | JS        |
-| Rendering           | OS WebView                                      | Chromium     | OS WebView     | Chromium  |
-| Runtime bundled     | Node.js                                         | Chromium+Node| none           | Chromium+Node |
-| Installer size      | **~30 MB** default / **~500 KB** `--slim`\*     | ~90 MB       | ~5 MB          | ~110 MB   |
-| npm ecosystem       | ✅ full                                          | ✅ full       | ⚠️ client only  | ✅ full    |
-| Server-side HMR     | ✅                                               | ⚠️ manual     | ❌              | ⚠️ manual  |
-| Built-in components | **34 + 13 hooks**                               | none         | none           | none      |
-| Server actions      | **`defineAction`**                              | manual IPC   | manual IPC     | manual    |
-| Cross-compile       | **built-in `--target`**                         | manual       | matrix         | manual    |
-| Auto-publish CI     | **Trusted Publisher OIDC**                      | manual       | manual         | manual    |
+The size/memory story is about what each framework bundles, not a number
+we've benchmarked head-to-head:
 
-<sub>\* `--slim` ships a launcher that fetches Node.js (~30 MB) on first launch instead of bundling it.</sub>
+- **Electron** bundles a full Chromium **and** Node into every app.
+- **Tauri** renders through the OS WebView (no Chromium) and bundles no
+  runtime at all — smallest footprint, but your backend is Rust.
+- **murasaki** also renders through the OS WebView (no Chromium), but bundles
+  Node so your whole app — client and server-side logic — stays TypeScript.
 
-### Choose Murasaki if...
+|                  | **murasaki**                    | Electron                | Tauri                  |
+| ---------------- | -------------------------------- | ------------------------ | ------------------------ |
+| Rendering        | OS WebView (WKWebView / WebView2 / WebKitGTK) | Bundled Chromium | OS WebView |
+| Runtime bundled  | Node.js                          | Chromium + Node          | none                     |
+| Backend language | TypeScript                       | TypeScript                | Rust                     |
+| You write Rust?  | No (prebuilt native binding)     | No                        | Yes                      |
+| Installer size   | **~43 MB `.dmg`** / **~120 MB `.app`** (measured, macOS) | ~80–150 MB\* | ~3–10 MB\* |
+| npm ecosystem    | full                              | full                      | client only              |
+| Server actions   | `defineAction` / `useAction`     | manual IPC                | manual IPC / commands    |
+| Auto-publish CI  | Trusted Publisher OIDC           | manual                    | manual                   |
 
-- ✅ You already write **Next.js / Node** and don't want to learn Rust
-- ✅ You want to `pnpm add express` (or anything else) on the server side
-- ✅ You're building **internal tools** or **dev tools** where 30 MB is fine
-- ✅ You want **HMR that works on both client and server code**
+<sub>\* commonly cited ballparks for Electron/Tauri installers — not measured by us. murasaki's numbers are our own, real `.dmg`/`.app` sizes on macOS.</sub>
+
+### Choose murasaki if...
+
+- You already write **Next.js / React** and don't want to learn Rust.
+- You want a **native OS context menu, menus, dialogs, notifications** —
+  without writing platform code.
+- You're fine with Node being bundled in exchange for **zero Rust**.
 
 ### Choose Tauri if...
 
-- ❌ You need a **<10 MB** consumer app and are willing to write Rust on the server side
-- ❌ You care more about **binary size** than about **the JS ecosystem**
+- You need the smallest possible installer and are willing to write your
+  backend in **Rust**.
 
 ### Choose Electron if...
 
-- ❌ You need a **guaranteed Chromium** environment (specific web APIs, DevTools protocol)
-
-Murasaki is the only framework that combines:
-
-- 🟢 **Node.js you already know** (npm, package.json, async/await)
-- 🪶 **Tauri-style lightweight** (OS WebView — no Chromium bundle)
-- ⚛️ **React-like JSX** (own runtime — no React dependency)
-- 🎨 **Batteries-included components** with theme tokens
-- 🔧 **Full toolchain**: dev → build → bundle → installer, all shipped
+- You need a **guaranteed Chromium** environment (specific web APIs, the
+  DevTools protocol) regardless of install size.
 
 ---
 
 ## Features
 
-- **File-based routing.** `src/app/**/page.tsx` becomes routes automatically.
-- **HMR out of the box.** Save a file, the window reloads. Native menu keeps working.
-- **JSX renderer without React.** Own `jsx/` + `jsx/dom/` runtime.
-- **Batteries-included UI.** 34 components sharing one theme token system.
-- **Server Actions.** `defineAction` on the server, `useAction` on the client, typed end-to-end.
-- **Multi-window.** `useWindow` + `openWindow()` API.
-- **Native APIs.** Notifications, clipboard, dialogs, filesystem, shell, tray icon.
-- **Cross-compile.** From a macOS host, produce `.dmg`, `.msi`, `.AppImage`, `.zip`, `.tar.gz`.
-- **Trusted Publisher OIDC.** Tag-push triggers signed `npm publish --provenance`.
+- **Vite dev server + React Fast Refresh.** `murasaki dev` boots Vite and
+  attaches a native window pointed at it — edit and save, the window updates.
+- **Native context menu.** `useGlobalContextMenu()` posts to the Rust side,
+  which pops a real OS menu (NSMenu / HMENU / GtkMenu) and dispatches the
+  clicked item back as a DOM `CustomEvent` — no HTML popup involved.
+- **Native menus, dialogs, clipboard, notifications, shell.** Built on
+  [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native):
+  open/save/directory dialogs, clipboard read/write, OS notifications, and
+  "reveal in Finder/Explorer" — all typed, no Rust required to call them.
+- **Server Actions API.** `defineAction` + `useAction` mirror React 19's
+  `useActionState` shape end-to-end (see [Server Actions](#server-actions)).
+- **Theming.** `ThemeProvider` / `useTheme` with light / dark / system modes.
+- **Packaging on macOS (verified).** `murasaki bundle` → `.app`,
+  `murasaki installer` → `.dmg` (~43 MB compressed; the `.app` itself is
+  ~120 MB because it bundles Node + your app).
+- **Trusted Publisher OIDC.** Tag-push triggers a signed
+  `npm publish --provenance` — no long-lived npm tokens in CI.
 
 ---
 
 ## CLI reference
 
 ```
-murasaki dev                       Start the development server (HMR)
-murasaki build                     Production JS bundle → dist/server.cjs
-murasaki bundle                    Native folder / .app for the current OS
-murasaki installer                 Distributable archive / installer for the current OS
+murasaki dev         Start the Vite dev server + native window (HMR, Fast Refresh)
+murasaki build       Production Vite build → dist/client
+murasaki bundle      Native app folder / .app for the current platform
+murasaki installer   Distributable installer for the current platform
+murasaki init        Install the Rust toolchain (only if you're hacking on @murasakijs/native)
+murasaki icon        Generate .icns / .ico / .png from a single PNG
+murasaki release     Auto-update manifest helpers
+murasaki help        Show this help
 ```
 
-All build subcommands accept `--target <id>` for cross-compile:
-
-```
---target darwin-arm64    (default on Apple Silicon)
---target darwin-x64
---target win-x64
---target win-arm64
---target linux-x64
---target linux-arm64
-```
-
-The Node binary and `@webviewjs/webview` prebuild for the requested target
-are downloaded on demand and cached under `~/.murasaki/cache/`.
+**Platform status:** `murasaki dev` works on macOS, Windows, and Linux.
+`murasaki bundle` and `murasaki installer` are implemented and verified on
+**macOS** (`.app` / `.dmg`) today; on other platforms they currently print a
+"not supported yet" message rather than producing an installer.
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native)
+itself already ships prebuilt binaries for macOS (arm64/x64), Windows (x64),
+and Linux (x64/arm64) — Windows/Linux app packaging is tracked in the
+[Roadmap](#roadmap).
 
 ---
 
@@ -185,118 +200,72 @@ are downloaded on demand and cached under `~/.murasaki/cache/`.
 import { defineConfig } from 'murasaki'
 
 export default defineConfig({
-  name: 'My App',                             // display name (macOS .app title)
-  bundleId: 'com.example.myapp',              // reverse-DNS identifier
-  description: 'A murasaki app',
-  copyright: '© 2026 Example, Inc.',
-  icon: 'assets/icon.icns',                   // .icns / .ico / .png
-  category: 'public.app-category.productivity',
-  targets: ['darwin-arm64', 'win-x64', 'linux-x64'],
+  appId: 'app.murasaki.example',
+  productName: 'Murasaki App',
+  version: '0.1.0',
+  icon: 'assets/icon.png',
   window: {
-    title: 'My App',
-    width: 1280,
-    height: 800,
+    title: 'Murasaki App',
+    width: 1000,
+    height: 700,
+    vibrancy: 'hud',
   },
 })
 ```
 
-Lookup order (first match wins): `murasaki.config.ts` → `murasaki.config.js`
-→ `murasaki.config.json` → `package.json`'s `"murasaki"` field.
+`MurasakiConfig` also accepts an optional `devPort` (Vite dev server port,
+default `5178`), `targets` (build targets array), and `updater` (config
+consumed by `useUpdate` / `UpdateButton`).
 
 ---
 
 ## Server Actions
 
-```ts
-// src/actions.ts — server side
-import { defineAction } from 'murasaki'
+React 19-style server actions — same shape as `useActionState`:
 
-export const greet = defineAction('greet', async (name: string) => {
-  return `Hello, ${name}! (Node ${process.version})`
-})
+```ts
+// src/actions.ts
+'use server'
+import { defineAction } from 'murasaki'
+import type { ActionState } from 'murasaki'
+
+export const greet = defineAction(
+  async (_prev: ActionState<string>, formData: FormData): Promise<ActionState<string>> => {
+    const name = formData.get('name')
+    return { data: `Hello, ${name}!`, error: null, isPending: false }
+  },
+)
 ```
 
 ```tsx
-// src/app/page.tsx — client side
+// src/app/page.tsx
 import { useAction } from 'murasaki'
-import type { greet } from '../actions'   // types only
+import { greet } from '../actions'
 
 export default function Home() {
-  const g = useAction<typeof greet>('greet')
+  const [state, run, isPending] = useAction(greet, {
+    data: null,
+    error: null,
+    isPending: false,
+  })
 
   return (
-    <>
-      <Button onClick={() => g.call('world')}>Greet</Button>
-      {g.loading ? '…' : g.data}
-      {g.error && <Text color="red">{g.error.message}</Text>}
-    </>
+    <form action={run}>
+      <input name="name" />
+      <button disabled={isPending}>Greet</button>
+      {state.data && <p>{state.data}</p>}
+    </form>
   )
 }
 ```
 
-Behind the scenes: `window.ipc.postMessage` → `webview.onIpcMessage` on the
-server, results returned via `webview.evaluate` — no additional native
-bridge needed.
-
----
-
-## Cross-compile matrix
-
-| Output     | Where you can build it        | Consumer install                           |
-| ---------- | ----------------------------- | ------------------------------------------ |
-| `.dmg`     | **macOS host only**           | `hdiutil` (built into macOS)               |
-| `.msi`     | any host + WiX v4             | `dotnet tool install -g wix`               |
-| `.AppImage`| any host + squashfs-tools     | `brew install squashfs` / `apt install squashfs-tools` |
-| `.zip`     | any host                      | built-in (`zip` / `Compress-Archive`)      |
-| `.tar.gz`  | any host                      | built-in (`tar`)                           |
-
-From a macOS host with WiX and squashfs installed, **one machine builds all
-four platforms' installers**. If a required tool isn't present, murasaki
-falls back to `.zip` / `.tar.gz` with an install hint — never a hard failure.
-
----
-
-## Components (34) & Hooks (13)
-
-```ts
-import {
-  // Layout (4)
-  View, Row, Stack, Text,
-
-  // Desktop shell (7)
-  TitleBar, NoDrag, Sidebar, SidebarItem, Toolbar, StatusBar, Pane,
-
-  // UI Tier 1 (7)
-  Button, Card, Input, Textarea, Modal, List, ListItem,
-
-  // UI Tier 2 (10)
-  Switch, Checkbox, Radio, RadioGroup,
-  Tooltip, Tabs, TabList, Tab, TabPanel, ContextMenu,
-
-  // UI Tier 3 (5)
-  Badge, Avatar, Spinner, Progress, ToastProvider,
-
-  // Routing (1)
-  Link,
-
-  // Theme
-  ThemeProvider, useTheme,
-} from 'murasaki'
-
-import {
-  // React-like (3)
-  useState, useEffect, useRef,
-
-  // Native bridge (10)
-  useNotification, useClipboard, useShell, useFs, useDialog,
-  useWindow, useTray, useAction, useToast, toast,
-} from 'murasaki/jsx/dom'
-```
-
-All components share one set of theme tokens (CSS custom properties), flip
-with `<ThemeProvider theme="auto" | "dark" | "light">`, and accept `className`
-+ `style` for full override. All native hooks are server-import safe — they
-degrade to no-op during SSR.
+`defineAction` is a typed passthrough that carries `'use server'` semantics
+through TypeScript; `useAction` wraps React 19's `useActionState` directly, so
+`[state, run, isPending]` is exactly the shape you already know from Next.js.
+A Vite plugin detects the `'use server'` directive and code-splits the
+module — the public API shape is stable today, and wiring the client stub
+through to a running Node handler is ongoing (tracked in the
+[Roadmap](#roadmap)).
 
 ---
 
@@ -304,43 +273,40 @@ degrade to no-op during SSR.
 
 ```
 ┌─────────────────────────────────────────┐
-│  Your App (src/app/page.tsx)            │  file-based routing, metadata
+│  Your app (src/app/page.tsx, ...)       │  layouts, metadata, theming
 ├─────────────────────────────────────────┤
-│  Murasaki Components + Hooks            │  Button / Card / Modal / …
-│                                         │  useState / useAction / useNotification
+│  React 19 + Vite                        │  HMR, Fast Refresh, server-actions plugin
 ├─────────────────────────────────────────┤
-│  Server Actions (defineAction)          │  RPC dispatcher over wry IPC
+│  murasaki (CLI + murasaki.config.ts)    │  dev / build / bundle / installer
 ├─────────────────────────────────────────┤
-│  Client bundle (jsx/dom)                │  own JSX runtime, no React
+│  @murasakijs/native (Rust, via napi-rs) │  tao / wry / muda / rfd / arboard / notify-rust / open
 ├─────────────────────────────────────────┤
-│  Native bridge (window.murasaki)        │  Promise-based, typed
-├─────────────────────────────────────────┤
-│  Murasaki Runtime (Node.js)             │  window lifecycle, HMR, esbuild
-├─────────────────────────────────────────┤
-│  OS Native WebView                      │  WKWebView / WebView2 / WebKitGTK
+│  OS WebView                             │  WKWebView / WebView2 / WebKitGTK — no Chromium bundled
 └─────────────────────────────────────────┘
 ```
-
-No Chromium. No Rust. No new runtime. Just Node + the WebView your OS
-already ships, plus a thin TypeScript layer.
 
 ---
 
 ## Roadmap
 
-- 🚧 UI Tier 4 (`DataTable`, `Slider`, `DatePicker`, `Skeleton`)
-- 🚧 Auto-update channel
-- 🚧 Icon generator (single PNG → `.icns` / `.ico` / `.png` set)
-- 🚧 Docs site (`https://murasaki.dev`)
-- 🚧 v1.0 API stabilization
+murasaki is **pre-1.0** (currently `0.26.0`) — the API can still change
+before v1.0.
+
+- 🚧 **Phase B** — full App Router: wiring the file-scanned route table into
+  the client runtime for real multi-page apps, `loading` / `error` /
+  `not-found` boundaries, middleware, streaming, and a working Server Actions
+  RPC dispatch to Node.
+- 🚧 **Phase C** — `@murasakijs/ui` component library, docs site, examples.
+- 🚧 **Phase D** — auto-update, code signing/notarization, Windows/Linux
+  packaging, v1.0 stabilization.
 
 ---
 
 ## Contributing
 
 We welcome contributions of all kinds — code, docs, examples, bug reports,
-feature requests. See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to get
-set up and what workflow to follow.
+feature requests. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full
+workflow.
 
 Quick setup:
 
@@ -348,9 +314,11 @@ Quick setup:
 git clone https://github.com/murasakijs/murasaki.git
 cd murasaki
 pnpm install
-pnpm --filter murasaki tsc -p tsconfig.build.json
-cd examples/app-router
-pnpm dev
+pnpm --filter murasaki build
+
+# only if you're hacking on the native binding (Rust) — most contributors don't need this
+pnpm --filter @murasakijs/native build
+# or: cd crates/native && pnpm build
 ```
 
 ## Code of Conduct
