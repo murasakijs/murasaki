@@ -83,6 +83,24 @@ jobs:
             exit 1
           fi
 
+      # Keep the scaffolder template in sync with the release. create-murasaki's
+      # default template pins `murasaki` in its package.json, and for a 0.x
+      # release the caret range is minor-locked (`^0.26.0` EXCLUDES 0.27.0). So
+      # without this, a fresh `npm create murasaki` would pull an older murasaki
+      # than the one being published. Rewrite it to `^<version>` (CI-only) so new
+      # apps always get the murasaki shipped with this create-murasaki.
+      - name: Sync scaffolder template murasaki dependency
+        run: |
+          V=$(node -p "require('./packages/create-murasaki/package.json').version")
+          node -e "
+          const fs = require('fs');
+          const f = 'packages/create-murasaki/templates/default/package.json';
+          const p = JSON.parse(fs.readFileSync(f, 'utf8'));
+          p.dependencies.murasaki = '^' + '$V';
+          fs.writeFileSync(f, JSON.stringify(p, null, 2) + '\n');
+          "
+          echo "Template murasaki dep → $(node -p "require('./packages/create-murasaki/templates/default/package.json').dependencies.murasaki")"
+
       # Ordering guard: murasaki depends on @murasakijs/native, which is
       # published separately by native-release.yml on its own native-v<x.y.z>
       # tag. If that tag wasn't pushed (or its run hasn't finished) before this
