@@ -152,6 +152,10 @@ we've benchmarked head-to-head:
 
 - **Vite dev server + React Fast Refresh.** `murasaki dev` boots Vite and
   attaches a native window pointed at it — edit and save, the window updates.
+- **File-based routing.** Every `src/app/**/page.tsx` becomes a route
+  automatically — nested layouts, dynamic `:param` segments, `loading` /
+  `error` / `not-found` boundaries, and client-side `<Link>` navigation, with
+  no router config to write.
 - **Native context menu.** `useGlobalContextMenu()` posts to the Rust side,
   which pops a real OS menu (NSMenu / HMENU / GtkMenu) and dispatches the
   clicked item back as a DOM `CustomEvent` — no HTML popup involved.
@@ -159,8 +163,10 @@ we've benchmarked head-to-head:
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native):
   open/save/directory dialogs, clipboard read/write, OS notifications, and
   "reveal in Finder/Explorer" — all typed, no Rust required to call them.
-- **Server Actions API.** `defineAction` + `useAction` mirror React 19's
-  `useActionState` shape end-to-end (see [Server Actions](#server-actions)).
+- **Server Actions, running end-to-end.** `defineAction` + `useAction` mirror
+  React 19's `useActionState` shape, and the `'use server'` function actually
+  runs in Node — via a Vite middleware in dev, via a bundled Node child server
+  in prod (see [Server Actions](#server-actions)).
 - **Theming.** `ThemeProvider` / `useTheme` with light / dark / system modes.
 - **Packaging on macOS (verified).** `murasaki bundle` → `.app`,
   `murasaki installer` → `.dmg` (~43 MB compressed; the `.app` itself is
@@ -262,10 +268,9 @@ export default function Home() {
 `defineAction` is a typed passthrough that carries `'use server'` semantics
 through TypeScript; `useAction` wraps React 19's `useActionState` directly, so
 `[state, run, isPending]` is exactly the shape you already know from Next.js.
-A Vite plugin detects the `'use server'` directive and code-splits the
-module — the public API shape is stable today, and wiring the client stub
-through to a running Node handler is ongoing (tracked in the
-[Roadmap](#roadmap)).
+A Vite plugin detects the `'use server'` directive and splits the module: the
+client gets a typed `fetch` stub, and the function itself runs on the
+server — a Vite middleware in dev, a small bundled Node child server in prod.
 
 ---
 
@@ -292,10 +297,8 @@ through to a running Node handler is ongoing (tracked in the
 murasaki is **pre-1.0** (currently `0.26.0`) — the API can still change
 before v1.0.
 
-- 🚧 **Phase B** — full App Router: wiring the file-scanned route table into
-  the client runtime for real multi-page apps, `loading` / `error` /
-  `not-found` boundaries, middleware, streaming, and a working Server Actions
-  RPC dispatch to Node.
+- 🚧 **Phase B** — App Router polish: `middleware`, streaming / Suspense-driven
+  data, dynamic `generateMetadata`, and DevTools / error-overlay polish.
 - 🚧 **Phase C** — `@murasakijs/ui` component library, docs site, examples.
 - 🚧 **Phase D** — auto-update, code signing/notarization, Windows/Linux
   packaging, v1.0 stabilization.

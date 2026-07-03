@@ -154,6 +154,10 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
 
 - **Vite 開発サーバー + React Fast Refresh** — `murasaki dev` は Vite を起動し、
   そこを指すネイティブウィンドウを紐づけます。編集して保存すればウィンドウが更新されます。
+- **ファイルベースルーティング** — `src/app/**/page.tsx` を置くだけでルートに
+  なります。ネストされたレイアウト、動的な `:param` セグメント、`loading` /
+  `error` / `not-found` バウンダリ、クライアントサイドの `<Link>` 遷移まで、
+  ルーター設定を書く必要はありません。
 - **ネイティブコンテキストメニュー** — `useGlobalContextMenu()` が Rust 側へ post し、
   本物の OS メニュー(NSMenu / HMENU / GtkMenu)を表示、クリックされた項目を DOM の
   `CustomEvent` として返します。HTML のポップアップは介在しません。
@@ -161,9 +165,10 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 上に
   構築されています。open/save/directory ダイアログ、クリップボードの読み書き、OS 通知、
   「Finder/Explorer で表示」などをすべて型付きで呼び出せ、呼び出しに Rust は不要です。
-- **Server Actions API** — `defineAction` + `useAction` は React 19 の
-  `useActionState` の形をそのままエンドツーエンドで踏襲します
-  ([サーバーアクション](#サーバーアクション) 参照)。
+- **実際に動く Server Actions** — `defineAction` + `useAction` は React 19 の
+  `useActionState` の形をそのまま踏襲し、`'use server'` 関数は実際に Node 上で
+  実行されます——開発時は Vite ミドルウェア、本番時はバンドルされた Node の
+  子サーバー経由です([サーバーアクション](#サーバーアクション) 参照)。
 - **テーマ** — `ThemeProvider` / `useTheme` で light / dark / system モードに対応。
 - **macOS でのパッケージング(検証済み)** — `murasaki bundle` → `.app`、
   `murasaki installer` → `.dmg`(圧縮後 ~43 MB。`.app` 自体は Node + アプリを
@@ -267,9 +272,9 @@ export default function Home() {
 そのまま運ぶ、型付きのパススルーです。`useAction` は React 19 の `useActionState`
 を直接ラップしているため、`[state, run, isPending]` は Next.js ですでにおなじみの
 形そのものです。Vite プラグインが `'use server'` ディレクティブを検出してモジュールを
-コード分割します——公開 API の形は現時点で安定していますが、クライアント側のスタブを
-実際に動く Node ハンドラへ配線する部分は現在進行中です
-([ロードマップ](#ロードマップ) で管理)。
+分割します——クライアント側には型付きの `fetch` スタブが渡り、関数の実体はサーバー側
+(開発時は Vite ミドルウェア、本番時は小さくバンドルされた Node の子サーバー)で
+実行されます。
 
 ---
 
@@ -296,10 +301,9 @@ export default function Home() {
 murasaki は **pre-1.0**(現在 `0.26.0`)です——v1.0 までの間に API が変更される
 可能性があります。
 
-- 🚧 **Phase B** — フル App Router: ファイルスキャンで得たルートテーブルを
-  クライアントランタイムに配線して実際のマルチページアプリを実現、`loading` /
-  `error` / `not-found` バウンダリ、ミドルウェア、ストリーミング、そして Node への
-  実働する Server Actions RPC ディスパッチ。
+- 🚧 **Phase B** — App Router の仕上げ: `middleware`、ストリーミング /
+  Suspense によるデータ取得、動的な `generateMetadata`、DevTools /
+  エラーオーバーレイの磨き込み。
 - 🚧 **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
   サンプル集。
 - 🚧 **Phase D** — 自動アップデート、コード署名 / notarization、Windows/Linux
