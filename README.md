@@ -99,9 +99,12 @@ npm run bundle      # dist/bundle/<App>.app  ~120 MB (bundles Node + your app)
 npm run installer   # dist/<App>-<ver>.dmg   ~43 MB compressed
 ```
 
-The scaffold gives you a React 19 + Vite + Tailwind app: `src/main.tsx` calls
-`installClientRpc()` and renders `<ThemeProvider><Layout><Page /></ThemeProvider>`,
-and `murasaki.config.ts` describes your app's identity and window.
+The scaffold gives you a React 19 + Vite + Tailwind app with a Next.js-like
+layout — you only touch `src/app/` (pages, layouts, `globals.css`), `src/api/`
+(server actions), and `src/middleware.ts`. There's no `index.html` or entry
+file to maintain: murasaki owns the app shell and the client bootstrap (drop
+your own `index.html` in the project root if you want to customize the HTML
+head). `murasaki.config.ts` describes your app's identity and window.
 
 ---
 
@@ -304,7 +307,7 @@ server — a Vite middleware in dev, a small bundled Node child server in prod.
 
 ## Roadmap
 
-murasaki is **pre-1.0** (currently `0.32.1`) — the API can still change
+murasaki is **pre-1.0** (currently `0.33.0`) — the API can still change
 before v1.0.
 
 - ✅ **Phase B** — App Router essentially done: routing, Server Actions,

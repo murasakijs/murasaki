@@ -100,10 +100,12 @@ npm run bundle      # dist/bundle/<App>.app  ~120 MB (Node + アプリを同梱)
 npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
 ```
 
-生成される雛形は React 19 + Vite + Tailwind のアプリです。`src/main.tsx` が
-`installClientRpc()` を呼び出し、`<ThemeProvider><Layout><Page /></ThemeProvider>`
-をレンダリングします。アプリの識別情報とウィンドウ設定は `murasaki.config.ts` に
-記述します。
+生成される雛形は React 19 + Vite + Tailwind のアプリで、Next.js に近い構成です。
+触るのは `src/app/`(ページ・レイアウト・`globals.css`)、`src/api/`(サーバー
+アクション)、`src/middleware.ts` だけ。`index.html` やエントリファイルの管理は
+不要です — アプリシェルとクライアント起動は murasaki が持ちます(HTML の head を
+カスタムしたい場合はプロジェクト直下に自分の `index.html` を置けます)。アプリの
+識別情報とウィンドウ設定は `murasaki.config.ts` に記述します。
 
 ---
 
@@ -308,7 +310,7 @@ export default function Home() {
 
 ## ロードマップ
 
-murasaki は **pre-1.0**(現在 `0.32.1`)です——v1.0 までの間に API が変更される
+murasaki は **pre-1.0**(現在 `0.33.0`)です——v1.0 までの間に API が変更される
 可能性があります。
 
 - ✅ **Phase B** — App Router はほぼ完成: ルーティング・Server Actions・
