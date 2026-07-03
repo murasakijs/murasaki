@@ -263,7 +263,12 @@ async function copyTemplate(templateDir, targetDir, appName) {
   await cp(templateDir, targetDir, {
     recursive: true,
     filter(src) {
-      return !/\/node_modules(?:\/|$)/.test(src) && !/\/dist(?:\/|$)/.test(src)
+      // Match against the path *inside* the template only. `src` is absolute,
+      // and when create-murasaki is installed it lives under node_modules — so
+      // checking the absolute path would exclude every template file. Slice off
+      // templateDir first so an ancestor node_modules doesn't trigger this.
+      const rel = src.slice(templateDir.length)
+      return !/(?:^|\/)node_modules(?:\/|$)/.test(rel) && !/(?:^|\/)dist(?:\/|$)/.test(rel)
     },
   })
 
