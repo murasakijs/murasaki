@@ -1,5 +1,5 @@
 import type { Plugin } from 'vite'
-import { readdir } from 'node:fs/promises'
+import { access, readdir } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 
 interface Options {
@@ -9,12 +9,15 @@ interface Options {
 const VIRTUAL_ID = 'virtual:murasaki/routes'
 const RESOLVED_ID = `\0${VIRTUAL_ID}`
 
+const MIDDLEWARE_EXTS = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'mts']
+
 /**
  * File-based routing over `src/app/**\/page.tsx`.
  *
  * Emits a virtual module with an array of route entries the React runtime
  * consumes. Matches Next.js App Router shape (page / layout / loading /
- * error / not-found / dynamic segments / group segments).
+ * error / not-found / dynamic segments / group segments). Also exposes the
+ * project's optional `src/middleware.{ts,js,...}` default export, if any.
  */
 export function fileRouterPlugin({ srcDir }: Options): Plugin {
   return {
@@ -26,14 +29,33 @@ export function fileRouterPlugin({ srcDir }: Options): Plugin {
     async load(id) {
       if (id !== RESOLVED_ID) return null
       const routes = await scanRoutes(join(srcDir, 'app'))
-      return emitRoutesModule(routes, join(srcDir, 'app'))
+      const middlewareFile = await findMiddlewareFile(srcDir)
+      return emitRoutesModule(routes, join(srcDir, 'app'), middlewareFile)
     },
     async handleHotUpdate(ctx) {
-      if (!ctx.file.includes('/app/')) return
+      const isRouteFile = ctx.file.includes('/app/')
+      const isMiddlewareFile = MIDDLEWARE_EXTS.some(
+        (ext) => ctx.file === join(srcDir, `middleware.${ext}`),
+      )
+      if (!isRouteFile && !isMiddlewareFile) return
       const mod = ctx.server.moduleGraph.getModuleById(RESOLVED_ID)
       if (mod) ctx.server.moduleGraph.invalidateModule(mod)
     },
   }
+}
+
+/** First `src/middleware.{ts,tsx,js,jsx,mjs,mts}` found, if any. */
+async function findMiddlewareFile(srcDir: string): Promise<string | undefined> {
+  for (const ext of MIDDLEWARE_EXTS) {
+    const file = join(srcDir, `middleware.${ext}`)
+    try {
+      await access(file)
+      return file
+    } catch {
+      // try next extension
+    }
+  }
+  return undefined
 }
 
 interface RouteEntry {
@@ -117,7 +139,11 @@ function normalizeSegment(seg: string) {
   return seg
 }
 
-function emitRoutesModule(routes: RouteEntry[], appDir: string): string {
+function emitRoutesModule(
+  routes: RouteEntry[],
+  appDir: string,
+  middlewareFile?: string,
+): string {
   const imports: string[] = []
   const items: string[] = []
   routes.forEach((r, i) => {
@@ -139,5 +165,13 @@ function emitRoutesModule(routes: RouteEntry[], appDir: string): string {
     items.push(`{ ${bag.join(', ')} }`)
   })
 
-  return `${imports.join('\n')}\nexport const routes = [${items.join(',')}]\nexport const appDir = ${JSON.stringify(appDir)}\n`
+  let middlewareExport = 'export const middleware = undefined'
+  if (middlewareFile) {
+    imports.push(
+      `import _mw from '/${relative(process.cwd(), middlewareFile).replace(/\\/g, '/')}'`,
+    )
+    middlewareExport = 'export const middleware = _mw'
+  }
+
+  return `${imports.join('\n')}\nexport const routes = [${items.join(',')}]\nexport const appDir = ${JSON.stringify(appDir)}\n${middlewareExport}\n`
 }

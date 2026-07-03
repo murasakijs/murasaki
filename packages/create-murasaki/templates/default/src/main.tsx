@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { AppRouter, installClientRpc, ThemeProvider } from 'murasaki'
-import { routes } from 'virtual:murasaki/routes'
+import { routes, middleware } from 'virtual:murasaki/routes'
 import './globals.css'
 
 installClientRpc()
@@ -9,7 +9,7 @@ installClientRpc()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ThemeProvider>
-      <AppRouter routes={routes} />
+      <AppRouter routes={routes} middleware={middleware} />
     </ThemeProvider>
   </StrictMode>,
 )

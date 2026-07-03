@@ -1,8 +1,9 @@
-import { Component, Suspense, useEffect, useMemo, useState } from 'react'
+import { Component, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, ReactNode } from 'react'
 import { ParamsContext, RouterContext } from './router.js'
 import { applyMetadata } from './metadata.js'
 import type { GenerateMetadata, Metadata } from './metadata.js'
+import type { Middleware } from './middleware.js'
 
 /**
  * Shape of a namespace import (`import * as mod from '...'`) for a page,
@@ -177,6 +178,9 @@ function DefaultNotFound() {
   )
 }
 
+/** Redirect-loop guard for `middleware` — after this many consecutive redirects, give up. */
+const MAX_MIDDLEWARE_HOPS = 5
+
 /**
  * Client-side file-based routing dispatch.
  *
@@ -185,16 +189,28 @@ function DefaultNotFound() {
  * the caller imports the virtual module and passes it in:
  *
  * ```tsx
- * import { routes } from 'virtual:murasaki/routes'
+ * import { routes, middleware } from 'virtual:murasaki/routes'
  * import { AppRouter } from 'murasaki'
  *
- * createRoot(el).render(<AppRouter routes={routes} />)
+ * createRoot(el).render(<AppRouter routes={routes} middleware={middleware} />)
  * ```
+ *
+ * `middleware`, if given, runs before every navigation (initial mount,
+ * `push`/`replace`, and browser back/forward) and can redirect it — see
+ * `Middleware`.
  */
-export function AppRouter({ routes }: { routes: RouteEntry[] }) {
+export function AppRouter({
+  routes,
+  middleware,
+}: {
+  routes: RouteEntry[]
+  middleware?: Middleware
+}) {
   const [pathname, setPathname] = useState(() =>
     typeof window !== 'undefined' ? window.location.pathname : '/',
   )
+  const [resolving, setResolving] = useState(() => !!middleware)
+  const hopsRef = useRef(0)
 
   useEffect(() => {
     const onPopState = () => setPathname(window.location.pathname)
@@ -220,6 +236,53 @@ export function AppRouter({ routes }: { routes: RouteEntry[] }) {
     [pathname],
   )
 
+  // Runs `middleware` before every navigation, ahead of matching/rendering.
+  // No-op (and no async gate) when there's no `middleware` prop.
+  useEffect(() => {
+    if (!middleware) {
+      setResolving(false)
+      return
+    }
+
+    let cancelled = false
+    setResolving(true)
+
+    Promise.resolve(middleware({ pathname }))
+      .then((result) => {
+        if (cancelled) return
+
+        const redirect = result?.redirect
+        if (redirect && redirect !== pathname) {
+          if (hopsRef.current >= MAX_MIDDLEWARE_HOPS) {
+            console.warn(
+              `[murasaki] middleware redirected ${MAX_MIDDLEWARE_HOPS}+ times in a row (possible loop) — rendering "${pathname}" as-is.`,
+            )
+            hopsRef.current = 0
+            setResolving(false)
+            return
+          }
+          hopsRef.current++
+          window.history.replaceState(null, '', redirect)
+          setPathname(window.location.pathname)
+          return
+        }
+
+        hopsRef.current = 0
+        setResolving(false)
+      })
+      .catch((err) => {
+        console.error('[murasaki] middleware failed:', err)
+        if (!cancelled) {
+          hopsRef.current = 0
+          setResolving(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [middleware, pathname])
+
   const match = useMemo(() => matchRoute(routes, pathname), [routes, pathname])
 
   const layoutChain = useMemo(
@@ -233,7 +296,7 @@ export function AppRouter({ routes }: { routes: RouteEntry[] }) {
   )
 
   useEffect(() => {
-    if (!match || !staticMetadata) return
+    if (resolving || !match || !staticMetadata) return
     const generate = match.route.page?.generateMetadata
     if (!generate) {
       applyMetadata(staticMetadata)
@@ -252,34 +315,38 @@ export function AppRouter({ routes }: { routes: RouteEntry[] }) {
     return () => {
       cancelled = true
     }
-  }, [match, staticMetadata])
+  }, [match, staticMetadata, resolving])
 
-  let element: ReactNode
+  let element: ReactNode = null
   let params: Record<string, string> = {}
 
-  if (!match) {
-    const NotFound = nearestNotFound(routes, pathname)?.default ?? DefaultNotFound
-    element = <NotFound />
-  } else {
-    const { route, params: matchedParams } = match
-    params = matchedParams
-    const Page = route.page!.default
-    const Loading = ancestorChain(routes, route.urlPath, 'loading').at(-1)?.loading?.default
-    const ErrorFallback = ancestorChain(routes, route.urlPath, 'error').at(-1)?.error?.default
+  // While `middleware` is deciding (or mid-redirect), render nothing rather
+  // than flashing the requested route.
+  if (!resolving) {
+    if (!match) {
+      const NotFound = nearestNotFound(routes, pathname)?.default ?? DefaultNotFound
+      element = <NotFound />
+    } else {
+      const { route, params: matchedParams } = match
+      params = matchedParams
+      const Page = route.page!.default
+      const Loading = ancestorChain(routes, route.urlPath, 'loading').at(-1)?.loading?.default
+      const ErrorFallback = ancestorChain(routes, route.urlPath, 'error').at(-1)?.error?.default
 
-    let inner: ReactNode = (
-      <ErrorBoundary fallback={ErrorFallback}>
-        <Suspense fallback={Loading ? <Loading /> : null}>
-          <Page params={params} />
-        </Suspense>
-      </ErrorBoundary>
-    )
+      let inner: ReactNode = (
+        <ErrorBoundary fallback={ErrorFallback}>
+          <Suspense fallback={Loading ? <Loading /> : null}>
+            <Page params={params} />
+          </Suspense>
+        </ErrorBoundary>
+      )
 
-    for (let i = layoutChain.length - 1; i >= 0; i--) {
-      const Layout = layoutChain[i].layout!.default
-      inner = <Layout>{inner}</Layout>
+      for (let i = layoutChain.length - 1; i >= 0; i--) {
+        const Layout = layoutChain[i].layout!.default
+        inner = <Layout>{inner}</Layout>
+      }
+      element = inner
     }
-    element = inner
   }
 
   return (

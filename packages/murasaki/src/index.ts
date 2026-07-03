@@ -20,6 +20,8 @@ export type { LinkProps } from './react/router.js'
 export { AppRouter } from './react/app-router.js'
 export type { RouteEntry } from './react/app-router.js'
 
+export type { Middleware, MiddlewareContext, MiddlewareResult } from './react/middleware.js'
+
 export { applyMetadata } from './react/metadata.js'
 export type { GenerateMetadata, GenerateMetadataContext, Metadata } from './react/metadata.js'
 
