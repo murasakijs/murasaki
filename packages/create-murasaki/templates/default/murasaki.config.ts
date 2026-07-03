@@ -9,9 +9,5 @@ export default defineConfig({
     title: 'Murasaki App',
     width: 1000,
     height: 700,
-    // vibrancy: 'hud', // translucent window blur — only shows through a
-    // transparent background. With an opaque UI (the default) it's invisible
-    // yet still costs GPU every frame and can make the window feel laggy, so
-    // it's left off. Turn it on only if you give the app a see-through look.
   },
 })

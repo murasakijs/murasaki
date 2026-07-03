@@ -6,6 +6,10 @@ export interface WindowConfig {
   minHeight?: number
   resizable?: boolean
   transparent?: boolean
+  /**
+   * macOS translucent window vibrancy. NOTE: declared but not yet applied by
+   * the native binding — setting it is a no-op today (support is planned).
+   */
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
 }
 

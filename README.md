@@ -227,7 +227,6 @@ export default defineConfig({
     title: 'Murasaki App',
     width: 1000,
     height: 700,
-    vibrancy: 'hud',
   },
 })
 ```
