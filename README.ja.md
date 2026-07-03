@@ -310,7 +310,7 @@ export default function Home() {
 
 ## ロードマップ
 
-murasaki は **pre-1.0**(現在 `0.34.1`)です——v1.0 までの間に API が変更される
+murasaki は **pre-1.0**(現在 `0.34.2`)です——v1.0 までの間に API が変更される
 可能性があります。
 
 - ✅ **Phase B** — App Router はほぼ完成: ルーティング・Server Actions・
