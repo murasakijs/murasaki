@@ -230,6 +230,13 @@ async function applyBiome(targetDir) {
   pkg.scripts.format = 'biome format --write .'
   pkg.devDependencies = pkg.devDependencies || {}
   pkg.devDependencies['@biomejs/biome'] = '^2.5.1'
+  // pnpm v10 ignores dependency build scripts unless allow-listed — Biome ships
+  // a native binary via its postinstall, so let it build.
+  pkg.pnpm = pkg.pnpm || {}
+  pkg.pnpm.onlyBuiltDependencies = pkg.pnpm.onlyBuiltDependencies || []
+  if (!pkg.pnpm.onlyBuiltDependencies.includes('@biomejs/biome')) {
+    pkg.pnpm.onlyBuiltDependencies.push('@biomejs/biome')
+  }
   await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
 }
 
