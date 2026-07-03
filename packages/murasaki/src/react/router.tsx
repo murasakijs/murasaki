@@ -9,6 +9,7 @@ interface RouterCtx {
 }
 
 const Ctx = createContext<RouterCtx | null>(null)
+const ParamsCtx = createContext<Record<string, string>>({})
 
 export interface LinkProps
   extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> {
@@ -64,4 +65,12 @@ export function usePathname(): string {
   return useRouter().pathname
 }
 
-export { Ctx as RouterContext }
+/**
+ * Dynamic-segment params for the currently matched route (e.g. `:slug`).
+ * Populated by `<AppRouter>`; returns `{}` outside of a matched dynamic route.
+ */
+export function useParams(): Record<string, string> {
+  return useContext(ParamsCtx)
+}
+
+export { Ctx as RouterContext, ParamsCtx as ParamsContext }

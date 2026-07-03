@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useGlobalContextMenu } from 'murasaki'
+import { Link, useGlobalContextMenu } from 'murasaki'
 
 /**
  * "Hello, Murasaki 🦋" — the greeting stays.
@@ -41,6 +41,11 @@ export default function Page() {
       </button>
       <p className="mt-6 text-xs text-slate-500 dark:text-slate-500">
         Right-click for a native context menu.
+      </p>
+      <p className="mt-4">
+        <Link href="/about" className="text-murasaki-bright hover:underline">
+          About this app
+        </Link>
       </p>
     </main>
   )

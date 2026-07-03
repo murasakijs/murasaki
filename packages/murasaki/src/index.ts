@@ -14,8 +14,11 @@ export type {
 export { defineAction, callAction, useAction } from './react/actions.js'
 export type { ActionState, ActionResult } from './react/actions.js'
 
-export { Link, useRouter, usePathname } from './react/router.js'
+export { Link, useRouter, usePathname, useParams } from './react/router.js'
 export type { LinkProps } from './react/router.js'
+
+export { AppRouter } from './react/app-router.js'
+export type { RouteEntry } from './react/app-router.js'
 
 export type { Metadata } from './react/metadata.js'
 
