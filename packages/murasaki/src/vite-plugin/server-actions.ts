@@ -1,4 +1,5 @@
 import type { Connect, Plugin, ViteDevServer } from 'vite'
+import { relative, resolve } from 'node:path'
 
 interface Options {
   srcDir: string
@@ -7,13 +8,29 @@ interface Options {
 const ACTION_PATH_PREFIX = '/__murasaki/action/'
 
 /**
+ * Stable id for a `'use server'` module: a project-root-relative POSIX path
+ * (e.g. `src/actions.ts`). This is what the client stub embeds in its
+ * `fetch()` call and what both the dev middleware (below) and the prod
+ * server (assets/prod-server.mjs, keyed off the registry built by
+ * cli/build-server.ts) use to look the module back up — it has to be
+ * identical in dev and prod, so an absolute filesystem path (which used to
+ * be used here) doesn't work since it's dev-machine-specific and wouldn't
+ * match a module bundled into a prod registry anyway.
+ */
+export function toActionId(absPath: string): string {
+  return relative(process.cwd(), absPath).replace(/\\/g, '/')
+}
+
+/**
  * Detects `'use server'` at the top of a module and splits it:
  *  - the client bundle gets a `fetch('/__murasaki/action/…')` proxy
  *  - the server keeps the real implementation (the SSR transform is left
  *    untouched so `server.ssrLoadModule` can load the actual functions)
  *
  * In dev, a middleware handles the `fetch` calls emitted by the stub and
- * invokes the real function via `ssrLoadModule`.
+ * invokes the real function via `ssrLoadModule`. In prod, the same stub
+ * hits a Node HTTP server (assets/prod-server.mjs) backed by a registry
+ * bundle built ahead of time by cli/build-server.ts.
  *
  * Full RSC parity lands in Phase B — Phase A ships the wire format so the
  * public shape is stable from day one.
@@ -27,11 +44,12 @@ export function serverActionsPlugin({ srcDir }: Options): Plugin {
       if (!id.startsWith(srcDir)) return null
       if (!/^\s*(['"])use server\1\s*;?/m.test(code)) return null
 
+      const actionId = toActionId(id)
       const exports = extractExportNames(code)
       const stubs = exports
         .map(
           (name) => `export async function ${name}(...args) {
-  const res = await fetch('/__murasaki/action/${encodeURIComponent(id)}/${name}', {
+  const res = await fetch('/__murasaki/action/${encodeURIComponent(actionId)}/${name}', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ args }),
@@ -65,7 +83,9 @@ function handleActionRequest(server: ViteDevServer): Connect.NextHandleFunction 
 
     const encodedId = rest.slice(0, sepIndex)
     const name = rest.slice(sepIndex + 1)
-    const id = decodeURIComponent(encodedId)
+    // The client sent back the project-root-relative id (see toActionId
+    // above) — resolve it to the absolute path ssrLoadModule needs.
+    const id = resolve(process.cwd(), decodeURIComponent(encodedId))
 
     let args: unknown[]
     try {

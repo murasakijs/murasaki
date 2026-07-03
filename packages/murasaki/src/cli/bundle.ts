@@ -6,24 +6,33 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import build from './build.js'
+import buildServer from './build-server.js'
 import { dim, success, warn } from './brand.js'
 import type { MurasakiConfig } from '../config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
- * Pack `dist/client` + a copy of the current Node runtime + the production
- * launcher (`assets/prod-launcher.mjs`) into a macOS `.app` bundle.
+ * Pack `dist/client` + `dist/server` (the `'use server'` action registry) +
+ * a copy of the current Node runtime + the production launcher
+ * (`assets/prod-launcher.mjs` + `assets/prod-server.mjs`) into a macOS
+ * `.app` bundle.
  *
- * production has no Vite dev server — `prod-launcher.mjs` runs a small
- * static file server over `dist/client` instead and points the native
- * WebView at it (see assets/prod-launcher.mjs for the dev.ts → prod
- * translation).
+ * production has no Vite dev server — `prod-launcher.mjs` spawns
+ * `prod-server.mjs`, a small Node HTTP server that serves `dist/client` and
+ * runs actions out of the `dist/server` registry, then points the native
+ * WebView at it over `http://127.0.0.1:<port>/` (see assets/prod-launcher.mjs
+ * for the dev.ts → prod translation). This mirrors dev (Vite dev server)
+ * closely enough that the client's `/__murasaki/action/…` fetch works
+ * unchanged in both.
  */
 export default async function bundle(argv: string[]) {
   const cwd = process.cwd()
   const config = await loadUserConfig(cwd)
   if (!existsSync(resolve(cwd, 'dist/client'))) await build(argv)
+  // Always (re)built — cheap relative to the client build, and must exist
+  // before packaging even if dist/client was already up to date.
+  await buildServer(cwd, resolve(cwd, 'src'))
 
   if (process.platform !== 'darwin') {
     process.stdout.write(`\n${warn('bundle: only macOS is supported right now.')}\n\n`)
@@ -57,9 +66,11 @@ exec "$DIR/node" "$DIR/prod-launcher.mjs"
   await copyFile(process.execPath, nodeDest)
   await chmod(nodeDest, 0o755)
 
-  // Contents/Resources/prod-launcher.mjs
+  // Contents/Resources/prod-launcher.mjs + prod-server.mjs
   const launcherSrc = resolve(__dirname, '../../assets/prod-launcher.mjs')
   await copyFile(launcherSrc, join(resourcesDir, 'prod-launcher.mjs'))
+  const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
+  await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
 
   // Contents/Resources/icon.icns + icon.png — the .icns backs the .app's
   // Finder/DMG appearance (via CFBundleIconFile below); the plain PNG is
@@ -88,6 +99,13 @@ exec "$DIR/node" "$DIR/prod-launcher.mjs"
 
   // Contents/Resources/client — the Vite build output.
   await cp(resolve(cwd, 'dist/client'), join(resourcesDir, 'client'), {
+    recursive: true,
+  })
+
+  // Contents/Resources/server — the 'use server' action registry bundle
+  // (dist/server/actions.mjs), built self-contained (see build-server.ts)
+  // so no project node_modules need to ship alongside it.
+  await cp(resolve(cwd, 'dist/server'), join(resourcesDir, 'server'), {
     recursive: true,
   })
 
