@@ -158,6 +158,10 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
   なります。ネストされたレイアウト、動的な `:param` セグメント、`loading` /
   `error` / `not-found` バウンダリ、クライアントサイドの `<Link>` 遷移まで、
   ルーター設定を書く必要はありません。
+- **メタデータ & ミドルウェア** — ページやレイアウトの `export const metadata` /
+  `generateMetadata()` が document のタイトルと meta タグを設定し、
+  `src/middleware.ts` が各ナビゲーションの前に走ってリダイレクトできます
+  (ルートガード)。どちらも Next.js の形。
 - **ネイティブコンテキストメニュー** — `useGlobalContextMenu()` が Rust 側へ post し、
   本物の OS メニュー(NSMenu / HMENU / GtkMenu)を表示、クリックされた項目を DOM の
   `CustomEvent` として返します。HTML のポップアップは介在しません。
@@ -301,9 +305,9 @@ export default function Home() {
 murasaki は **pre-1.0**(現在 `0.26.0`)です——v1.0 までの間に API が変更される
 可能性があります。
 
-- 🚧 **Phase B** — App Router の仕上げ: `middleware`、ストリーミング /
-  Suspense によるデータ取得、動的な `generateMetadata`、DevTools /
-  エラーオーバーレイの磨き込み。
+- 🚧 **Phase B** — 残りの App Router 仕上げ: ストリーミング / Suspense による
+  データ取得、DevTools / エラーオーバーレイ。(ルーティング・Server Actions・
+  メタデータ・ミドルウェアは実装済み。)
 - 🚧 **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
   サンプル集。
 - 🚧 **Phase D** — 自動アップデート、コード署名 / notarization、Windows/Linux

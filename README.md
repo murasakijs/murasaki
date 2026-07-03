@@ -156,6 +156,10 @@ we've benchmarked head-to-head:
   automatically — nested layouts, dynamic `:param` segments, `loading` /
   `error` / `not-found` boundaries, and client-side `<Link>` navigation, with
   no router config to write.
+- **Metadata & middleware.** `export const metadata` / `generateMetadata()` on
+  a page or layout set the document title and meta tags; `src/middleware.ts`
+  runs before every navigation and can redirect (a route guard) — both
+  Next.js-shaped.
 - **Native context menu.** `useGlobalContextMenu()` posts to the Rust side,
   which pops a real OS menu (NSMenu / HMENU / GtkMenu) and dispatches the
   clicked item back as a DOM `CustomEvent` — no HTML popup involved.
@@ -297,8 +301,9 @@ server — a Vite middleware in dev, a small bundled Node child server in prod.
 murasaki is **pre-1.0** (currently `0.26.0`) — the API can still change
 before v1.0.
 
-- 🚧 **Phase B** — App Router polish: `middleware`, streaming / Suspense-driven
-  data, dynamic `generateMetadata`, and DevTools / error-overlay polish.
+- 🚧 **Phase B** — remaining App Router polish: streaming / Suspense-driven
+  data and DevTools / error-overlay. (Routing, Server Actions, metadata, and
+  middleware already ship.)
 - 🚧 **Phase C** — `@murasakijs/ui` component library, docs site, examples.
 - 🚧 **Phase D** — auto-update, code signing/notarization, Windows/Linux
   packaging, v1.0 stabilization.
