@@ -174,6 +174,12 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
   実行されます——開発時は Vite ミドルウェア、本番時はバンドルされた Node の
   子サーバー経由です([サーバーアクション](#サーバーアクション) 参照)。
 - **テーマ** — `ThemeProvider` / `useTheme` で light / dark / system モードに対応。
+- **開発用エラーオーバーレイ** — キャッチされないランタイムエラー(レンダーエラー、
+  未処理の Promise rejection)を、murasaki らしいフルスクリーンのオーバーレイとして
+  スタックトレースと React のコンポーネントスタックとともに表示します。`Esc` で
+  閉じるか、リロードできます。本番ビルドでは何もしません(no-op)。`murasaki dev`
+  は `http://localhost` で配信されるため、標準の **React DevTools ブラウザ拡張**も
+  同じ URL を Chrome で開けばそのまま使えます。
 - **macOS でのパッケージング(検証済み)** — `murasaki bundle` → `.app`、
   `murasaki installer` → `.dmg`(圧縮後 ~43 MB。`.app` 自体は Node + アプリを
   同梱するため ~120 MB)。
@@ -302,16 +308,19 @@ export default function Home() {
 
 ## ロードマップ
 
-murasaki は **pre-1.0**(現在 `0.26.0`)です——v1.0 までの間に API が変更される
+murasaki は **pre-1.0**(現在 `0.29.0`)です——v1.0 までの間に API が変更される
 可能性があります。
 
-- 🚧 **Phase B** — 残りの App Router 仕上げ: ストリーミング / Suspense による
-  データ取得、DevTools / エラーオーバーレイ。(ルーティング・Server Actions・
-  メタデータ・ミドルウェアは実装済み。)
+- ✅ **Phase B** — App Router はほぼ完成: ルーティング・Server Actions・
+  メタデータ・ミドルウェア・開発用エラーオーバーレイまで、すべて実装済みです。
 - 🚧 **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
   サンプル集。
 - 🚧 **Phase D** — 自動アップデート、コード署名 / notarization、Windows/Linux
   パッケージング、v1.0 の安定化。
+- 🔭 **検討中(post-1.0)**: サーバーサイドレンダリング + ストリーミング。現状の
+  アーキテクチャはクライアント側で完結してレンダリングしているため、これは
+  近いフェーズで計画しているものではなく、v1.0 以降に評価するより大きな
+  アーキテクチャ上の変更として位置づけています。
 
 ---
 

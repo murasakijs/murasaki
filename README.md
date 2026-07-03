@@ -172,6 +172,12 @@ we've benchmarked head-to-head:
   runs in Node — via a Vite middleware in dev, via a bundled Node child server
   in prod (see [Server Actions](#server-actions)).
 - **Theming.** `ThemeProvider` / `useTheme` with light / dark / system modes.
+- **Dev error overlay.** Uncaught runtime errors — render errors, unhandled
+  promise rejections — surface as a full-screen, murasaki-branded overlay with
+  the stack and the React component stack; dismiss with `Esc` or reload. It's
+  a no-op in production builds. Since `murasaki dev` serves over
+  `http://localhost`, the standard **React DevTools browser extension** also
+  works — just open the same URL in Chrome.
 - **Packaging on macOS (verified).** `murasaki bundle` → `.app`,
   `murasaki installer` → `.dmg` (~43 MB compressed; the `.app` itself is
   ~120 MB because it bundles Node + your app).
@@ -298,15 +304,18 @@ server — a Vite middleware in dev, a small bundled Node child server in prod.
 
 ## Roadmap
 
-murasaki is **pre-1.0** (currently `0.26.0`) — the API can still change
+murasaki is **pre-1.0** (currently `0.29.0`) — the API can still change
 before v1.0.
 
-- 🚧 **Phase B** — remaining App Router polish: streaming / Suspense-driven
-  data and DevTools / error-overlay. (Routing, Server Actions, metadata, and
-  middleware already ship.)
+- ✅ **Phase B** — App Router essentially done: routing, Server Actions,
+  metadata, middleware, and a dev error overlay all ship.
 - 🚧 **Phase C** — `@murasakijs/ui` component library, docs site, examples.
 - 🚧 **Phase D** — auto-update, code signing/notarization, Windows/Linux
   packaging, v1.0 stabilization.
+- 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
+  architecture renders entirely on the client, so this is a bigger
+  architectural shift we're evaluating for after v1.0 rather than something
+  planned for a near-term phase.
 
 ---
 

@@ -4,6 +4,7 @@ import { ParamsContext, RouterContext } from './router.js'
 import { applyMetadata } from './metadata.js'
 import type { GenerateMetadata, Metadata } from './metadata.js'
 import type { Middleware } from './middleware.js'
+import { DevErrorOverlay, reportDevError } from './error-overlay.js'
 
 /**
  * Shape of a namespace import (`import * as mod from '...'`) for a page,
@@ -148,6 +149,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { error }
+  }
+
+  componentDidCatch(error: Error, info: { componentStack?: string | null }) {
+    if (process.env.NODE_ENV !== 'production') {
+      reportDevError(error, info.componentStack ?? undefined)
+    }
   }
 
   reset = () => this.setState({ error: null })
@@ -350,8 +357,11 @@ export function AppRouter({
   }
 
   return (
-    <RouterContext.Provider value={routerValue}>
-      <ParamsContext.Provider value={params}>{element}</ParamsContext.Provider>
-    </RouterContext.Provider>
+    <>
+      <RouterContext.Provider value={routerValue}>
+        <ParamsContext.Provider value={params}>{element}</ParamsContext.Provider>
+      </RouterContext.Provider>
+      {process.env.NODE_ENV !== 'production' && <DevErrorOverlay />}
+    </>
   )
 }
