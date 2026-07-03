@@ -126,10 +126,26 @@ exec "$DIR/node" "$DIR/prod-launcher.mjs"
   process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
 }
 
+/**
+ * Locate the installed `@murasakijs/native` package dir. Resolve from the user
+ * project first (the normal, hoisted case), then fall back to resolving from
+ * murasaki's own location — `@murasakijs/native` is murasaki's dependency, so
+ * this succeeds even when a package manager nests it under
+ * `node_modules/murasaki/node_modules/` (e.g. `file:`/link installs) rather
+ * than hoisting it to the project root.
+ */
 function resolveNativeModuleDir(cwd: string): string {
-  const req = createRequire(resolve(cwd, 'package.json'))
-  const pkgJson = req.resolve('@murasakijs/native/package.json')
-  return dirname(pkgJson)
+  const bases = [resolve(cwd, 'package.json'), fileURLToPath(import.meta.url)]
+  for (const base of bases) {
+    try {
+      return dirname(createRequire(base).resolve('@murasakijs/native/package.json'))
+    } catch {
+      // try the next resolution base
+    }
+  }
+  throw new Error(
+    "murasaki: couldn't resolve @murasakijs/native — make sure it's installed (it ships as a dependency of murasaki).",
+  )
 }
 
 /**
