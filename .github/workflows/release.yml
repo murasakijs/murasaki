@@ -48,6 +48,12 @@ jobs:
       - name: Build murasaki
         run: pnpm --filter murasaki build
 
+      # @murasakijs/ui ships its own compiled dist (plus styles.css /
+      # tailwind-preset.cjs at the package root). It versions independently of
+      # the framework, so it is NOT part of the tag-match check below.
+      - name: Build @murasakijs/ui
+        run: pnpm --filter @murasakijs/ui build
+
       - name: Verify package versions match tag (if triggered by tag)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -135,6 +141,22 @@ jobs:
           V=$(node -p "require('./package.json').version")
           if npm view "create-murasaki@$V" version >/dev/null 2>&1; then
             echo "create-murasaki@$V already published — skipping."
+          else
+            npm publish --provenance --access public
+          fi
+
+      # @murasakijs/ui versions independently of the framework and publishes at
+      # its own package.json version (idempotent: skip if that version is
+      # already on npm). The very first version must be published manually and
+      # its Trusted Publisher configured on npm before CI can OIDC-publish
+      # subsequent versions — until then this step simply skips the existing
+      # 0.1.0.
+      - name: Publish packages/ui
+        working-directory: packages/ui
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "@murasakijs/ui@$V" version >/dev/null 2>&1; then
+            echo "@murasakijs/ui@$V already published — skipping."
           else
             npm publish --provenance --access public
           fi

@@ -1,7 +1,12 @@
 import type { Config } from 'tailwindcss'
 
 export default {
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  presets: [require('@murasakijs/ui/tailwind-preset')],
+  content: [
+    './index.html',
+    './src/**/*.{ts,tsx}',
+    './node_modules/@murasakijs/ui/dist/**/*.js',
+  ],
   darkMode: ['selector', '[data-theme="dark"]'],
   theme: {
     extend: {

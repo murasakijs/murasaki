@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "murasaki": "^0.30.0",
+    "@murasakijs/ui": "^0.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

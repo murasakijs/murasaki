@@ -1,5 +1,6 @@
 import { Link } from 'murasaki'
 import type { Metadata } from 'murasaki'
+import { Card, CardHeader, CardTitle, CardContent } from '@murasakijs/ui'
 
 export const metadata: Metadata = {
   title: 'About · Murasaki App',
@@ -7,13 +8,18 @@ export const metadata: Metadata = {
 
 export default function AboutPage() {
   return (
-    <main className="text-center">
-      <h1 className="text-4xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
-        About
-      </h1>
-      <p className="mt-3 text-slate-600 dark:text-slate-400">
-        This page lives at <code className="rounded bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-sm">src/app/about/page.tsx</code>.
-      </p>
+    <main className="mx-auto max-w-md text-center">
+      <Card className="text-left">
+        <CardHeader>
+          <CardTitle className="text-center text-4xl">About</CardTitle>
+        </CardHeader>
+        <CardContent className="text-center">
+          <p className="text-muted-foreground">
+            This page lives at{' '}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/app/about/page.tsx</code>.
+          </p>
+        </CardContent>
+      </Card>
       <p className="mt-6">
         <Link href="/" className="text-murasaki-bright hover:underline">
           ← Back home

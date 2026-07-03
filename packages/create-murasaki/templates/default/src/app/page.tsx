@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { Link, useGlobalContextMenu } from 'murasaki'
 import type { Metadata } from 'murasaki'
+import {
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+} from '@murasakijs/ui'
 import { greet } from '../actions'
 
 export const metadata: Metadata = {
@@ -34,38 +42,38 @@ export default function Page() {
   )
 
   return (
-    <main className="text-center">
-      <h1 className="text-4xl font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+    <main className="mx-auto max-w-md text-center">
+      <h1 className="text-4xl font-semibold tracking-tight text-foreground">
         Hello, Murasaki <span aria-hidden>🦋</span>
       </h1>
-      <p className="mt-3 text-slate-600 dark:text-slate-400">
-        Edit <code className="rounded bg-slate-200 dark:bg-slate-800 px-1.5 py-0.5 text-sm">src/app/page.tsx</code> and save to reload.
-      </p>
-      <button
-        onClick={() => setCount((n) => n + 1)}
-        className="mt-8 rounded-md bg-murasaki-bright text-white px-4 py-2 font-medium hover:bg-murasaki-deep transition-colors"
-      >
-        Clicked {count} times
-      </button>
-      <p className="mt-6 text-xs text-slate-500 dark:text-slate-500">
+      <p className="mt-3 text-muted-foreground">
         Right-click for a native context menu.
       </p>
-      <p className="mt-4">
+
+      <Card className="mt-8 text-left">
+        <CardHeader>
+          <CardTitle>Try it out</CardTitle>
+          <CardDescription>
+            Edit <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/app/page.tsx</code> and
+            save to reload.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center gap-4 text-center">
+          <Button onClick={() => setCount((n) => n + 1)}>
+            Clicked {count} times
+          </Button>
+          <Button variant="outline" onClick={async () => setGreeting(await greet('Murasaki'))}>
+            Call server action
+          </Button>
+          {greeting && <p className="text-sm text-muted-foreground">{greeting}</p>}
+        </CardContent>
+      </Card>
+
+      <p className="mt-6">
         <Link href="/about" className="text-murasaki-bright hover:underline">
           About this app
         </Link>
       </p>
-      <div className="mt-8">
-        <button
-          onClick={async () => setGreeting(await greet('Murasaki'))}
-          className="rounded-md border border-slate-300 dark:border-slate-700 px-4 py-2 font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-        >
-          Call server action
-        </button>
-        {greeting && (
-          <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">{greeting}</p>
-        )}
-      </div>
     </main>
   )
 }
