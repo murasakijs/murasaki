@@ -3,7 +3,6 @@ import type { Config } from 'tailwindcss'
 export default {
   presets: [require('@murasakijs/ui/tailwind-preset')],
   content: [
-    './index.html',
     './src/**/*.{ts,tsx}',
     './node_modules/@murasakijs/ui/dist/**/*.js',
   ],

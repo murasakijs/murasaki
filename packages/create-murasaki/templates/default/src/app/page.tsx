@@ -9,7 +9,7 @@ import {
   CardDescription,
   CardContent,
 } from '@murasakijs/ui'
-import { greet } from '../actions'
+import { greet } from '../api/actions'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',

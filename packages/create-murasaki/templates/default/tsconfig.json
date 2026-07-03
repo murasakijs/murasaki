@@ -15,5 +15,5 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "vite.config.ts", "murasaki.config.ts"]
+  "include": ["src/**/*", "vite.config.ts", "murasaki.config.ts", "murasaki-env.d.ts"]
 }
