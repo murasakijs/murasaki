@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import type { MurasakiConfig } from '../config.js'
 import { fileRouterPlugin } from './routing.js'
 import { serverActionsPlugin } from './server-actions.js'
+import { appShellPlugin } from './shell.js'
 
 export interface MurasakiPluginOptions {
   config: MurasakiConfig
@@ -15,6 +16,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     react(),
     fileRouterPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),
+    appShellPlugin(),
     {
       name: 'murasaki:core',
       config() {

@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Murasaki App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- Inline module script (not `src="virtual:..."`) so Vite resolves the
+         bare import to the real dev/built URL. A `src` attribute starting with
+         `virtual:` would be read by the browser as a URL scheme and never load. -->
+    <script type="module">
+      import 'virtual:murasaki/client'
+    </script>
+  </body>
+</html>
