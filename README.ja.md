@@ -2,9 +2,9 @@
 
 <img src="./assets/logo.svg" alt="Murasaki — Next.js 開発者のためのデスクトップフレームワーク" width="720">
 
-**Next.js 開発者のためのデスクトップフレームワーク**
+**Next.js 開発者のためのデスクトップフレームワーク。**
 
-Node 駆動 · WebView 薄 · Rust 不要 · Chromium 不要
+React 19 · Vite · OS WebView · Rust ネイティブ · Chromium 不要
 
 [![npm version](https://img.shields.io/npm/v/murasaki?color=A855F7&label=npm)](https://www.npmjs.com/package/murasaki)
 [![npm downloads](https://img.shields.io/npm/dm/murasaki?color=A855F7)](https://www.npmjs.com/package/murasaki)
@@ -17,56 +17,64 @@ Node 駆動 · WebView 薄 · Rust 不要 · Chromium 不要
 
 ---
 
-Murasaki は TypeScript ファーストのデスクトップフレームワークです。
-**Next.js のような DX** — ファイルベースルーティング、レイアウト、metadata、
-ウィンドウ内 HMR、サーバーアクション — をすべて素の Node.js 上で提供し、
-**OS 標準搭載の WebView** でレンダリングします。
+Murasaki は TypeScript ファーストのデスクトップフレームワークです。**Next.js ライクな DX**
+——ファイルベースのプロジェクト構成、レイアウト、metadata、React 19 のサーバーアクション
+——を **React 19 + Vite** の上に構築し、**マシンに標準搭載の OS WebView** でレンダリングします
+(Chromium は同梱しません)。ネイティブウィンドウ、メニュー、OS 連携は自作の Rust バインディング
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) が担っており
+——あなたが書くのは TypeScript だけで、Rust を書くことはありません。対応ターゲットは
+**macOS / Windows / Linux** です。
 
 ```bash
-pnpm create murasaki@latest my-app
+npm create murasaki@latest my-app
 cd my-app
-pnpm dev
+npm run dev
 ```
 
 ```tsx
 // src/app/page.tsx
-import { Button, Card, Text, useAction } from 'murasaki'
-import { useState } from 'murasaki/jsx/dom'
-import type { greet } from '../actions'
+import { useState } from 'react'
+import { useGlobalContextMenu } from 'murasaki'
 
-export default function Home() {
+export default function Page() {
   const [count, setCount] = useState(0)
-  const g = useAction<typeof greet>('greet')
+
+  useGlobalContextMenu(
+    [
+      { id: 'reload', label: 'Reload', accelerator: 'CmdOrCtrl+R' },
+      { role: 'separator' },
+      { role: 'copy' },
+      { role: 'paste' },
+    ],
+    (id) => {
+      if (id === 'reload') location.reload()
+    },
+  )
 
   return (
-    <Card>
-      <Text size={24} weight="bold">カウント: {count}</Text>
-      <Button onClick={() => setCount(count + 1)}>+</Button>
-      <Button variant="secondary" onClick={() => g.call('world')}>
-        Node から挨拶
-      </Button>
-      {g.data && <Text>{g.data}</Text>}
-    </Card>
+    <main>
+      <h1>Hello, Murasaki 🦋</h1>
+      <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
+    </main>
   )
 }
 ```
 
-これだけです。TypeScript アプリがそのままデスクトップアプリになります。
-**macOS / Windows / Linux** 対応、`.app` / `.dmg` / `.msi` / `.AppImage`
-/ `.zip` / `.tar.gz` として配布可能 — どの host OS からでも。
+これは本物の Vite 開発サーバーが React Fast Refresh とともに動き、ネイティブウィンドウの中で
+レンダリングされている状態です——そして画面のどこを右クリックしても、HTML のポップアップではなく
+**本物の OS コンテキストメニュー**(macOS では NSMenu、Windows では HMENU、Linux では GtkMenu)
+が表示されます。
 
 ---
 
 ## 目次
 
 - [クイックスタート](#クイックスタート)
-- [なぜ Murasaki?](#なぜ-murasaki)
+- [なぜ murasaki なのか](#なぜ-murasaki-なのか)
 - [機能](#機能)
 - [CLI リファレンス](#cli-リファレンス)
 - [設定 (`murasaki.config.ts`)](#設定-murasakiconfigts)
 - [サーバーアクション](#サーバーアクション)
-- [クロスコンパイル対応表](#クロスコンパイル対応表)
-- [コンポーネント (34 個) & フック (13 個)](#コンポーネント-34-個--フック-13-個)
 - [アーキテクチャ](#アーキテクチャ)
 - [ロードマップ](#ロードマップ)
 - [コントリビュート](#コントリビュート)
@@ -79,104 +87,114 @@ export default function Home() {
 ## クイックスタート
 
 ```bash
-# 生成
-pnpm create murasaki@latest my-app
+# 雛形を生成
+npm create murasaki@latest my-app
 
-# HMR で開発
+# Vite の HMR + React Fast Refresh で開発
 cd my-app
-pnpm dev
+npm run dev
 
-# 配布
-pnpm build          # dist/server.cjs                    (~400 KB)
-pnpm bundle         # dist/<App>.app                     (~120 MB)
-pnpm installer      # dist/<App>-<ver>.dmg               (~43 MB 圧縮)
-
-# クロスコンパイル
-pnpm exec murasaki installer --target win-x64      # → .msi (要 WiX v4)
-pnpm exec murasaki installer --target linux-x64    # → .AppImage (要 squashfs)
+# 配布 (現時点では macOS で検証済み — CLI リファレンス参照)
+npm run build       # dist/client            Vite の本番ビルド
+npm run bundle      # dist/bundle/<App>.app  ~120 MB (Node + アプリを同梱)
+npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
 ```
+
+生成される雛形は React 19 + Vite + Tailwind のアプリです。`src/main.tsx` が
+`installClientRpc()` を呼び出し、`<ThemeProvider><Layout><Page /></ThemeProvider>`
+をレンダリングします。アプリの識別情報とウィンドウ設定は `murasaki.config.ts` に
+記述します。
 
 ---
 
-## なぜ Murasaki?
+## なぜ murasaki なのか
 
-|                     | **Murasaki**                                    | Electron     | Tauri          | NW.js     |
-| ------------------- | ----------------------------------------------- | ------------ | -------------- | --------- |
-| 書く言語            | TypeScript (サーバー + クライアント)              | TypeScript   | Rust + JS      | JS        |
-| レンダリング        | OS WebView                                      | Chromium     | OS WebView     | Chromium  |
-| ランタイム同梱      | Node.js                                         | Chromium + Node | なし        | Chromium + Node |
-| インストーラサイズ  | **~30 MB** デフォルト / **~500 KB** `--slim`\*  | ~90 MB       | ~5 MB          | ~110 MB   |
-| npm エコシステム    | ✅ フル                                          | ✅ フル       | ⚠️ クライアント側のみ | ✅ フル |
-| サーバー側 HMR      | ✅                                               | ⚠️ 手動      | ❌              | ⚠️ 手動   |
-| 組込コンポーネント  | **34 + 13 フック**                              | なし         | なし           | なし      |
-| サーバーアクション  | **`defineAction`**                              | 手動 IPC     | 手動 IPC       | 手動      |
-| クロスコンパイル    | **組込 `--target`**                             | 手動         | matrix         | 手動      |
-| 自動 publish CI     | **Trusted Publisher OIDC**                      | 手動         | 手動           | 手動      |
+サイズ・メモリの話は各フレームワークが何を同梱しているかという話であり、横並びで
+実測したベンチマーク値ではありません:
 
-<sub>\* `--slim` は Node.js を同梱せず、初回起動時に (~30 MB) ダウンロードするランチャを ship します。</sub>
+- **Electron** は各アプリに完全な Chromium **と** Node の両方を同梱します。
+- **Tauri** は OS WebView でレンダリングし(Chromium なし)、ランタイムを一切
+  同梱しません——フットプリントは最小ですが、バックエンドは Rust で書く必要があります。
+- **murasaki** も OS WebView でレンダリングします(Chromium なし)が、Node を
+  同梱することでアプリ全体——クライアントとサーバー側のロジック——を TypeScript
+  のままにできます。
 
-### Murasaki を選ぶ場合
+|                  | **murasaki**                    | Electron                | Tauri                  |
+| ---------------- | -------------------------------- | ------------------------ | ------------------------ |
+| レンダリング      | OS WebView (WKWebView / WebView2 / WebKitGTK) | 同梱 Chromium | OS WebView |
+| ランタイム同梱    | Node.js                          | Chromium + Node          | なし                     |
+| バックエンド言語  | TypeScript                       | TypeScript                | Rust                     |
+| Rust を書く?      | いいえ (ビルド済みのネイティブバインディング) | いいえ         | はい                     |
+| インストーラサイズ | **~43 MB `.dmg`** / **~120 MB `.app`** (macOS で実測) | ~80–150 MB\* | ~3–10 MB\* |
+| npm エコシステム  | フル                              | フル                      | クライアントのみ         |
+| サーバーアクション | `defineAction` / `useAction`     | 手動 IPC                  | 手動 IPC / コマンド      |
+| 自動 publish CI   | Trusted Publisher OIDC           | 手動                      | 手動                     |
 
-- ✅ すでに **Next.js / Node** を書いていて、Rust を学ぶ気はない
-- ✅ サーバー側で `pnpm add express` (や他の何か) を使いたい
-- ✅ **社内ツール** や **開発ツール** で 30 MB は問題ない
-- ✅ **クライアント/サーバー両方の HMR** が欲しい
+<sub>\* Electron/Tauri のインストーラでよく挙げられる概算値であり、当プロジェクトが実測したものではありません。murasaki の数値は macOS 上で実測した `.dmg`/`.app` の実サイズです。</sub>
+
+### murasaki を選ぶ場合
+
+- すでに **Next.js / React** を書いていて、Rust を学びたくない場合。
+- プラットフォーム固有のコードを書かずに **ネイティブの OS コンテキストメニュー、
+  メニュー、ダイアログ、通知** を使いたい場合。
+- **Rust をまったく書かない** 代わりに Node が同梱されることを許容できる場合。
 
 ### Tauri を選ぶ場合
 
-- ❌ **10 MB 未満** のエンドユーザ向けアプリが必要で、サーバー側を Rust で書いても OK
-- ❌ **バイナリサイズ** > **JS エコシステム**
+- 可能な限り小さいインストーラが必要で、バックエンドを **Rust** で書く覚悟がある場合。
 
 ### Electron を選ぶ場合
 
-- ❌ **Chromium 保証** が必須 (特定の Web API、DevTools プロトコル)
-
-Murasaki が唯一提供する組み合わせ:
-
-- 🟢 **既に知ってる Node.js** (npm, package.json, async/await)
-- 🪶 **Tauri 並みに軽量** (OS WebView、Chromium バンドルなし)
-- ⚛️ **React 風 JSX** (自前ランタイム、React 依存なし)
-- 🎨 **テーマトークン込みの UI コンポーネント**
-- 🔧 **フルツールチェーン**: dev → build → bundle → installer 全部同梱
+- インストールサイズを問わず、**Chromium が保証された環境**(特定の Web API や
+  DevTools プロトコル)が必要な場合。
 
 ---
 
 ## 機能
 
-- **ファイルベースルーティング** — `src/app/**/page.tsx` が自動でルートに。
-- **HMR 標準装備** — ファイル保存でウィンドウが再読込。ネイティブメニューも維持。
-- **React 不要の JSX レンダラ** — 独自の `jsx/` + `jsx/dom/` ランタイム。
-- **UI コンポーネント込み** — 34 個が単一のテーマトークンを共有。
-- **サーバーアクション** — サーバー側 `defineAction`、クライアント側 `useAction`、型安全。
-- **マルチウィンドウ** — `useWindow` + `openWindow()` API。
-- **ネイティブ API** — 通知、クリップボード、ダイアログ、ファイルシステム、シェル、トレイアイコン。
-- **クロスコンパイル** — macOS host から `.dmg`, `.msi`, `.AppImage`, `.zip`, `.tar.gz` 全部生成。
-- **Trusted Publisher OIDC** — tag push で署名付き `npm publish --provenance`。
+- **Vite 開発サーバー + React Fast Refresh** — `murasaki dev` は Vite を起動し、
+  そこを指すネイティブウィンドウを紐づけます。編集して保存すればウィンドウが更新されます。
+- **ネイティブコンテキストメニュー** — `useGlobalContextMenu()` が Rust 側へ post し、
+  本物の OS メニュー(NSMenu / HMENU / GtkMenu)を表示、クリックされた項目を DOM の
+  `CustomEvent` として返します。HTML のポップアップは介在しません。
+- **ネイティブメニュー、ダイアログ、クリップボード、通知、シェル** —
+  [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 上に
+  構築されています。open/save/directory ダイアログ、クリップボードの読み書き、OS 通知、
+  「Finder/Explorer で表示」などをすべて型付きで呼び出せ、呼び出しに Rust は不要です。
+- **Server Actions API** — `defineAction` + `useAction` は React 19 の
+  `useActionState` の形をそのままエンドツーエンドで踏襲します
+  ([サーバーアクション](#サーバーアクション) 参照)。
+- **テーマ** — `ThemeProvider` / `useTheme` で light / dark / system モードに対応。
+- **macOS でのパッケージング(検証済み)** — `murasaki bundle` → `.app`、
+  `murasaki installer` → `.dmg`(圧縮後 ~43 MB。`.app` 自体は Node + アプリを
+  同梱するため ~120 MB)。
+- **Trusted Publisher OIDC** — タグの push をトリガーに署名付きの
+  `npm publish --provenance` を実行します。CI に長期有効な npm トークンを
+  置く必要はありません。
 
 ---
 
 ## CLI リファレンス
 
 ```
-murasaki dev                       開発サーバ起動 (HMR)
-murasaki build                     本番 JS bundle → dist/server.cjs
-murasaki bundle                    現ホスト OS 用のネイティブフォルダ / .app
-murasaki installer                 現ホスト OS 用の配布用アーカイブ/インストーラ
+murasaki dev         Vite 開発サーバー + ネイティブウィンドウを起動 (HMR, Fast Refresh)
+murasaki build       本番用 Vite ビルド → dist/client
+murasaki bundle      現在のプラットフォーム向けのネイティブアプリフォルダ / .app
+murasaki installer   現在のプラットフォーム向けの配布用インストーラ
+murasaki init        Rust ツールチェーンをインストール (@murasakijs/native をいじる場合のみ)
+murasaki icon        単一の PNG から .icns / .ico / .png を生成
+murasaki release     自動アップデート用マニフェストのヘルパー
+murasaki help        このヘルプを表示
 ```
 
-全ビルド系サブコマンドで `--target <id>` によるクロスコンパイル対応:
-
-```
---target darwin-arm64    (Apple Silicon の初期値)
---target darwin-x64
---target win-x64
---target win-arm64
---target linux-x64
---target linux-arm64
-```
-
-target 用の Node バイナリと `@webviewjs/webview` prebuild は必要になった時に
-自動 download され、`~/.murasaki/cache/` にキャッシュされます。
+**プラットフォームの状況:** `murasaki dev` は macOS、Windows、Linux で動作します。
+`murasaki bundle` と `murasaki installer` は現在 **macOS**(`.app` / `.dmg`)で
+実装・検証済みです。それ以外のプラットフォームでは、現時点ではインストーラを生成する
+代わりに "not supported yet" というメッセージを表示します。
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 自体は
+すでに macOS(arm64/x64)、Windows(x64)、Linux(x64/arm64)向けのビルド済み
+バイナリを提供しています——Windows/Linux 向けアプリパッケージングは
+[ロードマップ](#ロードマップ) で管理しています。
 
 ---
 
@@ -186,118 +204,72 @@ target 用の Node バイナリと `@webviewjs/webview` prebuild は必要にな
 import { defineConfig } from 'murasaki'
 
 export default defineConfig({
-  name: 'My App',                             // 表示名 (macOS .app タイトル)
-  bundleId: 'com.example.myapp',              // 逆 DNS 形式の識別子
-  description: 'A murasaki app',
-  copyright: '© 2026 Example, Inc.',
-  icon: 'assets/icon.icns',                   // .icns / .ico / .png
-  category: 'public.app-category.productivity',
-  targets: ['darwin-arm64', 'win-x64', 'linux-x64'],
+  appId: 'app.murasaki.example',
+  productName: 'Murasaki App',
+  version: '0.1.0',
+  icon: 'assets/icon.png',
   window: {
-    title: 'My App',
-    width: 1280,
-    height: 800,
+    title: 'Murasaki App',
+    width: 1000,
+    height: 700,
+    vibrancy: 'hud',
   },
 })
 ```
 
-参照順序 (最初にヒットしたものが採用): `murasaki.config.ts` → `murasaki.config.js`
-→ `murasaki.config.json` → `package.json` の `"murasaki"` フィールド。
+`MurasakiConfig` はほかにも、オプションの `devPort`(Vite 開発サーバーのポート、
+デフォルトは `5178`)、`targets`(ビルドターゲットの配列)、`updater`
+(`useUpdate` / `UpdateButton` が参照する設定)を受け付けます。
 
 ---
 
 ## サーバーアクション
 
-```ts
-// src/actions.ts — サーバー側
-import { defineAction } from 'murasaki'
+React 19 スタイルのサーバーアクション——`useActionState` と同じ形です:
 
-export const greet = defineAction('greet', async (name: string) => {
-  return `こんにちは、${name}! (Node ${process.version})`
-})
+```ts
+// src/actions.ts
+'use server'
+import { defineAction } from 'murasaki'
+import type { ActionState } from 'murasaki'
+
+export const greet = defineAction(
+  async (_prev: ActionState<string>, formData: FormData): Promise<ActionState<string>> => {
+    const name = formData.get('name')
+    return { data: `Hello, ${name}!`, error: null, isPending: false }
+  },
+)
 ```
 
 ```tsx
-// src/app/page.tsx — クライアント側
+// src/app/page.tsx
 import { useAction } from 'murasaki'
-import type { greet } from '../actions'   // 型のみ
+import { greet } from '../actions'
 
 export default function Home() {
-  const g = useAction<typeof greet>('greet')
+  const [state, run, isPending] = useAction(greet, {
+    data: null,
+    error: null,
+    isPending: false,
+  })
 
   return (
-    <>
-      <Button onClick={() => g.call('世界')}>挨拶</Button>
-      {g.loading ? '…' : g.data}
-      {g.error && <Text color="red">{g.error.message}</Text>}
-    </>
+    <form action={run}>
+      <input name="name" />
+      <button disabled={isPending}>Greet</button>
+      {state.data && <p>{state.data}</p>}
+    </form>
   )
 }
 ```
 
-内部動作: `window.ipc.postMessage` → サーバー側の `webview.onIpcMessage`、
-結果は `webview.evaluate` 経由で返却 — 追加のネイティブブリッジ不要。
-
----
-
-## クロスコンパイル対応表
-
-| 出力       | 生成可能ホスト                    | ユーザ側の準備                       |
-| ---------- | --------------------------------- | ------------------------------------ |
-| `.dmg`     | **macOS ホストのみ**              | `hdiutil` (macOS 標準)               |
-| `.msi`     | 任意ホスト + WiX v4               | `dotnet tool install -g wix`         |
-| `.AppImage`| 任意ホスト + squashfs-tools       | `brew install squashfs` / `apt install squashfs-tools` |
-| `.zip`     | 任意ホスト                        | 標準搭載 (`zip` / `Compress-Archive`) |
-| `.tar.gz`  | 任意ホスト                        | 標準搭載 (`tar`)                     |
-
-WiX + squashfs が入った macOS ホストなら、**1 台で全 4 プラットフォーム
-分のインストーラが揃います**。ツールが未インストールの場合は自動的に
-`.zip` / `.tar.gz` へ fallback してインストール手順が表示されます。
-致命的失敗にはなりません。
-
----
-
-## コンポーネント (34 個) & フック (13 個)
-
-```ts
-import {
-  // Layout (4)
-  View, Row, Stack, Text,
-
-  // Desktop shell (7)
-  TitleBar, NoDrag, Sidebar, SidebarItem, Toolbar, StatusBar, Pane,
-
-  // UI Tier 1 (7)
-  Button, Card, Input, Textarea, Modal, List, ListItem,
-
-  // UI Tier 2 (10)
-  Switch, Checkbox, Radio, RadioGroup,
-  Tooltip, Tabs, TabList, Tab, TabPanel, ContextMenu,
-
-  // UI Tier 3 (5)
-  Badge, Avatar, Spinner, Progress, ToastProvider,
-
-  // Routing (1)
-  Link,
-
-  // Theme
-  ThemeProvider, useTheme,
-} from 'murasaki'
-
-import {
-  // React ライク (3)
-  useState, useEffect, useRef,
-
-  // ネイティブブリッジ (10)
-  useNotification, useClipboard, useShell, useFs, useDialog,
-  useWindow, useTray, useAction, useToast, toast,
-} from 'murasaki/jsx/dom'
-```
-
-全コンポーネントが単一のテーマトークン (CSS カスタムプロパティ) を共有し、
-`<ThemeProvider theme="auto" | "dark" | "light">` で切替、`className` と
-`style` によるフルオーバーライドも可能。ネイティブ系フックは SSR-safe で、
-SSR 時は no-op に degrade します。
+`defineAction` は `'use server'` のセマンティクスを TypeScript の型情報として
+そのまま運ぶ、型付きのパススルーです。`useAction` は React 19 の `useActionState`
+を直接ラップしているため、`[state, run, isPending]` は Next.js ですでにおなじみの
+形そのものです。Vite プラグインが `'use server'` ディレクティブを検出してモジュールを
+コード分割します——公開 API の形は現時点で安定していますが、クライアント側のスタブを
+実際に動く Node ハンドラへ配線する部分は現在進行中です
+([ロードマップ](#ロードマップ) で管理)。
 
 ---
 
@@ -305,42 +277,40 @@ SSR 時は no-op に degrade します。
 
 ```
 ┌─────────────────────────────────────────┐
-│  ユーザアプリ (src/app/page.tsx)         │  ファイルベースルーティング, metadata
+│  あなたのアプリ (src/app/page.tsx, ...)  │  レイアウト, metadata, テーマ
 ├─────────────────────────────────────────┤
-│  Murasaki コンポーネント + フック        │  Button / Card / Modal / …
-│                                         │  useState / useAction / useNotification
+│  React 19 + Vite                        │  HMR, Fast Refresh, server-actions プラグイン
 ├─────────────────────────────────────────┤
-│  Server Actions (defineAction)          │  wry IPC を使った RPC ディスパッチャ
+│  murasaki (CLI + murasaki.config.ts)    │  dev / build / bundle / installer
 ├─────────────────────────────────────────┤
-│  クライアント bundle (jsx/dom)          │  自前 JSX ランタイム、React 依存なし
+│  @murasakijs/native (Rust, via napi-rs) │  tao / wry / muda / rfd / arboard / notify-rust / open
 ├─────────────────────────────────────────┤
-│  ネイティブブリッジ (window.murasaki)   │  Promise ベース、typed
-├─────────────────────────────────────────┤
-│  Murasaki ランタイム (Node.js)          │  window ライフサイクル, HMR, esbuild
-├─────────────────────────────────────────┤
-│  OS 標準の WebView                       │  WKWebView / WebView2 / WebKitGTK
+│  OS WebView                             │  WKWebView / WebView2 / WebKitGTK — Chromium は同梱しない
 └─────────────────────────────────────────┘
 ```
-
-Chromium なし。Rust なし。新規ランタイムなし。OS 同梱の WebView + Node、
-その上に薄い TypeScript レイヤだけ。
 
 ---
 
 ## ロードマップ
 
-- 🚧 UI Tier 4 (`DataTable`, `Slider`, `DatePicker`, `Skeleton`)
-- 🚧 自動アップデート機能
-- 🚧 アイコンジェネレータ (単一 PNG → `.icns` / `.ico` / `.png` セット)
-- 🚧 ドキュメントサイト (`https://murasaki.dev`)
-- 🚧 v1.0 API 安定化
+murasaki は **pre-1.0**(現在 `0.26.0`)です——v1.0 までの間に API が変更される
+可能性があります。
+
+- 🚧 **Phase B** — フル App Router: ファイルスキャンで得たルートテーブルを
+  クライアントランタイムに配線して実際のマルチページアプリを実現、`loading` /
+  `error` / `not-found` バウンダリ、ミドルウェア、ストリーミング、そして Node への
+  実働する Server Actions RPC ディスパッチ。
+- 🚧 **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
+  サンプル集。
+- 🚧 **Phase D** — 自動アップデート、コード署名 / notarization、Windows/Linux
+  パッケージング、v1.0 の安定化。
 
 ---
 
 ## コントリビュート
 
-コード、ドキュメント、事例、バグ報告、機能要望 — あらゆる貢献を歓迎します。
-セットアップ方法とワークフローは [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
+コード、ドキュメント、サンプル、バグ報告、機能要望など、あらゆる貢献を歓迎します。
+ワークフロー全体は [CONTRIBUTING.md](./CONTRIBUTING.md) を参照してください。
 
 簡易セットアップ:
 
@@ -348,21 +318,25 @@ Chromium なし。Rust なし。新規ランタイムなし。OS 同梱の WebVi
 git clone https://github.com/murasakijs/murasaki.git
 cd murasaki
 pnpm install
-pnpm --filter murasaki tsc -p tsconfig.build.json
-cd examples/app-router
-pnpm dev
+pnpm --filter murasaki build
+
+# ネイティブバインディング (Rust) をいじる場合のみ——ほとんどのコントリビュータには不要
+pnpm --filter @murasakijs/native build
+# または: cd crates/native && pnpm build
 ```
 
 ## 行動規範
 
-本プロジェクトは Contributor Covenant に従います。参加前に
-[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) をご一読ください。
+本プロジェクトは Contributor Covenant に従います。参加する前に
+[CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) をお読みください。
 
 ## セキュリティ
 
 セキュリティ上の問題は **公開の GitHub Issue で報告しないでください**。
-責任ある報告方法は [SECURITY.md](./SECURITY.md) を参照してください。
+責任ある報告方法については [SECURITY.md](./SECURITY.md) を参照してください。
 
 ## ライセンス
 
 MIT © ichi — [LICENSE](./LICENSE) を参照。
+</content>
+</invoke>
