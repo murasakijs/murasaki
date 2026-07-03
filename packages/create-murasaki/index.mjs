@@ -7,7 +7,8 @@ import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { text, select, isCancel, cancel } from '@clack/prompts'
+import { input, select } from '@inquirer/prompts'
+import { createSpinner } from 'nanospinner'
 
 // ── ANSI truecolor (Oomurasaki palette) ────────────────────────────────
 const BRIGHT = '\x1b[38;2;168;85;247m'
@@ -120,12 +121,12 @@ function installArgs(pm) {
 }
 
 function runInstall(targetDir, pm) {
-  const result = spawnSync(pm, installArgs(pm), {
+  return spawnSync(pm, installArgs(pm), {
     cwd: targetDir,
-    stdio: 'inherit',
+    stdio: ['ignore', 'ignore', 'pipe'],   // capture stderr, keep the spinner clean
+    encoding: 'utf8',
     shell: process.platform === 'win32',
   })
-  return result.status === 0
 }
 
 function hasGit() {
@@ -154,42 +155,32 @@ function initGit(targetDir) {
     log(c(DIM) + '  → git initialized, but the initial commit failed.' + c(RESET))
     return
   }
-  log(c(DIM) + '  → git initialized' + c(RESET))
-}
-
-function exitIfCancel(value) {
-  if (isCancel(value)) {
-    cancel('Cancelled.')
-    process.exit(0)
-  }
-  return value
+  log(c(GREEN) + '  ✔' + c(RESET) + ' Git initialized')
 }
 
 async function promptForName() {
-  const value = await text({
+  return input({
     message: 'Project name',
-    placeholder: 'my-app',
-    defaultValue: 'my-app',
+    default: 'my-app',
     validate(v) {
       const t = (v || '').trim()
-      if (!t) return
+      if (!t) return 'Please enter a project name.'
       if (!isValidPackageName(t)) return 'Use lowercase letters, digits, dot, hyphen, underscore. Start with a letter or digit.'
+      return true
     },
   })
-  return exitIfCancel(value)
 }
 
 async function promptForLinter() {
-  const value = await select({
+  return select({
     message: 'Which linter would you like to use?',
-    options: [
-      { value: 'biome',  label: 'Biome',  hint: 'fast, single tool, recommended' },
-      { value: 'eslint', label: 'ESLint', hint: 'classic, huge ecosystem' },
-      { value: 'none',   label: 'None',   hint: 'add your own later' },
+    default: 'biome',
+    choices: [
+      { value: 'biome', name: 'Biome', description: 'fast, single tool, recommended' },
+      { value: 'eslint', name: 'ESLint', description: 'classic, huge ecosystem' },
+      { value: 'none', name: 'None', description: 'add your own later' },
     ],
-    initialValue: 'biome',
   })
-  return exitIfCancel(value)
 }
 
 async function applyBiome(targetDir) {
@@ -323,14 +314,18 @@ async function main() {
   const pm = detectPackageManager()
   let installed = false
   if (!skipInstall) {
-    log(c(DIM) + `  → installing with ${pm}…` + c(RESET))
-    const ok = runInstall(target, pm)
-    if (!ok) {
-      log(c(RED) + `  ✗ install failed. run it yourself:` + c(RESET))
+    const spinner = createSpinner('Installing dependencies').start()
+    const res = runInstall(target, pm)
+    if (res.status === 0) {
+      spinner.success({ text: 'Dependencies installed' })
+      installed = true
+    } else {
+      spinner.error({ text: 'Install failed' })
+      if (res.stderr) process.stderr.write('\n' + res.stderr.trim() + '\n')
+      log(c(RED) + `  run it yourself:` + c(RESET))
       log(`      cd ${name} && ${pm} install`)
       process.exit(1)
     }
-    installed = true
   }
 
   if (!noGit && hasGit() && !isInsideGitRepo(target)) {
@@ -338,11 +333,8 @@ async function main() {
   }
 
   log('')
-  log(c(GREEN) + c(BOLD) + `  ✓ ${name} created.` + c(RESET))
+  log(`${c(BRIGHT)}${c(BOLD)}🎉  Hello, Murasaki 🦋${c(RESET)}`)
   log('')
-  log(`  ${c(BRIGHT)}${c(BOLD)}Hello, Murasaki 🦋${c(RESET)}`)
-  log('')
-  log(c(DIM) + '  Next:' + c(RESET))
   log(`    cd ${name}`)
   if (!installed) log(`    ${pm} install`)
   log(`    ${pm} run dev`)
@@ -350,6 +342,10 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (err && err.name === 'ExitPromptError') {
+    log('\n' + c(DIM) + '  Cancelled.' + c(RESET))
+    process.exit(0)
+  }
   console.error(err)
   process.exit(1)
 })

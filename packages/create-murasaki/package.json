@@ -17,6 +17,7 @@
     "templates"
   ],
   "dependencies": {
-    "@clack/prompts": "^0.11.0"
+    "@inquirer/prompts": "^7.0.0",
+    "nanospinner": "^1.0.0"
   }
 }
