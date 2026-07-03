@@ -120,8 +120,17 @@ export interface ContextMenuTriggerProps {
 export function ContextMenuTrigger({ asChild, children }: ContextMenuTriggerProps) {
   const ctx = useContext(Ctx)
 
-  const onContextMenu = (e: { preventDefault(): void; clientX: number; clientY: number }) => {
+  const onContextMenu = (e: {
+    preventDefault(): void
+    stopPropagation(): void
+    clientX: number
+    clientY: number
+  }) => {
     e.preventDefault()
+    // Innermost menu wins: stop the event before it reaches an enclosing
+    // ContextMenuTrigger (e.g. a global one in the root layout), so a
+    // scoped menu overrides the app-wide default within its region.
+    e.stopPropagation()
     ctx?.openAt(e.clientX, e.clientY)
   }
 
