@@ -1,5 +1,7 @@
 import type { Plugin } from 'vite'
 import { readFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const CLIENT_VIRTUAL_ID = 'virtual:murasaki/client'
@@ -44,14 +46,21 @@ export const SHELL_HTML_PATH = fileURLToPath(new URL('../../assets/app.html', im
  * relative to `root`, ignoring any object-form input key, so an entry
  * living outside `root` (this shell ships inside the murasaki package, not
  * the user project) can't be pointed at directly here.
+ *
+ * Escape hatch: if the project has its own `index.html`, murasaki steps
+ * aside and lets Vite serve it (so an app scaffolded before this model, or a
+ * power user who wants to customize the HTML head, keeps working). The
+ * framework shell is only used when the project has no index.html of its own
+ * — kept in sync with the same check in cli/build.ts.
  */
 export function appShellPlugin(): Plugin {
+  const userOwnsHtml = existsSync(resolve(process.cwd(), 'index.html'))
   return {
     name: 'murasaki:app-shell',
     config() {
-      return {
-        appType: 'custom',
-      }
+      // Only take over HTML (appType:'custom' disables Vite's own index.html
+      // serving + SPA fallback) when the project has no index.html of its own.
+      return userOwnsHtml ? {} : { appType: 'custom' }
     },
     resolveId(id) {
       if (id === CLIENT_VIRTUAL_ID) return CLIENT_RESOLVED_ID
@@ -62,6 +71,8 @@ export function appShellPlugin(): Plugin {
       return CLIENT_ENTRY_SOURCE
     },
     configureServer(server) {
+      // If the project owns its HTML, leave dev serving to Vite entirely.
+      if (userOwnsHtml) return
       // Returning a function here makes this a "post" hook: it runs after
       // Vite's own middlewares (transform pipeline, static/asset serving,
       // HMR websocket upgrade), so JS/CSS/HMR requests are handled first and

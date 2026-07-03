@@ -18,40 +18,48 @@ export default async function build(_argv: string[]) {
 
   process.stdout.write(`\n${banner({ mode: 'build' })}\n\n`)
 
-  // Rollup resolves an HTML entry's emitted file name from its path relative
-  // to `root`, so the framework's app.html (which ships inside the murasaki
-  // package, outside the project) can't be passed to rollupOptions.input
-  // directly — it has to be staged as a project-local `index.html` first.
-  // User projects aren't expected to have their own index.html in this
-  // model, but bail out rather than clobbering one if it's there.
+  // Escape hatch (kept in sync with vite-plugin/shell.ts): if the project has
+  // its own index.html, build with it as Vite normally would. Otherwise use
+  // the framework-owned shell. Rollup resolves an HTML entry's emitted file
+  // name from its path relative to `root`, so the framework's app.html (which
+  // ships inside the murasaki package, outside the project) can't be passed to
+  // rollupOptions.input directly — it has to be staged as a project-local
+  // `index.html` first, then removed.
   const stagedEntry = resolve(cwd, 'index.html')
-  if (existsSync(stagedEntry)) {
-    throw new Error(
-      'murasaki: found a project-local index.html — murasaki now owns the app shell, remove it (murasaki serves its own).',
-    )
+  const userOwnsHtml = existsSync(stagedEntry)
+  const commonBuild = {
+    outDir: resolve(cwd, 'dist/client'),
+    emptyOutDir: true,
+    target: 'chrome110' as const,
   }
 
   const start = performance.now()
   let result: unknown
   try {
-    await copyFile(SHELL_HTML_PATH, stagedEntry)
-    try {
+    if (userOwnsHtml) {
+      // Vite's default: the project's own index.html is the entry.
       result = await viteBuild({
         root: cwd,
         plugins: murasaki({ config, srcDir }),
-        build: {
-          outDir: resolve(cwd, 'dist/client'),
-          emptyOutDir: true,
-          target: 'chrome110',
-          rollupOptions: { input: stagedEntry },
-        },
-        // Vite's own build logs are silenced — murasaki prints its own summary
-        // below. Real warnings/errors still surface via viteLogger().
+        build: commonBuild,
         logLevel: 'silent',
         customLogger: viteLogger(),
       })
-    } finally {
-      await rm(stagedEntry, { force: true })
+    } else {
+      await copyFile(SHELL_HTML_PATH, stagedEntry)
+      try {
+        result = await viteBuild({
+          root: cwd,
+          plugins: murasaki({ config, srcDir }),
+          build: { ...commonBuild, rollupOptions: { input: stagedEntry } },
+          // Vite's own build logs are silenced — murasaki prints its own
+          // summary below. Real warnings/errors still surface via viteLogger().
+          logLevel: 'silent',
+          customLogger: viteLogger(),
+        })
+      } finally {
+        await rm(stagedEntry, { force: true })
+      }
     }
   } catch (err) {
     process.stderr.write(`\n${error('build failed')}\n\n`)
