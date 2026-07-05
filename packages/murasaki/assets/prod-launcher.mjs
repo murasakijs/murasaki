@@ -65,7 +65,10 @@ const webview = app.createWebview(
     title: meta.productName,
     width: meta.width ?? 1000,
     height: meta.height ?? 700,
-    vibrancy: meta.vibrancy ?? null,
+    // napi's Option<String> rejects an explicit `null` (only undefined maps to
+    // None), so coerce "no vibrancy" to undefined — passing null crashes
+    // createWebview with "Failed to convert Null into String".
+    vibrancy: meta.vibrancy ?? undefined,
     icon: meta.icon ? join(__dirname, meta.icon) : undefined,
     version: meta.version,
     description: meta.description,

@@ -52,7 +52,10 @@ export default async function dev(_argv: string[]) {
       minHeight: config.window?.minHeight,
       resizable: config.window?.resizable,
       transparent: config.window?.transparent,
-      vibrancy: config.window?.vibrancy,
+      // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
+      // undefined: napi's Option<String> maps undefined to None but rejects an
+      // explicit null with "Failed to convert Null into String".
+      vibrancy: config.window?.vibrancy ?? undefined,
       icon: config.icon ? resolve(cwd, config.icon) : undefined,
       version: config.version,
       description: config.description,
