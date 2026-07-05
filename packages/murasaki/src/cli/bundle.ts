@@ -229,7 +229,22 @@ function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>NSHighResolutionCapable</key><true/>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}
+  <key>NSHighResolutionCapable</key><true/>
+  <!-- Languages the app supports. Declaring them lets macOS localize its own
+       injected UI (the Edit menu's Start Dictation / Emoji & Symbols / Writing
+       Tools items, standard dialogs, …) into the user's language. Keep in sync
+       with src/menu-locales.json. -->
+  <key>CFBundleDevelopmentRegion</key><string>en</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>en</string>
+    <string>ja</string>
+    <string>zh-Hans</string>
+    <string>ko</string>
+    <string>es</string>
+    <string>fr</string>
+    <string>de</string>
+  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}
 </dict>
 </plist>
 `
