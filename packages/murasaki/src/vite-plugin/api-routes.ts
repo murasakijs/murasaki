@@ -154,7 +154,14 @@ function handleApiRequest(server: ViteDevServer, apiDir: string): Connect.NextHa
     // without needing a watcher or dev-server restart.
     const routes = await scanApiRoutes(apiDir)
     const match = matchApiRoute(routes, pathname)
-    if (!match) return next()
+    if (!match) {
+      // `/api/*` is reserved for API routes: terminate with 404 rather than
+      // falling through to Vite (which would serve the SPA HTML fallback and
+      // return 200). Mirrors assets/prod-server.mjs's `handleApiRoute`.
+      res.statusCode = 404
+      res.end()
+      return
+    }
 
     const method = (req.method ?? 'GET').toUpperCase() as HttpMethod
     try {

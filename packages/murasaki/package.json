@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.40.0",
+  "version": "0.40.1",
   "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
   "keywords": [
     "desktop",
