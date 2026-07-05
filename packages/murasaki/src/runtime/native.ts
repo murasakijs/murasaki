@@ -14,6 +14,16 @@ export interface WindowOptions {
   /** macOS only. Resolved path to a PNG icon shown in the standard "About
    * <app>" panel. */
   icon?: string
+  /** Populates the "Version" field of the native "About <app>" panel. */
+  version?: string
+  /** Populates the description field of the native "About <app>" panel. */
+  description?: string
+  /** Populates the copyright field of the native "About <app>" panel. */
+  copyright?: string
+  /** Populates the homepage/website field of the native "About <app>" panel. */
+  homepage?: string
+  /** Populates the authors field of the native "About <app>" panel. */
+  authors?: string[]
 }
 
 export interface WebviewOptions {

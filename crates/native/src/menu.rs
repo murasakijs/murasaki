@@ -14,27 +14,47 @@ pub(crate) fn build_menu(items: &[MenuItemOptions]) -> Result<Menu> {
   Ok(menu)
 }
 
+/// Inputs for the native "About <app>" panel. See `build_about_credits` and
+/// `build_default_app_menu` for how these map onto muda's `AboutMetadata` —
+/// macOS and Windows/Linux render different subsets of its fields.
+#[cfg(target_os = "macos")]
+pub(crate) struct AboutInfo<'a> {
+  pub name: &'a str,
+  pub icon_path: Option<&'a str>,
+  pub version: Option<&'a str>,
+  pub description: Option<&'a str>,
+  pub copyright: Option<&'a str>,
+  pub homepage: Option<&'a str>,
+  pub authors: Option<&'a [String]>,
+}
+
 /// Builds the standard macOS application menu bar (App / Edit / Window) for
-/// `app_name`. macOS treats the menu bar's first submenu as the bold "app
-/// menu" — that's what makes `About <app_name>` / `Quit <app_name>` appear
-/// under the app name next to the apple logo. Callers install the result via
+/// `info.name`. macOS treats the menu bar's first submenu as the bold "app
+/// menu" — that's what makes `About <name>` / `Quit <name>` appear under the
+/// app name next to the apple logo. Callers install the result via
 /// `Menu::init_for_nsapp()`.
 #[cfg(target_os = "macos")]
-pub(crate) fn build_default_app_menu(app_name: &str, icon_path: Option<&str>) -> Result<Menu> {
+pub(crate) fn build_default_app_menu(info: &AboutInfo) -> Result<Menu> {
   let menu = Menu::new();
-  let about_label = format!("About {app_name}");
+  let about_label = format!("About {}", info.name);
   // Provide explicit metadata so the standard About panel shows the product
   // name — without it macOS derives the panel from the running process, which
   // is the bundled `node` binary, and the panel reads "node". Likewise, the
   // panel only shows an icon if `icon` is `Some` — otherwise it falls back to
   // the bundle icon, which the bundled `node` process isn't associated with.
   let about_metadata = AboutMetadata {
-    name: Some(app_name.to_string()),
-    icon: icon_path.and_then(load_icon_rgba),
+    name: Some(info.name.to_string()),
+    version: info.version.map(|s| s.to_string()),
+    comments: info.description.map(|s| s.to_string()),
+    copyright: info.copyright.map(|s| s.to_string()),
+    website: info.homepage.map(|s| s.to_string()),
+    authors: info.authors.map(|a| a.to_vec()),
+    credits: build_about_credits(info.description, info.homepage),
+    icon: info.icon_path.and_then(load_icon_rgba),
     ..Default::default()
   };
 
-  let app_menu = Submenu::new(app_name, true);
+  let app_menu = Submenu::new(info.name, true);
   app_menu
     .append_items(&[
       &PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)),
@@ -75,6 +95,30 @@ pub(crate) fn build_default_app_menu(app_name: &str, icon_path: Option<&str>) ->
     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
   Ok(menu)
+}
+
+/// macOS's standard About panel ignores `comments`/`website`, so fold the
+/// description and homepage into `credits` (the one free-text field it does
+/// render). Windows/Linux ignore `credits` and read the structured fields
+/// instead, so both paths stay populated.
+#[cfg(target_os = "macos")]
+fn build_about_credits(description: Option<&str>, homepage: Option<&str>) -> Option<String> {
+  let mut lines: Vec<&str> = Vec::new();
+  if let Some(d) = description {
+    if !d.is_empty() {
+      lines.push(d);
+    }
+  }
+  if let Some(h) = homepage {
+    if !h.is_empty() {
+      lines.push(h);
+    }
+  }
+  if lines.is_empty() {
+    None
+  } else {
+    Some(lines.join("\n"))
+  }
 }
 
 /// Decodes a PNG at `path` into a `muda::Icon` for the About panel. Returns

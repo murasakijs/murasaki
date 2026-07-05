@@ -50,6 +50,11 @@ export default async function dev(_argv: string[]) {
       transparent: config.window?.transparent,
       vibrancy: config.window?.vibrancy,
       icon: config.icon ? resolve(cwd, config.icon) : undefined,
+      version: config.version,
+      description: config.description,
+      copyright: config.copyright,
+      homepage: config.homepage,
+      authors: config.authors,
     },
     { url, devtools: true },
   )

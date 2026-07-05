@@ -84,6 +84,11 @@ impl Application {
       transparent: None,
       vibrancy: None,
       icon: None,
+      version: None,
+      description: None,
+      copyright: None,
+      homepage: None,
+      authors: None,
     });
 
     // Install the standard macOS app menu bar (App/Edit/Window) once, on the
@@ -92,7 +97,16 @@ impl Application {
     #[cfg(target_os = "macos")]
     if self.app_menu.borrow().is_none() {
       let app_name = opts.title.as_deref().unwrap_or("Murasaki");
-      let menu = build_default_app_menu(app_name, opts.icon.as_deref())?;
+      let about = crate::menu::AboutInfo {
+        name: app_name,
+        icon_path: opts.icon.as_deref(),
+        version: opts.version.as_deref(),
+        description: opts.description.as_deref(),
+        copyright: opts.copyright.as_deref(),
+        homepage: opts.homepage.as_deref(),
+        authors: opts.authors.as_deref(),
+      };
+      let menu = build_default_app_menu(&about)?;
       menu.init_for_nsapp();
       *self.app_menu.borrow_mut() = Some(menu);
     }

@@ -58,6 +58,11 @@ const webview = app.createWebview(
     height: meta.height ?? 700,
     vibrancy: meta.vibrancy ?? null,
     icon: meta.icon ? join(__dirname, meta.icon) : undefined,
+    version: meta.version,
+    description: meta.description,
+    copyright: meta.copyright,
+    homepage: meta.homepage,
+    authors: meta.authors,
   },
   { url, devtools: false },
 )

@@ -19,6 +19,16 @@ pub struct WindowOptions {
   /// <app>" panel (`NSAboutPanelOptionApplicationIcon`). Does not affect the
   /// Dock icon — see `Application::setIconPath` for that.
   pub icon: Option<String>,
+  /// Populates the "Version" field of the native "About <app>" panel.
+  pub version: Option<String>,
+  /// Populates the description field of the native "About <app>" panel.
+  pub description: Option<String>,
+  /// Populates the copyright field of the native "About <app>" panel.
+  pub copyright: Option<String>,
+  /// Populates the homepage/website field of the native "About <app>" panel.
+  pub homepage: Option<String>,
+  /// Populates the authors field of the native "About <app>" panel.
+  pub authors: Option<Vec<String>>,
 }
 
 #[napi(object)]

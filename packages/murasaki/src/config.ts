@@ -34,6 +34,18 @@ export interface MurasakiConfig {
   productName: string
   version?: string
 
+  /** Short description shown in the native "About <app>" panel. */
+  description?: string
+
+  /** Copyright notice shown in the native "About <app>" panel. */
+  copyright?: string
+
+  /** Homepage URL shown in the native "About <app>" panel. */
+  homepage?: string
+
+  /** Author names shown in the native "About <app>" panel (Windows/Linux only). */
+  authors?: string[]
+
   window?: WindowConfig
   updater?: UpdaterConfig
 
