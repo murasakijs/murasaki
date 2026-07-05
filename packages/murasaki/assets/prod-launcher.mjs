@@ -6,7 +6,7 @@
 // `murasaki dev` (src/cli/dev.ts spawns Vite the same way) closely enough
 // that the client's `/__murasaki/action/…` fetch works unchanged in both —
 // the murasaki:// custom protocol (crates/native) is no longer used here.
-import { spawn } from 'node:child_process'
+import { spawn, execSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
@@ -160,8 +160,21 @@ function resolveMenuLabels(productName, locale = detectLocale()) {
  * src/menu-i18n.ts's detectLocale().
  */
 function detectLocale() {
-  const raw = runtimeLocale() ?? envLocale() ?? 'en'
+  const raw = macosUiLanguage() ?? runtimeLocale() ?? envLocale() ?? 'en'
   return normalizeLocale(raw)
+}
+
+function macosUiLanguage() {
+  if (process.platform !== 'darwin') return undefined
+  try {
+    const out = execSync('defaults read -g AppleLanguages', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return out.match(/[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]+)*/)?.[0]
+  } catch {
+    return undefined
+  }
 }
 
 function runtimeLocale() {

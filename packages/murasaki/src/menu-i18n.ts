@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process'
 import localesData from './menu-locales.json' with { type: 'json' }
 
 /**
@@ -35,13 +36,33 @@ const LOCALES = localesData as Record<string, MenuLabels>
 const FALLBACK = 'en'
 
 /**
- * Best-effort system UI language, normalized to a shipped locale key. Prefers
- * the JS runtime's resolved locale (reflects the OS language on macOS), then
- * the POSIX locale env vars. Unknown languages fall back to English.
+ * Best-effort system UI language, normalized to a shipped locale key. The
+ * default menu is macOS-only, and there Node's `Intl`/`LANG` reflect the POSIX
+ * region, not the UI language a user set in System Settings (a Japanese Mac
+ * still reports en-US to Node) — so read AppleLanguages first. Falls back to
+ * the JS runtime locale, then the POSIX env vars, then English.
  */
 export function detectLocale(): string {
-  const raw = runtimeLocale() ?? envLocale() ?? FALLBACK
+  const raw = macosUiLanguage() ?? runtimeLocale() ?? envLocale() ?? FALLBACK
   return normalizeLocale(raw)
+}
+
+/**
+ * The user's macOS UI language (first entry of the AppleLanguages preference
+ * list, e.g. "ja-JP"), or undefined off macOS or if the lookup fails.
+ */
+function macosUiLanguage(): string | undefined {
+  if (process.platform !== 'darwin') return undefined
+  try {
+    // Output looks like `(\n    "ja-JP",\n    "en-US"\n)` — take the first tag.
+    const out = execSync('defaults read -g AppleLanguages', {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return out.match(/[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]+)*/)?.[0]
+  } catch {
+    return undefined
+  }
 }
 
 function runtimeLocale(): string | undefined {
