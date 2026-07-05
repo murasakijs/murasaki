@@ -48,7 +48,7 @@ export default function Page() {
 
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <Card className="mt-8 text-left">
+          <Card className="mt-8 text-center">
             <CardHeader>
               <CardTitle>Try it out</CardTitle>
               <CardDescription>
