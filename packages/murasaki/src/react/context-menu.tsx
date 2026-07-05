@@ -13,7 +13,7 @@
  * `__murasaki` tag stamped on the function itself — this survives
  * minification, unlike matching on `displayName` or `element.type.name`.
  */
-import { Children, cloneElement, createContext, isValidElement, useContext, useEffect, useMemo, useRef } from 'react'
+import { Children, cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useRef } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { post } from './rpc.js'
 import type { ContextMenuItem as WireMenuItem } from './rpc.js'
@@ -49,6 +49,13 @@ export interface ContextMenuProps {
 
 export function ContextMenu({ children }: ContextMenuProps) {
   const router = useRouter()
+  // Namespaces this menu's item ids. `murasaki:menuclick` is a window-wide
+  // event that every mounted <ContextMenu> listens to, and each instance's
+  // item counter restarts at 0 — so without a per-instance prefix, item `m0`
+  // of a scoped menu collides with item `m0` of the app-wide menu and BOTH
+  // handlers fire on a click (e.g. clicking "Increment" also ran the root
+  // menu's "Reload"). `useId()` gives each instance a stable, unique prefix.
+  const uid = useId()
   const all = Children.toArray(children)
   const trigger = all.find(
     (c): c is ReactElement => isValidElement(c) && (c.type as any)?.__murasaki === 'trigger',
@@ -63,11 +70,11 @@ export function ContextMenu({ children }: ContextMenuProps) {
       handlers: new Map(),
       shortcuts: [],
       router,
-      nextId: () => `m${counter++}`,
+      nextId: () => `${uid}m${counter++}`,
     }
     const items = content ? parseContent((content.props as { children?: ReactNode }).children, ctx) : []
     return { items, handlers: ctx.handlers, shortcuts: ctx.shortcuts }
-  }, [content, router])
+  }, [content, router, uid])
 
   // Kept in a ref so the window listeners (installed once) always see the
   // latest parse without needing to be torn down and rebuilt on every render.
