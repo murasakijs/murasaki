@@ -1,4 +1,4 @@
-import localesData from './menu-locales.json'
+import localesData from './menu-locales.json' with { type: 'json' }
 
 /**
  * Localized labels for the native default application menu (the macOS
