@@ -72,6 +72,12 @@ exec "$DIR/node" "$DIR/prod-launcher.mjs"
   const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
   await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
 
+  // Contents/Resources/menu-locales.json — read by prod-launcher.mjs at
+  // runtime to localize the default app menu for the end user's locale (see
+  // assets/prod-launcher.mjs).
+  const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
+  await copyFile(menuLocalesSrc, join(resourcesDir, 'menu-locales.json'))
+
   // Contents/Resources/icon.icns + icon.png — the .icns backs the .app's
   // Finder/DMG appearance (via CFBundleIconFile below); the plain PNG is
   // read at runtime by prod-launcher.mjs to set NSApp.applicationIconImage

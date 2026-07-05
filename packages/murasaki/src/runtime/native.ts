@@ -2,6 +2,31 @@
  * Thin wrapper around `@murasakijs/native`. Keeps a single import surface
  * so higher layers (CLI, react/updater) never touch the prebuild directly.
  */
+
+/**
+ * macOS only. Localized labels for the standard App/Edit/Window menu bar —
+ * see `../menu-i18n.ts` for the resolver. All fields optional since any
+ * left unset fall back to muda's English default on the native side.
+ */
+export interface MenuLabels {
+  about?: string
+  services?: string
+  hide?: string
+  hideOthers?: string
+  showAll?: string
+  quit?: string
+  edit?: string
+  undo?: string
+  redo?: string
+  cut?: string
+  copy?: string
+  paste?: string
+  selectAll?: string
+  window?: string
+  minimize?: string
+  zoom?: string
+}
+
 export interface WindowOptions {
   title?: string
   width?: number
@@ -24,6 +49,8 @@ export interface WindowOptions {
   homepage?: string
   /** Populates the authors field of the native "About <app>" panel. */
   authors?: string[]
+  /** macOS only. Localized labels for the standard App/Edit/Window menu bar. */
+  menuLabels?: MenuLabels
 }
 
 export interface WebviewOptions {

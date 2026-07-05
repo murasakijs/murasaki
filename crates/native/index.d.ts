@@ -85,6 +85,31 @@ export interface MenuItemOptions {
   role?: string
 }
 
+/**
+ * macOS only. Localized labels for the predefined items in the standard
+ * application menu bar — muda hardcodes English for these, so murasaki
+ * resolves per-locale labels in JS and passes them through here. Any field
+ * left `None` falls back to muda's English default.
+ */
+export interface MenuLabels {
+  about?: string
+  services?: string
+  hideOthers?: string
+  hide?: string
+  showAll?: string
+  quit?: string
+  edit?: string
+  undo?: string
+  redo?: string
+  cut?: string
+  copy?: string
+  paste?: string
+  selectAll?: string
+  window?: string
+  minimize?: string
+  zoom?: string
+}
+
 export interface MenuOptions {
   items: Array<MenuItemOptions>
 }
@@ -170,4 +195,10 @@ export interface WindowOptions {
   homepage?: string
   /** Populates the authors field of the native "About <app>" panel. */
   authors?: Array<string>
+  /**
+   * macOS only. Localized labels for the standard App/Edit/Window menu bar
+   * (see `crate::menu::build_default_app_menu`). Falls back to English when
+   * absent.
+   */
+  menuLabels?: MenuLabels
 }

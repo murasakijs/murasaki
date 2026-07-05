@@ -89,6 +89,7 @@ impl Application {
       copyright: None,
       homepage: None,
       authors: None,
+      menu_labels: None,
     });
 
     // Install the standard macOS app menu bar (App/Edit/Window) once, on the
@@ -106,7 +107,7 @@ impl Application {
         homepage: opts.homepage.as_deref(),
         authors: opts.authors.as_deref(),
       };
-      let menu = build_default_app_menu(&about)?;
+      let menu = build_default_app_menu(&about, opts.menu_labels.as_ref())?;
       menu.init_for_nsapp();
       *self.app_menu.borrow_mut() = Some(menu);
     }

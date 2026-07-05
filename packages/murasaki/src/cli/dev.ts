@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import http from 'node:http'
 import net from 'node:net'
 import { loadNative } from '../runtime/native.js'
+import { resolveMenuLabels } from '../menu-i18n.js'
 import type { MurasakiConfig } from '../config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -17,6 +18,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export default async function dev(_argv: string[]) {
   const cwd = process.cwd()
   const config = await loadUserConfig(cwd)
+  // The bundled `node` binary is otherwise the process's own name (visible in
+  // the bold macOS app menu and the About panel) — prefer the product name.
+  process.title = config.productName
   // murasaki pins Vite to an exact port (strictPort) so the parent knows the
   // URL to point the webview at. Probe first so a stale dev server (or anything
   // else) holding the default port steps us to the next free one instead of
@@ -55,6 +59,7 @@ export default async function dev(_argv: string[]) {
       copyright: config.copyright,
       homepage: config.homepage,
       authors: config.authors,
+      menuLabels: resolveMenuLabels(config.productName),
     },
     { url, devtools: true },
   )

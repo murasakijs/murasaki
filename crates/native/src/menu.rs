@@ -33,10 +33,21 @@ pub(crate) struct AboutInfo<'a> {
 /// menu" — that's what makes `About <name>` / `Quit <name>` appear under the
 /// app name next to the apple logo. Callers install the result via
 /// `Menu::init_for_nsapp()`.
+///
+/// `labels` supplies localized text for muda's predefined items, which are
+/// hardcoded to English otherwise — see `crate::types::MenuLabels`. Any field
+/// left `None` (or `labels` itself being `None`) falls back to muda's English
+/// default for that item.
 #[cfg(target_os = "macos")]
-pub(crate) fn build_default_app_menu(info: &AboutInfo) -> Result<Menu> {
+pub(crate) fn build_default_app_menu(
+  info: &AboutInfo,
+  labels: Option<&crate::types::MenuLabels>,
+) -> Result<Menu> {
   let menu = Menu::new();
-  let about_label = format!("About {}", info.name);
+  let about_label = labels
+    .and_then(|l| l.about.as_deref())
+    .map(String::from)
+    .unwrap_or_else(|| format!("About {}", info.name));
   // Provide explicit metadata so the standard About panel shows the product
   // name — without it macOS derives the panel from the running process, which
   // is the bundled `node` binary, and the panel reads "node". Likewise, the
@@ -59,34 +70,37 @@ pub(crate) fn build_default_app_menu(info: &AboutInfo) -> Result<Menu> {
     .append_items(&[
       &PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)),
       &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::services(None),
+      &PredefinedMenuItem::services(labels.and_then(|l| l.services.as_deref())),
       &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::hide(None),
-      &PredefinedMenuItem::hide_others(None),
-      &PredefinedMenuItem::show_all(None),
+      &PredefinedMenuItem::hide(labels.and_then(|l| l.hide.as_deref())),
+      &PredefinedMenuItem::hide_others(labels.and_then(|l| l.hide_others.as_deref())),
+      &PredefinedMenuItem::show_all(labels.and_then(|l| l.show_all.as_deref())),
       &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::quit(None),
+      &PredefinedMenuItem::quit(labels.and_then(|l| l.quit.as_deref())),
     ])
     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  let edit_menu = Submenu::new("Edit", true);
+  let edit_menu = Submenu::new(labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"), true);
   edit_menu
     .append_items(&[
-      &PredefinedMenuItem::undo(None),
-      &PredefinedMenuItem::redo(None),
+      &PredefinedMenuItem::undo(labels.and_then(|l| l.undo.as_deref())),
+      &PredefinedMenuItem::redo(labels.and_then(|l| l.redo.as_deref())),
       &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::cut(None),
-      &PredefinedMenuItem::copy(None),
-      &PredefinedMenuItem::paste(None),
-      &PredefinedMenuItem::select_all(None),
+      &PredefinedMenuItem::cut(labels.and_then(|l| l.cut.as_deref())),
+      &PredefinedMenuItem::copy(labels.and_then(|l| l.copy.as_deref())),
+      &PredefinedMenuItem::paste(labels.and_then(|l| l.paste.as_deref())),
+      &PredefinedMenuItem::select_all(labels.and_then(|l| l.select_all.as_deref())),
     ])
     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  let window_menu = Submenu::new("Window", true);
+  let window_menu = Submenu::new(
+    labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"),
+    true,
+  );
   window_menu
     .append_items(&[
-      &PredefinedMenuItem::minimize(None),
-      &PredefinedMenuItem::maximize(None),
+      &PredefinedMenuItem::minimize(labels.and_then(|l| l.minimize.as_deref())),
+      &PredefinedMenuItem::maximize(labels.and_then(|l| l.zoom.as_deref())),
     ])
     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 

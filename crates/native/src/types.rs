@@ -29,6 +29,35 @@ pub struct WindowOptions {
   pub homepage: Option<String>,
   /// Populates the authors field of the native "About <app>" panel.
   pub authors: Option<Vec<String>>,
+  /// macOS only. Localized labels for the standard App/Edit/Window menu bar
+  /// (see `crate::menu::build_default_app_menu`). Falls back to English when
+  /// absent.
+  pub menu_labels: Option<MenuLabels>,
+}
+
+/// macOS only. Localized labels for the predefined items in the standard
+/// application menu bar — muda hardcodes English for these, so murasaki
+/// resolves per-locale labels in JS and passes them through here. Any field
+/// left `None` falls back to muda's English default.
+#[napi(object)]
+#[derive(Clone)]
+pub struct MenuLabels {
+  pub about: Option<String>,
+  pub services: Option<String>,
+  pub hide_others: Option<String>,
+  pub hide: Option<String>,
+  pub show_all: Option<String>,
+  pub quit: Option<String>,
+  pub edit: Option<String>,
+  pub undo: Option<String>,
+  pub redo: Option<String>,
+  pub cut: Option<String>,
+  pub copy: Option<String>,
+  pub paste: Option<String>,
+  pub select_all: Option<String>,
+  pub window: Option<String>,
+  pub minimize: Option<String>,
+  pub zoom: Option<String>,
 }
 
 #[napi(object)]

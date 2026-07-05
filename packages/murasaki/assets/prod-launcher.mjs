@@ -16,6 +16,15 @@ import http from 'node:http'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const require = createRequire(import.meta.url)
 const meta = JSON.parse(await readFile(join(__dirname, 'murasaki-meta.json'), 'utf8'))
+// The bundled `node` binary is otherwise the process's own name (visible in
+// the bold macOS app menu and the About panel) — prefer the product name.
+process.title = meta.productName
+// Localized labels for the standard App/Edit/Window menu bar. Resolved here
+// (rather than at build time) so this reflects the *end user's* runtime
+// locale, not the build machine's — see src/menu-i18n.ts, whose
+// detectLocale()/resolveMenuLabels() logic is mirrored below since this
+// launcher ships standalone (same reasoning as prod-server.mjs).
+const menuLocales = JSON.parse(await readFile(join(__dirname, 'menu-locales.json'), 'utf8'))
 
 const server = spawn(
   process.execPath,
@@ -63,6 +72,7 @@ const webview = app.createWebview(
     copyright: meta.copyright,
     homepage: meta.homepage,
     authors: meta.authors,
+    menuLabels: resolveMenuLabels(meta.productName),
   },
   { url, devtools: false },
 )
@@ -116,6 +126,67 @@ function waitForPort(child, timeoutMs) {
       if (!settled) rejectFail(new Error('prod server did not report a port in time'))
     }, timeoutMs)
   })
+}
+
+/**
+ * Resolves the native menu labels for `productName`, localized for the
+ * detected system language. Mirrors src/menu-i18n.ts's resolveMenuLabels().
+ */
+function resolveMenuLabels(productName, locale = detectLocale()) {
+  const t = menuLocales[locale] ?? menuLocales.en
+  const fill = (s) => s.split('{app}').join(productName)
+  return {
+    about: fill(t.about),
+    services: t.services,
+    hide: fill(t.hide),
+    hideOthers: t.hideOthers,
+    showAll: t.showAll,
+    quit: fill(t.quit),
+    edit: t.edit,
+    undo: t.undo,
+    redo: t.redo,
+    cut: t.cut,
+    copy: t.copy,
+    paste: t.paste,
+    selectAll: t.selectAll,
+    window: t.window,
+    minimize: t.minimize,
+    zoom: t.zoom,
+  }
+}
+
+/**
+ * Best-effort system UI language, normalized to a shipped locale key. Mirrors
+ * src/menu-i18n.ts's detectLocale().
+ */
+function detectLocale() {
+  const raw = runtimeLocale() ?? envLocale() ?? 'en'
+  return normalizeLocale(raw)
+}
+
+function runtimeLocale() {
+  try {
+    return new Intl.DateTimeFormat().resolvedOptions().locale
+  } catch {
+    return undefined
+  }
+}
+
+function envLocale() {
+  const v = process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG
+  // "ja_JP.UTF-8" carries the language; "C"/"POSIX" mean "no locale" → skip.
+  return v && v !== 'C' && v !== 'POSIX' ? v : undefined
+}
+
+function normalizeLocale(raw) {
+  const lc = raw.toLowerCase().replace('_', '-')
+  if (lc.startsWith('ja')) return 'ja'
+  if (lc.startsWith('zh')) return 'zh-CN'
+  if (lc.startsWith('ko')) return 'ko'
+  if (lc.startsWith('es')) return 'es'
+  if (lc.startsWith('fr')) return 'fr'
+  if (lc.startsWith('de')) return 'de'
+  return 'en'
 }
 
 /**
