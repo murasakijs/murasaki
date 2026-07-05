@@ -49,6 +49,16 @@ export interface MurasakiConfig {
   window?: WindowConfig
   updater?: UpdaterConfig
 
+  /**
+   * BCP-47 UI languages your app supports, e.g. ['en', 'ja']. Feeds the macOS
+   * bundle's CFBundleLocalizations (so macOS localizes its injected menus and
+   * standard dialogs) and constrains murasaki's native default menu: it follows
+   * the system language when that language is in this list, otherwise falls back
+   * to the first entry. Defaults to every language murasaki ships menu
+   * translations for (en, ja, zh-Hans, ko, es, fr, de).
+   */
+  locales?: string[]
+
   /** Vite server port during `murasaki dev`. Defaults to 5178. */
   devPort?: number
 

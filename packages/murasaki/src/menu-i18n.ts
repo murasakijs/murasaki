@@ -35,6 +35,9 @@ export interface MenuLabels {
 const LOCALES = localesData as Record<string, MenuLabels>
 const FALLBACK = 'en'
 
+/** Languages murasaki ships default-menu translations for (BCP-47). Kept in sync with menu-locales.json's keys. */
+export const DEFAULT_LOCALES = ['en', 'ja', 'zh-Hans', 'ko', 'es', 'fr', 'de']
+
 /**
  * Best-effort system UI language, normalized to a shipped locale key. The
  * default menu is macOS-only, and there Node's `Intl`/`LANG` reflect the POSIX
@@ -92,14 +95,22 @@ function normalizeLocale(raw: string): string {
 
 /**
  * Resolves the native menu labels for `productName`, localized for `locale`
- * (defaults to the detected system language). `{app}` in the about/hide/quit
- * labels is replaced with the product name.
+ * (defaults to the detected system language). If `allowed` is given (the
+ * app's configured `locales`), `locale` is constrained to it — falling back
+ * to `allowed[0]` when the system language isn't one of them. `{app}` in the
+ * about/hide/quit labels is replaced with the product name.
  */
 export function resolveMenuLabels(
   productName: string,
   locale: string = detectLocale(),
+  allowed?: string[],
 ): MenuLabels {
-  const t = LOCALES[locale] ?? LOCALES[FALLBACK]
+  let key = locale
+  if (allowed && allowed.length > 0) {
+    const allowedKeys = new Set(allowed.map(normalizeLocale))
+    if (!allowedKeys.has(key)) key = normalizeLocale(allowed[0])
+  }
+  const t = LOCALES[key] ?? LOCALES[FALLBACK]
   const fill = (s: string) => s.split('{app}').join(productName)
   return {
     about: fill(t.about),

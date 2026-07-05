@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import http from 'node:http'
 import net from 'node:net'
 import { loadNative } from '../runtime/native.js'
-import { resolveMenuLabels } from '../menu-i18n.js'
+import { detectLocale, resolveMenuLabels } from '../menu-i18n.js'
 import type { MurasakiConfig } from '../config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -59,7 +59,7 @@ export default async function dev(_argv: string[]) {
       copyright: config.copyright,
       homepage: config.homepage,
       authors: config.authors,
-      menuLabels: resolveMenuLabels(config.productName),
+      menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
     },
     { url, devtools: true },
   )

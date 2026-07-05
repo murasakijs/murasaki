@@ -72,7 +72,7 @@ const webview = app.createWebview(
     copyright: meta.copyright,
     homepage: meta.homepage,
     authors: meta.authors,
-    menuLabels: resolveMenuLabels(meta.productName),
+    menuLabels: resolveMenuLabels(meta.productName, detectLocale(), meta.locales),
   },
   { url, devtools: false },
 )
@@ -130,10 +130,16 @@ function waitForPort(child, timeoutMs) {
 
 /**
  * Resolves the native menu labels for `productName`, localized for the
- * detected system language. Mirrors src/menu-i18n.ts's resolveMenuLabels().
+ * detected system language, constrained to `allowed` (the app's configured
+ * `locales`) when given. Mirrors src/menu-i18n.ts's resolveMenuLabels().
  */
-function resolveMenuLabels(productName, locale = detectLocale()) {
-  const t = menuLocales[locale] ?? menuLocales.en
+function resolveMenuLabels(productName, locale = detectLocale(), allowed) {
+  let key = locale
+  if (allowed && allowed.length > 0) {
+    const allowedKeys = new Set(allowed.map(normalizeLocale))
+    if (!allowedKeys.has(key)) key = normalizeLocale(allowed[0])
+  }
+  const t = menuLocales[key] ?? menuLocales.en
   const fill = (s) => s.split('{app}').join(productName)
   return {
     about: fill(t.about),

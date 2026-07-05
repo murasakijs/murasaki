@@ -9,6 +9,7 @@ import build from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn } from './brand.js'
 import type { MurasakiConfig } from '../config.js'
+import { DEFAULT_LOCALES } from '../menu-i18n.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -97,6 +98,7 @@ exec "$DIR/node" "$DIR/prod-launcher.mjs"
         copyright: config.copyright,
         homepage: config.homepage,
         authors: config.authors,
+        locales: config.locales,
         width: config.window?.width,
         height: config.window?.height,
         vibrancy: config.window?.vibrancy,
@@ -216,6 +218,8 @@ function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean
   const appId = escapeXml(config.appId)
   const name = escapeXml(productName)
   const version = escapeXml(config.version ?? '0.0.0')
+  const locales = config.locales ?? DEFAULT_LOCALES
+  const localizationsXml = locales.map((l) => `    <string>${escapeXml(l)}</string>`).join('\n')
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -232,18 +236,13 @@ function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean
   <key>NSHighResolutionCapable</key><true/>
   <!-- Languages the app supports. Declaring them lets macOS localize its own
        injected UI (the Edit menu's Start Dictation / Emoji & Symbols / Writing
-       Tools items, standard dialogs, …) into the user's language. Keep in sync
-       with src/menu-locales.json. -->
+       Tools items, standard dialogs, …) into the user's language. Driven by
+       config.locales, defaulting to every language murasaki ships default-menu
+       translations for (see src/menu-i18n.ts's DEFAULT_LOCALES / src/menu-locales.json). -->
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleLocalizations</key>
   <array>
-    <string>en</string>
-    <string>ja</string>
-    <string>zh-Hans</string>
-    <string>ko</string>
-    <string>es</string>
-    <string>fr</string>
-    <string>de</string>
+${localizationsXml}
   </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}
 </dict>
 </plist>
