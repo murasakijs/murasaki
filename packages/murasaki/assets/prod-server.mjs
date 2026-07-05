@@ -290,3 +290,12 @@ server.listen(port, '127.0.0.1', () => {
 
 process.on('SIGINT', () => process.exit(0))
 process.on('SIGTERM', () => process.exit(0))
+
+// Safety net against orphaned servers: if the launcher (our parent) dies
+// without running its shutdown handler — a force-quit or a crash — the OS
+// reparents us to init (ppid 1). Detect that and exit so we don't linger as a
+// stray process (which also shows up as an extra icon in the Dock). `.unref()`
+// keeps this timer from holding the event loop open on its own.
+setInterval(() => {
+  if (process.ppid === 1) process.exit(0)
+}, 2000).unref()
