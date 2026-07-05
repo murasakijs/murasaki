@@ -1,5 +1,6 @@
 import type { Plugin, PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
+import svgr from 'vite-plugin-svgr'
 import type { MurasakiConfig } from '../config.js'
 import { fileRouterPlugin } from './routing.js'
 import { serverActionsPlugin } from './server-actions.js'
@@ -14,6 +15,10 @@ export interface MurasakiPluginOptions {
 export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
   return [
     react(),
+    // Import SVGs as React components via `import Icon from './x.svg?react'`,
+    // so an icon inherits `currentColor` (theme-aware) — plain `.svg` imports
+    // still resolve to a URL.
+    svgr(),
     fileRouterPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),
     appShellPlugin(),

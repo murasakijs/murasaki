@@ -11,7 +11,7 @@ import {
 } from '@murasakijs/ui'
 import { Action } from '@/lib/action'
 import { useCounter } from '@/lib/counter'
-import { XLogo } from '@/assets/x-logo'
+import XLogo from '@/assets/x-logo.svg?react'
 import { greet } from '@/api/actions'
 
 export const metadata: Metadata = {
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
  * "Hello, Murasaki 🦋" — the greeting stays.
  *
  * Two native context menus (NSMenu / HMENU / GtkMenu, never an HTML popup):
- *  - the app-wide menu in src/components/app-shell.tsx
+ *  - the app-wide menu in src/app/layout.tsx
  *  - the card-scoped menu below — its reusable actions come from
  *    src/lib/action.ts as <Action.increment /> (the counter lives in a store so
  *    the action is shareable); the server-action call stays inline since it
