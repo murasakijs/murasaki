@@ -84,17 +84,25 @@ fn webview2_data_dir() -> Option<std::path::PathBuf> {
 /// inside the app window. Only `http(s)` URLs to a non-loopback host count as
 /// external — the dev server (localhost), the `murasaki://` prod protocol, and
 /// non-http schemes (`about:`, `data:`, `blob:`, `file:`, …) always load in-app.
-fn is_external_url(url: &str) -> bool {
-  let u = url.to_ascii_lowercase();
-  if !(u.starts_with("http://") || u.starts_with("https://")) {
+///
+/// The host is compared on the *parsed* URL, not a string prefix: a prefix
+/// check treats `http://localhost.evil.com` / `http://127.0.0.1.evil.com` as
+/// loopback and loads the external page in-app. Matching on the parsed host —
+/// the `localhost` domain, or an IP that `is_loopback()` — closes that hole.
+fn is_external_url(target: &str) -> bool {
+  let Ok(parsed) = url::Url::parse(target) else {
+    return false;
+  };
+  if !matches!(parsed.scheme(), "http" | "https") {
     return false;
   }
-  !(u.starts_with("http://localhost")
-    || u.starts_with("https://localhost")
-    || u.starts_with("http://127.0.0.1")
-    || u.starts_with("https://127.0.0.1")
-    || u.starts_with("http://[::1]")
-    || u.starts_with("https://[::1]"))
+  match parsed.host() {
+    Some(url::Host::Domain("localhost")) => false,
+    Some(url::Host::Ipv4(ip)) => !ip.is_loopback(),
+    Some(url::Host::Ipv6(ip)) => !ip.is_loopback(),
+    Some(url::Host::Domain(_)) => true,
+    None => false,
+  }
 }
 
 impl Webview {
