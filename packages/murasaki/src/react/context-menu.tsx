@@ -1,43 +1,58 @@
 /**
- * Declarative `ContextMenu` that renders as a **native OS menu**, not an HTML
- * popup. You write the menu with `<ContextMenuItem>` + `<Action.*>` children;
- * none of those actually render — they're parsed into the wire shape the native
- * side pops (see `./rpc.ts`). Clicks come back as a `murasaki:menuclick`
- * `CustomEvent` on `window`; shortcuts additionally fire straight off `keydown`
- * so they work without ever opening the menu.
+ * Native context menus, declared with a hook instead of markup — so the menu
+ * lives next to your state (its `action`s can close over `useState` setters),
+ * separate from what you return. None of it renders HTML: items are posted to
+ * the Rust side, which pops the real OS menu (see `./rpc.ts`). Clicks come back
+ * as a `murasaki:menuclick` `CustomEvent` on `window`; shortcuts additionally
+ * fire straight off `keydown` so they work without opening the menu.
  *
- * Two ways to attach a menu:
+ *   // App-wide — no id → the whole-window default (right-click anywhere):
+ *   useContextMenu([
+ *     { label: 'Reload', shortcut: 'command,R', action: () => location.reload() },
+ *     { separator: true },
+ *     { label: 'Copy', role: 'copy' },
+ *   ])
  *
- *   // App-wide — a bare <ContextMenu> (no `for`) is the whole-window default:
- *   <ContextMenu>
- *     <ContextMenuItem label="Reload" shortcut="command,R"><Action.Reload /></ContextMenuItem>
- *   </ContextMenu>
+ *   // Scoped — name the menu, then tag a region with a matching trigger:
+ *   useContextMenu('card', [
+ *     { label: 'Increment', action: () => setCount((n) => n + 1) },
+ *   ])
+ *   // …in the return: <ContextMenuTrigger id="card"><Card /></ContextMenuTrigger>
  *
- *   // Scoped — tag a region with a trigger id, define the menu with `for`:
- *   <ContextMenuTrigger id="card"><Card /></ContextMenuTrigger>
- *   <ContextMenu for="card">
- *     <ContextMenuItem label="Do it"><Action.Run action={fn} /></ContextMenuItem>
- *   </ContextMenu>
- *
- * A scoped right-click `preventDefault`s (so the window-default, gated on
+ * A scoped right-click `preventDefault`s (so the window default, gated on
  * `defaultPrevented`, stays quiet) and `stopPropagation`s (so a nested trigger
- * wins over an outer one). Everything but `ContextMenu`/`ContextMenuTrigger` is
- * a marker component (renders `null`) that the parser matches by a `__murasaki`
- * tag stamped on the function — this survives minification.
+ * wins over an outer one).
  */
-import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useRef } from 'react'
+import { Children, cloneElement, isValidElement, useEffect, useId, useRef } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { post } from './rpc.js'
 import type { ContextMenuItem as WireMenuItem } from './rpc.js'
 import { useRouter } from './router.js'
 import { parseShortcut } from './shortcut.js'
 
-interface ParseCtx {
-  handlers: Map<string, () => void>
-  shortcuts: { matches: (e: KeyboardEvent) => boolean; run: () => void }[]
-  router: { push(to: string): void }
-  nextId: () => string
+// ---------------------------------------------------------------------------
+// Item spec — the data you hand to useContextMenu. Exactly one behaviour per
+// item: a native `role`, a client `action`, a `navigate` target, or `items`
+// for a submenu. `{ separator: true }` draws a divider.
+// ---------------------------------------------------------------------------
+
+export type ContextMenuRole = 'copy' | 'paste' | 'cut' | 'selectAll' | 'undo' | 'redo' | 'quit'
+
+export interface ContextMenuEntry {
+  label: string
+  shortcut?: string
+  disabled?: boolean
+  /** A native menu role, performed by the OS itself. */
+  role?: ContextMenuRole
+  /** A custom handler run on this side — may close over component state. */
+  action?: () => void | Promise<void>
+  /** Navigate to a route (via murasaki's router). */
+  navigate?: string
+  /** Nested submenu. */
+  items?: ContextMenuItemSpec[]
 }
+
+export type ContextMenuItemSpec = ContextMenuEntry | { separator: true }
 
 interface Parsed {
   items: WireMenuItem[]
@@ -48,10 +63,9 @@ interface Parsed {
 type MenuRef = { current: Parsed }
 
 // ---------------------------------------------------------------------------
-// Registry — a `<ContextMenuTrigger id>` and its `<ContextMenu for>` are
-// siblings, not parent/child, so they're linked through this module-level
-// registry instead of React context. Entries hold a *ref* (updated every
-// render) so lookups always see the latest closures without re-registering.
+// Registry — a `<ContextMenuTrigger id>` and its `useContextMenu(id, …)` are
+// declared apart, so they're linked through this module-level registry. Entries
+// hold a *ref* (updated every render) so lookups always see the latest closures.
 // ---------------------------------------------------------------------------
 
 const scopedMenus = new Map<string, MenuRef>()
@@ -99,9 +113,9 @@ function onKeyDown(e: KeyboardEvent) {
 
 function onWindowContextMenu(e: MouseEvent) {
   // A scoped trigger handles its region by calling preventDefault (which sets
-  // defaultPrevented on this same native event, since a nested trigger's React
-  // handler runs before the event bubbles up to window) — so the window default
-  // only fires where nothing more specific claimed the click.
+  // defaultPrevented on this same native event, since a trigger's React handler
+  // runs before the event bubbles up to window) — so the window default only
+  // fires where nothing more specific claimed the click.
   if (e.defaultPrevented || !windowMenu) return
   e.preventDefault()
   openNative(windowMenu.current.items, e.clientX, e.clientY)
@@ -124,36 +138,28 @@ function releaseGlobalListeners() {
 }
 
 // ---------------------------------------------------------------------------
-// <ContextMenu> — a menu declaration. Renders nothing. Bare = the whole-window
-// default; `for="id"` scopes it to the matching <ContextMenuTrigger id="id">.
+// useContextMenu — declare a menu. `useContextMenu(items)` is the whole-window
+// default; `useContextMenu(id, items)` is scoped to <ContextMenuTrigger id={id}>.
 // ---------------------------------------------------------------------------
 
-export interface ContextMenuProps {
-  /** Scope this menu to the `<ContextMenuTrigger id>` of the same name. Omit for the whole-window default. */
-  for?: string
-  children?: ReactNode
-}
+export function useContextMenu(items: ContextMenuItemSpec[]): void
+export function useContextMenu(id: string, items: ContextMenuItemSpec[]): void
+export function useContextMenu(
+  idOrItems: string | ContextMenuItemSpec[],
+  maybeItems?: ContextMenuItemSpec[],
+): void {
+  const scopeId = typeof idOrItems === 'string' ? idOrItems : undefined
+  const specs = (typeof idOrItems === 'string' ? maybeItems : idOrItems) ?? []
 
-export function ContextMenu({ for: scopeId, children }: ContextMenuProps) {
   const router = useRouter()
   // Namespaces this menu's item ids so a click resolves in the menu that owns
   // it, even though every menu shares one window-wide `murasaki:menuclick`.
   const uid = useId()
 
-  const parsed = useMemo<Parsed>(() => {
-    let counter = 0
-    const ctx: ParseCtx = {
-      handlers: new Map(),
-      shortcuts: [],
-      router,
-      nextId: () => `${uid}m${counter++}`,
-    }
-    const items = parseContent(children, ctx)
-    return { items, handlers: ctx.handlers, shortcuts: ctx.shortcuts }
-  }, [children, router, uid])
-
-  const parsedRef = useRef(parsed)
-  parsedRef.current = parsed
+  // Rebuilt every render (specs is a fresh array and its actions close over the
+  // latest state); the ref keeps the once-installed listeners seeing it.
+  const parsedRef = useRef<Parsed>({ items: [], handlers: new Map(), shortcuts: [] })
+  parsedRef.current = buildMenu(specs, router, uid)
 
   useEffect(() => {
     retainGlobalListeners()
@@ -161,7 +167,7 @@ export function ContextMenu({ for: scopeId, children }: ContextMenuProps) {
       const prev = windowMenu
       windowMenu = parsedRef
       if (prev && prev !== parsedRef && process.env.NODE_ENV !== 'production') {
-        console.warn('[murasaki] more than one window-default <ContextMenu> is mounted — the last one wins.')
+        console.warn('[murasaki] more than one window-default useContextMenu() is mounted — the last one wins.')
       }
       return () => {
         if (windowMenu === parsedRef) windowMenu = null
@@ -174,19 +180,22 @@ export function ContextMenu({ for: scopeId, children }: ContextMenuProps) {
       releaseGlobalListeners()
     }
   }, [scopeId])
-
-  return null
 }
-;(ContextMenu as any).__murasaki = 'menu'
 
 // ---------------------------------------------------------------------------
 // <ContextMenuTrigger id> — tags a region. On right-click it opens the menu
-// registered under the same id (a <ContextMenu for={id}>), if any.
+// declared under the same id (a useContextMenu(id, …)), if any.
 // ---------------------------------------------------------------------------
 
 export interface ContextMenuTriggerProps {
-  /** Links this region to the `<ContextMenu for>` of the same name. */
+  /** Links this region to the `useContextMenu(id, …)` of the same name. */
   id: string
+  /**
+   * Attach the handler to the child element directly (no wrapper node). Defaults
+   * to `true` when there's a single element child, `false` otherwise (then a
+   * `display: contents` `<span>` carries the handler). Set it explicitly to
+   * override.
+   */
   asChild?: boolean
   children?: ReactNode
 }
@@ -209,8 +218,14 @@ export function ContextMenuTrigger({ id, asChild, children }: ContextMenuTrigger
     openNative(menu.current.items, e.clientX, e.clientY)
   }
 
-  if (asChild) {
-    const child = Children.only(children) as ReactElement<{ onContextMenu?: (e: any) => void }>
+  // Default to cloning the child when it's a lone element (the common case — no
+  // extra DOM node), and fall back to a wrapper otherwise. `asChild` overrides.
+  const kids = Children.toArray(children)
+  const sole = kids.length === 1 && isValidElement(kids[0]) ? (kids[0] as ReactElement) : null
+  const clone = asChild === true || (asChild === undefined && sole !== null)
+
+  if (clone) {
+    const child = (sole ?? Children.only(children)) as ReactElement<{ onContextMenu?: (e: any) => void }>
     return cloneElement(child, {
       onContextMenu: (e: any) => {
         child.props.onContextMenu?.(e)
@@ -227,178 +242,50 @@ export function ContextMenuTrigger({ id, asChild, children }: ContextMenuTrigger
 }
 
 // ---------------------------------------------------------------------------
-// Marker components — none of these render anything; the parser reads their
-// props off the element tree instead.
+// Builder — turns the item specs into the wire shape the native side expects,
+// plus the client-side handler and keydown-shortcut maps.
 // ---------------------------------------------------------------------------
 
-export interface ContextMenuItemProps {
-  label: string
-  shortcut?: string
-  disabled?: boolean
-  children?: ReactNode
-}
+function buildMenu(specs: ContextMenuItemSpec[], router: { push(to: string): void }, uid: string): Parsed {
+  let counter = 0
+  const nextId = () => `${uid}m${counter++}`
+  const handlers = new Map<string, () => void>()
+  const shortcuts: { matches: (e: KeyboardEvent) => boolean; run: () => void }[] = []
 
-export function ContextMenuItem(_props: ContextMenuItemProps) {
-  return null
-}
-;(ContextMenuItem as any).__murasaki = 'item'
-
-export function ContextMenuSeparator() {
-  return null
-}
-;(ContextMenuSeparator as any).__murasaki = 'separator'
-
-export interface ContextMenuSubProps {
-  label: string
-  children?: ReactNode
-}
-
-export function ContextMenuSub(_props: ContextMenuSubProps) {
-  return null
-}
-;(ContextMenuSub as any).__murasaki = 'sub'
-
-// ---------------------------------------------------------------------------
-// Action.* — each is a marker carrying a static descriptor (a role for the
-// native menu to perform itself, or a `__client` tag the parser turns into a
-// handler function run from this side).
-// ---------------------------------------------------------------------------
-
-function roleAction(name: string, role: NonNullable<WireMenuItem['role']>) {
-  function ActionComponent() {
-    return null
-  }
-  ActionComponent.displayName = `Action.${name}`
-  ;(ActionComponent as any).__murasaki = 'action'
-  ;(ActionComponent as any).__role = role
-  return ActionComponent
-}
-
-const Copy = roleAction('Copy', 'copy')
-const Paste = roleAction('Paste', 'paste')
-const Cut = roleAction('Cut', 'cut')
-const SelectAll = roleAction('SelectAll', 'selectAll')
-const Undo = roleAction('Undo', 'undo')
-const Redo = roleAction('Redo', 'redo')
-const Quit = roleAction('Quit', 'quit')
-
-function Reload() {
-  return null
-}
-Reload.displayName = 'Action.Reload'
-;(Reload as any).__murasaki = 'action'
-;(Reload as any).__client = 'reload'
-
-export interface ActionNavigateProps {
-  to: string
-}
-
-function Navigate(_props: ActionNavigateProps) {
-  return null
-}
-Navigate.displayName = 'Action.Navigate'
-;(Navigate as any).__murasaki = 'action'
-;(Navigate as any).__client = 'navigate'
-
-export interface ActionRunProps {
-  action: () => void | Promise<void>
-}
-
-function Run(_props: ActionRunProps) {
-  return null
-}
-Run.displayName = 'Action.Run'
-;(Run as any).__murasaki = 'action'
-;(Run as any).__client = 'run'
-
-export const Action = {
-  Copy,
-  Paste,
-  Cut,
-  SelectAll,
-  Undo,
-  Redo,
-  Quit,
-  Reload,
-  Navigate,
-  Run,
-}
-
-// ---------------------------------------------------------------------------
-// Parser — walks a menu's children (order-preserving; supports conditionals /
-// `.map` since it reads `React.Children.toArray`) into the wire item shape the
-// native side expects, plus the client-side handler and keydown-shortcut maps.
-// ---------------------------------------------------------------------------
-
-function resolveClientHandler(client: string, props: any, ctx: ParseCtx): () => void {
-  switch (client) {
-    case 'reload':
-      return () => window.location.reload()
-    case 'navigate': {
-      const to = props.to as string
-      return () => ctx.router.push(to)
-    }
-    case 'run':
-      return props.action as () => void | Promise<void>
-    default:
-      return () => {}
-  }
-}
-
-function parseContent(children: ReactNode, ctx: ParseCtx): WireMenuItem[] {
-  const items: WireMenuItem[] = []
-
-  for (const child of Children.toArray(children)) {
-    if (!isValidElement(child)) continue
-    const type = child.type as any
-    const kind = type?.__murasaki
-
-    if (kind === 'separator') {
-      items.push({ id: ctx.nextId(), role: 'separator' })
-      continue
-    }
-
-    if (kind === 'sub') {
-      const props = child.props as ContextMenuSubProps
-      const id = ctx.nextId()
-      const submenu = parseContent(props.children, ctx)
-      items.push({ id, label: props.label, submenu })
-      continue
-    }
-
-    if (kind === 'item') {
-      const props = child.props as ContextMenuItemProps
-      const id = ctx.nextId()
-      const action = Children.toArray(props.children).find(
-        (c): c is ReactElement => isValidElement(c) && (c.type as any)?.__murasaki === 'action',
-      )
-      if (!action) {
-        console.warn(`[murasaki] <ContextMenuItem label="${props.label}"> has no Action.* child — skipping.`)
+  function build(list: ContextMenuItemSpec[]): WireMenuItem[] {
+    const out: WireMenuItem[] = []
+    for (const spec of list) {
+      if (!spec) continue
+      if ('separator' in spec && spec.separator) {
+        out.push({ id: nextId(), role: 'separator' })
         continue
       }
+      const entry = spec as ContextMenuEntry
+      const id = nextId()
+      const wire: WireMenuItem = { id, label: entry.label, enabled: !entry.disabled }
 
-      const actionType = action.type as any
-      const wireItem: WireMenuItem = { id, label: props.label, enabled: !props.disabled }
-
-      if (actionType.__role) {
-        wireItem.role = actionType.__role
-      } else if (actionType.__client) {
-        const handler = resolveClientHandler(actionType.__client, action.props, ctx)
-        ctx.handlers.set(id, handler)
+      if (entry.items) {
+        wire.submenu = build(entry.items)
+      } else if (entry.role) {
+        wire.role = entry.role
+      } else if (entry.action) {
+        handlers.set(id, entry.action)
+      } else if (entry.navigate != null) {
+        const to = entry.navigate
+        handlers.set(id, () => router.push(to))
       }
 
-      if (props.shortcut) {
-        const { accelerator, matches } = parseShortcut(props.shortcut)
-        wireItem.accelerator = accelerator
-        if (actionType.__client) {
-          ctx.shortcuts.push({ matches, run: ctx.handlers.get(id)! })
-        }
+      if (entry.shortcut) {
+        const { accelerator, matches } = parseShortcut(entry.shortcut)
+        wire.accelerator = accelerator
+        const handler = handlers.get(id)
+        if (handler) shortcuts.push({ matches, run: handler })
       }
 
-      items.push(wireItem)
-      continue
+      out.push(wire)
     }
+    return out
   }
 
-  return items
+  return { items: build(specs), handlers, shortcuts }
 }

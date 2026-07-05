@@ -1,12 +1,5 @@
 import { useState } from 'react'
-import {
-  Link,
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  Action,
-} from 'murasaki'
+import { Link, ContextMenuTrigger, useContextMenu } from 'murasaki'
 import type { Metadata } from 'murasaki'
 import {
   Button,
@@ -29,9 +22,9 @@ export const metadata: Metadata = {
  * Two native context menus (NSMenu / HMENU / GtkMenu, never an HTML popup):
  *  - the app-wide menu in src/components/app-shell.tsx (right-click the heading
  *    or the empty space around it)
- *  - the card-scoped menu below — <ContextMenuTrigger id="card"> tags the card,
- *    and <ContextMenu for="card"> defines its menu, running your own actions via
- *    Action.Run. A bare <ContextMenu> (no `for`) would be the window default.
+ *  - the card-scoped menu below — useContextMenu('card', …) declares it (next to
+ *    the state its actions touch), and <ContextMenuTrigger id="card"> applies it
+ *    to the card's region. A no-id useContextMenu() would be the window default.
  *
  * The top bar's X link is a plain <a href>: murasaki opens off-origin links in
  * the user's default browser instead of loading them inside the app window.
@@ -39,6 +32,13 @@ export const metadata: Metadata = {
 export default function Page() {
   const [count, setCount] = useState(0)
   const [greeting, setGreeting] = useState<string | null>(null)
+
+  useContextMenu('card', [
+    { label: 'Increment', shortcut: 'command,I', action: () => setCount((n) => n + 1) },
+    { label: 'Reset counter', action: () => setCount(0) },
+    { separator: true },
+    { label: 'Call server action', action: async () => setGreeting(await greet('Murasaki')) },
+  ])
 
   return (
     <>
@@ -67,8 +67,8 @@ export default function Page() {
           Right-click the card for its own menu — or anywhere else for the app menu.
         </p>
 
-        {/* Tag the region with a trigger id; the menu is declared separately below. */}
-        <ContextMenuTrigger id="card" asChild>
+        {/* Tag the region; its menu is declared above via useContextMenu('card', …). */}
+        <ContextMenuTrigger id="card">
           <Card className="mt-8 text-center">
             <CardHeader>
               <CardTitle>Try it out</CardTitle>
@@ -88,19 +88,6 @@ export default function Page() {
             </CardContent>
           </Card>
         </ContextMenuTrigger>
-
-        <ContextMenu for="card">
-          <ContextMenuItem label="Increment" shortcut="command,I">
-            <Action.Run action={() => setCount((n) => n + 1)} />
-          </ContextMenuItem>
-          <ContextMenuItem label="Reset counter">
-            <Action.Run action={() => setCount(0)} />
-          </ContextMenuItem>
-          <ContextMenuSeparator />
-          <ContextMenuItem label="Call server action">
-            <Action.Run action={async () => setGreeting(await greet('Murasaki'))} />
-          </ContextMenuItem>
-        </ContextMenu>
 
         <p className="mt-6">
           <Link href="/about" className="text-murasaki-bright hover:underline">

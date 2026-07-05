@@ -1,6 +1,6 @@
 /**
- * Parses the small `"command,shift,R"`-style shortcut spec used by
- * `<ContextMenuItem shortcut="…">` into:
+ * Parses the small `"command,shift,R"`-style shortcut spec used by a context
+ * menu item's `shortcut` field into:
  *  - a muda-compatible `accelerator` string (for the native menu label), and
  *  - a `matches(e)` predicate (for firing the action straight off a
  *    `keydown`, without the menu ever opening).

@@ -34,29 +34,23 @@ npm run dev
 ```tsx
 // src/app/page.tsx
 import { useState } from 'react'
-import { ContextMenu, ContextMenuItem, ContextMenuSeparator, Action } from 'murasaki'
+import { useContextMenu } from 'murasaki'
 
 export default function Page() {
   const [count, setCount] = useState(0)
+
+  // The window-wide menu — declared as data, right next to your state.
+  useContextMenu([
+    { label: 'Increment', shortcut: 'command,I', action: () => setCount((n) => n + 1) },
+    { separator: true },
+    { label: 'Reload', shortcut: 'command,R', action: () => location.reload() },
+    { label: 'Copy', role: 'copy' },
+  ])
 
   return (
     <main>
       <h1>Hello, Murasaki 🦋</h1>
       <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
-
-      {/* A bare <ContextMenu> is the window-wide menu — right-click anywhere. */}
-      <ContextMenu>
-        <ContextMenuItem label="Increment" shortcut="command,I">
-          <Action.Run action={() => setCount((n) => n + 1)} />
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem label="Reload" shortcut="command,R">
-          <Action.Reload />
-        </ContextMenuItem>
-        <ContextMenuItem label="Copy">
-          <Action.Copy />
-        </ContextMenuItem>
-      </ContextMenu>
     </main>
   )
 }
@@ -165,11 +159,11 @@ we've benchmarked head-to-head:
   a page or layout set the document title and meta tags; `src/middleware.ts`
   runs before every navigation and can redirect (a route guard) — both
   Next.js-shaped.
-- **Native context menu.** A declarative `<ContextMenu>` with `<Action.*>`
-  children posts to the Rust side, which pops a real OS menu (NSMenu / HMENU /
-  GtkMenu) and runs the clicked item. A bare one is the whole-window menu; scope
-  it to a region with `<ContextMenuTrigger id>` + `<ContextMenu for>`. No HTML
-  popup involved.
+- **Native context menu.** Declare it with a hook — `useContextMenu([{ label,
+  action, shortcut, role }])` — data that lives next to your state. No id is the
+  whole-window menu; give it an id and tag a region with `<ContextMenuTrigger
+  id>` to scope it. It posts to the Rust side, which pops a real OS menu (NSMenu
+  / HMENU / GtkMenu). No HTML popup involved.
 - **Native menus, dialogs, clipboard, notifications, shell.** Built on
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native):
   open/save/directory dialogs, clipboard read/write, OS notifications, and

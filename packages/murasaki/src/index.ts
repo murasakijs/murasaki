@@ -36,21 +36,18 @@ export {
   useGlobalContextMenu,
 } from './react/rpc.js'
 
+export { App } from './react/app.js'
+export type { AppProps } from './react/app.js'
+
 export {
-  ContextMenu,
+  useContextMenu,
   ContextMenuTrigger,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  Action,
 } from './react/context-menu.js'
 export type {
-  ContextMenuProps,
   ContextMenuTriggerProps,
-  ContextMenuItemProps,
-  ContextMenuSubProps,
-  ActionNavigateProps,
-  ActionRunProps,
+  ContextMenuItemSpec,
+  ContextMenuEntry,
+  ContextMenuRole,
 } from './react/context-menu.js'
 
 export {
