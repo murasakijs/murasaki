@@ -48,6 +48,31 @@ function errorLine(msg) {
   return `  ${paint('✗', RED)} ${msg}`
 }
 
+// A branded, human-readable block for a fatal dev-server startup error — used
+// instead of dumping the raw Node stack trace. The full stack is still one env
+// var away (`MURASAKI_DEBUG=1`) for when it's actually needed.
+function fatal(err) {
+  const msg = err?.message ?? String(err)
+  const isPortInUse = err?.code === 'EADDRINUSE' || /already in use|EADDRINUSE/i.test(msg)
+  const out = [`\n  ${paint('✗', RED)}  ${paint('murasaki dev failed to start', BOLD)}\n\n`]
+
+  if (isPortInUse) {
+    const m = msg.match(/\b(\d{2,5})\b/)
+    out.push(`  ${m ? `Port ${m[1]} is already in use.` : 'That port is already in use.'}\n`)
+    out.push(`  ${paint('Another murasaki dev server is probably still running — quit it,', DIM)}\n`)
+    out.push(`  ${paint('or set a different ', DIM)}${paint('devPort', BRIGHT)}${paint(' in murasaki.config.ts.', DIM)}\n`)
+  } else {
+    out.push(`  ${msg}\n`)
+  }
+
+  if (process.env.MURASAKI_DEBUG && err?.stack) {
+    out.push(`\n${paint(err.stack, DIM)}\n`)
+  } else {
+    out.push(`\n  ${paint('Run with ', DIM)}${paint('MURASAKI_DEBUG=1', BRIGHT)}${paint(' to see the full stack trace.', DIM)}\n`)
+  }
+  return `${out.join('')}\n`
+}
+
 // Vite `Logger` — suppresses Vite's own "VITE vX ready" info banner (murasaki
 // prints its own below) while still surfacing real warnings/errors, branded.
 let warned = false
@@ -62,8 +87,12 @@ const logger = {
     process.stdout.write(`${warnLine(msg)}\n`)
   },
   error(msg, options) {
+    // The port-in-use failure is re-surfaced — branded, with a hint — by the
+    // fatal handler on main()'s rejection, so don't double-print it here.
+    if (/already in use|EADDRINUSE/i.test(String(msg))) return
     process.stderr.write(`${errorLine(msg)}\n`)
-    if (options?.error?.stack) process.stderr.write(`${options.error.stack}\n`)
+    if (process.env.MURASAKI_DEBUG && options?.error?.stack)
+      process.stderr.write(`${paint(options.error.stack, DIM)}\n`)
   },
   clearScreen() {},
   hasErrorLogged() {
@@ -101,7 +130,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  process.stderr.write(`\n${errorLine(err?.message ?? String(err))}\n`)
-  if (err?.stack) process.stderr.write(`${err.stack}\n`)
+  process.stderr.write(fatal(err))
   process.exit(1)
 })

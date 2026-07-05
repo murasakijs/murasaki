@@ -83,12 +83,19 @@ export default async function dev(_argv: string[]) {
   app.run()
 }
 
+// Vite's dev server binds `localhost`, which on macOS resolves to IPv6 `::1`.
+// The probe below MUST bind the same host: a host-less `listen(port)` binds
+// `0.0.0.0` (IPv4), which does NOT collide with a `[::1]:port` held by a stale
+// dev server — so it would report the port free, hand it to Vite, and Vite
+// would then fail to bind `::1`. Probing `localhost` matches Vite exactly.
+const DEV_HOST = 'localhost'
+
 /**
- * Resolves the first free TCP port at or after `startPort`. Binds a throwaway
- * server on each candidate (host-less, so `EADDRINUSE` fires if anything holds
- * the port on any interface) and returns the first that listens cleanly. There
- * is an inherent probe→bind race — Vite still runs with `strictPort`, so if the
- * port is grabbed in that window it fails loudly rather than silently drifting.
+ * Resolves the first free TCP port at or after `startPort`, probing on the same
+ * host Vite binds (`localhost`). Binds a throwaway server on each candidate and
+ * returns the first that listens cleanly. There is an inherent probe→bind race
+ * — Vite still runs with `strictPort`, so if the port is grabbed in that window
+ * it fails loudly rather than silently drifting.
  */
 function findFreePort(startPort: number, maxTries = 20): Promise<number> {
   return new Promise((resolveOk, rejectFail) => {
@@ -108,7 +115,7 @@ function findFreePort(startPort: number, maxTries = 20): Promise<number> {
         }
       })
       srv.once('listening', () => srv.close(() => resolveOk(port)))
-      srv.listen(port)
+      srv.listen(port, DEV_HOST)
     }
     attempt()
   })
@@ -125,10 +132,9 @@ function startViteChild(cwd: string, port: number) {
     env: process.env,
   })
   child.on('exit', (code) => {
-    if (code && code !== 0) {
-      process.stderr.write(`\n  vite exited with code ${code}\n`)
-      process.exit(code)
-    }
+    // The child (assets/dev-server.mjs) already prints a branded error on a
+    // fatal exit — just mirror its code without adding a second, rawer line.
+    if (code && code !== 0) process.exit(code)
   })
   return child
 }
