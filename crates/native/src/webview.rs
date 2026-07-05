@@ -80,6 +80,23 @@ fn webview2_data_dir() -> Option<std::path::PathBuf> {
   }
 }
 
+/// Whether a navigation target should open in the system browser rather than
+/// inside the app window. Only `http(s)` URLs to a non-loopback host count as
+/// external — the dev server (localhost), the `murasaki://` prod protocol, and
+/// non-http schemes (`about:`, `data:`, `blob:`, `file:`, …) always load in-app.
+fn is_external_url(url: &str) -> bool {
+  let u = url.to_ascii_lowercase();
+  if !(u.starts_with("http://") || u.starts_with("https://")) {
+    return false;
+  }
+  !(u.starts_with("http://localhost")
+    || u.starts_with("https://localhost")
+    || u.starts_with("http://127.0.0.1")
+    || u.starts_with("https://127.0.0.1")
+    || u.starts_with("http://[::1]")
+    || u.starts_with("https://[::1]"))
+}
+
 impl Webview {
   pub(crate) fn new(window: SharedWindow, opts: WebviewOptions) -> Result<Self> {
     let on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>> =
@@ -125,6 +142,19 @@ impl Webview {
       if let Some(tsf) = ipc_slot.borrow().as_ref() {
         let _ = tsf.call(Ok(body), ThreadsafeFunctionCallMode::NonBlocking);
       }
+    });
+
+    // Off-origin navigations (a plain `<a href="https://…">` to another site)
+    // open in the user's default browser instead of replacing the app inside
+    // its own window. In-app navigations — the dev server on localhost, the
+    // `murasaki://` prod protocol, and non-http schemes — load normally.
+    // Returning `false` cancels the in-window navigation.
+    builder = builder.with_navigation_handler(|url| {
+      if is_external_url(&url) {
+        let _ = open::that_detached(&url);
+        return false;
+      }
+      true
     });
 
     // Production loads static files (the built client) through wry's custom
