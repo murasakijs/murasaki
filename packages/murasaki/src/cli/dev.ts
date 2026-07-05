@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import http from 'node:http'
+import net from 'node:net'
 import { loadNative } from '../runtime/native.js'
 import type { MurasakiConfig } from '../config.js'
 
@@ -16,7 +17,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export default async function dev(_argv: string[]) {
   const cwd = process.cwd()
   const config = await loadUserConfig(cwd)
-  const port = config.devPort ?? 5178
+  // murasaki pins Vite to an exact port (strictPort) so the parent knows the
+  // URL to point the webview at. Probe first so a stale dev server (or anything
+  // else) holding the default port steps us to the next free one instead of
+  // hard-failing — the same auto-increment Vite does on its own, but with the
+  // parent kept in the loop.
+  const requestedPort = config.devPort ?? 5178
+  const port = await findFreePort(requestedPort)
+  if (port !== requestedPort) {
+    process.stdout.write(`\n  Port ${requestedPort} is in use — starting on ${port} instead\n`)
+  }
   const url = `http://localhost:${port}/`
 
   const vite = await startViteChild(cwd, port)
@@ -71,6 +81,37 @@ export default async function dev(_argv: string[]) {
   }
 
   app.run()
+}
+
+/**
+ * Resolves the first free TCP port at or after `startPort`. Binds a throwaway
+ * server on each candidate (host-less, so `EADDRINUSE` fires if anything holds
+ * the port on any interface) and returns the first that listens cleanly. There
+ * is an inherent probe→bind race — Vite still runs with `strictPort`, so if the
+ * port is grabbed in that window it fails loudly rather than silently drifting.
+ */
+function findFreePort(startPort: number, maxTries = 20): Promise<number> {
+  return new Promise((resolveOk, rejectFail) => {
+    let port = startPort
+    let tries = 0
+    const attempt = () => {
+      const srv = net.createServer()
+      srv.once('error', (err: NodeJS.ErrnoException) => {
+        srv.close()
+        if (err.code === 'EADDRINUSE' && tries++ < maxTries) {
+          port++
+          attempt()
+        } else if (err.code === 'EADDRINUSE') {
+          rejectFail(new Error(`no free port found in ${startPort}..${startPort + maxTries}`))
+        } else {
+          rejectFail(err)
+        }
+      })
+      srv.once('listening', () => srv.close(() => resolveOk(port)))
+      srv.listen(port)
+    }
+    attempt()
+  })
 }
 
 function startViteChild(cwd: string, port: number) {
