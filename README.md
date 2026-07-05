@@ -34,28 +34,18 @@ npm run dev
 ```tsx
 // src/app/page.tsx
 import { useState } from 'react'
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  Action,
-} from 'murasaki'
+import { ContextMenu, ContextMenuItem, ContextMenuSeparator, Action } from 'murasaki'
 
 export default function Page() {
   const [count, setCount] = useState(0)
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <main>
-          <h1>Hello, Murasaki 🦋</h1>
-          <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
-        </main>
-      </ContextMenuTrigger>
+    <main>
+      <h1>Hello, Murasaki 🦋</h1>
+      <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
 
-      <ContextMenuContent>
+      {/* A bare <ContextMenu> is the window-wide menu — right-click anywhere. */}
+      <ContextMenu>
         <ContextMenuItem label="Increment" shortcut="command,I">
           <Action.Run action={() => setCount((n) => n + 1)} />
         </ContextMenuItem>
@@ -66,8 +56,8 @@ export default function Page() {
         <ContextMenuItem label="Copy">
           <Action.Copy />
         </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu>
+    </main>
   )
 }
 ```
@@ -175,9 +165,10 @@ we've benchmarked head-to-head:
   a page or layout set the document title and meta tags; `src/middleware.ts`
   runs before every navigation and can redirect (a route guard) — both
   Next.js-shaped.
-- **Native context menu.** A declarative `<ContextMenu>` — shaped like
-  shadcn/ui's, with `<Action.*>` children — posts to the Rust side, which pops a
-  real OS menu (NSMenu / HMENU / GtkMenu) and runs the clicked item. No HTML
+- **Native context menu.** A declarative `<ContextMenu>` with `<Action.*>`
+  children posts to the Rust side, which pops a real OS menu (NSMenu / HMENU /
+  GtkMenu) and runs the clicked item. A bare one is the whole-window menu; scope
+  it to a region with `<ContextMenuTrigger id>` + `<ContextMenu for>`. No HTML
   popup involved.
 - **Native menus, dialogs, clipboard, notifications, shell.** Built on
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native):

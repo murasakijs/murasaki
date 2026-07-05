@@ -1,34 +1,36 @@
 /**
- * shadcn-shaped `ContextMenu` that renders as a **native OS menu**, not an
- * HTML popup. Behavior is expressed declaratively via `Action.*` children;
- * `<ContextMenuContent>` and everything inside it never actually render —
- * their children are parsed into the wire shape `useGlobalContextMenu`
- * already knows how to post (see `./rpc.ts`), and the native side pops the
- * real menu. Clicks come back as a `murasaki:menuclick` `CustomEvent` on
- * `window`; shortcuts additionally fire straight off `keydown` so they work
- * without ever opening the menu.
+ * Declarative `ContextMenu` that renders as a **native OS menu**, not an HTML
+ * popup. You write the menu with `<ContextMenuItem>` + `<Action.*>` children;
+ * none of those actually render — they're parsed into the wire shape the native
+ * side pops (see `./rpc.ts`). Clicks come back as a `murasaki:menuclick`
+ * `CustomEvent` on `window`; shortcuts additionally fire straight off `keydown`
+ * so they work without ever opening the menu.
  *
- * Everything but `ContextMenu`/`ContextMenuTrigger` is a marker component
- * (renders `null`) that the parser below matches by `element.type`, via a
- * `__murasaki` tag stamped on the function itself — this survives
- * minification, unlike matching on `displayName` or `element.type.name`.
+ * Two ways to attach a menu:
+ *
+ *   // App-wide — a bare <ContextMenu> (no `for`) is the whole-window default:
+ *   <ContextMenu>
+ *     <ContextMenuItem label="Reload" shortcut="command,R"><Action.Reload /></ContextMenuItem>
+ *   </ContextMenu>
+ *
+ *   // Scoped — tag a region with a trigger id, define the menu with `for`:
+ *   <ContextMenuTrigger id="card"><Card /></ContextMenuTrigger>
+ *   <ContextMenu for="card">
+ *     <ContextMenuItem label="Do it"><Action.Run action={fn} /></ContextMenuItem>
+ *   </ContextMenu>
+ *
+ * A scoped right-click `preventDefault`s (so the window-default, gated on
+ * `defaultPrevented`, stays quiet) and `stopPropagation`s (so a nested trigger
+ * wins over an outer one). Everything but `ContextMenu`/`ContextMenuTrigger` is
+ * a marker component (renders `null`) that the parser matches by a `__murasaki`
+ * tag stamped on the function — this survives minification.
  */
-import { Children, cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useRef } from 'react'
+import { Children, cloneElement, isValidElement, useEffect, useId, useMemo, useRef } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { post } from './rpc.js'
 import type { ContextMenuItem as WireMenuItem } from './rpc.js'
 import { useRouter } from './router.js'
 import { parseShortcut } from './shortcut.js'
-
-// ---------------------------------------------------------------------------
-// Root + context
-// ---------------------------------------------------------------------------
-
-interface ContextMenuCtxValue {
-  openAt(x: number, y: number): void
-}
-
-const Ctx = createContext<ContextMenuCtxValue | null>(null)
 
 interface ParseCtx {
   handlers: Map<string, () => void>
@@ -43,26 +45,100 @@ interface Parsed {
   shortcuts: { matches: (e: KeyboardEvent) => boolean; run: () => void }[]
 }
 
+type MenuRef = { current: Parsed }
+
+// ---------------------------------------------------------------------------
+// Registry — a `<ContextMenuTrigger id>` and its `<ContextMenu for>` are
+// siblings, not parent/child, so they're linked through this module-level
+// registry instead of React context. Entries hold a *ref* (updated every
+// render) so lookups always see the latest closures without re-registering.
+// ---------------------------------------------------------------------------
+
+const scopedMenus = new Map<string, MenuRef>()
+let windowMenu: MenuRef | null = null
+
+function openNative(items: WireMenuItem[], x: number, y: number) {
+  post({ kind: 'contextMenu', items, x, y })
+}
+
+function onMenuClick(e: Event) {
+  const id = (e as CustomEvent<string>).detail
+  // Item ids are useId-namespaced (unique per menu), so a linear search across
+  // the window default + every scoped menu resolves to exactly one handler.
+  const handler = windowMenu?.current.handlers.get(id) ?? findScopedHandler(id)
+  handler?.()
+}
+
+function findScopedHandler(id: string): (() => void) | undefined {
+  for (const ref of scopedMenus.values()) {
+    const handler = ref.current.handlers.get(id)
+    if (handler) return handler
+  }
+  return undefined
+}
+
+function onKeyDown(e: KeyboardEvent) {
+  // Ignore keys fired while an IME composition is active. WKWebView (and other
+  // engines) emit keydown with `keyCode === 229` / `key === "Process"`
+  // mid-composition, so without this a shortcut would misfire on, e.g., the
+  // Enter that confirms Japanese/Chinese/Korean input.
+  if (e.isComposing || e.keyCode === 229) return
+  const menus: Parsed[] = []
+  if (windowMenu) menus.push(windowMenu.current)
+  for (const ref of scopedMenus.values()) menus.push(ref.current)
+  for (const menu of menus) {
+    for (const shortcut of menu.shortcuts) {
+      if (shortcut.matches(e)) {
+        e.preventDefault()
+        shortcut.run()
+        return
+      }
+    }
+  }
+}
+
+function onWindowContextMenu(e: MouseEvent) {
+  // A scoped trigger handles its region by calling preventDefault (which sets
+  // defaultPrevented on this same native event, since a nested trigger's React
+  // handler runs before the event bubbles up to window) — so the window default
+  // only fires where nothing more specific claimed the click.
+  if (e.defaultPrevented || !windowMenu) return
+  e.preventDefault()
+  openNative(windowMenu.current.items, e.clientX, e.clientY)
+}
+
+let listenerRefs = 0
+function retainGlobalListeners() {
+  if (listenerRefs++ === 0) {
+    window.addEventListener('murasaki:menuclick', onMenuClick)
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('contextmenu', onWindowContextMenu)
+  }
+}
+function releaseGlobalListeners() {
+  if (--listenerRefs === 0) {
+    window.removeEventListener('murasaki:menuclick', onMenuClick)
+    window.removeEventListener('keydown', onKeyDown)
+    window.removeEventListener('contextmenu', onWindowContextMenu)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// <ContextMenu> — a menu declaration. Renders nothing. Bare = the whole-window
+// default; `for="id"` scopes it to the matching <ContextMenuTrigger id="id">.
+// ---------------------------------------------------------------------------
+
 export interface ContextMenuProps {
+  /** Scope this menu to the `<ContextMenuTrigger id>` of the same name. Omit for the whole-window default. */
+  for?: string
   children?: ReactNode
 }
 
-export function ContextMenu({ children }: ContextMenuProps) {
+export function ContextMenu({ for: scopeId, children }: ContextMenuProps) {
   const router = useRouter()
-  // Namespaces this menu's item ids. `murasaki:menuclick` is a window-wide
-  // event that every mounted <ContextMenu> listens to, and each instance's
-  // item counter restarts at 0 — so without a per-instance prefix, item `m0`
-  // of a scoped menu collides with item `m0` of the app-wide menu and BOTH
-  // handlers fire on a click (e.g. clicking "Increment" also ran the root
-  // menu's "Reload"). `useId()` gives each instance a stable, unique prefix.
+  // Namespaces this menu's item ids so a click resolves in the menu that owns
+  // it, even though every menu shares one window-wide `murasaki:menuclick`.
   const uid = useId()
-  const all = Children.toArray(children)
-  const trigger = all.find(
-    (c): c is ReactElement => isValidElement(c) && (c.type as any)?.__murasaki === 'trigger',
-  )
-  const content = all.find(
-    (c): c is ReactElement => isValidElement(c) && (c.type as any)?.__murasaki === 'content',
-  )
 
   const parsed = useMemo<Parsed>(() => {
     let counter = 0
@@ -72,78 +148,65 @@ export function ContextMenu({ children }: ContextMenuProps) {
       router,
       nextId: () => `${uid}m${counter++}`,
     }
-    const items = content ? parseContent((content.props as { children?: ReactNode }).children, ctx) : []
+    const items = parseContent(children, ctx)
     return { items, handlers: ctx.handlers, shortcuts: ctx.shortcuts }
-  }, [content, router, uid])
+  }, [children, router, uid])
 
-  // Kept in a ref so the window listeners (installed once) always see the
-  // latest parse without needing to be torn down and rebuilt on every render.
   const parsedRef = useRef(parsed)
   parsedRef.current = parsed
 
   useEffect(() => {
-    const onMenuClick = (e: Event) => {
-      const id = (e as CustomEvent<string>).detail
-      parsedRef.current.handlers.get(id)?.()
-    }
-    const onKeyDown = (e: KeyboardEvent) => {
-      // Ignore keys fired while an IME composition is active. WKWebView (and
-      // other engines) emit keydown with `keyCode === 229` / `key === "Process"`
-      // mid-composition, so without this a bare-key shortcut would misfire on,
-      // e.g., the Enter that confirms Japanese/Chinese/Korean input.
-      if (e.isComposing || e.keyCode === 229) return
-      for (const shortcut of parsedRef.current.shortcuts) {
-        if (shortcut.matches(e)) {
-          e.preventDefault()
-          shortcut.run()
-          break
-        }
+    retainGlobalListeners()
+    if (scopeId == null) {
+      const prev = windowMenu
+      windowMenu = parsedRef
+      if (prev && prev !== parsedRef && process.env.NODE_ENV !== 'production') {
+        console.warn('[murasaki] more than one window-default <ContextMenu> is mounted — the last one wins.')
+      }
+      return () => {
+        if (windowMenu === parsedRef) windowMenu = null
+        releaseGlobalListeners()
       }
     }
-    window.addEventListener('murasaki:menuclick', onMenuClick)
-    window.addEventListener('keydown', onKeyDown)
+    scopedMenus.set(scopeId, parsedRef)
     return () => {
-      window.removeEventListener('murasaki:menuclick', onMenuClick)
-      window.removeEventListener('keydown', onKeyDown)
+      if (scopedMenus.get(scopeId) === parsedRef) scopedMenus.delete(scopeId)
+      releaseGlobalListeners()
     }
-  }, [])
+  }, [scopeId])
 
-  const ctxValue = useMemo<ContextMenuCtxValue>(
-    () => ({
-      openAt(x, y) {
-        post({ kind: 'contextMenu', items: parsedRef.current.items, x, y })
-      },
-    }),
-    [],
-  )
-
-  return <Ctx.Provider value={ctxValue}>{trigger ?? null}</Ctx.Provider>
+  return null
 }
+;(ContextMenu as any).__murasaki = 'menu'
 
 // ---------------------------------------------------------------------------
-// Trigger (the only child that actually renders)
+// <ContextMenuTrigger id> — tags a region. On right-click it opens the menu
+// registered under the same id (a <ContextMenu for={id}>), if any.
 // ---------------------------------------------------------------------------
 
 export interface ContextMenuTriggerProps {
+  /** Links this region to the `<ContextMenu for>` of the same name. */
+  id: string
   asChild?: boolean
   children?: ReactNode
 }
 
-export function ContextMenuTrigger({ asChild, children }: ContextMenuTriggerProps) {
-  const ctx = useContext(Ctx)
-
+export function ContextMenuTrigger({ id, asChild, children }: ContextMenuTriggerProps) {
   const onContextMenu = (e: {
     preventDefault(): void
     stopPropagation(): void
     clientX: number
     clientY: number
   }) => {
+    const menu = scopedMenus.get(id)
+    // No menu registered for this id: leave the event alone so it bubbles to the
+    // window-default handler instead of swallowing the right-click.
+    if (!menu) return
     e.preventDefault()
     // Innermost menu wins: stop the event before it reaches an enclosing
-    // ContextMenuTrigger (e.g. a global one in the root layout), so a
-    // scoped menu overrides the app-wide default within its region.
+    // trigger, so a nested scoped menu overrides an outer one in its region.
     e.stopPropagation()
-    ctx?.openAt(e.clientX, e.clientY)
+    openNative(menu.current.items, e.clientX, e.clientY)
   }
 
   if (asChild) {
@@ -162,21 +225,11 @@ export function ContextMenuTrigger({ asChild, children }: ContextMenuTriggerProp
     </span>
   )
 }
-;(ContextMenuTrigger as any).__murasaki = 'trigger'
 
 // ---------------------------------------------------------------------------
 // Marker components — none of these render anything; the parser reads their
 // props off the element tree instead.
 // ---------------------------------------------------------------------------
-
-export interface ContextMenuContentProps {
-  children?: ReactNode
-}
-
-export function ContextMenuContent(_props: ContextMenuContentProps) {
-  return null
-}
-;(ContextMenuContent as any).__murasaki = 'content'
 
 export interface ContextMenuItemProps {
   label: string
@@ -272,10 +325,9 @@ export const Action = {
 }
 
 // ---------------------------------------------------------------------------
-// Parser — walks the Content children (order-preserving; supports
-// conditionals/`.map` since it just reads `React.Children.toArray`) and
-// produces the wire item shape `useGlobalContextMenu`/the native side expect,
-// plus the client-side handler and keydown-shortcut maps.
+// Parser — walks a menu's children (order-preserving; supports conditionals /
+// `.map` since it reads `React.Children.toArray`) into the wire item shape the
+// native side expects, plus the client-side handler and keydown-shortcut maps.
 // ---------------------------------------------------------------------------
 
 function resolveClientHandler(client: string, props: any, ctx: ParseCtx): () => void {

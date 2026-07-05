@@ -39,7 +39,6 @@ export {
 export {
   ContextMenu,
   ContextMenuTrigger,
-  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuSub,
@@ -48,7 +47,6 @@ export {
 export type {
   ContextMenuProps,
   ContextMenuTriggerProps,
-  ContextMenuContentProps,
   ContextMenuItemProps,
   ContextMenuSubProps,
   ActionNavigateProps,

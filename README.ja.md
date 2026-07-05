@@ -34,28 +34,18 @@ npm run dev
 ```tsx
 // src/app/page.tsx
 import { useState } from 'react'
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  Action,
-} from 'murasaki'
+import { ContextMenu, ContextMenuItem, ContextMenuSeparator, Action } from 'murasaki'
 
 export default function Page() {
   const [count, setCount] = useState(0)
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <main>
-          <h1>Hello, Murasaki 🦋</h1>
-          <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
-        </main>
-      </ContextMenuTrigger>
+    <main>
+      <h1>Hello, Murasaki 🦋</h1>
+      <button onClick={() => setCount((n) => n + 1)}>Clicked {count} times</button>
 
-      <ContextMenuContent>
+      {/* A bare <ContextMenu> is the window-wide menu — right-click anywhere. */}
+      <ContextMenu>
         <ContextMenuItem label="Increment" shortcut="command,I">
           <Action.Run action={() => setCount((n) => n + 1)} />
         </ContextMenuItem>
@@ -66,8 +56,8 @@ export default function Page() {
         <ContextMenuItem label="Copy">
           <Action.Copy />
         </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      </ContextMenu>
+    </main>
   )
 }
 ```
@@ -176,10 +166,10 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
   `generateMetadata()` が document のタイトルと meta タグを設定し、
   `src/middleware.ts` が各ナビゲーションの前に走ってリダイレクトできます
   (ルートガード)。どちらも Next.js の形。
-- **ネイティブコンテキストメニュー** — shadcn/ui 風に書ける宣言的な `<ContextMenu>`
-  (`<Action.*>` を子に持つ)が Rust 側へ post し、本物の OS メニュー
-  (NSMenu / HMENU / GtkMenu)を表示してクリックされた項目を実行します。HTML の
-  ポップアップは介在しません。
+- **ネイティブコンテキストメニュー** — `<Action.*>` を子に持つ宣言的な `<ContextMenu>`
+  が Rust 側へ post し、本物の OS メニュー(NSMenu / HMENU / GtkMenu)を表示して
+  クリックされた項目を実行します。素の `<ContextMenu>` は全ウィンドウ、領域を絞る
+  ときは `<ContextMenuTrigger id>` で囲みます。HTML のポップアップは介在しません。
 - **ネイティブメニュー、ダイアログ、クリップボード、通知、シェル** —
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 上に
   構築されています。open/save/directory ダイアログ、クリップボードの読み書き、OS 通知、

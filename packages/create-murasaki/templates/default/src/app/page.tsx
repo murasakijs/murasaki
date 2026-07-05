@@ -3,7 +3,6 @@ import {
   Link,
   ContextMenu,
   ContextMenuTrigger,
-  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   Action,
@@ -27,12 +26,12 @@ export const metadata: Metadata = {
 /**
  * "Hello, Murasaki 🦋" — the greeting stays.
  *
- * This home page owns everything you see: the top bar, the hero, and two native
- * context menus (NSMenu / HMENU / GtkMenu, never an HTML popup):
- *  - the app-wide menu in src/app/layout.tsx (right-click the heading or the
- *    empty space around it)
- *  - the card-scoped menu below (right-click inside the card) — it overrides the
- *    app menu within the card and runs your own actions via Action.Run.
+ * Two native context menus (NSMenu / HMENU / GtkMenu, never an HTML popup):
+ *  - the app-wide menu in src/components/app-shell.tsx (right-click the heading
+ *    or the empty space around it)
+ *  - the card-scoped menu below — <ContextMenuTrigger id="card"> tags the card,
+ *    and <ContextMenu for="card"> defines its menu, running your own actions via
+ *    Action.Run. A bare <ContextMenu> (no `for`) would be the window default.
  *
  * The top bar's X link is a plain <a href>: murasaki opens off-origin links in
  * the user's default browser instead of loading them inside the app window.
@@ -68,40 +67,39 @@ export default function Page() {
           Right-click the card for its own menu — or anywhere else for the app menu.
         </p>
 
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <Card className="mt-8 text-center">
-              <CardHeader>
-                <CardTitle>Try it out</CardTitle>
-                <CardDescription>
-                  Right-click this card, or edit{' '}
-                  <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/app/page.tsx</code>.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col items-center gap-4 text-center">
-                <Button onClick={() => setCount((n) => n + 1)}>
-                  Clicked {count} times
-                </Button>
-                <Button variant="outline" onClick={async () => setGreeting(await greet('Murasaki'))}>
-                  Call server action
-                </Button>
-                {greeting && <p className="text-sm text-muted-foreground">{greeting}</p>}
-              </CardContent>
-            </Card>
-          </ContextMenuTrigger>
+        {/* Tag the region with a trigger id; the menu is declared separately below. */}
+        <ContextMenuTrigger id="card" asChild>
+          <Card className="mt-8 text-center">
+            <CardHeader>
+              <CardTitle>Try it out</CardTitle>
+              <CardDescription>
+                Right-click this card, or edit{' '}
+                <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/app/page.tsx</code>.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-col items-center gap-4 text-center">
+              <Button onClick={() => setCount((n) => n + 1)}>
+                Clicked {count} times
+              </Button>
+              <Button variant="outline" onClick={async () => setGreeting(await greet('Murasaki'))}>
+                Call server action
+              </Button>
+              {greeting && <p className="text-sm text-muted-foreground">{greeting}</p>}
+            </CardContent>
+          </Card>
+        </ContextMenuTrigger>
 
-          <ContextMenuContent>
-            <ContextMenuItem label="Increment" shortcut="command,I">
-              <Action.Run action={() => setCount((n) => n + 1)} />
-            </ContextMenuItem>
-            <ContextMenuItem label="Reset counter">
-              <Action.Run action={() => setCount(0)} />
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-            <ContextMenuItem label="Call server action">
-              <Action.Run action={async () => setGreeting(await greet('Murasaki'))} />
-            </ContextMenuItem>
-          </ContextMenuContent>
+        <ContextMenu for="card">
+          <ContextMenuItem label="Increment" shortcut="command,I">
+            <Action.Run action={() => setCount((n) => n + 1)} />
+          </ContextMenuItem>
+          <ContextMenuItem label="Reset counter">
+            <Action.Run action={() => setCount(0)} />
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem label="Call server action">
+            <Action.Run action={async () => setGreeting(await greet('Murasaki'))} />
+          </ContextMenuItem>
         </ContextMenu>
 
         <p className="mt-6">
