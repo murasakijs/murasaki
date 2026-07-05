@@ -2,6 +2,7 @@ import type { Plugin, PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
 import svgr from 'vite-plugin-svgr'
 import type { MurasakiConfig } from '../config.js'
+import { apiRoutesPlugin } from './api-routes.js'
 import { fileRouterPlugin } from './routing.js'
 import { serverActionsPlugin } from './server-actions.js'
 import { appShellPlugin } from './shell.js'
@@ -21,6 +22,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     svgr(),
     fileRouterPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),
+    apiRoutesPlugin({ srcDir: opts.srcDir }),
     appShellPlugin(),
     {
       name: 'murasaki:core',

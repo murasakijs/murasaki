@@ -23,6 +23,7 @@ const server = spawn(
     join(__dirname, 'prod-server.mjs'),
     '--client', join(__dirname, 'client'),
     '--registry', join(__dirname, 'server/actions.mjs'),
+    '--routes', join(__dirname, 'server/routes.mjs'),
     '--port', '0',
   ],
   { cwd: __dirname, stdio: ['ignore', 'pipe', 'inherit'] },
