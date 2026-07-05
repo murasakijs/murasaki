@@ -30,7 +30,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export default async function bundle(argv: string[]) {
   const cwd = process.cwd()
   const config = await loadUserConfig(cwd)
-  if (!existsSync(resolve(cwd, 'dist/client'))) await build(argv)
+  // Rebuild the client every time by default — bundling is a release step, so
+  // silently packaging a stale `dist/client` from an earlier run is a footgun.
+  // `--no-build` opts back into reuse (but still builds if it's missing).
+  const skipBuild = argv.includes('--no-build')
+  if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await build(argv)
   // Always (re)built — cheap relative to the client build, and must exist
   // before packaging even if dist/client was already up to date.
   await buildServer(cwd, resolve(cwd, 'src'))

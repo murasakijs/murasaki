@@ -36,7 +36,11 @@ export default async function installer(argv: string[]) {
   const productName = config.productName
   const version = config.version ?? '0.0.0'
   const appDir = resolve(cwd, 'dist/bundle', `${productName}.app`)
-  if (!existsSync(appDir)) await bundle(argv)
+  // Re-bundle every time by default so the DMG never ships a stale `.app` from
+  // an earlier run. `--no-build` reuses an existing bundle (and propagates to
+  // `bundle`, which then also skips the client rebuild).
+  const skipBuild = argv.includes('--no-build')
+  if (!skipBuild || !existsSync(appDir)) await bundle(argv)
 
   const dmgPath = resolve(cwd, 'dist', `${productName}-${version}.dmg`)
   await rm(dmgPath, { force: true })
