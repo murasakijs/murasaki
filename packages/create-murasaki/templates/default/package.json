@@ -11,10 +11,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "murasaki": "^0.37.0",
+    "murasaki": "^0.38.0",
     "@murasakijs/ui": "^0.1.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "lucide-react": "^1.23.0",
+    "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

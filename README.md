@@ -34,7 +34,7 @@ npm run dev
 ```tsx
 // src/app/page.tsx
 import { useState } from 'react'
-import { useContextMenu } from 'murasaki'
+import { useContextMenu, Action } from 'murasaki'
 
 export default function Page() {
   const [count, setCount] = useState(0)
@@ -44,7 +44,7 @@ export default function Page() {
     { label: 'Increment', shortcut: 'command,I', action: () => setCount((n) => n + 1) },
     { separator: true },
     { label: 'Reload', shortcut: 'command,R', action: () => location.reload() },
-    { label: 'Copy', role: 'copy' },
+    { label: 'Copy', action: <Action.Copy /> },
   ])
 
   return (
@@ -160,7 +160,8 @@ we've benchmarked head-to-head:
   runs before every navigation and can redirect (a route guard) — both
   Next.js-shaped.
 - **Native context menu.** Declare it with a hook — `useContextMenu([{ label,
-  action, shortcut, role }])` — data that lives next to your state. No id is the
+  action, shortcut }])` — data next to your state; `action` is a built-in
+  `<Action.* />` element or your own function. No id is the
   whole-window menu; give it an id and tag a region with `<ContextMenuTrigger
   id>` to scope it. It posts to the Rust side, which pops a real OS menu (NSMenu
   / HMENU / GtkMenu). No HTML popup involved.

@@ -42,12 +42,17 @@ export type { AppProps } from './react/app.js'
 export {
   useContextMenu,
   ContextMenuTrigger,
+  Action,
+  createActions,
 } from './react/context-menu.js'
 export type {
   ContextMenuTriggerProps,
   ContextMenuItemSpec,
   ContextMenuEntry,
   ContextMenuRole,
+  ContextMenuAction,
+  ActionNavigateProps,
+  ActionRunProps,
 } from './react/context-menu.js'
 
 export {

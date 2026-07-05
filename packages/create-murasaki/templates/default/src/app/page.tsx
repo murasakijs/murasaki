@@ -9,7 +9,10 @@ import {
   CardDescription,
   CardContent,
 } from '@murasakijs/ui'
-import { greet } from '../api/actions'
+import { Action } from '@/lib/action'
+import { useCounter } from '@/lib/counter'
+import { XLogo } from '@/assets/x-logo'
+import { greet } from '@/api/actions'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',
@@ -20,22 +23,23 @@ export const metadata: Metadata = {
  * "Hello, Murasaki 🦋" — the greeting stays.
  *
  * Two native context menus (NSMenu / HMENU / GtkMenu, never an HTML popup):
- *  - the app-wide menu in src/components/app-shell.tsx (right-click the heading
- *    or the empty space around it)
- *  - the card-scoped menu below — useContextMenu('card', …) declares it (next to
- *    the state its actions touch), and <ContextMenuTrigger id="card"> applies it
- *    to the card's region. A no-id useContextMenu() would be the window default.
+ *  - the app-wide menu in src/components/app-shell.tsx
+ *  - the card-scoped menu below — its reusable actions come from
+ *    src/lib/action.ts as <Action.increment /> (the counter lives in a store so
+ *    the action is shareable); the server-action call stays inline since it
+ *    touches local state.
  *
  * The top bar's X link is a plain <a href>: murasaki opens off-origin links in
  * the user's default browser instead of loading them inside the app window.
  */
 export default function Page() {
-  const [count, setCount] = useState(0)
+  const count = useCounter((s) => s.count)
+  const increment = useCounter((s) => s.increment)
   const [greeting, setGreeting] = useState<string | null>(null)
 
   useContextMenu('card', [
-    { label: 'Increment', shortcut: 'command,I', action: () => setCount((n) => n + 1) },
-    { label: 'Reset counter', action: () => setCount(0) },
+    { label: 'Increment', shortcut: 'command,I', action: <Action.increment /> },
+    { label: 'Reset counter', action: <Action.reset /> },
     { separator: true },
     { label: 'Call server action', action: async () => setGreeting(await greet('Murasaki')) },
   ])
@@ -51,9 +55,7 @@ export default function Page() {
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 text-foreground/80 transition-colors hover:text-murasaki-bright"
           >
-            <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5 fill-current">
-              <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-            </svg>
+            <XLogo className="h-3.5 w-3.5 fill-current" />
             <span>murasaki_js</span>
           </a>
         </nav>
@@ -67,7 +69,6 @@ export default function Page() {
           Right-click the card for its own menu — or anywhere else for the app menu.
         </p>
 
-        {/* Tag the region; its menu is declared above via useContextMenu('card', …). */}
         <ContextMenuTrigger id="card">
           <Card className="mt-8 text-center">
             <CardHeader>
@@ -78,9 +79,7 @@ export default function Page() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-4 text-center">
-              <Button onClick={() => setCount((n) => n + 1)}>
-                Clicked {count} times
-              </Button>
+              <Button onClick={increment}>Clicked {count} times</Button>
               <Button variant="outline" onClick={async () => setGreeting(await greet('Murasaki'))}>
                 Call server action
               </Button>

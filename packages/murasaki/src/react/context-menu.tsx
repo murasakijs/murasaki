@@ -8,9 +8,9 @@
  *
  *   // App-wide — no id → the whole-window default (right-click anywhere):
  *   useContextMenu([
- *     { label: 'Reload', shortcut: 'command,R', action: () => location.reload() },
+ *     { label: 'Reload', shortcut: 'command,R', action: <Action.Reload /> },
  *     { separator: true },
- *     { label: 'Copy', role: 'copy' },
+ *     { label: 'Copy', action: <Action.Copy /> },
  *   ])
  *
  *   // Scoped — name the menu, then tag a region with a matching trigger:
@@ -19,7 +19,9 @@
  *   ])
  *   // …in the return: <ContextMenuTrigger id="card"><Card /></ContextMenuTrigger>
  *
- * A scoped right-click `preventDefault`s (so the window default, gated on
+ * Each item's `action` is either a built-in `<Action.* />` element (a native
+ * role, or a client behaviour like Reload/Navigate) or your own function. A
+ * scoped right-click `preventDefault`s (so the window default, gated on
  * `defaultPrevented`, stays quiet) and `stopPropagation`s (so a nested trigger
  * wins over an outer one).
  */
@@ -31,24 +33,23 @@ import { useRouter } from './router.js'
 import { parseShortcut } from './shortcut.js'
 
 // ---------------------------------------------------------------------------
-// Item spec — the data you hand to useContextMenu. Exactly one behaviour per
-// item: a native `role`, a client `action`, a `navigate` target, or `items`
-// for a submenu. `{ separator: true }` draws a divider.
+// Item spec — the data you hand to useContextMenu. `action` is a built-in
+// `<Action.* />` element or a function; `items` makes a submenu; `{ separator:
+// true }` draws a divider.
 // ---------------------------------------------------------------------------
 
 export type ContextMenuRole = 'copy' | 'paste' | 'cut' | 'selectAll' | 'undo' | 'redo' | 'quit'
+
+/** What an item does: a built-in `<Action.* />` element, or your own function. */
+export type ContextMenuAction = ReactElement | (() => void | Promise<void>)
 
 export interface ContextMenuEntry {
   label: string
   shortcut?: string
   disabled?: boolean
-  /** A native menu role, performed by the OS itself. */
-  role?: ContextMenuRole
-  /** A custom handler run on this side — may close over component state. */
-  action?: () => void | Promise<void>
-  /** Navigate to a route (via murasaki's router). */
-  navigate?: string
-  /** Nested submenu. */
+  /** A built-in `<Action.Copy />` / `<Action.Reload />` / … element, or a custom function. */
+  action?: ContextMenuAction
+  /** A nested submenu (in place of an action). */
   items?: ContextMenuItemSpec[]
 }
 
@@ -242,6 +243,100 @@ export function ContextMenuTrigger({ id, asChild, children }: ContextMenuTrigger
 }
 
 // ---------------------------------------------------------------------------
+// Action.* — the value you put in an item's `action`. Each is a marker element
+// (renders nothing) carrying a static descriptor: a native `role` the OS
+// performs itself, or a `__client` behaviour run on this side. For anything
+// custom, pass a plain function as `action` instead.
+// ---------------------------------------------------------------------------
+
+function roleAction(name: string, role: ContextMenuRole) {
+  function ActionComponent() {
+    return null
+  }
+  ActionComponent.displayName = `Action.${name}`
+  ;(ActionComponent as any).__role = role
+  return ActionComponent
+}
+
+const Copy = roleAction('Copy', 'copy')
+const Paste = roleAction('Paste', 'paste')
+const Cut = roleAction('Cut', 'cut')
+const SelectAll = roleAction('SelectAll', 'selectAll')
+const Undo = roleAction('Undo', 'undo')
+const Redo = roleAction('Redo', 'redo')
+const Quit = roleAction('Quit', 'quit')
+
+function Reload() {
+  return null
+}
+Reload.displayName = 'Action.Reload'
+;(Reload as any).__client = 'reload'
+
+export interface ActionNavigateProps {
+  to: string
+}
+
+function Navigate(_props: ActionNavigateProps) {
+  return null
+}
+Navigate.displayName = 'Action.Navigate'
+;(Navigate as any).__client = 'navigate'
+
+export interface ActionRunProps {
+  action: () => void | Promise<void>
+}
+
+/** A custom action in component form — the same as passing a bare function. */
+function Run(_props: ActionRunProps) {
+  return null
+}
+Run.displayName = 'Action.Run'
+;(Run as any).__client = 'run'
+
+export const Action = {
+  Copy,
+  Paste,
+  Cut,
+  SelectAll,
+  Undo,
+  Redo,
+  Quit,
+  Reload,
+  Navigate,
+  Run,
+}
+
+/**
+ * Turn a map of named functions into `<Action.* />` components you can drop
+ * straight into a menu item's `action`, alongside the built-ins. Define your
+ * app's actions once (typically in `src/lib/action.ts`, backed by a store so
+ * they're callable from anywhere) and reuse them across menus without a
+ * per-call-site wrapper:
+ *
+ *   // src/lib/action.ts
+ *   export const Action = createActions({
+ *     increment: () => useCounter.getState().increment(),
+ *   })
+ *   // …then: { label: 'Increment', action: <Action.increment /> }
+ *
+ * The returned object also includes the built-in `Action.Copy` / `Action.Reload`
+ * / … so a file can import a single `Action`.
+ */
+export function createActions<T extends Record<string, () => void | Promise<void>>>(
+  defs: T,
+): typeof Action & { [K in keyof T]: () => null } {
+  const custom: Record<string, () => null> = {}
+  for (const name of Object.keys(defs)) {
+    const ActionComponent = () => null
+    ActionComponent.displayName = `Action.${name}`
+    ;(ActionComponent as any).__client = 'run'
+    ;(ActionComponent as any).__run = defs[name]
+    custom[name] = ActionComponent
+  }
+  return { ...Action, ...custom } as typeof Action & { [K in keyof T]: () => null }
+}
+
+// ---------------------------------------------------------------------------
 // Builder — turns the item specs into the wire shape the native side expects,
 // plus the client-side handler and keydown-shortcut maps.
 // ---------------------------------------------------------------------------
@@ -251,6 +346,30 @@ function buildMenu(specs: ContextMenuItemSpec[], router: { push(to: string): voi
   const nextId = () => `${uid}m${counter++}`
   const handlers = new Map<string, () => void>()
   const shortcuts: { matches: (e: KeyboardEvent) => boolean; run: () => void }[] = []
+
+  function resolveAction(action: ContextMenuAction | undefined, id: string, wire: WireMenuItem) {
+    if (!action) return
+    if (typeof action === 'function') {
+      handlers.set(id, action)
+      return
+    }
+    if (isValidElement(action)) {
+      const type = action.type as any
+      if (type?.__role) {
+        wire.role = type.__role
+      } else if (type?.__client === 'reload') {
+        handlers.set(id, () => window.location.reload())
+      } else if (type?.__client === 'navigate') {
+        const to = (action.props as ActionNavigateProps).to
+        handlers.set(id, () => router.push(to))
+      } else if (type?.__client === 'run') {
+        // `<Action.Run action={fn} />` carries the fn as a prop; a `createActions`
+        // component carries it statically on the type as `__run`.
+        const fn = (type.__run as (() => void | Promise<void>) | undefined) ?? (action.props as ActionRunProps).action
+        if (fn) handlers.set(id, fn)
+      }
+    }
+  }
 
   function build(list: ContextMenuItemSpec[]): WireMenuItem[] {
     const out: WireMenuItem[] = []
@@ -266,13 +385,8 @@ function buildMenu(specs: ContextMenuItemSpec[], router: { push(to: string): voi
 
       if (entry.items) {
         wire.submenu = build(entry.items)
-      } else if (entry.role) {
-        wire.role = entry.role
-      } else if (entry.action) {
-        handlers.set(id, entry.action)
-      } else if (entry.navigate != null) {
-        const to = entry.navigate
-        handlers.set(id, () => router.push(to))
+      } else {
+        resolveAction(entry.action, id, wire)
       }
 
       if (entry.shortcut) {

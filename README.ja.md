@@ -34,7 +34,7 @@ npm run dev
 ```tsx
 // src/app/page.tsx
 import { useState } from 'react'
-import { useContextMenu } from 'murasaki'
+import { useContextMenu, Action } from 'murasaki'
 
 export default function Page() {
   const [count, setCount] = useState(0)
@@ -44,7 +44,7 @@ export default function Page() {
     { label: 'Increment', shortcut: 'command,I', action: () => setCount((n) => n + 1) },
     { separator: true },
     { label: 'Reload', shortcut: 'command,R', action: () => location.reload() },
-    { label: 'Copy', role: 'copy' },
+    { label: 'Copy', action: <Action.Copy /> },
   ])
 
   return (
@@ -161,7 +161,8 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
   `src/middleware.ts` が各ナビゲーションの前に走ってリダイレクトできます
   (ルートガード)。どちらも Next.js の形。
 - **ネイティブコンテキストメニュー** — フックで宣言します。`useContextMenu([{ label,
-  action, shortcut, role }])` — state の隣に置けるデータです。id なしは全ウィンドウ、
+  action, shortcut }])` — state の隣に置けるデータで、`action` は組み込みの
+  `<Action.* />` 要素か自前の関数。id なしは全ウィンドウ、
   id を付けて領域を `<ContextMenuTrigger id>` で囲めばそこだけに適用。Rust 側へ post
   され、本物の OS メニュー(NSMenu / HMENU / GtkMenu)が出ます。HTML のポップアップは
   介在しません。
