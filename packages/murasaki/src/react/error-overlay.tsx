@@ -170,6 +170,9 @@ export function DevErrorOverlay(): JSX.Element | null {
     const onRejection = (e: PromiseRejectionEvent) =>
       reportDevError(e.reason instanceof Error ? e.reason : new Error(String(e.reason)))
     const onKey = (e: KeyboardEvent) => {
+      // Don't treat the Esc that cancels an IME composition as "dismiss overlay"
+      // — mid-composition keydowns come through with keyCode 229 / isComposing.
+      if (e.isComposing || e.keyCode === 229) return
       if (e.key === 'Escape') dismissAll()
     }
 

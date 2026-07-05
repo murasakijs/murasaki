@@ -1,41 +1,13 @@
 import '@murasakijs/ui/styles.css'
 import './globals.css'
 import type { ReactNode } from 'react'
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  Action,
-} from 'murasaki'
+import { AppShell } from '../components/app-shell'
 
 /**
- * The root layout wraps every page, so the <ContextMenu> here is the app-wide
- * default: right-click anywhere a page doesn't override shows this menu.
- * You write it like shadcn's <ContextMenu>, but murasaki pops the real OS menu.
+ * Root layout — wraps every route. It only imports the global styles and mounts
+ * the app shell; app-wide chrome (the frame, the app-wide context menu) lives in
+ * src/components/app-shell.tsx.
  */
 export default function Layout({ children }: { children: ReactNode }) {
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div className="flex min-h-screen w-full items-center justify-center bg-background text-foreground">
-          {children}
-        </div>
-      </ContextMenuTrigger>
-
-      <ContextMenuContent>
-        <ContextMenuItem label="Reload" shortcut="command,R">
-          <Action.Reload />
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem label="Copy">
-          <Action.Copy />
-        </ContextMenuItem>
-        <ContextMenuItem label="Paste">
-          <Action.Paste />
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
-  )
+  return <AppShell>{children}</AppShell>
 }

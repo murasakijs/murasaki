@@ -87,6 +87,11 @@ export function ContextMenu({ children }: ContextMenuProps) {
       parsedRef.current.handlers.get(id)?.()
     }
     const onKeyDown = (e: KeyboardEvent) => {
+      // Ignore keys fired while an IME composition is active. WKWebView (and
+      // other engines) emit keydown with `keyCode === 229` / `key === "Process"`
+      // mid-composition, so without this a bare-key shortcut would misfire on,
+      // e.g., the Enter that confirms Japanese/Chinese/Korean input.
+      if (e.isComposing || e.keyCode === 229) return
       for (const shortcut of parsedRef.current.shortcuts) {
         if (shortcut.matches(e)) {
           e.preventDefault()
