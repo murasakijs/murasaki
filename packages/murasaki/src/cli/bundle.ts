@@ -49,21 +49,26 @@ export default async function bundle(argv: string[]) {
   await mkdir(macosDir, { recursive: true })
   await mkdir(resourcesDir, { recursive: true })
 
-  // Contents/MacOS/<productName> — bash launcher that execs the bundled
-  // node against the bundled prod-launcher.mjs, both under Resources/.
+  // Contents/MacOS/<productName> — bash launcher that execs the bundled node
+  // (renamed to the product name, see below) against prod-launcher.mjs.
   const launcher = `#!/bin/bash
 DIR="$(cd "$(dirname "$0")/.." && pwd)/Resources"
 cd "$DIR"
-exec "$DIR/node" "$DIR/prod-launcher.mjs"
+exec "$DIR/${productName}" "$DIR/prod-launcher.mjs"
 `
   await writeFile(join(macosDir, productName), launcher, { mode: 0o755 })
 
-  // Contents/Resources/node — copy of the current node binary. Distributing
-  // to other machines needs a downloaded, target-specific node instead
+  // Contents/Resources/<productName> — copy of the current node binary, named
+  // after the product. macOS derives the running app's name (the bold menu-bar
+  // title, Dock label, Cmd-Tab) from the executable's basename, NOT from
+  // CFBundleName — a binary literally named `node` shows up as "node". Renaming
+  // the exec'd binary to the product name is what fixes that (process.title /
+  // the LaunchServices display-name trick no longer work on recent macOS).
+  // Distributing to other machines needs a downloaded, target-specific node
   // (ensureNodeBinary-style fetch); that lands in a later phase. For now we
   // ship whatever node is running this CLI, which is enough to run on this
   // machine.
-  const nodeDest = join(resourcesDir, 'node')
+  const nodeDest = join(resourcesDir, productName)
   await copyFile(process.execPath, nodeDest)
   await chmod(nodeDest, 0o755)
 
