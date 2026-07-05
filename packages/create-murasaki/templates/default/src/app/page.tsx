@@ -9,10 +9,10 @@ import {
   CardDescription,
   CardContent,
 } from '@murasakijs/ui'
+import { Plus, Zap } from 'lucide-react'
 import { Action } from '@/lib/action'
 import { useCounter } from '@/lib/counter'
 import XLogo from '@/assets/x-logo.svg?react'
-import { greet } from '@/api/actions'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',
@@ -26,8 +26,8 @@ export const metadata: Metadata = {
  *  - the app-wide menu in src/app/layout.tsx
  *  - the card-scoped menu below — its reusable actions come from
  *    src/lib/action.ts as <Action.increment /> (the counter lives in a store so
- *    the action is shareable); the server-action call stays inline since it
- *    touches local state.
+ *    the action is shareable); "Call API route" posts to the API route at
+ *    src/api/action-demo/route.ts.
  *
  * The top bar's X link is a plain <a href>: murasaki opens off-origin links in
  * the user's default browser instead of loading them inside the app window.
@@ -37,11 +37,22 @@ export default function Page() {
   const increment = useCounter((s) => s.increment)
   const [greeting, setGreeting] = useState<string | null>(null)
 
+  // Calls the API route at src/api/action-demo/route.ts (runs on the server).
+  const callApi = async () => {
+    const res = await fetch('/api/action-demo', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Murasaki' }),
+    })
+    const data = (await res.json()) as { greeting: string }
+    setGreeting(data.greeting)
+  }
+
   useContextMenu('card', [
     { label: 'Increment', shortcut: 'command,I', action: <Action.increment /> },
     { label: 'Reset counter', action: <Action.reset /> },
     { separator: true },
-    { label: 'Call server action', action: async () => setGreeting(await greet('Murasaki')) },
+    { label: 'Call API route', action: callApi },
   ])
 
   return (
@@ -79,9 +90,11 @@ export default function Page() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col items-center gap-4 text-center">
-              <Button onClick={increment}>Clicked {count} times</Button>
-              <Button variant="outline" onClick={async () => setGreeting(await greet('Murasaki'))}>
-                Call server action
+              <Button onClick={increment}>
+                <Plus className="h-4 w-4" /> Clicked {count} times
+              </Button>
+              <Button variant="outline" onClick={callApi}>
+                <Zap className="h-4 w-4" /> Call API route
               </Button>
               {greeting && <p className="text-sm text-muted-foreground">{greeting}</p>}
             </CardContent>
