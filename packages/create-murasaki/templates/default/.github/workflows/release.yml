@@ -1,0 +1,67 @@
+name: Release
+
+# Push a version tag (e.g. `git tag v1.0.0 && git push origin v1.0.0`) to build a
+# .dmg and attach it to a GitHub Release.
+#
+# Signing is OPTIONAL. With no secrets set it still builds an *unsigned* .dmg
+# (recipients open it once via right-click -> Open). To ship a signed + notarized
+# app with no Gatekeeper warning, add these repository secrets
+# (Settings -> Secrets and variables -> Actions) and re-tag:
+#   APPLE_CERTIFICATE_P12       base64 of your "Developer ID Application" cert
+#                               exported as a .p12  (`base64 -i cert.p12 | pbcopy`)
+#   APPLE_CERTIFICATE_PASSWORD  the .p12 export password
+#   APPLE_ID                    your Apple ID email
+#   APPLE_TEAM_ID               your 10-character Team ID
+#   APPLE_APP_PASSWORD          an app-specific password (appleid.apple.com)
+# A paid Apple Developer Program membership is required for a Developer ID
+# certificate + notarization.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install
+
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/app-signing.keychain-db"
+          security create-keychain -p "" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+      - name: Build installer
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        run: |
+          if [ "$HAS_CERT" = "true" ]; then
+            pnpm exec murasaki installer --sign --notarize
+          else
+            pnpm exec murasaki installer
+          fi
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
