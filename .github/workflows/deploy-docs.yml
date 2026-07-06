@@ -1,10 +1,17 @@
-# Deploys the docs site (apps/docs) as a static export to GitHub Pages.
+# Builds the docs site (apps/docs) as a static export and publishes it to the
+# org-page repo `murasakijs/murasakijs.github.io`, which GitHub Pages serves at
+# the ROOT of https://murasakijs.github.io/ — so no `basePath` is needed (a
+# project sub-path deploy would serve broken assets).
 #
-# One-time setup: in the repo's Settings ▸ Pages, set Source to
-# "GitHub Actions". A custom domain (e.g. murasaki.dev) can also be
-# configured there — apps/docs is built without a `basePath`, so it expects
-# to be served from the root of a domain.
-name: Deploy docs to GitHub Pages
+# One-time setup (done once, by a maintainer):
+#   1. Create a PUBLIC repo `murasakijs/murasakijs.github.io` (empty is fine).
+#      GitHub Pages auto-serves such repos from the default branch at the root.
+#   2. Create a fine-grained Personal Access Token with `Contents: write` on
+#      that repo, and add it to THIS repo as an Actions secret named
+#      `DOCS_DEPLOY_TOKEN` (Settings ▸ Secrets and variables ▸ Actions).
+#   3. (Optional) Connect the `murasaki.dev` custom domain on the
+#      murasakijs.github.io repo's Settings ▸ Pages, and uncomment `cname:` below.
+name: Deploy docs
 
 on:
   push:
@@ -14,24 +21,23 @@ on:
       - 'README.md'
   workflow_dispatch:
 
+# Only the checkout needs repo access here; the cross-repo push authenticates
+# with DOCS_DEPLOY_TOKEN, not the workflow's GITHUB_TOKEN.
 permissions:
-  pages: write
-  id-token: write
   contents: read
 
 concurrency:
-  group: pages
+  group: deploy-docs
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # No version pin here: pnpm/action-setup@v4 reads the version from the
-      # root package.json "packageManager" field. Specifying both errors with
-      # "Multiple versions of pnpm specified".
+      # No version pin: pnpm/action-setup@v4 reads it from the root
+      # package.json "packageManager" field (specifying both errors).
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
@@ -41,21 +47,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build docs
+      - name: Build docs (static export -> apps/docs/out)
         run: pnpm --filter murasaki-docs build
 
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
+      - name: Publish to murasakijs.github.io
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: apps/docs/out
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/deploy-pages@v4
-        id: deployment
+          personal_token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          external_repository: murasakijs/murasakijs.github.io
+          publish_branch: main
+          publish_dir: ./apps/docs/out
+          # cname: murasaki.dev   # uncomment once the custom domain is connected
