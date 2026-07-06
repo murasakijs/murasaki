@@ -1,4 +1,12 @@
 #!/usr/bin/env node
+// SUPERSEDED: replaced by the Rust `murasaki-launcher` binary
+// (crates/native/src/launcher.rs, crates/native/src/bin/murasaki-launcher.rs),
+// which is now Contents/MacOS/<productName> in bundled apps (see
+// packages/murasaki/src/cli/bundle.ts). This file is no longer copied into
+// bundles or executed — kept only for reference (it was the original
+// node-based equivalent of the same spawn-prod-server.mjs-then-open-webview
+// logic, before that moved into the launcher binary itself).
+//
 // murasaki production launcher — spawns prod-server.mjs (a small Node HTTP
 // server that serves the built client and runs 'use server' actions out of
 // the dist/server registry, see that file) as a child process, then points

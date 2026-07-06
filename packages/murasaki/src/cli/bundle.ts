@@ -15,17 +15,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
  * Pack `dist/client` + `dist/server` (the `'use server'` action registry) +
- * a copy of the current Node runtime + the production launcher
- * (`assets/prod-launcher.mjs` + `assets/prod-server.mjs`) into a macOS
- * `.app` bundle.
+ * a copy of the current Node runtime + `assets/prod-server.mjs` + the
+ * compiled `murasaki-launcher` native binary into a macOS `.app` bundle.
  *
- * production has no Vite dev server — `prod-launcher.mjs` spawns
- * `prod-server.mjs`, a small Node HTTP server that serves `dist/client` and
- * runs actions out of the `dist/server` registry, then points the native
- * WebView at it over `http://127.0.0.1:<port>/` (see assets/prod-launcher.mjs
- * for the dev.ts → prod translation). This mirrors dev (Vite dev server)
- * closely enough that the client's `/__murasaki/action/…` fetch works
- * unchanged in both.
+ * production has no Vite dev server — `murasaki-launcher` (Rust,
+ * crates/native/src/launcher.rs) spawns `prod-server.mjs`, a small Node HTTP
+ * server that serves `dist/client` and runs actions out of the `dist/server`
+ * registry, then points the native WebView at it over
+ * `http://127.0.0.1:<port>/`. This mirrors dev (Vite dev server) closely
+ * enough that the client's `/__murasaki/action/…` fetch works unchanged in
+ * both.
  */
 export default async function bundle(argv: string[]) {
   const cwd = process.cwd()
@@ -53,46 +52,62 @@ export default async function bundle(argv: string[]) {
   await mkdir(macosDir, { recursive: true })
   await mkdir(resourcesDir, { recursive: true })
 
-  // Contents/MacOS/<productName> — bash launcher that execs the bundled node
-  // (renamed to the product name, see below) against prod-launcher.mjs.
-  const launcher = `#!/bin/bash
-DIR="$(cd "$(dirname "$0")/.." && pwd)/Resources"
-cd "$DIR"
-exec "$DIR/${productName}" "$DIR/prod-launcher.mjs"
-`
-  await writeFile(join(macosDir, productName), launcher, { mode: 0o755 })
+  // Contents/Resources/node_modules/@murasakijs/native — resolved once, used
+  // both to locate the compiled launcher binary below and to vendor the
+  // native binding itself (see the node_modules copy further down).
+  const nativeDir = resolveNativeModuleDir(cwd)
 
-  // Contents/Resources/<productName> — copy of the current node binary, named
-  // after the product. macOS derives the running app's name (the bold menu-bar
-  // title, Dock label, Cmd-Tab) from the executable's basename, NOT from
-  // CFBundleName — a binary literally named `node` shows up as "node". Renaming
-  // the exec'd binary to the product name is what fixes that (process.title /
-  // the LaunchServices display-name trick no longer work on recent macOS).
+  // Contents/MacOS/<productName> — the compiled `murasaki-launcher` Rust
+  // binary (crates/native/src/bin/murasaki-launcher.rs). Being a *real*
+  // Mach-O executable — rather than a bash script execing a renamed copy of
+  // node — is what makes macOS show the correct product name + icon in the
+  // Dock, Cmd-Tab, and the bold menu-bar title. It spawns
+  // `Resources/node prod-server.mjs` as a child process and drives the
+  // webview itself (see crates/native/src/launcher.rs); `prod-launcher.mjs`
+  // is no longer used at runtime.
+  const launcherBinary = await resolveLauncherBinary(nativeDir)
+  const launcherDest = join(macosDir, productName)
+  await copyFile(launcherBinary, launcherDest)
+  await chmod(launcherDest, 0o755)
+  // macOS (arm64 in particular) refuses to launch an unsigned main
+  // executable — ad-hoc sign it (no identity, no entitlements) since we
+  // don't have a Developer ID at bundle time. Best-effort: warn rather than
+  // fail if codesign is unavailable — it ships with Xcode Command Line
+  // Tools, which `murasaki bundle` already depends on for sips/iconutil.
+  const signResult = spawnSync('codesign', ['-s', '-', '-f', launcherDest])
+  if (signResult.status !== 0) {
+    process.stdout.write(
+      `\n${warn(`codesign failed for ${dim(launcherDest)} — the bundle may refuse to launch.`)}\n\n`,
+    )
+  }
+
+  // Contents/Resources/node — a plain copy of the current Node runtime. It's
+  // now a child process spawned by the launcher binary above rather than the
+  // app's main executable, so its filename no longer affects the Dock/
+  // menu-bar label (that used to require renaming it to the product name).
   // Distributing to other machines needs a downloaded, target-specific node
   // (ensureNodeBinary-style fetch); that lands in a later phase. For now we
   // ship whatever node is running this CLI, which is enough to run on this
   // machine.
-  const nodeDest = join(resourcesDir, productName)
+  const nodeDest = join(resourcesDir, 'node')
   await copyFile(process.execPath, nodeDest)
   await chmod(nodeDest, 0o755)
 
-  // Contents/Resources/prod-launcher.mjs + prod-server.mjs
-  const launcherSrc = resolve(__dirname, '../../assets/prod-launcher.mjs')
-  await copyFile(launcherSrc, join(resourcesDir, 'prod-launcher.mjs'))
+  // Contents/Resources/prod-server.mjs — spawned by the launcher binary.
   const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
   await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
 
-  // Contents/Resources/menu-locales.json — read by prod-launcher.mjs at
+  // Contents/Resources/menu-locales.json — read by the launcher binary at
   // runtime to localize the default app menu for the end user's locale (see
-  // assets/prod-launcher.mjs).
+  // crates/native/src/launcher.rs).
   const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
   await copyFile(menuLocalesSrc, join(resourcesDir, 'menu-locales.json'))
 
   // Contents/Resources/icon.icns + icon.png — the .icns backs the .app's
   // Finder/DMG appearance (via CFBundleIconFile below); the plain PNG is
-  // read at runtime by prod-launcher.mjs to set NSApp.applicationIconImage
-  // (see assets/prod-launcher.mjs — needed because the running process is
-  // the bundled `node` binary, not a "real" app executable).
+  // read at runtime by the launcher binary to set NSApp.applicationIconImage,
+  // which covers the About panel (CFBundleIconFile doesn't reliably reach it
+  // — see crates/native/src/launcher.rs's set_app_icon).
   const iconResource = config.icon ? await buildIcon(cwd, config.icon, resourcesDir) : null
 
   // Contents/Resources/murasaki-meta.json
@@ -133,10 +148,12 @@ exec "$DIR/${productName}" "$DIR/prod-launcher.mjs"
   // Contents/Resources/node_modules/@murasakijs/native — external native
   // binding, copied as-is since its .node binary is arch-specific and
   // can't go through esbuild/tsc.
-  const nativeSrc = resolveNativeModuleDir(cwd)
+  // TODO: no longer needed at runtime once verified — prod-server.mjs is pure
+  // HTTP and the launcher binary is native Rust, so nothing at runtime
+  // currently requires this package. Kept for now to minimize risk.
   const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
   await mkdir(dirname(nativeDest), { recursive: true })
-  await cp(nativeSrc, nativeDest, { recursive: true })
+  await cp(nativeDir, nativeDest, { recursive: true })
 
   // Contents/Info.plist
   await writeFile(
@@ -166,6 +183,31 @@ function resolveNativeModuleDir(cwd: string): string {
   }
   throw new Error(
     "murasaki: couldn't resolve @murasakijs/native — make sure it's installed (it ships as a dependency of murasaki).",
+  )
+}
+
+/**
+ * Locate the compiled `murasaki-launcher` binary for the current host.
+ * Published `@murasakijs/native` ships prebuilt binaries named
+ * `murasaki-launcher.<napi-triple>` (see .github/workflows/native-release.yml
+ * and crates/native/package.json's `files`), matching the `.node` bindings'
+ * `murasaki-native.<napi-triple>.node` naming. Falls back to a local
+ * `cargo build --release --bin murasaki-launcher` output for development,
+ * where `@murasakijs/native` resolves to a workspace link to crates/native
+ * itself rather than a published package.
+ */
+async function resolveLauncherBinary(nativeDir: string): Promise<string> {
+  const triple = `darwin-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
+  const candidates = [
+    join(nativeDir, `murasaki-launcher.${triple}`),
+    join(nativeDir, 'target/release/murasaki-launcher'),
+    resolve(__dirname, '../../../../crates/native/target/release/murasaki-launcher'),
+  ]
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate
+  }
+  throw new Error(
+    `murasaki: launcher binary not found — @murasakijs/native must ship murasaki-launcher.${triple}; rebuild native or update @murasakijs/native.`,
   )
 }
 
@@ -216,7 +258,7 @@ async function buildIcon(
     await rm(tmpRoot, { recursive: true, force: true })
   }
 
-  // Runtime icon (NSApp.applicationIconImage, set by prod-launcher.mjs) —
+  // Runtime icon (NSApp.applicationIconImage, set by the launcher binary) —
   // plain PNG, no conversion needed.
   await copyFile(src, join(resourcesDir, 'icon.png'))
 

@@ -1,6 +1,6 @@
 {
   "name": "@murasakijs/native",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "description": "Native binding for murasaki (wry + tao + muda) exposed via napi-rs.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -29,6 +29,7 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "*.node"
+    "*.node",
+    "murasaki-launcher.*"
   ]
 }

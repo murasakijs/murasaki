@@ -27,6 +27,7 @@ mod clipboard;
 mod notification;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod shell;
+mod launcher;
 
 pub use types::*;
 
@@ -36,6 +37,7 @@ pub use application::Application;
 pub use window::BrowserWindow;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 pub use webview::Webview;
+pub use launcher::run_launcher;
 
 #[napi]
 pub fn version() -> String {

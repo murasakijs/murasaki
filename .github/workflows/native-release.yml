@@ -55,10 +55,33 @@ jobs:
         run: pnpm install --ignore-workspace
       - name: build
         run: pnpm exec napi build --platform --release --target ${{ matrix.target }}
+      - name: build launcher
+        run: cargo build --release --bin murasaki-launcher --target ${{ matrix.target }}
+      - name: package launcher binary
+        # Named to match the napi `.node` triple convention
+        # (murasaki-native.<triple>.node → murasaki-launcher.<triple>) so
+        # bundle.ts can find both with the same triple string — see
+        # packages/murasaki/src/cli/bundle.ts's resolveLauncherBinary(). The
+        # triple is read off the just-built `.node` file rather than mapped
+        # from matrix.target by hand, so it can't drift from what napi
+        # actually names things. Runs under bash even on the Windows runner
+        # (Git Bash, ships on windows-2022) for a single cross-platform step.
+        shell: bash
+        run: |
+          NODE_FILE=$(ls murasaki-native.*.node)
+          TRIPLE=${NODE_FILE#murasaki-native.}
+          TRIPLE=${TRIPLE%.node}
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            cp "target/${{ matrix.target }}/release/murasaki-launcher.exe" "murasaki-launcher.$TRIPLE.exe"
+          else
+            cp "target/${{ matrix.target }}/release/murasaki-launcher" "murasaki-launcher.$TRIPLE"
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.target }}
-          path: crates/native/*.node
+          path: |
+            crates/native/*.node
+            crates/native/murasaki-launcher.*
           if-no-files-found: error
 
   publish:
@@ -98,11 +121,14 @@ jobs:
           echo "Version OK: $PKG_VERSION"
 
       # @murasakijs/native ships as a single package containing the .node
-      # binary for every target (files: ["index.js", "index.d.ts", "*.node"]).
-      # The napi-generated index.js loader tries each ./murasaki-native.<triple>.node
-      # locally before falling back to optionalDependencies, so bundling all
-      # of them here means no per-target packages or optionalDependencies are
-      # needed.
+      # binary for every target (files: ["index.js", "index.d.ts", "*.node"])
+      # plus the murasaki-launcher binary for every target
+      # (files: [..., "murasaki-launcher.*"]). The napi-generated index.js
+      # loader tries each ./murasaki-native.<triple>.node locally before
+      # falling back to optionalDependencies, so bundling all of them here
+      # means no per-target packages or optionalDependencies are needed;
+      # murasaki-launcher.<triple> is resolved the same way by
+      # packages/murasaki/src/cli/bundle.ts.
       - uses: actions/download-artifact@v4
         with:
           path: crates/native
@@ -118,6 +144,15 @@ jobs:
           fi
           echo "Found 5 .node binaries:"
           ls -la ./*.node
+
+          LAUNCHER_COUNT=$(find . -maxdepth 1 -name 'murasaki-launcher.*' | wc -l | tr -d ' ')
+          if [ "$LAUNCHER_COUNT" != "5" ]; then
+            echo "::error::Expected 5 murasaki-launcher binaries (one per build matrix target), found $LAUNCHER_COUNT"
+            ls -la ./murasaki-launcher.* 2>/dev/null || true
+            exit 1
+          fi
+          echo "Found 5 murasaki-launcher binaries:"
+          ls -la ./murasaki-launcher.*
 
       - name: Publish @murasakijs/native
         run: npm publish --access public --provenance

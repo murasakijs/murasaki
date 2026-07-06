@@ -1,0 +1,487 @@
+//! Production launcher — the Rust binary that becomes the packaged app's
+//! `CFBundleExecutable` (see `src/bin/murasaki-launcher.rs`), replacing the
+//! bash-script + `node` prod launcher. Being a *real* executable (rather than
+//! a renamed copy of `node`) is what lets macOS show the product name and
+//! icon for the running process — see `Application::set_icon_path`'s doc
+//! comment for why the previous approach couldn't do that reliably.
+//!
+//! Mirrors `packages/murasaki/assets/prod-launcher.mjs` closely: spawns
+//! `prod-server.mjs` as a child process, reads the assigned port off a
+//! `MURASAKI_PORT=<n>` stdout line, then opens a webview pointed at
+//! `http://127.0.0.1:<port>/`. The default-menu locale resolution mirrors
+//! `packages/murasaki/src/menu-i18n.ts`.
+//!
+//! macOS-only (packaging only supports macOS right now — see `cli/bundle.ts`);
+//! `run_launcher` is a no-op stub elsewhere so the crate still builds
+//! everywhere the GUI stack does.
+
+#[cfg(target_os = "macos")]
+mod imp {
+  use std::{
+    cell::RefCell,
+    collections::HashMap,
+    fs,
+    io::{BufRead, BufReader},
+    path::Path,
+    process::{Child, Command, Stdio},
+    rc::Rc,
+    sync::mpsc,
+    thread,
+    time::Duration,
+  };
+
+  use serde::Deserialize;
+  use tao::{
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+  };
+
+  use crate::{
+    menu::{build_default_app_menu, AboutInfo},
+    types::{MenuLabels, WebviewOptions},
+    webview::Webview,
+    window::{center_on_primary_monitor, SharedWindow},
+  };
+
+  /// Subset of `Contents/Resources/murasaki-meta.json` (written by
+  /// `cli/bundle.ts`) this launcher needs. Fields the packager may omit
+  /// (`config.window` / `config.description` etc. are all optional in
+  /// `MurasakiConfig`) are `#[serde(default)]` so a missing JSON key becomes
+  /// `None` instead of a parse error.
+  #[derive(Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  struct Meta {
+    product_name: String,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    copyright: Option<String>,
+    #[serde(default)]
+    homepage: Option<String>,
+    #[serde(default)]
+    authors: Option<Vec<String>>,
+    #[serde(default)]
+    locales: Option<Vec<String>>,
+    #[serde(default)]
+    width: Option<i32>,
+    #[serde(default)]
+    height: Option<i32>,
+    #[serde(default)]
+    vibrancy: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+  }
+
+  /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
+  /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
+  /// `Contents/Resources/menu-locales.json`.
+  #[derive(Deserialize, Clone)]
+  #[serde(rename_all = "camelCase")]
+  struct LocaleLabels {
+    about: String,
+    services: String,
+    hide: String,
+    hide_others: String,
+    show_all: String,
+    quit: String,
+    edit: String,
+    undo: String,
+    redo: String,
+    cut: String,
+    copy: String,
+    paste: String,
+    select_all: String,
+    window: String,
+    minimize: String,
+    zoom: String,
+  }
+
+  pub fn run() {
+    if let Err(err) = run_inner() {
+      eprintln!("murasaki-launcher: {err}");
+      std::process::exit(1);
+    }
+  }
+
+  fn run_inner() -> Result<(), String> {
+    // The bundle layout is `<App>.app/Contents/MacOS/<exe>` +
+    // `Contents/Resources/…` (see cli/bundle.ts) — resolve the latter from
+    // our own binary's location rather than the current directory, since the
+    // packaged executable can be launched from anywhere (Finder, Dock, …).
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let macos_dir = exe
+      .parent()
+      .ok_or_else(|| "murasaki-launcher: executable has no parent directory".to_string())?;
+    let resources_dir = macos_dir
+      .join("..")
+      .join("Resources")
+      .canonicalize()
+      .map_err(|e| format!("resolve Resources dir: {e}"))?;
+
+    let meta_path = resources_dir.join("murasaki-meta.json");
+    let meta_raw = fs::read_to_string(&meta_path)
+      .map_err(|e| format!("read {}: {e}", meta_path.display()))?;
+    let meta: Meta = serde_json::from_str(&meta_raw)
+      .map_err(|e| format!("parse {}: {e}", meta_path.display()))?;
+
+    // Spawn prod-server.mjs the same way prod-launcher.mjs did (see that
+    // file's header comment for why `--port 0` + reading back the assigned
+    // port is needed instead of picking one ourselves).
+    let node_path = resources_dir.join("node");
+    let mut child = Command::new(&node_path)
+      .arg("prod-server.mjs")
+      .arg("--client")
+      .arg(resources_dir.join("client"))
+      .arg("--registry")
+      .arg(resources_dir.join("server").join("actions.mjs"))
+      .arg("--routes")
+      .arg(resources_dir.join("server").join("routes.mjs"))
+      .arg("--port")
+      .arg("0")
+      .current_dir(&resources_dir)
+      .stdin(Stdio::null())
+      .stdout(Stdio::piped())
+      .spawn()
+      .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
+
+    let port = match wait_for_port(&mut child, Duration::from_secs(15)) {
+      Ok(port) => port,
+      Err(err) => {
+        let _ = child.kill();
+        return Err(err);
+      }
+    };
+
+    set_activation_policy_regular();
+
+    let event_loop = EventLoop::<()>::new();
+
+    // Matches prod-launcher.mjs's `meta.width ?? 1000` / `meta.height ?? 700`
+    // (not Application::createWindow's 1280x800 default, which is for
+    // `murasaki dev`'s window created with no explicit size).
+    let width = meta.width.unwrap_or(1000);
+    let height = meta.height.unwrap_or(700);
+    // Vibrancy isn't wired up on the native side yet — accepted here for
+    // murasaki-meta.json parity but currently a no-op, same as
+    // `BrowserWindow::from_window` (see window.rs).
+    let _ = &meta.vibrancy;
+
+    let window = WindowBuilder::new()
+      .with_title(&meta.product_name)
+      .with_inner_size(LogicalSize::new(width as f64, height as f64))
+      .with_resizable(true)
+      .build(&event_loop)
+      .map_err(|e| format!("build window: {e}"))?;
+    center_on_primary_monitor(&window);
+
+    let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
+
+    let icon_path = meta.icon.as_ref().map(|icon| resources_dir.join(icon));
+
+    let locale_table = load_menu_locales(&resources_dir);
+    let locale = detect_locale();
+    let menu_labels = resolve_menu_labels(
+      &meta.product_name,
+      &locale,
+      meta.locales.as_deref(),
+      &locale_table,
+    );
+
+    let about = AboutInfo {
+      name: &meta.product_name,
+      icon_path: icon_path.as_ref().and_then(|p| p.to_str()),
+      version: meta.version.as_deref(),
+      description: meta.description.as_deref(),
+      copyright: meta.copyright.as_deref(),
+      homepage: meta.homepage.as_deref(),
+      authors: meta.authors.as_deref(),
+    };
+    let menu = build_default_app_menu(&about, Some(&menu_labels))
+      .map_err(|e| format!("build menu: {e}"))?;
+    menu.init_for_nsapp();
+
+    let url = format!("http://127.0.0.1:{port}/");
+    // `Webview::new` gives us the external-link navigation handler for free
+    // (see webview.rs) — kept alive for the app's lifetime, see the comment
+    // on `event_loop.run` below for why it's fine that it's never touched
+    // again after this.
+    let _webview = Webview::new(
+      shared_window.clone(),
+      WebviewOptions {
+        url: Some(url),
+        html: None,
+        devtools: Some(false),
+        transparent: None,
+        serve_dir: None,
+      },
+    )
+    .map_err(|e| format!("build webview: {e}"))?;
+
+    // Dock/About-panel icon — mirrors Application::set_icon_path. As the real
+    // CFBundleExecutable, CFBundleIconFile (see cli/bundle.ts's Info.plist)
+    // already covers the Dock/Finder icon; this additionally covers the
+    // About panel, which doesn't reliably pick up CFBundleIconFile.
+    if let Some(path) = &icon_path {
+      set_app_icon(path);
+    }
+
+    // tao's `EventLoop::run` never returns (`-> !`) and explicitly documents
+    // that "values not passed to this function will *not* be dropped" — so
+    // `menu`/`_webview`/`shared_window`, though never referenced again after
+    // this point, simply stay alive on this stack frame for as long as the
+    // app runs. Only `child` needs to move into the closure, to be killed on
+    // window close.
+    event_loop.run(move |event, _target, control_flow| {
+      *control_flow = ControlFlow::Wait;
+      if let Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } = event
+      {
+        *control_flow = ControlFlow::Exit;
+        // Best-effort: if we get killed before this runs (force-quit, crash),
+        // prod-server.mjs's own orphan check (`ppid === 1`) reaps it within ~2s.
+        let _ = child.kill();
+        std::process::exit(0);
+      }
+    });
+  }
+
+  /// Reads `prod-server.mjs`'s stdout line-by-line looking for
+  /// `MURASAKI_PORT=<n>` (see that file's `server.listen` callback), on a
+  /// background thread so the child's pipe never fills up and blocks it.
+  /// Forwards every line to our own stdout as it goes (line-buffered, so
+  /// exact byte-for-byte interleaving with our own output isn't guaranteed —
+  /// good enough for what is essentially debug output).
+  fn wait_for_port(child: &mut Child, timeout: Duration) -> Result<u16, String> {
+    let stdout = child
+      .stdout
+      .take()
+      .ok_or_else(|| "prod-server: missing stdout pipe".to_string())?;
+    let (tx, rx) = mpsc::channel::<u16>();
+
+    thread::spawn(move || {
+      let reader = BufReader::new(stdout);
+      let mut found = false;
+      for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if !found {
+          if let Some(port) = line
+            .strip_prefix("MURASAKI_PORT=")
+            .and_then(|p| p.trim().parse::<u16>().ok())
+          {
+            found = true;
+            let _ = tx.send(port);
+          }
+        }
+        println!("{line}");
+      }
+    });
+
+    rx.recv_timeout(timeout)
+      .map_err(|_| "prod server did not report a port in time".to_string())
+  }
+
+  /// Reads `Contents/Resources/menu-locales.json`. Missing or unparsable ⇒
+  /// empty map, which makes `resolve_menu_labels` fall through to muda's
+  /// English defaults (see `MenuLabels`'s doc comment in types.rs).
+  fn load_menu_locales(resources_dir: &Path) -> HashMap<String, LocaleLabels> {
+    let path = resources_dir.join("menu-locales.json");
+    fs::read_to_string(&path)
+      .ok()
+      .and_then(|raw| serde_json::from_str(&raw).ok())
+      .unwrap_or_default()
+  }
+
+  /// Best-effort system UI language, normalized to a shipped locale key.
+  /// Mirrors `menu-i18n.ts`'s `detectLocale()` — macOS only, so unlike the JS
+  /// version there's no `Intl`/env-var fallback chain, just `AppleLanguages`.
+  fn detect_locale() -> String {
+    let raw = macos_ui_language().unwrap_or_else(|| "en".to_string());
+    normalize_locale(&raw)
+  }
+
+  /// The user's macOS UI language (first entry of the `AppleLanguages`
+  /// preference list, e.g. "ja-JP"), or `None` if the lookup fails.
+  fn macos_ui_language() -> Option<String> {
+    let output = Command::new("defaults")
+      .args(["read", "-g", "AppleLanguages"])
+      .output()
+      .ok()?;
+    if !output.status.success() {
+      return None;
+    }
+    first_locale_tag(&String::from_utf8_lossy(&output.stdout))
+  }
+
+  /// First BCP-47-ish locale tag in `s` — a hand-rolled equivalent of the JS
+  /// regex `/[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]+)*/` used by `menu-i18n.ts`'s
+  /// `macosUiLanguage()` against `defaults read -g AppleLanguages` output
+  /// (e.g. `(\n    "ja-JP",\n    "en-US"\n)` → `"ja-JP"`).
+  fn first_locale_tag(s: &str) -> Option<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    while i < n {
+      if !chars[i].is_ascii_alphabetic() {
+        i += 1;
+        continue;
+      }
+      let mut j = i;
+      while j < n && chars[j].is_ascii_alphabetic() {
+        j += 1;
+      }
+      let base_len = (j - i).min(3);
+      if base_len < 2 {
+        i = j.max(i + 1);
+        continue;
+      }
+      let mut tag: String = chars[i..i + base_len].iter().collect();
+      let mut k = i + base_len;
+      while k < n && chars[k] == '-' {
+        let seg_start = k + 1;
+        let mut m = seg_start;
+        while m < n && chars[m].is_ascii_alphanumeric() {
+          m += 1;
+        }
+        if m == seg_start {
+          break;
+        }
+        tag.push('-');
+        tag.extend(&chars[seg_start..m]);
+        k = m;
+      }
+      return Some(tag);
+    }
+    None
+  }
+
+  /// Mirrors `menu-i18n.ts`'s `normalizeLocale()`.
+  fn normalize_locale(raw: &str) -> String {
+    let lc = raw.to_lowercase().replace('_', "-");
+    if lc.starts_with("ja") {
+      "ja".to_string()
+    } else if lc.starts_with("zh") {
+      "zh-CN".to_string()
+    } else if lc.starts_with("ko") {
+      "ko".to_string()
+    } else if lc.starts_with("es") {
+      "es".to_string()
+    } else if lc.starts_with("fr") {
+      "fr".to_string()
+    } else if lc.starts_with("de") {
+      "de".to_string()
+    } else {
+      "en".to_string()
+    }
+  }
+
+  /// Mirrors `menu-i18n.ts`'s `resolveMenuLabels()`: resolves the default-menu
+  /// labels for `locale`, constrained to `allowed` (the app's configured
+  /// `locales`) when given, falling back to `allowed[0]` (normalized) if the
+  /// detected locale isn't one of them, and to muda's English defaults
+  /// (`None` fields) if the locale table has neither key nor `"en"`.
+  fn resolve_menu_labels(
+    product_name: &str,
+    locale: &str,
+    allowed: Option<&[String]>,
+    table: &HashMap<String, LocaleLabels>,
+  ) -> MenuLabels {
+    let mut key = locale.to_string();
+    if let Some(allowed) = allowed {
+      if !allowed.is_empty() {
+        let normalized_allowed: Vec<String> = allowed.iter().map(|a| normalize_locale(a)).collect();
+        if !normalized_allowed.iter().any(|a| a == &key) {
+          key = normalize_locale(&allowed[0]);
+        }
+      }
+    }
+
+    let Some(t) = table.get(&key).or_else(|| table.get("en")) else {
+      return MenuLabels {
+        about: None,
+        services: None,
+        hide: None,
+        hide_others: None,
+        show_all: None,
+        quit: None,
+        edit: None,
+        undo: None,
+        redo: None,
+        cut: None,
+        copy: None,
+        paste: None,
+        select_all: None,
+        window: None,
+        minimize: None,
+        zoom: None,
+      };
+    };
+
+    let fill = |s: &str| s.replace("{app}", product_name);
+    MenuLabels {
+      about: Some(fill(&t.about)),
+      services: Some(t.services.clone()),
+      hide: Some(fill(&t.hide)),
+      hide_others: Some(t.hide_others.clone()),
+      show_all: Some(t.show_all.clone()),
+      quit: Some(fill(&t.quit)),
+      edit: Some(t.edit.clone()),
+      undo: Some(t.undo.clone()),
+      redo: Some(t.redo.clone()),
+      cut: Some(t.cut.clone()),
+      copy: Some(t.copy.clone()),
+      paste: Some(t.paste.clone()),
+      select_all: Some(t.select_all.clone()),
+      window: Some(t.window.clone()),
+      minimize: Some(t.minimize.clone()),
+      zoom: Some(t.zoom.clone()),
+    }
+  }
+
+  /// Sets `NSApp.applicationIconImage` — mirrors `Application::set_icon_path`
+  /// exactly (see that method's doc comment for why this is needed alongside
+  /// `CFBundleIconFile`). No-op if `path` doesn't point at a readable image.
+  fn set_app_icon(path: &Path) {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSString;
+
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let ns_app = NSApplication::sharedApplication(mtm);
+    let ns_path = NSString::from_str(&path.to_string_lossy());
+    if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
+      unsafe { ns_app.setApplicationIconImage(Some(&image)) };
+    }
+  }
+
+  /// Ensures this CLI-launched process is a Regular (Dock-visible, focusable)
+  /// app — mirrors `Application::new`'s doc comment on why this is set up
+  /// front rather than relying on tao's default handling during
+  /// `applicationDidFinishLaunching`.
+  fn set_activation_policy_regular() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+    if let Some(mtm) = MainThreadMarker::new() {
+      let ns_app = NSApplication::sharedApplication(mtm);
+      ns_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+      #[allow(deprecated)]
+      ns_app.activateIgnoringOtherApps(true);
+    }
+  }
+}
+
+#[cfg(target_os = "macos")]
+pub fn run_launcher() {
+  imp::run();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn run_launcher() {
+  eprintln!("murasaki-launcher: unsupported platform (macOS only)");
+}

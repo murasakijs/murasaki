@@ -7,7 +7,15 @@ description = "Native binding for murasaki (Rust wry + tao + muda), exposed to N
 authors = ["ichi"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+# Rust binary that becomes the packaged app's CFBundleExecutable (Tauri-style),
+# replacing the bash-script + `node` prod launcher — see src/launcher.rs.
+# Links the rlib above so it can reuse Application/BrowserWindow/Webview/menu
+# internals directly instead of duplicating them.
+[[bin]]
+name = "murasaki-launcher"
+path = "src/bin/murasaki-launcher.rs"
 
 [dependencies]
 napi = { version = "3", features = ["napi9"] }

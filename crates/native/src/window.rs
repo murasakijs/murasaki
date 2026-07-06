@@ -13,6 +13,22 @@ use crate::{types::WebviewOptions, webview::Webview};
 
 pub(crate) type SharedWindow = Rc<RefCell<Option<Window>>>;
 
+/// Centers `window` on its primary monitor. tao's default placement can land
+/// the window off-screen (e.g. negative Y on multi-monitor setups), so
+/// callers that build a `tao::window::Window` directly — `Application::createWindow`
+/// and the production launcher (`crate::launcher`) — compute the centered
+/// position explicitly rather than relying on the OS default.
+pub(crate) fn center_on_primary_monitor(window: &Window) {
+  if let Some(monitor) = window.primary_monitor().or_else(|| window.current_monitor()) {
+    let screen = monitor.size();
+    let win = window.outer_size();
+    let mon_pos = monitor.position();
+    let x = mon_pos.x + ((screen.width as i32 - win.width as i32) / 2).max(0);
+    let y = mon_pos.y + ((screen.height as i32 - win.height as i32) / 2).max(0);
+    window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
+  }
+}
+
 #[napi]
 pub struct BrowserWindow {
   window: SharedWindow,
