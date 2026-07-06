@@ -16,8 +16,11 @@ const inter = Inter({
 // metadata (canonical, hreflang, og/twitter images) resolves against this.
 // Falls back to the current live GitHub Pages URL, matching next.config.mjs's
 // static-export target; not murasaki.dev yet since that domain isn't live.
+// `?.trim() ||` (not `??`): an env var set to an empty/whitespace string
+// (e.g. a build arg passed through unset) must fall back too — `new URL("")`
+// would otherwise throw "Invalid URL" and fail the build.
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://murasakijs.github.io";
+  process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://murasakijs.github.io";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

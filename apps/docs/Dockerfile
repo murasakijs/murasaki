@@ -34,13 +34,11 @@ COPY . .
 RUN corepack prepare pnpm@9.15.0 --activate \
   && pnpm install --frozen-lockfile
 
-# `NEXT_PUBLIC_*` vars are inlined by Next at BUILD time, so they must be
-# present when `next build` runs — a runtime env var is too late. Dokploy
-# passes this via its "Build-time Arguments" (a Docker `--build-arg`); when
-# unset the app's `metadataBase` keeps its env fallback (see app/layout.tsx).
-ARG NEXT_PUBLIC_SITE_URL
-ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
-
+# `NEXT_PUBLIC_*` vars are inlined by Next at BUILD time. We deliberately do
+# NOT re-declare them as ARG/ENV here: Dokploy's "Create Environment File"
+# writes the app's env vars to `apps/docs/.env` in the build context, which
+# `next build` loads automatically. Re-declaring an unset `ARG` would set the
+# ENV to an empty string and clobber that .env value.
 RUN pnpm --filter murasaki-docs build
 
 # -----------------------------------------------------------------------
