@@ -1,0 +1,120 @@
+---
+title: Context Menu
+description: Declare a real OS context menu with useContextMenu — no HTML popup involved.
+---
+
+murasaki's context menu is declared with a hook, not markup, so it lives right
+next to your state — its `action`s can close over `useState` setters. None of
+it renders HTML: items are posted to the Rust side, which pops a real OS menu
+(`NSMenu` on macOS, `HMENU` on Windows, `GtkMenu` on Linux).
+
+## The whole-window menu
+
+Calling `useContextMenu` with no id declares the default menu — it opens
+anywhere the user right-clicks that isn't claimed by a scoped menu:
+
+```tsx title="src/app/layout.tsx"
+import { useContextMenu, Action } from 'murasaki'
+
+useContextMenu([
+  { label: 'Reload', shortcut: 'command,R', action: <Action.Reload /> },
+  { separator: true },
+  { label: 'Copy', action: <Action.Copy /> },
+])
+```
+
+## Scoped menus
+
+Give the menu an id and tag a region with a matching `<ContextMenuTrigger>` —
+only that region opens it, and it takes priority over the window default:
+
+```tsx
+import { useContextMenu, ContextMenuTrigger } from 'murasaki'
+import { useState } from 'react'
+
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  useContextMenu('card', [
+    { label: 'Increment', action: () => setCount((n) => n + 1) },
+  ])
+
+  return (
+    <ContextMenuTrigger id="card">
+      <div>Clicked {count} times</div>
+    </ContextMenuTrigger>
+  )
+}
+```
+
+`<ContextMenuTrigger>` clones its child by default when it has exactly one
+element child (no wrapper node); pass `asChild={false}` to force a
+`display: contents` `<span>` wrapper instead (e.g. with multiple children).
+
+## Item shape
+
+Each entry is either a divider or:
+
+```ts
+interface ContextMenuEntry {
+  label: string
+  shortcut?: string          // e.g. "command,I" — also wired to keydown directly
+  disabled?: boolean
+  action?: ContextMenuAction // a built-in <Action.*/> element, or a function
+  items?: ContextMenuItemSpec[] // a submenu, instead of an action
+}
+
+type ContextMenuItemSpec = ContextMenuEntry | { separator: true }
+```
+
+`shortcut` both sets the menu's native accelerator label and registers a
+`keydown` handler, so it fires without the menu being open.
+
+## Actions
+
+`action` is either your own function, or one of the built-in `<Action.*/>`
+elements — native OS roles (`Copy`, `Paste`, `Cut`, `SelectAll`, `Undo`,
+`Redo`, `Quit`) or client behaviors (`Reload`, `Navigate`, `Run`). See
+[Native APIs](/docs/guides/native-apis#built-in-menu-actions) for the full
+list.
+
+## Reusable actions with `createActions`
+
+Define your app's actions once — typically in `src/lib/action.ts`, backed by a
+store so they're callable from anywhere — and drop them into any menu as
+`<Action.name />`:
+
+```ts title="src/lib/action.ts"
+import { createActions } from 'murasaki'
+import { useCounter } from './counter'
+
+export const Action = createActions({
+  increment: () => useCounter.getState().increment(),
+  reset: () => useCounter.getState().reset(),
+})
+```
+
+```tsx
+import { Action } from '@/lib/action'
+
+useContextMenu('card', [
+  { label: 'Increment', shortcut: 'command,I', action: <Action.increment /> },
+  { label: 'Reset counter', action: <Action.reset /> },
+])
+```
+
+The object `createActions` returns also includes the built-ins (`Action.Copy`,
+`Action.Reload`, …), so a file can import a single `Action` for everything.
+
+<Callout type="info">
+  Only one whole-window (`useContextMenu(items)`, no id) menu should be
+  mounted at a time — mounting a second one logs a dev warning, and the last
+  one mounted wins.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="The rest of murasaki's native surface." />
+  <Card title="Styling" href="/docs/guides/styling" description="Tailwind + @murasakijs/ui." />
+</Cards>

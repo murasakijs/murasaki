@@ -1,0 +1,93 @@
+---
+title: Routing
+description: File-based routing over src/app — pages, layouts, dynamic segments, and navigation.
+---
+
+Every `src/app/**/page.tsx` becomes a route automatically — no router config to
+write. A Vite plugin scans `src/app` and emits a virtual route table that
+`<AppRouter>` (mounted for you by the scaffold's entry) matches on every
+navigation.
+
+```txt
+src/app/
+├─ layout.tsx        # wraps every route
+├─ page.tsx          # "/"
+├─ about/
+│  └─ page.tsx       # "/about"
+└─ blog/
+   └─ [slug]/
+      └─ page.tsx    # "/blog/:slug"
+```
+
+## Layouts
+
+`layout.tsx` wraps every route beneath it (nested layouts compose root → leaf).
+Your **root layout** should wrap its children in `<App>` — a full-window frame
+component from `murasaki`:
+
+```tsx title="src/app/layout.tsx"
+import type { ReactNode } from 'react'
+import { App, useContextMenu } from 'murasaki'
+
+export default function Layout({ children }: { children: ReactNode }) {
+  useContextMenu([{ label: 'Reload', shortcut: 'command,R', action: () => location.reload() }])
+
+  return <App className="flex items-center justify-center">{children}</App>
+}
+```
+
+## Dynamic segments
+
+A `[param]` folder captures a URL segment; read it with `useParams()`:
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+import { useParams } from 'murasaki'
+
+export default function BlogPost() {
+  const { slug } = useParams()
+  return <p>Post: {slug}</p>
+}
+```
+
+Static segments always win over dynamic ones, and a more-specific match (more
+literal segments) wins over a less-specific one — the same precedence Next.js
+uses. A `(group)` folder — parens, no brackets — organizes routes without
+adding a URL segment.
+
+## Loading, error, and not-found boundaries
+
+Drop these files next to (or above) a `page.tsx`:
+
+- **`loading.tsx`** — shown while the page suspends (wrapped in a `<Suspense>`).
+- **`error.tsx`** — an error boundary; exports a component receiving `{ error,
+  reset }`. Catches render errors thrown under that route.
+- **`not-found.tsx`** — rendered when no route matches; the nearest one in the
+  URL's ancestor chain wins.
+
+Each is scoped to its own subtree, the same as Next.js App Router.
+
+## Navigation
+
+Use `<Link>` for client-side navigation (no full reload):
+
+```tsx
+import { Link } from 'murasaki'
+
+<Link href="/about">About</Link>
+```
+
+`useRouter()` gives you `push` / `replace` / `back` / `pathname` imperatively,
+and `usePathname()` reads the current path.
+
+<Callout type="info">
+  A plain `<a href="https://...">` to an off-origin URL opens in the user's
+  **default system browser**, not inside the app window — you don't need to
+  special-case external links.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Middleware" href="/docs/guides/middleware" description="Run a route guard before every navigation." />
+  <Card title="Metadata" href="/docs/guides/metadata" description="Set the document title and meta tags per route." />
+</Cards>

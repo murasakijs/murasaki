@@ -1,0 +1,57 @@
+---
+title: Metadata
+description: Per-route document title, description, and Open Graph tags.
+---
+
+A page or layout can export a static `metadata` object, or an async
+`generateMetadata()` for values that depend on route params:
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+import type { Metadata } from 'murasaki'
+
+export const metadata: Metadata = {
+  title: 'Blog',
+  description: 'Posts about murasaki.',
+}
+```
+
+```tsx
+import type { GenerateMetadata } from 'murasaki'
+
+export const generateMetadata: GenerateMetadata = async ({ params }) => {
+  return { title: `Post: ${params.slug}` }
+}
+```
+
+`Metadata` also accepts `icons` (`icon` / `shortcut` / `apple`) and
+`openGraph` (`title` / `description` / `images`).
+
+## How it's applied
+
+On every navigation, `<AppRouter>` resolves metadata root → leaf — each
+ancestor layout's `metadata` merges under the matched page's — then applies it
+to the document:
+
+- `document.title` (only touched when a title actually resolves — never
+  blanked out)
+- `<meta name="description">`
+- Open Graph `<meta property="og:...">` tags (falling back to `title` /
+  `description` when `openGraph` fields are omitted)
+- `<link rel="icon">`, from `icons.icon`
+
+A page's `generateMetadata` (if present) is awaited and merged on top after
+the static `metadata` chain resolves.
+
+<Callout type="warn">
+  This sets the **document's** title/meta tags, not the native window's title
+  bar — the window title comes from `window.title` in `murasaki.config.ts`
+  (see [Configuration](/docs/building/configuration)) and is set once at
+  launch.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Routing" href="/docs/guides/routing" />
+  <Card title="Configuration" href="/docs/building/configuration" />
+</Cards>

@@ -1,0 +1,79 @@
+---
+title: Server Actions
+description: "'use server' functions that run in Node, called from React with useAction."
+---
+
+React 19-style server actions — same shape as `useActionState`. A `'use
+server'` function actually runs in **Node**, not the browser.
+
+## Define an action
+
+```ts title="src/actions.ts"
+'use server'
+import { defineAction } from 'murasaki'
+import type { ActionState } from 'murasaki'
+
+export const greet = defineAction(
+  async (_prev: ActionState<string>, formData: FormData): Promise<ActionState<string>> => {
+    const name = formData.get('name')
+    return { data: `Hello, ${name}!`, error: null, isPending: false }
+  },
+)
+```
+
+`defineAction` is a typed passthrough — it exists so the `'use server'`
+semantics carry through TypeScript. The actual code-splitting happens in a
+Vite plugin that detects the directive.
+
+## Call it from a page
+
+```tsx title="src/app/page.tsx"
+import { useAction } from 'murasaki'
+import { greet } from '../actions'
+
+export default function Home() {
+  const [state, run, isPending] = useAction(greet, {
+    data: null,
+    error: null,
+    isPending: false,
+  })
+
+  return (
+    <form action={run}>
+      <input name="name" />
+      <button disabled={isPending}>Greet</button>
+      {state.data && <p>{state.data}</p>}
+    </form>
+  )
+}
+```
+
+`useAction` wraps React 19's `useActionState` directly, so `[state, run,
+isPending]` is exactly the shape you already know from Next.js. To invoke an
+action outside a `<form>` (e.g. from a button's `onClick`), call it directly —
+`callAction(fn, ...args)` is a thin passthrough for that case.
+
+## How it runs
+
+The Vite plugin splits a `'use server'` module in two: the client bundle gets
+a typed `fetch` stub (`fetch('/__murasaki/action/…')`), and the function body
+stays server-side.
+
+- **Dev** — a Vite middleware receives the stub's request and invokes the real
+  function via `ssrLoadModule`.
+- **Prod** — `murasaki bundle` compiles a self-contained action registry
+  (`dist/server`), and the bundled Node child server (spawned by the native
+  launcher) serves the same `/__murasaki/action/…` requests against it.
+
+Either way, the action itself never ships to the client — only the stub does.
+
+<Callout type="info">
+  A `'use server'` file can live anywhere under `src/` (`src/actions.ts` is the
+  common convention) — it isn't tied to `src/app/` or `src/api/`.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="API Routes" href="/docs/guides/api-routes" description="Addressable HTTP endpoints for anything that isn't a form/RPC call." />
+</Cards>

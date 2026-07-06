@@ -1,0 +1,13 @@
+{
+  "title": "Guides",
+  "pages": [
+    "routing",
+    "server-actions",
+    "api-routes",
+    "metadata",
+    "middleware",
+    "native-apis",
+    "context-menu",
+    "styling"
+  ]
+}

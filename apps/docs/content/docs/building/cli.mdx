@@ -1,0 +1,102 @@
+---
+title: CLI reference
+description: Every murasaki command — dev, build, bundle, installer, and more.
+---
+
+```txt
+murasaki dev         Start the Vite dev server + native window (HMR, Fast Refresh)
+murasaki build       Production Vite build → dist/client
+murasaki bundle      Native app folder / .app for the current platform
+murasaki installer   Distributable installer for the current platform
+murasaki init        Install the Rust toolchain (only if you're hacking on @murasakijs/native)
+murasaki icon        Generate .icns / .ico / .png from a single PNG
+murasaki release     Auto-update manifest helpers
+murasaki help        Show this help
+```
+
+<Callout type="warn">
+  `murasaki bundle` and `murasaki installer` are implemented and verified on
+  **macOS** today. On other platforms they currently print a "not supported
+  yet" message instead of producing an installer — `murasaki dev` itself works
+  on macOS, Windows, and Linux.
+</Callout>
+
+## `murasaki dev`
+
+Boots the Vite dev server in a child process and attaches a native window
+pointed at it — React Fast Refresh + HMR work as usual; edit and save, the
+window updates. Runs on `config.devPort` (default `5178`), auto-incrementing
+if that port is taken.
+
+## `murasaki build`
+
+A production Vite build → `dist/client`.
+
+## `murasaki bundle`
+
+Packages `dist/client` + the compiled server-actions registry + a portable
+Node runtime + the native launcher binary into a `<productName>.app` at
+`dist/bundle/`.
+
+```bash
+murasaki bundle              # host arch, ad-hoc signed (unsigned distribution)
+murasaki bundle --arch x64   # cross-arch: build an x64 .app on Apple Silicon
+murasaki bundle --sign       # sign with your Developer ID
+murasaki bundle --no-build   # reuse an existing dist/client instead of rebuilding
+```
+
+- **`--arch arm64|x64`** — target architecture (defaults to the host arch).
+- **`--sign`** — Developer ID-sign the `.app` (see [Distribution](/docs/building/distribution#signing--notarization)).
+- **`--no-build`** — skip the Vite rebuild if `dist/client` already exists.
+
+## `murasaki installer`
+
+Wraps the `.app` from `bundle` into a drag-to-install `.dmg` at
+`dist/<productName>-<version>.dmg`, styled with a background image and
+positioned icons (falls back to a plain DMG if Finder-styling fails, e.g.
+missing Automation permission).
+
+```bash
+murasaki installer                     # unsigned .dmg (re-bundles first)
+murasaki installer --sign --notarize   # Developer ID sign + submit to Apple + staple
+murasaki installer --no-build          # reuse an existing dist/bundle/<App>.app
+```
+
+- **`--sign`** — forwarded to `bundle`.
+- **`--notarize`** — submit the signed `.dmg` to Apple's notary service and
+  staple the ticket; requires `--sign`.
+- **`--arch arm64|x64`** — forwarded to `bundle`.
+
+## `murasaki init`
+
+Checks for `rustc` and prints an install command if it's missing. Only needed
+if you're hacking on `@murasakijs/native` itself — end users of murasaki never
+need Rust; prebuilt binaries come down from npm.
+
+## `murasaki icon`
+
+```bash
+murasaki icon assets/logo.png
+```
+
+Generates `dist/icons/icon.icns` (macOS, via `sips` + `iconutil`) from a
+single 1024px PNG. On non-macOS platforms it currently prints a "PNG-only"
+notice — `.ico` / Linux icon sets are on the roadmap.
+
+## `murasaki release`
+
+```bash
+murasaki release --generate-manifest --base-url <url> --version <v>
+```
+
+Emits the update-manifest JSON that `useUpdate()` expects, hashing whatever
+per-platform artifacts it finds under `dist/<version>/`. Only needed for the
+`custom` updater provider — the `github` provider derives release info
+directly from your GitHub Releases.
+
+## Next
+
+<Cards>
+  <Card title="Configuration" href="/docs/building/configuration" />
+  <Card title="Distribution" href="/docs/building/distribution" />
+</Cards>

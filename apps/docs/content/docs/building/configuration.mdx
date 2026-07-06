@@ -1,0 +1,117 @@
+---
+title: Configuration
+description: Full reference for murasaki.config.ts.
+---
+
+`murasaki.config.ts` (or `.js` / `.mjs`) at your project root describes your
+app's identity, window, and build settings:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'app.murasaki.example',
+  productName: 'Murasaki App',
+  version: '0.1.0',
+  icon: 'assets/icon.png',
+  window: {
+    title: 'Murasaki App',
+    width: 1000,
+    height: 700,
+  },
+})
+```
+
+`defineConfig` is just an identity function for type inference — there's
+nothing to await or configure beyond the object you pass it.
+
+## Top-level fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `appId` | `string` | **Required.** Bundle identifier (e.g. `com.example.my-app`) — becomes `CFBundleIdentifier` on macOS. |
+| `productName` | `string` | **Required.** Display name — the `.app` filename, Dock/menu-bar label, and DMG volume name. |
+| `version` | `string?` | App version. Shown in the native About panel; used in the `.dmg` filename. Defaults to `0.0.0`. |
+| `description` | `string?` | Short description shown in the native "About `<app>`" panel. |
+| `copyright` | `string?` | Copyright notice shown in the About panel. |
+| `homepage` | `string?` | Homepage URL shown in the About panel. |
+| `authors` | `string[]?` | Author names shown in the About panel (Windows/Linux only). |
+| `window` | `WindowConfig?` | Window shape — see [below](#window). |
+| `updater` | `UpdaterConfig?` | Auto-update source — see [below](#updater). |
+| `locales` | `string[]?` | BCP-47 UI languages your app supports (e.g. `['en', 'ja']`). Feeds the macOS bundle's `CFBundleLocalizations` and constrains murasaki's default native menu translations. Defaults to every language murasaki ships menu translations for: `en`, `ja`, `zh-Hans`, `ko`, `es`, `fr`, `de`. |
+| `devPort` | `number?` | Vite dev server port during `murasaki dev`. Defaults to `5178` (auto-increments if taken). |
+| `targets` | `Target[]?` | Build targets. Defaults to the host platform. One or more of `darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, `linux-arm64`. |
+| `icon` | `string?` | Path to a source PNG (ideally 1024px). `murasaki icon` / `murasaki bundle` fan it out to `.icns` / `.ico` / a PNG set. |
+| `installer` | `object?` | `.dmg` styling — see [below](#installer). |
+| `sign` | `object?` | macOS code-signing — see [below](#sign). |
+
+## `window`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `title` | `string?` | Window title bar text, set once at launch. |
+| `width` / `height` | `number?` | Initial window size. |
+| `minWidth` / `minHeight` | `number?` | Minimum window size. |
+| `resizable` | `boolean?` | Whether the window can be resized. |
+| `transparent` | `boolean?` | Transparent window background. |
+| `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS translucent window vibrancy. |
+
+<Callout type="warn">
+  `vibrancy` is declared but not yet applied by the native binding — setting
+  it is currently a no-op (support is planned).
+</Callout>
+
+## `updater`
+
+A discriminated union on `provider`:
+
+```ts
+type UpdaterConfig =
+  | {
+      provider: 'github'
+      repo: string              // "owner/repo"
+      channel?: string
+      checkOnStart?: boolean
+      checkInterval?: string
+    }
+  | {
+      provider: 'custom'
+      endpoint: string          // URL serving the manifest `murasaki release` generates
+      publicKey?: string
+      checkOnStart?: boolean
+      checkInterval?: string
+    }
+```
+
+Consumed by `useUpdate()` / `<UpdateButton />` — see
+[Native APIs → Auto-update](/docs/guides/native-apis#auto-update).
+
+## `installer`
+
+Styling for the `.dmg` produced by `murasaki installer`. Omit entirely to use
+murasaki's default background.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `background` | `string?` | Path (relative to the project root) to a custom DMG background PNG. Overrides murasaki's default. |
+| `window` | `{ width: number; height: number }?` | DMG window content size in points. Default `{ width: 640, height: 420 }` (matches the default background). |
+| `iconSize` | `number?` | Icon size in the DMG window. Default `128`. |
+
+## `sign`
+
+macOS code-signing. murasaki signs with **your** certificate — it ships none
+of its own. Notarization credentials are read from environment variables,
+never from this config — see
+[Distribution → Signing](/docs/building/distribution#signing--notarization).
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `identity` | `string?` | Signing identity, e.g. `"Developer ID Application: Name (TEAMID)"`. Defaults to `$MURASAKI_SIGN_IDENTITY`, then the first "Developer ID Application" identity in your keychain. |
+| `entitlements` | `string?` | Path to a custom entitlements `.plist`. Defaults to a Node-friendly hardened-runtime set (JIT + unsigned executable memory + disabled library validation). |
+
+## Next
+
+<Cards>
+  <Card title="CLI reference" href="/docs/building/cli" />
+  <Card title="Distribution" href="/docs/building/distribution" />
+</Cards>

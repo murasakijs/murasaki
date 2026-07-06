@@ -1,0 +1,72 @@
+---
+title: API Routes
+description: Next.js-style file-based HTTP endpoints under src/api.
+---
+
+A `src/api/<path>/route.ts` file exports one function per HTTP method, served
+at `/api/<path>`:
+
+```ts title="src/api/hello/route.ts"
+// GET /api/hello
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (request) => {
+  return Response.json({ message: `Hello from Node ${process.version}` })
+}
+
+export const POST: RouteHandler = async (request) => {
+  const body = await request.json()
+  return Response.json({ received: body })
+}
+```
+
+`RouteHandler` takes a Web `Request` and a `context` with `params`, and
+returns a Web `Response` — `Response.json(...)`, `new Response(...)`, status
+codes, headers, all standard.
+
+## Dynamic segments
+
+A `[name]` folder captures a segment, exposed on `context.params`:
+
+```ts title="src/api/greet/[name]/route.ts"
+// GET /api/greet/:name
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (_request, { params }) => {
+  return Response.json({ greeting: `Hello, ${params.name}!` })
+}
+```
+
+<Callout type="warn">
+  Only single-segment `[name]` params are supported today — a catch-all
+  (`[...name]`) segment isn't implemented yet.
+</Callout>
+
+## Calling a route
+
+```ts
+const res = await fetch('/api/hello')
+const data = await res.json()
+```
+
+Handlers run on the server in both dev (a Vite middleware) and prod (the
+bundled Node server), so they can reach the filesystem, a database, or
+secrets.
+
+## API routes vs. server actions
+
+Both run on the server — pick by shape:
+
+- **API routes** are addressable HTTP endpoints. Any client can `fetch` them —
+  good for webhooks, third-party callers, REST-ish surfaces.
+- **Server actions** ([guide](/docs/guides/server-actions)) are typed RPC wired
+  into React 19's form / `useAction` flow — no URL, no `fetch` boilerplate.
+
+They coexist in the same app.
+
+## Next
+
+<Cards>
+  <Card title="Server Actions" href="/docs/guides/server-actions" />
+  <Card title="Middleware" href="/docs/guides/middleware" />
+</Cards>

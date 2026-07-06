@@ -1,0 +1,61 @@
+---
+title: Quick start
+description: Scaffold a murasaki app, run it with HMR, and build a distributable.
+---
+
+## Prerequisites
+
+- **Node.js 22+**
+- **macOS** (Apple Silicon or Intel) for building `.app` / `.dmg`. `murasaki dev`
+  works cross-platform; bundling is macOS-only for now.
+
+## Scaffold
+
+```bash
+pnpm create murasaki@latest my-app
+cd my-app
+```
+
+This creates a React 19 + Vite + Tailwind app with a Next.js-like layout, a
+native window, and a working context menu — no `index.html` or entry file to
+maintain (murasaki owns the app shell).
+
+## Develop
+
+```bash
+pnpm dev
+```
+
+A native window opens on top of the Vite dev server — **React Fast Refresh and
+HMR work as usual**. Edit `src/app/page.tsx` and the window updates instantly.
+
+Right-click anywhere for the app's native menu; right-click the card for its own
+scoped menu — both are real `NSMenu`s, not HTML popups.
+
+## Build a distributable
+
+```bash
+pnpm bundle       # -> dist/bundle/<App>.app
+pnpm installer    # -> dist/<App>-<version>.dmg  (drag-to-install)
+```
+
+The `.app` ships a portable Node runtime and a native launcher, so it runs on
+other Macs — not just your build machine. To build for the other architecture:
+
+```bash
+pnpm bundle --arch x64     # build an x64 .app on an Apple Silicon Mac
+```
+
+<Callout type="warn">
+  Unsigned builds trigger Gatekeeper on other machines (recipients right-click →
+  **Open** the first time). To ship a signed, notarized app with no warning, see
+  [Distribution → Signing](/docs/building/distribution#signing--notarization).
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Project structure" href="/docs/getting-started/project-structure" />
+  <Card title="Routing" href="/docs/guides/routing" />
+  <Card title="Distribution" href="/docs/building/distribution" />
+</Cards>

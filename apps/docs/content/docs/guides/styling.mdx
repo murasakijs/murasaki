@@ -1,0 +1,77 @@
+---
+title: Styling
+description: Tailwind CSS + @murasakijs/ui, a shadcn-style component library.
+---
+
+The scaffold ships Tailwind CSS and [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) — a
+shadcn/ui-style component library built on Radix primitives, styled with the
+same `cn()` + `class-variance-authority` conventions shadcn/ui users already
+know.
+
+## Setup
+
+Import the stylesheet once (the scaffold already does this in the root
+layout), and extend your Tailwind config with the shared preset:
+
+```tsx title="src/app/layout.tsx"
+import '@murasakijs/ui/styles.css'
+import './globals.css'
+```
+
+```ts title="tailwind.config.ts"
+import type { Config } from 'tailwindcss'
+
+export default {
+  presets: [require('@murasakijs/ui/tailwind-preset')],
+  content: [
+    './src/**/*.{ts,tsx}',
+    './node_modules/@murasakijs/ui/dist/**/*.js',
+  ],
+  darkMode: ['selector', '[data-theme="dark"]'],
+} satisfies Config
+```
+
+## Components
+
+Import components directly from `@murasakijs/ui`:
+
+```tsx
+import { Button, Card, CardHeader, CardTitle, CardContent } from '@murasakijs/ui'
+
+function Example() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Try it out</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Button variant="outline">Click me</Button>
+      </CardContent>
+    </Card>
+  )
+}
+```
+
+The package currently ships:
+
+- **Layout & content** — `Card`, `Separator`, `Accordion`, `Tabs`, `ScrollArea`, `Table`, `Skeleton`
+- **Forms & inputs** — `Button`, `Input`, `Textarea`, `Label`, `Checkbox`, `Switch`, `RadioGroup`, `Select`
+- **Overlays** — `Dialog`, `Sheet`, `Popover`, `Tooltip`, `DropdownMenu`, `Command` (a command palette)
+- **Feedback** — `Alert`, `Badge`, `Progress`, `Toast` / `Toaster` (+ `useToast`)
+- **Misc** — `Avatar`, `cn` (the `clsx` + `tailwind-merge` class helper)
+
+`Button` supports `variant` (`default` / `secondary` / `outline` / `ghost` /
+`destructive` / `link`) and `size` (`default` / `sm` / `lg` / `icon`) props,
+plus `asChild` to render as a different element (Radix `Slot`) — the same
+pattern as the rest of the library.
+
+<Callout type="info">
+  `@murasakijs/ui` is not required — it's Tailwind + Radix under the hood, so
+  you can swap in your own components or another library instead.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Native APIs" href="/docs/guides/native-apis" />
+</Cards>

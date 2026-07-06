@@ -1,0 +1,62 @@
+---
+title: Project structure
+description: What lives where in a murasaki app.
+---
+
+A scaffolded app looks like a Next.js project. You only touch `src/` and
+`murasaki.config.ts` — murasaki owns the app shell and the client bootstrap, so
+there's no `index.html` or entry file to maintain.
+
+```txt
+my-app/
+├─ src/
+│  ├─ app/                 # pages, layouts, globals.css (file-based routing)
+│  │  ├─ layout.tsx        # root layout — wrap it in <App>
+│  │  ├─ page.tsx          # "/" route
+│  │  └─ about/page.tsx    # "/about" route
+│  ├─ api/                 # API route handlers -> /api/*
+│  │  └─ hello/route.ts    # GET/POST handlers
+│  ├─ actions.ts           # 'use server' functions (server actions)
+│  ├─ middleware.ts        # runs before every route (optional)
+│  ├─ lib/                 # your app code (stores, helpers)
+│  └─ assets/              # images, icons
+├─ murasaki.config.ts      # app identity, window, signing
+├─ tailwind.config.ts
+└─ package.json
+```
+
+## `src/app/` — routes
+
+File-based routing over `src/app/**/page.tsx`, with `layout.tsx`, dynamic
+`[param]` segments, and `loading` / `error` / `not-found` boundaries. Your root
+layout wraps everything in `<App>`. See [Routing](/docs/guides/routing).
+
+## `src/api/` — API routes
+
+`src/api/<path>/route.ts` exports one function per HTTP method and is served at
+`/api/<path>`. These run on the server (Node) in both dev and prod. See
+[API Routes](/docs/guides/api-routes).
+
+## Server actions
+
+`'use server'` functions (anywhere under `src/`, e.g. `src/actions.ts`) run on
+the server and are called from the client with `useAction`. See
+[Server Actions](/docs/guides/server-actions).
+
+## `murasaki.config.ts`
+
+Your app's identity, window, and build settings:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.my-app',
+  productName: 'My App',
+  version: '0.1.0',
+  icon: 'src/assets/icon.png',
+  window: { width: 1000, height: 700 },
+})
+```
+
+See [Configuration](/docs/building/configuration) for every field.

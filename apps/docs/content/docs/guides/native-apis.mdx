@@ -1,0 +1,72 @@
+---
+title: Native APIs
+description: What's exposed to your app from murasaki's native surface today.
+---
+
+murasaki's native window, menus, and OS integration are powered by
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) — a
+self-authored Rust binding (tao/wry/muda) — so you never write Rust. This page
+covers what's actually reachable **from your React app** today.
+
+## Window & native menu bar
+
+The window itself — size, title, resizability, macOS vibrancy — is declared
+once in `murasaki.config.ts`'s `window` field, not called imperatively from
+React. See [Configuration](/docs/building/configuration) for the full shape.
+
+On macOS, the standard App/Edit/Window menu bar (About, Services, Hide, Quit,
+Edit, Window) is generated for you and localized from `config.locales` — no
+code required.
+
+## Context menu
+
+The right-click context menu is declared with `useContextMenu` — a hook, not
+markup — and posts to the Rust side, which pops a real `NSMenu` / `HMENU` /
+`GtkMenu`. See the dedicated [Context Menu](/docs/guides/context-menu) guide.
+
+## Built-in menu actions
+
+An item's `action` can be one of the built-in `<Action.*/>` elements instead
+of a function — these run a native role (handled by the OS itself) or a small
+client-side behavior:
+
+| Action | Behavior |
+| --- | --- |
+| `<Action.Copy />`, `<Action.Paste />`, `<Action.Cut />`, `<Action.SelectAll />`, `<Action.Undo />`, `<Action.Redo />` | Native OS edit roles |
+| `<Action.Quit />` | Native quit role |
+| `<Action.Reload />` | Reloads the window (`location.reload()`) |
+| `<Action.Navigate to="/path" />` | Client-side navigation via the router |
+| `<Action.Run action={fn} />` | Runs a plain function (same as passing the function directly) |
+
+## Auto-update
+
+`useUpdate()` / `<UpdateButton />` talk to the native updater over the same
+IPC channel, driven by the `updater` config (GitHub releases or a custom
+endpoint):
+
+```tsx
+import { useUpdate } from 'murasaki'
+
+const { status, latest, check, download, install } = useUpdate()
+```
+
+`status` moves through `idle → checking → available → downloading → ready`
+(or `not-available` / `error`). `<UpdateButton />` is a ready-made button that
+wraps this for the common case.
+
+<Callout type="warn">
+  **Not yet public:** open/save/directory dialogs, clipboard read/write, OS
+  notifications, tray icons, and shell/"reveal in Finder" all exist inside
+  `@murasakijs/native` and are used internally by the murasaki CLI (the native
+  window, the `.app`'s About panel, etc.), but there's no public React hook
+  exposing them to application code yet. If you need one of these today,
+  don't guess at an API — it isn't there. This is tracked for a future
+  release.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Context Menu" href="/docs/guides/context-menu" description="The full useContextMenu API." />
+  <Card title="Configuration" href="/docs/building/configuration" description="Window, signing, and installer settings." />
+</Cards>

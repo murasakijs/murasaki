@@ -1,0 +1,36 @@
+---
+title: Middleware
+description: A route guard that runs before every client-side navigation.
+---
+
+`src/middleware.ts` may export a default function that runs before every
+navigation — initial mount, `push`/`replace`, and browser back/forward — and
+can redirect it:
+
+```ts title="src/middleware.ts"
+import type { Middleware } from 'murasaki'
+
+const middleware: Middleware = ({ pathname }) => {
+  if (pathname === '/admin') return { redirect: '/' }
+}
+
+export default middleware
+```
+
+It may be async (e.g. an auth check) — `<AppRouter>` awaits it before
+rendering the matched route, rendering nothing in between so the guarded
+route never flashes.
+
+<Callout type="info">
+  A redirect loop (5+ consecutive redirects) is caught automatically: murasaki
+  logs a warning and renders the current path as-is rather than hanging.
+</Callout>
+
+This is murasaki's client-side equivalent of Next.js middleware — there's no
+edge runtime involved, since it runs in the same WebView as your routes.
+
+## Next
+
+<Cards>
+  <Card title="Routing" href="/docs/guides/routing" />
+</Cards>
