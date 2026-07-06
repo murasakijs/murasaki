@@ -8,8 +8,11 @@ import { spawnSync } from 'node:child_process'
 import build from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn } from './brand.js'
+import { ensureNodeBinary } from './node-runtime.js'
 import type { MurasakiConfig } from '../config.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
+
+type Arch = 'arm64' | 'x64'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -29,6 +32,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export default async function bundle(argv: string[]) {
   const cwd = process.cwd()
   const config = await loadUserConfig(cwd)
+  // Target arch for the produced .app — defaults to the host arch, but
+  // `--arch arm64`/`--arch x64` lets a single arm64 dev machine also produce
+  // an Intel build (and vice versa). Drives both the fetched Node runtime and
+  // the `murasaki-launcher` binary selection below.
+  const arch = parseArch(argv)
   // Rebuild the client every time by default — bundling is a release step, so
   // silently packaging a stale `dist/client` from an earlier run is a footgun.
   // `--no-build` opts back into reuse (but still builds if it's missing).
@@ -65,7 +73,7 @@ export default async function bundle(argv: string[]) {
   // `Resources/node prod-server.mjs` as a child process and drives the
   // webview itself (see crates/native/src/launcher.rs); `prod-launcher.mjs`
   // is no longer used at runtime.
-  const launcherBinary = await resolveLauncherBinary(nativeDir)
+  const launcherBinary = await resolveLauncherBinary(nativeDir, arch)
   const launcherDest = join(macosDir, productName)
   await copyFile(launcherBinary, launcherDest)
   await chmod(launcherDest, 0o755)
@@ -81,16 +89,19 @@ export default async function bundle(argv: string[]) {
     )
   }
 
-  // Contents/Resources/node — a plain copy of the current Node runtime. It's
-  // now a child process spawned by the launcher binary above rather than the
-  // app's main executable, so its filename no longer affects the Dock/
-  // menu-bar label (that used to require renaming it to the product name).
-  // Distributing to other machines needs a downloaded, target-specific node
-  // (ensureNodeBinary-style fetch); that lands in a later phase. For now we
-  // ship whatever node is running this CLI, which is enough to run on this
-  // machine.
+  // Contents/Resources/node — a downloaded, target-specific Node runtime
+  // (official nodejs.org macOS build, checksum-verified and cached under
+  // ~/.murasaki/node/, see node-runtime.ts), not whatever node happens to be
+  // running this CLI. That matters for two reasons: the CLI's own node might
+  // be the wrong architecture for a cross-arch build (--arch), and even for
+  // the host arch it could be a Homebrew/nvm build linked against libs that
+  // aren't present on other machines. It's a child process spawned by the
+  // launcher binary above rather than the app's main executable, so its
+  // filename no longer affects the Dock/menu-bar label (that used to require
+  // renaming it to the product name).
+  const nodeSrc = await ensureNodeBinary(arch, process.versions.node)
   const nodeDest = join(resourcesDir, 'node')
-  await copyFile(process.execPath, nodeDest)
+  await copyFile(nodeSrc, nodeDest)
   await chmod(nodeDest, 0o755)
 
   // Contents/Resources/prod-server.mjs — spawned by the launcher binary.
@@ -165,6 +176,20 @@ export default async function bundle(argv: string[]) {
 }
 
 /**
+ * `--arch arm64|x64`, defaulting to the host arch (macOS only runs on these
+ * two). Lets an arm64 dev machine also produce an Intel `.app` (and vice
+ * versa) by fetching the matching Node runtime and launcher binary below.
+ */
+function parseArch(argv: string[]): Arch {
+  const i = argv.indexOf('--arch')
+  const value = i >= 0 ? argv[i + 1] : (process.arch as Arch)
+  if (value !== 'arm64' && value !== 'x64') {
+    throw new Error(`murasaki: --arch must be "arm64" or "x64", got ${JSON.stringify(value)}`)
+  }
+  return value
+}
+
+/**
  * Locate the installed `@murasakijs/native` package dir. Resolve from the user
  * project first (the normal, hoisted case), then fall back to resolving from
  * murasaki's own location — `@murasakijs/native` is murasaki's dependency, so
@@ -187,22 +212,26 @@ function resolveNativeModuleDir(cwd: string): string {
 }
 
 /**
- * Locate the compiled `murasaki-launcher` binary for the current host.
+ * Locate the compiled `murasaki-launcher` binary for the target arch.
  * Published `@murasakijs/native` ships prebuilt binaries named
  * `murasaki-launcher.<napi-triple>` (see .github/workflows/native-release.yml
  * and crates/native/package.json's `files`), matching the `.node` bindings'
- * `murasaki-native.<napi-triple>.node` naming. Falls back to a local
- * `cargo build --release --bin murasaki-launcher` output for development,
- * where `@murasakijs/native` resolves to a workspace link to crates/native
- * itself rather than a published package.
+ * `murasaki-native.<napi-triple>.node` naming — this resolves correctly for
+ * cross-arch builds too, since both triples ship in the package. Falls back
+ * to a local `cargo build --release --bin murasaki-launcher` output for
+ * development, where `@murasakijs/native` resolves to a workspace link to
+ * crates/native itself rather than a published package — but only when
+ * `arch` matches the host, since that output is never cross-compiled.
  */
-async function resolveLauncherBinary(nativeDir: string): Promise<string> {
-  const triple = `darwin-${process.arch === 'arm64' ? 'arm64' : 'x64'}`
-  const candidates = [
-    join(nativeDir, `murasaki-launcher.${triple}`),
-    join(nativeDir, 'target/release/murasaki-launcher'),
-    resolve(__dirname, '../../../../crates/native/target/release/murasaki-launcher'),
-  ]
+async function resolveLauncherBinary(nativeDir: string, arch: Arch): Promise<string> {
+  const triple = `darwin-${arch}`
+  const candidates = [join(nativeDir, `murasaki-launcher.${triple}`)]
+  if (arch === process.arch) {
+    candidates.push(
+      join(nativeDir, 'target/release/murasaki-launcher'),
+      resolve(__dirname, '../../../../crates/native/target/release/murasaki-launcher'),
+    )
+  }
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
   }
