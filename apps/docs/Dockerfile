@@ -34,12 +34,19 @@ COPY . .
 RUN corepack prepare pnpm@9.15.0 --activate \
   && pnpm install --frozen-lockfile
 
-# `NEXT_PUBLIC_*` vars are inlined by Next at BUILD time. We deliberately do
-# NOT re-declare them as ARG/ENV here: Dokploy's "Create Environment File"
-# writes the app's env vars to `apps/docs/.env` in the build context, which
-# `next build` loads automatically. Re-declaring an unset `ARG` would set the
-# ENV to an empty string and clobber that .env value.
-RUN pnpm --filter murasaki-docs build
+# Deployed site URL. `NEXT_PUBLIC_*` vars are inlined by Next at BUILD time,
+# so this must be present when `next build` runs. The portable, host-agnostic
+# way to inject it is a build arg:
+#   docker build --build-arg NEXT_PUBLIC_SITE_URL=https://example.com ...
+# When the arg is omitted we `unset` it before building so an EMPTY value
+# can't clobber one provided another way (e.g. apps/docs/.env, which Dokploy's
+# "Create Environment File" writes and `next build` auto-loads); app/layout.tsx
+# falls back to a sane default if it ends up absent. Do NOT turn this into a
+# bare `ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}` — an unset arg would
+# then hard-set it to "" and `new URL("")` fails the build.
+ARG NEXT_PUBLIC_SITE_URL
+RUN if [ -z "$NEXT_PUBLIC_SITE_URL" ]; then unset NEXT_PUBLIC_SITE_URL; fi; \
+    pnpm --filter murasaki-docs build
 
 # -----------------------------------------------------------------------
 # runtime
