@@ -69,6 +69,7 @@ export default function Page() {
 - [なぜ murasaki なのか](#なぜ-murasaki-なのか)
 - [機能](#機能)
 - [CLI リファレンス](#cli-リファレンス)
+- [署名と配布](#署名と配布)
 - [設定 (`murasaki.config.ts`)](#設定-murasakiconfigts)
 - [サーバーアクション](#サーバーアクション)
 - [API ルート](#api-ルート)
@@ -212,6 +213,29 @@ murasaki help        このヘルプを表示
 すでに macOS(arm64/x64)、Windows(x64)、Linux(x64/arm64)向けのビルド済み
 バイナリを提供しています——Windows/Linux 向けアプリパッケージングは
 [ロードマップ](#ロードマップ) で管理しています。
+
+---
+
+## 署名と配布
+
+デフォルトでは、`murasaki bundle`/`murasaki installer` は**未署名**(ad-hoc)の
+`.app`/`.dmg` を生成します。受け取った側は初回のみ右クリック→開く、または
+`xattr -dr com.apple.quarantine "<path>"` を実行して開きます。
+
+警告なしで配布するには、自分の Apple Developer ID で署名・公証します——
+murasaki 自体は証明書を一切持ちません:
+
+```
+murasaki bundle --sign                 # .app を Developer ID で署名
+murasaki installer --sign --notarize   # .dmg を Apple に提出して公証チケットをステープル
+```
+
+署名 identity は `$MURASAKI_SIGN_IDENTITY` → `config.sign.identity` →
+キーチェーン内の最初の "Developer ID Application" identity の順で解決されます。
+`--notarize` は `--sign` を必須とし、公証用の認証情報を `APPLE_ID` /
+`APPLE_TEAM_ID` / `APPLE_APP_PASSWORD`(App 用パスワード)という環境変数から
+読み取ります——設定ファイルやリポジトリには一切書きません。どちらも有料の
+Apple Developer Program メンバーシップが必要です。
 
 ---
 

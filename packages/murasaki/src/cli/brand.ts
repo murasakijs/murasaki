@@ -79,6 +79,22 @@ export function error(msg: string): string {
 }
 
 /**
+ * Printed after an unsigned (ad-hoc) `.app`/`.dmg` is produced — murasaki
+ * ships no certificate, so builds are ad-hoc signed by default and macOS
+ * quarantines them for anyone who downloads them from outside the Mac App
+ * Store. Shared by `bundle` and `installer` (see cli/bundle.ts's and
+ * cli/installer.ts's `--sign`/`--notarize` handling).
+ */
+export function unsignedNote(path: string): string {
+  return (
+    `\n${warn('This build is unsigned (ad-hoc). Recipients open it the first time with')}\n` +
+    `${dim(`  right-click → Open (once), or:  xattr -dr com.apple.quarantine "${path}"`)}\n` +
+    `${dim('  For warning-free distribution, sign + notarize:  murasaki installer --sign --notarize')}\n` +
+    `${dim('  (needs a paid Apple Developer ID; see the README "Signing & distribution" section)')}\n`
+  )
+}
+
+/**
  * A Vite `Logger` that suppresses Vite's own info banner (murasaki prints its
  * own) while still surfacing real warnings and errors, branded through the
  * helpers above. Used with `logLevel: 'silent'` so nothing slips through the

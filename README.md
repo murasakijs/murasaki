@@ -68,6 +68,7 @@ on macOS, HMENU on Windows, GtkMenu on Linux), not an HTML popup.
 - [Why murasaki?](#why-murasaki)
 - [Features](#features)
 - [CLI reference](#cli-reference)
+- [Signing & distribution](#signing--distribution)
 - [Configuration (`murasaki.config.ts`)](#configuration-murasakiconfigts)
 - [Server Actions](#server-actions)
 - [API Routes](#api-routes)
@@ -210,6 +211,29 @@ murasaki help        Show this help
 itself already ships prebuilt binaries for macOS (arm64/x64), Windows (x64),
 and Linux (x64/arm64) — Windows/Linux app packaging is tracked in the
 [Roadmap](#roadmap).
+
+---
+
+## Signing & distribution
+
+By default, `murasaki bundle`/`murasaki installer` produce an **unsigned**
+(ad-hoc) `.app`/`.dmg` — recipients open it the first time with right-click →
+Open, or by running `xattr -dr com.apple.quarantine "<path>"`.
+
+For warning-free distribution, sign and notarize with your own Apple
+Developer ID — murasaki ships no certificate of its own:
+
+```
+murasaki bundle --sign                 # Developer ID-sign the .app
+murasaki installer --sign --notarize   # + submit the .dmg to Apple, staple the ticket
+```
+
+The signing identity resolves from `$MURASAKI_SIGN_IDENTITY`, then
+`config.sign.identity`, then the first "Developer ID Application" identity in
+your keychain. `--notarize` requires `--sign` and reads your notarization
+credentials from `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD`
+(an app-specific password) — never from config or a file. Both require a paid
+Apple Developer Program membership.
 
 ---
 

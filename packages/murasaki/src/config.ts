@@ -84,6 +84,18 @@ export interface MurasakiConfig {
     /** Icon size in the DMG window. Default 128. */
     iconSize?: number
   }
+
+  /**
+   * macOS code-signing. murasaki signs with YOUR certificate — it ships none.
+   * Secrets (notarization credentials) are read from env vars, never here.
+   */
+  sign?: {
+    /** Signing identity, e.g. "Developer ID Application: Name (TEAMID)". Defaults to
+     *  $MURASAKI_SIGN_IDENTITY, then the first "Developer ID Application" in your keychain. */
+    identity?: string
+    /** Path to a custom entitlements .plist. Defaults to a Node-friendly hardened-runtime set. */
+    entitlements?: string
+  }
 }
 
 export function defineConfig(config: MurasakiConfig): MurasakiConfig {

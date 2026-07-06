@@ -4,7 +4,7 @@ import { mkdtemp, rm, cp, copyFile, mkdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { success, warn, error, dim } from './brand.js'
+import { success, warn, error, dim, unsignedNote } from './brand.js'
 import bundle from './bundle.js'
 import type { MurasakiConfig } from '../config.js'
 
@@ -32,6 +32,18 @@ export default async function installer(argv: string[]) {
     return
   }
 
+  // `--sign` is parsed (and applied) by `bundle` itself — argv is forwarded
+  // as-is below. `--notarize` only makes sense on top of a Developer
+  // ID-signed build, so it requires `--sign` alongside it.
+  const shouldSign = argv.includes('--sign')
+  const shouldNotarize = argv.includes('--notarize')
+  if (shouldNotarize && !shouldSign) {
+    throw new Error(
+      'murasaki: --notarize requires --sign (notarization only accepts Developer ID-signed ' +
+        'code) — run `murasaki installer --sign --notarize`.',
+    )
+  }
+
   const config = await loadUserConfig(cwd)
   const productName = config.productName
   const version = config.version ?? '0.0.0'
@@ -56,6 +68,12 @@ export default async function installer(argv: string[]) {
     if (!styled) await plainDmg(staging, productName, dmgPath)
 
     process.stdout.write(`\n${success(`installer written  ${dim(dmgPath)}`)}\n\n`)
+
+    if (shouldNotarize) {
+      await notarizeDmg(dmgPath)
+    } else if (!shouldSign) {
+      process.stdout.write(unsignedNote(dmgPath))
+    }
   } finally {
     await rm(staging, { recursive: true, force: true })
   }
@@ -273,6 +291,63 @@ function escapeAppleScript(s: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/**
+ * Apple notarization for `--notarize`, following Apple's documented flow:
+ * https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
+ * Submits the (Developer ID-signed) DMG to Apple's notary service, waits for
+ * the result, then staples the ticket so Gatekeeper can verify it offline —
+ * without stapling, a downloaded DMG needs network access to pass Gatekeeper.
+ * Credentials are read from the environment only; murasaki never stores or
+ * ships them.
+ */
+async function notarizeDmg(dmgPath: string): Promise<void> {
+  const appleId = process.env.APPLE_ID
+  const teamId = process.env.APPLE_TEAM_ID
+  const password = process.env.APPLE_APP_PASSWORD
+  const missing = [
+    !appleId && 'APPLE_ID',
+    !teamId && 'APPLE_TEAM_ID',
+    !password && 'APPLE_APP_PASSWORD',
+  ].filter((v): v is string => !!v)
+  if (missing.length > 0) {
+    throw new Error(
+      `murasaki: --notarize requires ${missing.join(', ')} in the environment ` +
+        '(an app-specific password for APPLE_APP_PASSWORD — see the README "Signing & distribution" section).',
+    )
+  }
+
+  process.stdout.write(`\n${dim('submitting for notarization…')}\n`)
+  const submit = spawnSync(
+    'xcrun',
+    [
+      'notarytool',
+      'submit',
+      dmgPath,
+      '--apple-id',
+      appleId as string,
+      '--team-id',
+      teamId as string,
+      '--password',
+      password as string,
+      '--wait',
+    ],
+    { stdio: 'inherit' },
+  )
+  if (submit.status !== 0) {
+    throw new Error(
+      'murasaki: notarization failed — run `xcrun notarytool log <submission-id>` (the id is ' +
+        'printed above) for details.',
+    )
+  }
+
+  const staple = spawnSync('xcrun', ['stapler', 'staple', dmgPath], { stdio: 'inherit' })
+  if (staple.status !== 0) {
+    throw new Error('murasaki: xcrun stapler staple failed.')
+  }
+
+  process.stdout.write(`\n${success('notarized and stapled')}\n\n`)
 }
 
 /** The original, unstyled DMG — used as a fallback if styling fails. */

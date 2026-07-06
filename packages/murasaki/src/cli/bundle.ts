@@ -1,13 +1,13 @@
 import { resolve, dirname, join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import build from './build.js'
 import buildServer from './build-server.js'
-import { dim, success, warn } from './brand.js'
+import { dim, success, warn, unsignedNote } from './brand.js'
 import { ensureNodeBinary } from './node-runtime.js'
 import type { MurasakiConfig } from '../config.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
@@ -41,6 +41,11 @@ export default async function bundle(argv: string[]) {
   // silently packaging a stale `dist/client` from an earlier run is a footgun.
   // `--no-build` opts back into reuse (but still builds if it's missing).
   const skipBuild = argv.includes('--no-build')
+  // Real Developer ID signing (see signApp below) instead of the default
+  // ad-hoc launcher signature. Off by default — murasaki ships no
+  // certificate, so this only works once the app developer supplies their
+  // own (config.sign.identity / $MURASAKI_SIGN_IDENTITY / their keychain).
+  const shouldSign = argv.includes('--sign')
   if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await build(argv)
   // Always (re)built — cheap relative to the client build, and must exist
   // before packaging even if dist/client was already up to date.
@@ -172,7 +177,147 @@ export default async function bundle(argv: string[]) {
     infoPlist(config, productName, iconResource !== null),
   )
 
+  // Real Developer ID signing, on top of the ad-hoc launcher signature
+  // applied above — see signApp's doc comment for the full flow.
+  if (shouldSign) await signApp(appDir, config)
+
   process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
+
+  if (!shouldSign) process.stdout.write(unsignedNote(appDir))
+}
+
+/**
+ * Real Developer ID signing for `--sign`, following Apple's documented
+ * hardened-runtime signing flow (prerequisite for notarization — see
+ * installer.ts's `--notarize`): https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
+ *
+ * murasaki ships no certificate of its own — this signs with whatever
+ * Developer ID Application identity the app developer supplies via
+ * $MURASAKI_SIGN_IDENTITY, `config.sign.identity`, or their keychain.
+ */
+async function signApp(appDir: string, config: MurasakiConfig): Promise<void> {
+  const identity = resolveSignIdentity(config)
+  const entitlements = await resolveEntitlements(config)
+
+  // Sign inner code first, then the outer bundle — codesign requires nested
+  // code to already carry a valid signature before the containing bundle is
+  // sealed. `--deep` is deliberately not used: it's an Apple-documented
+  // anti-pattern that hides which nested binaries actually got signed.
+  const resourcesDir = join(appDir, 'Contents/Resources')
+  const targets: string[] = []
+  const nodeBin = join(resourcesDir, 'node')
+  if (existsSync(nodeBin)) targets.push(nodeBin)
+  targets.push(...(await findNodeAddons(resourcesDir)))
+  targets.push(join(appDir, 'Contents/MacOS', config.productName))
+  targets.push(appDir)
+
+  for (const target of targets) {
+    const result = spawnSync(
+      'codesign',
+      [
+        '--force',
+        '--options',
+        'runtime',
+        '--timestamp',
+        '--entitlements',
+        entitlements,
+        '--sign',
+        identity,
+        target,
+      ],
+      { encoding: 'utf8' },
+    )
+    if (result.status !== 0) {
+      throw new Error(`murasaki: codesign failed for ${target}:\n${result.stderr.trim()}`)
+    }
+  }
+
+  const verify = spawnSync('codesign', ['--verify', '--strict', appDir], { encoding: 'utf8' })
+  if (verify.status !== 0) {
+    throw new Error(`murasaki: codesign --verify --strict failed:\n${verify.stderr.trim()}`)
+  }
+
+  // Gatekeeper (spctl) legitimately says "rejected" for a signed-but-not-yet-
+  // notarized build — that's expected here, so it's logged for visibility
+  // rather than treated as a failure. `murasaki installer --notarize` is what
+  // actually clears it.
+  const spctl = spawnSync('spctl', ['-a', '-vv', appDir], { encoding: 'utf8' })
+  process.stdout.write(`\n${dim((spctl.stderr || spctl.stdout).trim())}\n`)
+
+  process.stdout.write(`\n${success(`signed with ${dim(identity)}`)}\n`)
+}
+
+/**
+ * Resolve the Developer ID Application identity to sign with. Priority:
+ * $MURASAKI_SIGN_IDENTITY > `config.sign.identity` > auto-detected from the
+ * signer's keychain (`security find-identity`) — the common case for a
+ * solo developer who already has exactly one.
+ */
+function resolveSignIdentity(config: MurasakiConfig): string {
+  if (process.env.MURASAKI_SIGN_IDENTITY) return process.env.MURASAKI_SIGN_IDENTITY
+  if (config.sign?.identity) return config.sign.identity
+
+  const find = spawnSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+    encoding: 'utf8',
+  })
+  const line = find.stdout?.split('\n').find((l) => l.includes('Developer ID Application'))
+  const quoted = line?.match(/"([^"]+)"/)?.[1]
+  if (quoted) return quoted
+  const hash = line?.match(/\b([0-9A-Fa-f]{40})\b/)?.[1]
+  if (hash) return hash
+
+  throw new Error(
+    'murasaki: --sign: no Developer ID Application identity found (set MURASAKI_SIGN_IDENTITY, ' +
+      'config.sign.identity, or add one to your keychain — needs a paid Apple Developer account).',
+  )
+}
+
+/**
+ * Entitlements for the hardened-runtime signing above. Uses
+ * `config.sign.entitlements` if it's set and exists; otherwise writes a
+ * default plist to a temp file. Node needs the JIT + unsigned-executable-
+ * memory + no-library-validation entitlements to keep launching once the
+ * hardened runtime is on — it JITs and loads unsigned `.node` add-ons.
+ */
+async function resolveEntitlements(config: MurasakiConfig): Promise<string> {
+  const custom = config.sign?.entitlements ? resolve(process.cwd(), config.sign.entitlements) : null
+  if (custom && existsSync(custom)) return custom
+
+  const dir = await mkdtemp(join(tmpdir(), 'murasaki-entitlements-'))
+  const path = join(dir, 'entitlements.plist')
+  await writeFile(path, DEFAULT_ENTITLEMENTS_PLIST)
+  return path
+}
+
+const DEFAULT_ENTITLEMENTS_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>
+`
+
+/** Recursively collect every `*.node` native add-on under `dir` — each needs
+ * its own hardened-runtime signature before the outer bundle is sealed. */
+async function findNodeAddons(dir: string): Promise<string[]> {
+  const acc: string[] = []
+  await walkNodeAddons(dir, acc)
+  return acc
+}
+
+async function walkNodeAddons(dir: string, acc: string[]): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  for (const entry of entries) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      await walkNodeAddons(full, acc)
+    } else if (entry.name.endsWith('.node')) {
+      acc.push(full)
+    }
+  }
 }
 
 /**
