@@ -54,6 +54,15 @@ jobs:
       - name: Build @murasakijs/ui
         run: pnpm --filter @murasakijs/ui build
 
+      # npm always ships README.md from the package dir (regardless of `files`),
+      # so copy the root README into each package before publishing — otherwise
+      # the npmjs.com pages for murasaki/create-murasaki are blank. Single source
+      # of truth stays the root README; this is CI-only (not committed).
+      - name: Stage README for npm pages
+        run: |
+          cp README.md packages/murasaki/README.md
+          cp README.md packages/create-murasaki/README.md
+
       - name: Verify package versions match tag (if triggered by tag)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
