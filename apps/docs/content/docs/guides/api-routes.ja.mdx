@@ -1,0 +1,74 @@
+---
+title: API Routes
+description: src/api 配下の、Next.js 風のファイルベース HTTP エンドポイント。
+---
+
+`src/api/<path>/route.ts` ファイルは HTTP メソッドごとに1つの関数をエクスポートし、
+`/api/<path>` として提供されます:
+
+```ts title="src/api/hello/route.ts"
+// GET /api/hello
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (request) => {
+  return Response.json({ message: `Hello from Node ${process.version}` })
+}
+
+export const POST: RouteHandler = async (request) => {
+  const body = await request.json()
+  return Response.json({ received: body })
+}
+```
+
+`RouteHandler` は Web の `Request` と、`params` を含む `context` を受け取り、Web の
+`Response` を返します — `Response.json(...)`、`new Response(...)`、ステータスコード、
+ヘッダーなど、すべて標準的なものです。
+
+## 動的セグメント
+
+`[name]` フォルダはセグメントをキャプチャし、`context.params` に公開されます:
+
+```ts title="src/api/greet/[name]/route.ts"
+// GET /api/greet/:name
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (_request, { params }) => {
+  return Response.json({ greeting: `Hello, ${params.name}!` })
+}
+```
+
+<Callout type="warn">
+  現在サポートされているのは単一セグメントの `[name]` パラメータのみです — キャッチ
+  オール(`[...name]`)セグメントはまだ実装されていません。
+</Callout>
+
+## ルートを呼び出す
+
+```ts
+const res = await fetch('/api/hello')
+const data = await res.json()
+```
+
+ハンドラは開発時(Vite ミドルウェア)・本番時(バンドルされた Node サーバー)のいずれ
+でもサーバー上で実行されるため、ファイルシステム、データベース、シークレットなどにアク
+セスできます。
+
+## API ルート vs. サーバーアクション
+
+どちらもサーバー上で実行されます — 形状で使い分けます:
+
+- **API ルート**はアドレス可能な HTTP エンドポイントです。どんなクライアントからでも
+  `fetch` できます — Webhook、サードパーティの呼び出し元、REST 的なサーフェスに向いて
+  います。
+- **サーバーアクション**([ガイド](/docs/guides/server-actions))は、React 19 のフォー
+  ム / `useAction` フローに組み込まれた、型付きの RPC です — URL も `fetch` の定型コー
+  ドも不要です。
+
+両者は同じアプリの中で共存できます。
+
+## 次へ
+
+<Cards>
+  <Card title="Server Actions" href="/docs/guides/server-actions" />
+  <Card title="ミドルウェア" href="/docs/guides/middleware" />
+</Cards>

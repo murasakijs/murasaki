@@ -1,0 +1,129 @@
+---
+title: 配布
+description: 本物の .app / .dmg を出荷する — クロスアーキテクチャビルド、署名、公証、CI。
+---
+
+`murasaki bundle` / `murasaki installer` は、現在のところ **macOS**(`.app` /
+`.dmg`)で実装・検証済みです。他のプラットフォームでは現時点で「まだサポートされてい
+ません」というメッセージが表示されます。`@murasakijs/native` 自体は、macOS
+(arm64/x64)、Windows(x64)、Linux(x64/arm64)向けにビルド済みバイナリをすでに提供
+しています — Windows/Linux 向けのアプリパッケージングはロードマップに含まれていま
+す。
+
+## クロスアーキテクチャビルド
+
+`.app` には、ポータブルでターゲット固有の Node ランタイム(nodejs.org からのチェック
+サム検証済みダウンロードで、`~/.murasaki/node/` にキャッシュされます)と、コンパイル
+済みのネイティブランチャーバイナリが同梱されます — CLI をたまたま実行している
+`node` ではありません。つまり、Apple Silicon の開発マシンから Intel 向けビルドを生成
+することも、その逆もできます:
+
+```bash
+murasaki bundle --arch x64     # Apple Silicon Mac 上で x64 の .app をビルド
+murasaki bundle --arch arm64   # Intel Mac 上で arm64 の .app をビルド
+```
+
+`murasaki installer` も、同じ方法で `--arch` を `bundle` に転送します。
+
+## 署名と公証
+
+デフォルトでは、`murasaki bundle` / `murasaki installer` は**未署名**(アドホック)
+の `.app` / `.dmg` を生成します — 受け取った側は、初回のみ右クリック →**開く**、また
+は次を実行して開きます:
+
+```bash
+xattr -dr com.apple.quarantine "<path>"
+```
+
+警告なしで配布するには、あなた自身の Apple Developer ID で署名・公証してください —
+murasaki は独自の証明書を一切同梱していません:
+
+```bash
+murasaki bundle --sign                 # .app を Developer ID で署名する
+murasaki installer --sign --notarize   # + .dmg を Apple に提出し、チケットをステープルする
+```
+
+- **`--sign`** は、`.app` をハードンドランタイムで署名します(Apple のドキュメント
+  化されたフローどおり: まず内側のコード、その後外側のバンドル)。署名 identity は
+  `$MURASAKI_SIGN_IDENTITY`、次に `config.sign.identity`、次にキーチェーン内の最初の
+  "Developer ID Application" identity の順で解決されます。Entitlements は、設定され
+  ていれば `config.sign.entitlements` から、そうでなければハードンドランタイムの下で
+  Node が必要とする JIT / 未署名実行可能メモリ / ライブラリ検証なしの entitlements を
+  付与するデフォルトの plist から取得されます。
+- **`--notarize`** には `--sign` が必須です(公証は Developer ID 署名済みのコードしか
+  受け付けません)。認証情報は `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`
+  (アプリ専用パスワード)から読み取られます — **設定やファイルからは決して読み取りま
+  せん**。`.dmg` を Apple の notary サービスに提出し、結果を待ってから、Gatekeeper が
+  オフラインで検証できるようチケットをステープルします。
+
+どちらも、有料の Apple Developer Program メンバーシップが必要です。
+
+### GitHub Actions による署名済みリリース
+
+タグの push で `.dmg` をビルドし、(任意で)署名・公証して GitHub Release に添付しま
+す。あなたのアプリに `.github/workflows/release.yml` として次を追加してください:
+
+```yaml title=".github/workflows/release.yml"
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/app.keychain-db"
+          security create-keychain -p "" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "" "$KC"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$CERT_PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+      - name: Build installer
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        run: |
+          if [ "$HAS_CERT" = "true" ]; then
+            pnpm exec murasaki installer --sign --notarize
+          else
+            pnpm exec murasaki installer
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+```
+
+署名・公証するには、次のリポジトリシークレットを追加してください(未署名の `.dmg` に
+するにはすべて省略します): `APPLE_CERTIFICATE_P12`(あなたの Developer ID `.p12` の
+base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
+`APPLE_APP_PASSWORD`。
+
+<Callout type="info">
+  これらのシークレットを設定やソースにコミットしないでください — `--notarize` は意図
+  的に、環境変数からしかそれらを読み取りません。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="CLI リファレンス" href="/docs/building/cli" />
+  <Card title="設定" href="/docs/building/configuration" />
+</Cards>

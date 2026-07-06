@@ -13,19 +13,22 @@ const workspaceRoot = path.join(import.meta.dirname, "..", "..");
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
-  // Static export: the same `out/` folder deploys to GitHub Pages or a VPS
-  // (nginx/caddy) behind murasaki.dev. No `basePath` is set because the
-  // target is the root of a domain — a project-page deploy (e.g.
-  // username.github.io/murasaki) would additionally need `basePath` /
-  // `assetPrefix` set to the repo name.
-  output: "export",
+  // Dynamic server deploy (Dokploy/VPS), not a static export: this app is a
+  // real Next.js server (i18n middleware, per-query server search with a
+  // Japanese tokenizer — neither is possible from `output: "export"`).
+  // `standalone` traces the minimal `node_modules` subset the server needs
+  // into `.next/standalone`, which the Dockerfile copies into the runner
+  // image instead of shipping the whole workspace.
+  output: "standalone",
+  // The workspace root (see `workspaceRoot` above) isn't necessarily where
+  // this app's Docker build runs `pnpm install` from, but locally it's the
+  // right place to trace `node_modules` up from for the pnpm workspace.
+  outputFileTracingRoot: workspaceRoot,
   images: {
-    // No Image Optimization server is available for a static export.
+    // No Image Optimization server is running in the container; keep it
+    // simple rather than wiring one up.
     unoptimized: true,
   },
-  // Serves `path/index.html` for nested routes, which is what GitHub Pages
-  // (and most static hosts) expect.
-  trailingSlash: true,
   turbopack: {
     root: workspaceRoot,
   },

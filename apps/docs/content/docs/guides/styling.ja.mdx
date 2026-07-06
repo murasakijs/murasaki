@@ -1,0 +1,82 @@
+---
+title: スタイリング
+description: Tailwind CSS + @murasakijs/ui、shadcn スタイルのコンポーネントライブラリ。
+---
+
+スキャフォールドには Tailwind CSS と
+[`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) が同梱されています —
+Radix プリミティブの上に構築された shadcn/ui スタイルのコンポーネントライブラリで、
+shadcn/ui ユーザーがすでに知っている `cn()` + `class-variance-authority` の慣習でスタ
+イリングされています。
+
+## セットアップ
+
+スタイルシートを一度 import し(スキャフォールドはすでにルートレイアウトでこれを行って
+います)、共有プリセットで Tailwind の設定を拡張します:
+
+```tsx title="src/app/layout.tsx"
+import '@murasakijs/ui/styles.css'
+import './globals.css'
+```
+
+```ts title="tailwind.config.ts"
+import type { Config } from 'tailwindcss'
+
+export default {
+  presets: [require('@murasakijs/ui/tailwind-preset')],
+  content: [
+    './src/**/*.{ts,tsx}',
+    './node_modules/@murasakijs/ui/dist/**/*.js',
+  ],
+  darkMode: ['selector', '[data-theme="dark"]'],
+} satisfies Config
+```
+
+## コンポーネント
+
+コンポーネントは `@murasakijs/ui` から直接 import します:
+
+```tsx
+import { Button, Card, CardHeader, CardTitle, CardContent } from '@murasakijs/ui'
+
+function Example() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Try it out</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Button variant="outline">Click me</Button>
+      </CardContent>
+    </Card>
+  )
+}
+```
+
+現時点でパッケージが提供しているのは:
+
+- **レイアウト & コンテンツ** — `Card`、`Separator`、`Accordion`、`Tabs`、
+  `ScrollArea`、`Table`、`Skeleton`
+- **フォーム & 入力** — `Button`、`Input`、`Textarea`、`Label`、`Checkbox`、
+  `Switch`、`RadioGroup`、`Select`
+- **オーバーレイ** — `Dialog`、`Sheet`、`Popover`、`Tooltip`、`DropdownMenu`、
+  `Command`(コマンドパレット）
+- **フィードバック** — `Alert`、`Badge`、`Progress`、`Toast` / `Toaster`
+  （+ `useToast`）
+- **その他** — `Avatar`、`cn`（`clsx` + `tailwind-merge` のクラスヘルパー）
+
+`Button` は `variant`(`default` / `secondary` / `outline` / `ghost` /
+`destructive` / `link`）と `size`（`default` / `sm` / `lg` / `icon`）の props に加え
+て、別の要素としてレンダーするための `asChild`（Radix の `Slot`）をサポートしています
+— ライブラリの他の部分と同じパターンです。
+
+<Callout type="info">
+  `@murasakijs/ui` は必須ではありません — その正体は Tailwind + Radix なので、代わりに
+  自分のコンポーネントや別のライブラリに差し替えることもできます。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="ネイティブ API" href="/docs/guides/native-apis" />
+</Cards>

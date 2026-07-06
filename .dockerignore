@@ -1,0 +1,44 @@
+# Build context for apps/docs/Dockerfile is the monorepo root (needed so the
+# build can see pnpm-workspace.yaml + the other workspace packages), so this
+# file lives here rather than under apps/docs/ — Docker only honors a
+# `.dockerignore` (or `<Dockerfile-name>.dockerignore`) located at the
+# *context root*, never one sitting next to a Dockerfile in a subdirectory.
+# If more Dockerfiles are added for other apps/packages later, this file
+# covers all of them.
+
+# Version control / CI / editor
+.git
+.github
+.claude
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Dependencies — reinstalled fresh inside the image via `pnpm install`.
+node_modules
+**/node_modules
+.pnpm-store
+
+# Build outputs — rebuilt fresh inside the image; local artifacts would also
+# be the wrong platform/arch for native deps (e.g. sharp) if copied in.
+**/.next
+**/out
+**/dist
+**/build
+**/.turbo
+**/.source
+**/*.tsbuildinfo
+
+# Rust (crates/native) — huge (multi-GB `target/`) and irrelevant to the
+# docs build; prebuilt `.node` binaries are also host-platform-specific.
+**/target
+crates/native/*.node
+crates/native/npm/**/*.node
+
+# Env / logs / local scratch
+.env
+.env.local
+*.log
+.tmp
+tmp

@@ -1,0 +1,121 @@
+---
+title: コンテキストメニュー
+description: useContextMenu で本物の OS コンテキストメニューを宣言する — HTML ポップアップは一切関与しません。
+---
+
+murasaki のコンテキストメニューは、マークアップではなくフックで宣言するため、あなたの
+state のすぐ隣で使えます — その `action` は `useState` のセッターをクロージャできます。
+HTML は一切レンダーされません。項目は Rust 側に投げられ、本物の OS メニュー(macOS で
+は `NSMenu`、Windows では `HMENU`、Linux では `GtkMenu`)がポップアップします。
+
+## ウィンドウ全体のメニュー
+
+id を指定せずに `useContextMenu` を呼び出すと、デフォルトメニューが宣言されます —
+スコープ付きメニューに占有されていない場所であれば、ユーザーがどこを右クリックしても開
+きます:
+
+```tsx title="src/app/layout.tsx"
+import { useContextMenu, Action } from 'murasaki'
+
+useContextMenu([
+  { label: 'Reload', shortcut: 'command,R', action: <Action.Reload /> },
+  { separator: true },
+  { label: 'Copy', action: <Action.Copy /> },
+])
+```
+
+## スコープ付きメニュー
+
+メニューに id を与え、対応する `<ContextMenuTrigger>` で領域にタグ付けします —
+その領域だけがそのメニューを開き、ウィンドウのデフォルトメニューより優先されます:
+
+```tsx
+import { useContextMenu, ContextMenuTrigger } from 'murasaki'
+import { useState } from 'react'
+
+function Counter() {
+  const [count, setCount] = useState(0)
+
+  useContextMenu('card', [
+    { label: 'Increment', action: () => setCount((n) => n + 1) },
+  ])
+
+  return (
+    <ContextMenuTrigger id="card">
+      <div>Clicked {count} times</div>
+    </ContextMenuTrigger>
+  )
+}
+```
+
+`<ContextMenuTrigger>` は、子要素がちょうど1つの場合はデフォルトでそれをクローンしま
+す(ラッパーノードなし)。複数の子要素がある場合など、代わりに `display: contents` の
+`<span>` ラッパーを強制するには `asChild={false}` を渡します。
+
+## 項目の形
+
+各エントリはディバイダーか、以下のいずれかです:
+
+```ts
+interface ContextMenuEntry {
+  label: string
+  shortcut?: string          // 例: "command,I" — keydown にも直接紐づけられる
+  disabled?: boolean
+  action?: ContextMenuAction // 組み込みの <Action.*/> 要素、または関数
+  items?: ContextMenuItemSpec[] // action の代わりのサブメニュー
+}
+
+type ContextMenuItemSpec = ContextMenuEntry | { separator: true }
+```
+
+`shortcut` は、メニューのネイティブなアクセラレータラベルを設定すると同時に
+`keydown` ハンドラを登録するため、メニューが開いていなくても発火します。
+
+## Actions
+
+`action` には、あなた自身の関数か、組み込みの `<Action.*/>` 要素のいずれかを指定でき
+ます — ネイティブ OS のロール(`Copy`、`Paste`、`Cut`、`SelectAll`、`Undo`、`Redo`、
+`Quit`)、またはクライアントの挙動(`Reload`、`Navigate`、`Run`)です。全リストは
+[Native APIs](/docs/guides/native-apis#built-in-menu-actions)を参照してください。
+
+## `createActions` による再利用可能な Actions
+
+アプリの actions を(典型的には `src/lib/action.ts` に、store に裏打ちされた形で)一度
+だけ定義すれば、どこからでも呼び出せます — そして `<Action.name />` として、どのメニュ
+ーにも組み込めます:
+
+```ts title="src/lib/action.ts"
+import { createActions } from 'murasaki'
+import { useCounter } from './counter'
+
+export const Action = createActions({
+  increment: () => useCounter.getState().increment(),
+  reset: () => useCounter.getState().reset(),
+})
+```
+
+```tsx
+import { Action } from '@/lib/action'
+
+useContextMenu('card', [
+  { label: 'Increment', shortcut: 'command,I', action: <Action.increment /> },
+  { label: 'Reset counter', action: <Action.reset /> },
+])
+```
+
+`createActions` が返すオブジェクトには組み込みの action(`Action.Copy`、
+`Action.Reload` など)も含まれるため、1つのファイルで `Action` を import するだけです
+べてをまかなえます。
+
+<Callout type="info">
+  ウィンドウ全体のメニュー(id なしの `useContextMenu(items)`)は、同時に1つだけマウン
+  トされるべきです — 2つ目をマウントすると開発時に警告がログに出力され、最後にマウント
+  されたものが優先されます。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="ネイティブ API" href="/docs/guides/native-apis" description="murasaki のネイティブサーフェスの残り。" />
+  <Card title="スタイリング" href="/docs/guides/styling" description="Tailwind + @murasakijs/ui。" />
+</Cards>

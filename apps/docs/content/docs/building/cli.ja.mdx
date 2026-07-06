@@ -1,0 +1,104 @@
+---
+title: CLI リファレンス
+description: dev、build、bundle、installer など、murasaki のすべてのコマンド。
+---
+
+```txt
+murasaki dev         Vite の開発サーバー + ネイティブウィンドウを起動する(HMR、Fast Refresh)
+murasaki build       本番用の Vite ビルド → dist/client
+murasaki bundle      現在のプラットフォーム向けのネイティブアプリフォルダ / .app
+murasaki installer   現在のプラットフォーム向けの配布用インストーラー
+murasaki init        Rust ツールチェーンをインストールする(@murasakijs/native 自体をいじる場合のみ)
+murasaki icon        1つの PNG から .icns / .ico / .png を生成する
+murasaki release     自動更新マニフェストのヘルパー
+murasaki help        このヘルプを表示する
+```
+
+<Callout type="warn">
+  `murasaki bundle` と `murasaki installer` は、現在のところ **macOS** で実装・検証済み
+  です。他のプラットフォームでは、現時点ではインストーラーを生成する代わりに「まだサポ
+  ートされていません」というメッセージが表示されます — `murasaki dev` 自体は macOS、
+  Windows、Linux で動作します。
+</Callout>
+
+## `murasaki dev`
+
+子プロセスで Vite の開発サーバーを起動し、それを指すネイティブウィンドウをアタッチしま
+す — React Fast Refresh + HMR は通常どおり動作します。編集して保存すると、ウィンドウが
+更新されます。`config.devPort`(デフォルト `5178`)で実行され、そのポートが使用中なら
+自動的にインクリメントされます。
+
+## `murasaki build`
+
+本番用の Vite ビルド → `dist/client`。
+
+## `murasaki bundle`
+
+`dist/client` + コンパイル済みのサーバーアクションレジストリ + ポータブルな Node ラン
+タイム + ネイティブランチャーバイナリを、`dist/bundle/` の `<productName>.app` にパッ
+ケージングします。
+
+```bash
+murasaki bundle              # ホストアーキテクチャ、アドホック署名(未署名配布)
+murasaki bundle --arch x64   # クロスアーキテクチャ: Apple Silicon 上で x64 の .app をビルド
+murasaki bundle --sign       # Developer ID で署名する
+murasaki bundle --no-build   # 再ビルドせず既存の dist/client を再利用する
+```
+
+- **`--arch arm64|x64`** — 対象アーキテクチャ(デフォルトはホストのアーキテクチャ)。
+- **`--sign`** — `.app` を Developer ID で署名する(詳しくは
+  [Distribution](/docs/building/distribution#signing--notarization)を参照)。
+- **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップす
+  る。
+
+## `murasaki installer`
+
+`bundle` で生成した `.app` を、`dist/<productName>-<version>.dmg` にあるドラッグイン
+ストール用の `.dmg` にラップします。背景画像と配置されたアイコンでスタイリングされます
+(Finder のスタイリングに失敗した場合、例えば Automation の権限が不足している場合は、
+プレーンな DMG にフォールバックします)。
+
+```bash
+murasaki installer                     # 未署名の .dmg(最初に再バンドルする)
+murasaki installer --sign --notarize   # Developer ID 署名 + Apple への提出 + ステープル
+murasaki installer --no-build          # 既存の dist/bundle/<App>.app を再利用する
+```
+
+- **`--sign`** — `bundle` に転送されます。
+- **`--notarize`** — 署名済みの `.dmg` を Apple の notary サービスに提出し、チケットを
+  ステープルします。`--sign` が必須です。
+- **`--arch arm64|x64`** — `bundle` に転送されます。
+
+## `murasaki init`
+
+`rustc` の有無を確認し、見つからない場合はインストールコマンドを表示します。
+`@murasakijs/native` 自体をいじる場合にのみ必要です。murasaki のエンドユーザーが Rust
+を必要とすることは決してありません — ビルド済みバイナリが npm から降ってきます。
+
+## `murasaki icon`
+
+```bash
+murasaki icon assets/logo.png
+```
+
+1つの 1024px の PNG から、`dist/icons/icon.icns`(macOS、`sips` + `iconutil` 経由)を
+生成します。macOS 以外のプラットフォームでは、現時点では「PNG のみ」という通知が表示さ
+れます — `.ico` / Linux のアイコンセットはロードマップに含まれています。
+
+## `murasaki release`
+
+```bash
+murasaki release --generate-manifest --base-url <url> --version <v>
+```
+
+`dist/<version>/` 配下に見つかったプラットフォームごとの成果物をハッシュ化し、
+`useUpdate()` が期待する更新マニフェスト JSON を出力します。`custom` アップデータープ
+ロバイダーの場合にのみ必要です — `github` プロバイダーは、あなたの GitHub Releases か
+らリリース情報を直接導出します。
+
+## 次へ
+
+<Cards>
+  <Card title="設定" href="/docs/building/configuration" />
+  <Card title="配布" href="/docs/building/distribution" />
+</Cards>

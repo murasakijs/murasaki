@@ -1,0 +1,65 @@
+---
+title: クイックスタート
+description: murasaki アプリをスキャフォールドし、HMR 付きで実行し、配布物をビルドします。
+---
+
+## 前提条件
+
+- **Node.js 22 以上**
+- **macOS**(Apple Silicon または Intel)— `.app` / `.dmg` のビルドに必要です。`murasaki
+  dev` 自体はクロスプラットフォームで動作しますが、バンドルは現在 macOS のみ対応してい
+  ます。
+
+## スキャフォールド
+
+```bash
+pnpm create murasaki@latest my-app
+cd my-app
+```
+
+これにより、Next.js ライクなレイアウト、ネイティブウィンドウ、そして動作するコンテキス
+トメニューを備えた React 19 + Vite + Tailwind アプリが作成されます。`index.html` やエン
+トリファイルを管理する必要はありません(アプリシェルは murasaki が管理します)。
+
+## 開発
+
+```bash
+pnpm dev
+```
+
+Vite の開発サーバーの上にネイティブウィンドウが開きます — **React Fast Refresh と HMR
+は通常どおり動作します**。`src/app/page.tsx` を編集すると、ウィンドウが即座に更新され
+ます。
+
+アプリ内のどこでも右クリックするとネイティブメニューが表示されます。カードを右クリック
+すると、そのカード専用のスコープ付きメニューが表示されます — どちらも本物の `NSMenu`
+であり、HTML のポップアップではありません。
+
+## 配布物をビルドする
+
+```bash
+pnpm bundle       # -> dist/bundle/<App>.app
+pnpm installer    # -> dist/<App>-<version>.dmg  (ドラッグ&ドロップでインストール)
+```
+
+`.app` にはポータブルな Node ランタイムとネイティブランチャーが同梱されているため、ビル
+ドしたマシンだけでなく他の Mac でも動作します。別のアーキテクチャ向けにビルドするには:
+
+```bash
+pnpm bundle --arch x64     # Apple Silicon Mac 上で x64 の .app をビルドする
+```
+
+<Callout type="warn">
+  署名されていないビルドは、他のマシンで Gatekeeper をトリガーします(受け取った側は初
+  回のみ右クリック→**開く**が必要です)。警告なしで署名・公証済みのアプリを配布する方法
+  は、[Distribution → Signing](/docs/building/distribution#signing--notarization)
+  を参照してください。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" />
+  <Card title="ルーティング" href="/docs/guides/routing" />
+  <Card title="配布" href="/docs/building/distribution" />
+</Cards>

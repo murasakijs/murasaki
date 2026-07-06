@@ -6,6 +6,113 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * murasaki brand accent.
+ *
+ * fumadocs-ui's `neutral.css` preset ships a grayscale `--color-fd-*`
+ * palette. Rather than fighting it (or swapping to the bundled
+ * `purple.css` preset, which also re-tints background/card/muted toward
+ * lavender), we only override the two tokens that drive the sidebar's
+ * active state, links, focus rings, and search highlight: `--color-fd-primary`
+ * and `--color-fd-ring`. Every other fumadocs token — background, card,
+ * border, muted — stays neutral.css's grayscale default, which is already
+ * a genuinely dark near-black in `.dark`.
+ *
+ * Light uses purple-600 and dark uses purple-400 (mirroring the
+ * `text-purple-700 dark:text-purple-300` / `text-purple-600
+ * dark:text-purple-400` convention already used on the landing page) so the
+ * accent keeps AA-ish contrast against fd-background in both themes.
+ */
+:root {
+  --color-fd-primary: var(--color-purple-600);
+  --color-fd-ring: var(--color-purple-600);
+}
+
+.dark {
+  --color-fd-primary: var(--color-purple-400);
+  --color-fd-ring: var(--color-purple-400);
+}
+
+@layer utilities {
+  /*
+   * Vercel/Next.js-style dot grid for the landing hero backdrop. Colored
+   * off `--foreground` via color-mix so it's faint in both themes without
+   * needing separate light/dark declarations; the edge fade is applied by
+   * consumers via a `mask-image` utility so the grid dissolves into the
+   * page instead of ending abruptly.
+   */
+  .bg-grid-dot {
+    background-image: radial-gradient(
+      color-mix(in oklch, var(--foreground) 16%, transparent) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+
+  /*
+   * Faint radiating hairlines behind the hero's brand mark — a single
+   * repeating conic-gradient fakes ~48 evenly spaced rays without extra DOM.
+   * Consumers fade the edges with a `mask-image` utility, the same way
+   * `.bg-grid-dot` is used above.
+   */
+  .bg-hairline-rays {
+    background-image: repeating-conic-gradient(
+      from 0deg,
+      color-mix(in oklch, var(--foreground) 22%, transparent) 0deg 0.4deg,
+      transparent 0.4deg 7.5deg
+    );
+  }
+}
+
+/*
+ * Fallback for the landing page's scroll/mount reveals (components/home/*):
+ * those set `opacity: 0` (and sometimes a `translate`) inline via motion's
+ * `initial` prop, which — for SSR/static-export HTML — is baked into the
+ * very first paint and only ever cleared by client JS once the element
+ * mounts/scrolls into view. Two cases can't run that JS in time:
+ *
+ * 1. `prefers-reduced-motion: reduce` — the equivalent JS check
+ *    (`useReducedMotion()`) returns `null` during SSR/first paint, so it
+ *    can't be trusted to beat the inline style; a CSS media query can.
+ * 2. No JS at all — handled by the `<noscript>` stylesheet in
+ *    app/layout.tsx, which reuses this same `.motion-reveal` hook.
+ *
+ * Every reveal element in components/home/* carries this class alongside
+ * its motion props, so both cases always render fully visible content.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .motion-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/*
+ * Editorial display type: a high-contrast serif for `en` headlines, a
+ * mincho for `ja` ones — switched purely by the nearest `lang` attribute
+ * (set on the home page's root element, app/[lang]/(home)/page.tsx), never
+ * by a runtime branch. Both font files load once, in app/layout.tsx via
+ * lib/fonts.ts.
+ */
+.font-display {
+  font-family: var(--font-display-en);
+  font-variation-settings: "opsz" 144;
+}
+
+:lang(ja) .font-display {
+  font-family: var(--font-display-ja);
+  font-variation-settings: normal;
+}
+
+/*
+ * Noto Sans JP for `ja`-scoped body/UI text — Geist has no CJK glyphs, so
+ * this keeps Japanese type consistent across platforms instead of falling
+ * back to whatever Japanese system font the OS/browser happens to pick.
+ */
+:lang(ja) {
+  font-family: var(--font-sans-ja), var(--font-sans);
+}
+
 html {
   scrollbar-gutter: stable;
 }
@@ -18,6 +125,7 @@ html > body[data-scroll-locked] {
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);

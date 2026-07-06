@@ -1,0 +1,64 @@
+---
+title: プロジェクト構成
+description: murasaki アプリの中で何がどこにあるか。
+---
+
+スキャフォールドされたアプリは、Next.js プロジェクトのように見えます。触るのは
+`src/` と `murasaki.config.ts` だけです — アプリシェルとクライアントのブートストラップ
+は murasaki が管理するため、`index.html` やエントリファイルを管理する必要はありません。
+
+```txt
+my-app/
+├─ src/
+│  ├─ app/                 # ページ、レイアウト、globals.css(ファイルベースルーティング)
+│  │  ├─ layout.tsx        # ルートレイアウト — <App> でラップする
+│  │  ├─ page.tsx          # "/" ルート
+│  │  └─ about/page.tsx    # "/about" ルート
+│  ├─ api/                 # API ルートハンドラ -> /api/*
+│  │  └─ hello/route.ts    # GET/POST ハンドラ
+│  ├─ actions.ts           # 'use server' 関数(サーバーアクション)
+│  ├─ middleware.ts        # すべてのルートの前に実行される(任意)
+│  ├─ lib/                 # アプリのコード(ストア、ヘルパー)
+│  └─ assets/              # 画像、アイコン
+├─ murasaki.config.ts      # アプリの識別情報、ウィンドウ、署名
+├─ tailwind.config.ts
+└─ package.json
+```
+
+## `src/app/` — ルート
+
+`src/app/**/page.tsx` を対象にしたファイルベースルーティングで、`layout.tsx`、動的な
+`[param]` セグメント、`loading` / `error` / `not-found` バウンダリを備えています。ルー
+トレイアウトはすべてを `<App>` でラップします。詳しくは
+[ルーティング](/docs/guides/routing)を参照してください。
+
+## `src/api/` — API ルート
+
+`src/api/<path>/route.ts` は HTTP メソッドごとに1つの関数をエクスポートし、
+`/api/<path>` として提供されます。これらは開発時・本番時ともサーバー(Node)上で実行さ
+れます。詳しくは[API Routes](/docs/guides/api-routes)を参照してください。
+
+## サーバーアクション
+
+`'use server'` 関数(`src/` 配下のどこにでも置け、例えば `src/actions.ts`)はサーバー
+上で実行され、クライアントからは `useAction` で呼び出します。詳しくは
+[Server Actions](/docs/guides/server-actions)を参照してください。
+
+## `murasaki.config.ts`
+
+アプリの識別情報、ウィンドウ、ビルド設定を記述します:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.my-app',
+  productName: 'My App',
+  version: '0.1.0',
+  icon: 'src/assets/icon.png',
+  window: { width: 1000, height: 700 },
+})
+```
+
+すべてのフィールドについては[Configuration](/docs/building/configuration)を参照してく
+ださい。

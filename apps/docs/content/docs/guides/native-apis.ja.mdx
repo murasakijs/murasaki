@@ -1,0 +1,74 @@
+---
+title: ネイティブ API
+description: 現時点で、murasaki のネイティブサーフェスからアプリに公開されているもの。
+---
+
+murasaki のネイティブウィンドウ、メニュー、OS 統合は
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
+自社製の Rust バインディング(tao/wry/muda)— によって支えられているため、Rust を書く
+ことは一切ありません。このページでは、**あなたの React アプリから**実際に到達可能なも
+のを説明します。
+
+## ウィンドウとネイティブメニューバー
+
+ウィンドウそのもの — サイズ、タイトル、リサイズ可否、macOS のビブランシーなど — は
+React から命令的に呼び出すのではなく、`murasaki.config.ts` の `window` フィールドで一
+度だけ宣言します。すべての形については[Configuration](/docs/building/configuration)を
+参照してください。
+
+macOS では、標準的な App/Edit/Window メニューバー(About、Services、Hide、Quit、
+Edit、Window)が自動的に生成され、`config.locales` からローカライズされます — コード
+は不要です。
+
+## コンテキストメニュー
+
+右クリックのコンテキストメニューは、マークアップではなくフックである
+`useContextMenu` で宣言し、Rust 側に投げられて本物の `NSMenu` / `HMENU` /
+`GtkMenu` がポップアップします。詳しくは専用の
+[コンテキストメニュー](/docs/guides/context-menu)ガイドを参照してください。
+
+## 組み込みのメニューアクション
+
+項目の `action` は、関数の代わりに組み込みの `<Action.*/>` 要素の1つにできます —
+これらは(OS 自身が処理する)ネイティブロール、または小さなクライアントサイドの挙動を
+実行します:
+
+| Action | 挙動 |
+| --- | --- |
+| `<Action.Copy />`, `<Action.Paste />`, `<Action.Cut />`, `<Action.SelectAll />`, `<Action.Undo />`, `<Action.Redo />` | ネイティブ OS の編集ロール |
+| `<Action.Quit />` | ネイティブの終了ロール |
+| `<Action.Reload />` | ウィンドウをリロードします(`location.reload()`） |
+| `<Action.Navigate to="/path" />` | ルーター経由のクライアントサイドナビゲーション |
+| `<Action.Run action={fn} />` | 通常の関数を実行します(関数を直接渡すのと同じです） |
+
+## 自動更新
+
+`useUpdate()` / `<UpdateButton />` は、`updater` 設定(GitHub releases またはカスタム
+エンドポイント)によって駆動される、同じ IPC チャンネル経由でネイティブのアップデータ
+ーとやり取りします:
+
+```tsx
+import { useUpdate } from 'murasaki'
+
+const { status, latest, check, download, install } = useUpdate()
+```
+
+`status` は `idle → checking → available → downloading → ready`(または
+`not-available` / `error`)と遷移します。`<UpdateButton />` は、この一般的なケースをラ
+ップした、すぐに使えるボタンです。
+
+<Callout type="warn">
+  **まだ公開されていません:** open/save/directory ダイアログ、クリップボードの読み書
+  き、OS 通知、トレイアイコン、shell/「Finder で表示」はすべて `@murasakijs/native`
+  の内部に存在し、murasaki の CLI(ネイティブウィンドウ、`.app` の About パネルなど)
+  が内部的に使用していますが、アプリケーションコードにそれらを公開する React フックは
+  まだありません。今日これらのどれかが必要な場合、存在しない API を推測で使おうとしな
+  いでください。これは将来のリリースに向けて追跡されています。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="コンテキストメニュー" href="/docs/guides/context-menu" description="useContextMenu API の全体像。" />
+  <Card title="設定" href="/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
+</Cards>

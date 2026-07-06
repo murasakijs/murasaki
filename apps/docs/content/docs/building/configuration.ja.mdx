@@ -1,0 +1,119 @@
+---
+title: 設定
+description: murasaki.config.ts の完全なリファレンス。
+---
+
+プロジェクトルートの `murasaki.config.ts`(または `.js` / `.mjs`)は、アプリの識別情
+報、ウィンドウ、ビルド設定を記述します:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'app.murasaki.example',
+  productName: 'Murasaki App',
+  version: '0.1.0',
+  icon: 'assets/icon.png',
+  window: {
+    title: 'Murasaki App',
+    width: 1000,
+    height: 700,
+  },
+})
+```
+
+`defineConfig` は型推論のための単なる恒等関数です — 渡したオブジェクト以外に、await
+したり設定したりするものは何もありません。
+
+## トップレベルのフィールド
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `appId` | `string` | **必須。** バンドル識別子(例: `com.example.my-app`）— macOS では `CFBundleIdentifier` になります。 |
+| `productName` | `string` | **必須。** 表示名 — `.app` のファイル名、Dock/メニューバーのラベル、DMG のボリューム名です。 |
+| `version` | `string?` | アプリのバージョン。ネイティブの About パネルに表示され、`.dmg` のファイル名にも使われます。デフォルトは `0.0.0`。 |
+| `description` | `string?` | ネイティブの「About `<app>`」パネルに表示される短い説明。 |
+| `copyright` | `string?` | About パネルに表示される著作権表示。 |
+| `homepage` | `string?` | About パネルに表示されるホームページ URL。 |
+| `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
+| `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
+| `updater` | `UpdaterConfig?` | 自動更新のソース — [下記](#updater)を参照。 |
+| `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
+| `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
+| `targets` | `Target[]?` | ビルドターゲット。デフォルトはホストプラットフォーム。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` のうち1つ以上。 |
+| `icon` | `string?` | ソースとなる PNG(理想は 1024px)へのパス。`murasaki icon` / `murasaki bundle` がこれを `.icns` / `.ico` / PNG セットに展開します。 |
+| `installer` | `object?` | `.dmg` のスタイリング — [下記](#installer)を参照。 |
+| `sign` | `object?` | macOS のコード署名 — [下記](#sign)を参照。 |
+
+## `window`
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `title` | `string?` | ウィンドウのタイトルバーのテキスト。起動時に一度だけ設定されます。 |
+| `width` / `height` | `number?` | 初期ウィンドウサイズ。 |
+| `minWidth` / `minHeight` | `number?` | 最小ウィンドウサイズ。 |
+| `resizable` | `boolean?` | ウィンドウをリサイズ可能にするかどうか。 |
+| `transparent` | `boolean?` | 透明なウィンドウ背景。 |
+| `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS の半透明なウィンドウビブランシー。 |
+
+<Callout type="warn">
+  `vibrancy` は宣言できますが、ネイティブバインディングにはまだ適用されていません —
+  設定しても現時点では no-op です(サポート予定)。
+</Callout>
+
+## `updater`
+
+`provider` に対する判別共用体です:
+
+```ts
+type UpdaterConfig =
+  | {
+      provider: 'github'
+      repo: string              // "owner/repo"
+      channel?: string
+      checkOnStart?: boolean
+      checkInterval?: string
+    }
+  | {
+      provider: 'custom'
+      endpoint: string          // murasaki release が生成するマニフェストを提供する URL
+      publicKey?: string
+      checkOnStart?: boolean
+      checkInterval?: string
+    }
+```
+
+`useUpdate()` / `<UpdateButton />` から利用されます — 詳しくは
+[Native APIs → Auto-update](/docs/guides/native-apis#auto-update)を参照してくださ
+い。
+
+## `installer`
+
+`murasaki installer` が生成する `.dmg` のスタイリングです。まったく省略すれば
+murasaki のデフォルトの背景が使われます。
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `background` | `string?` | カスタム DMG 背景 PNG への(プロジェクトルートからの相対)パス。murasaki のデフォルトを上書きします。 |
+| `window` | `{ width: number; height: number }?` | DMG ウィンドウのコンテンツサイズ(ポイント単位)。デフォルトは `{ width: 640, height: 420 }`(デフォルトの背景に合わせています)。 |
+| `iconSize` | `number?` | DMG ウィンドウ内のアイコンサイズ。デフォルトは `128`。 |
+
+## `sign`
+
+macOS のコード署名です。murasaki は**あなた自身の**証明書で署名します — 独自の証明書
+は一切同梱していません。公証の認証情報はこの設定からではなく、常に環境変数から読み取ら
+れます — 詳しくは
+[Distribution → Signing](/docs/building/distribution#signing--notarization)を参照
+してください。
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `identity` | `string?` | 署名 identity、例: `"Developer ID Application: Name (TEAMID)"`。デフォルトは `$MURASAKI_SIGN_IDENTITY`、次にキーチェーン内の最初の "Developer ID Application" identity。 |
+| `entitlements` | `string?` | カスタムの entitlements `.plist` へのパス。デフォルトは、Node に優しいハードンドランタイムのセット(JIT + 未署名実行可能メモリ + ライブラリ検証の無効化)です。 |
+
+## 次へ
+
+<Cards>
+  <Card title="CLI リファレンス" href="/docs/building/cli" />
+  <Card title="配布" href="/docs/building/distribution" />
+</Cards>

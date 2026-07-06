@@ -1,0 +1,36 @@
+---
+title: ミドルウェア
+description: すべてのクライアントサイドナビゲーションの前に実行されるルートガード。
+---
+
+`src/middleware.ts` は、すべてのナビゲーション — 初回マウント、`push`/`replace`、ブラ
+ウザの戻る/進む — の前に実行され、それをリダイレクトできるデフォルト関数をエクスポート
+できます:
+
+```ts title="src/middleware.ts"
+import type { Middleware } from 'murasaki'
+
+const middleware: Middleware = ({ pathname }) => {
+  if (pathname === '/admin') return { redirect: '/' }
+}
+
+export default middleware
+```
+
+これは非同期(例えば認証チェック)でも構いません — `<AppRouter>` はマッチしたルートを
+レンダーする前にそれを await し、その間は何もレンダーしないため、ガードされたルートが
+一瞬でも表示されることはありません。
+
+<Callout type="info">
+  リダイレクトループ(5回以上連続したリダイレクト)は自動的に検出されます: murasaki は
+  警告をログに出力し、ハングする代わりに現在のパスをそのままレンダーします。
+</Callout>
+
+これは Next.js のミドルウェアに相当する murasaki のクライアントサイド版です —
+あなたのルートと同じ WebView の中で実行されるため、エッジランタイムは関与しません。
+
+## 次へ
+
+<Cards>
+  <Card title="ルーティング" href="/docs/guides/routing" />
+</Cards>

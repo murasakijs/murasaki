@@ -2,8 +2,10 @@ import { getLLMText, source } from "@/lib/source";
 
 export const revalidate = false;
 
+// ja has no translated content yet (it falls back to the English MDX), so
+// this stays English-only for now rather than emitting duplicate entries.
 export async function GET() {
-  const scan = source.getPages().map(getLLMText);
+  const scan = source.getPages("en").map(getLLMText);
   const scanned = await Promise.all(scan);
 
   return new Response(scanned.join("\n\n"));

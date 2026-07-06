@@ -1,3 +1,4 @@
+import { Card } from "fumadocs-ui/components/card";
 import {
   DocsBody,
   DocsDescription,
@@ -10,16 +11,21 @@ import { createRelativeLink } from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getMDXComponents } from "@/components/mdx";
+import { localizeDocsHref } from "@/lib/localize-href";
 import { gitConfig } from "@/lib/shared";
 import { getPageImage, getPageMarkdownUrl, source } from "@/lib/source";
 
-export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
-  const params = await props.params;
-  const page = source.getPage(params.slug);
+export default async function Page(
+  props: PageProps<"/[lang]/docs/[[...slug]]">,
+) {
+  const { lang, slug } = await props.params;
+  const page = source.getPage(slug, lang);
   if (!page) notFound();
 
   const MDX = page.data.body;
   const markdownUrl = getPageMarkdownUrl(page).url;
+  // Resolve relative in-content links against the current file...
+  const RelativeLink = createRelativeLink(source, page);
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
@@ -37,8 +43,16 @@ export default async function Page(props: PageProps<"/docs/[[...slug]]">) {
       <DocsBody>
         <MDX
           components={getMDXComponents({
-            // this allows you to link to other pages with relative file paths
-            a: createRelativeLink(source, page),
+            // Locale-prefix absolute `/docs/...` links (see localizeDocsHref),
+            // then let createRelativeLink resolve any relative file-path links.
+            a: ({ href, ...props }) => (
+              <RelativeLink href={localizeDocsHref(href, lang)} {...props} />
+            ),
+            // `<Card href>` isn't touched by createRelativeLink, so localize it
+            // here too — used by the `<Cards>` navigation blocks in the MDX.
+            Card: ({ href, ...props }) => (
+              <Card href={localizeDocsHref(href, lang)} {...props} />
+            ),
           })}
         />
       </DocsBody>
@@ -51,10 +65,10 @@ export async function generateStaticParams() {
 }
 
 export async function generateMetadata(
-  props: PageProps<"/docs/[[...slug]]">,
+  props: PageProps<"/[lang]/docs/[[...slug]]">,
 ): Promise<Metadata> {
-  const params = await props.params;
-  const page = source.getPage(params.slug);
+  const { lang, slug } = await props.params;
+  const page = source.getPage(slug, lang);
   if (!page) notFound();
 
   return {

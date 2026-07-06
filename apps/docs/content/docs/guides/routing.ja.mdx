@@ -1,0 +1,94 @@
+---
+title: ルーティング
+description: src/app 上のファイルベースルーティング — ページ、レイアウト、動的セグメント、ナビゲーション。
+---
+
+`src/app/**/page.tsx` はそれぞれ自動的にルートになります — ルーター設定を書く必要はあり
+ません。Vite プラグインが `src/app` をスキャンして仮想のルートテーブルを生成し、
+(スキャフォールドのエントリによってマウントされる)`<AppRouter>` がナビゲーションのた
+びにそれとマッチングします。
+
+```txt
+src/app/
+├─ layout.tsx        # すべてのルートをラップする
+├─ page.tsx          # "/"
+├─ about/
+│  └─ page.tsx       # "/about"
+└─ blog/
+   └─ [slug]/
+      └─ page.tsx    # "/blog/:slug"
+```
+
+## レイアウト
+
+`layout.tsx` はその配下のすべてのルートをラップします(ネストしたレイアウトはルートか
+らリーフへと合成されます)。**ルートレイアウト**は、`murasaki` が提供するフルウィンド
+ウのフレームコンポーネントである `<App>` で子要素をラップする必要があります:
+
+```tsx title="src/app/layout.tsx"
+import type { ReactNode } from 'react'
+import { App, useContextMenu } from 'murasaki'
+
+export default function Layout({ children }: { children: ReactNode }) {
+  useContextMenu([{ label: 'Reload', shortcut: 'command,R', action: () => location.reload() }])
+
+  return <App className="flex items-center justify-center">{children}</App>
+}
+```
+
+## 動的セグメント
+
+`[param]` フォルダは URL のセグメントをキャプチャします。`useParams()` で読み取れます:
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+import { useParams } from 'murasaki'
+
+export default function BlogPost() {
+  const { slug } = useParams()
+  return <p>Post: {slug}</p>
+}
+```
+
+静的セグメントは常に動的セグメントより優先され、より具体的なマッチ(リテラルセグメント
+が多い方)がより非具体的なものより優先されます — Next.js と同じ優先順位です。`(group)`
+フォルダ(括弧を使い、ブラケットは使わない)は、URL セグメントを追加せずにルートを整理
+します。
+
+## Loading、error、not-found バウンダリ
+
+これらのファイルを `page.tsx` の隣(またはその上位)に置きます:
+
+- **`loading.tsx`** — ページがサスペンドしている間に表示されます(`<Suspense>` でラッ
+  プされます)。
+- **`error.tsx`** — エラーバウンダリです。`{ error, reset }` を受け取るコンポーネント
+  をエクスポートします。そのルート配下で発生したレンダーエラーをキャッチします。
+- **`not-found.tsx`** — マッチするルートがない場合にレンダーされます。URL の祖先チェー
+  ンの中で最も近いものが優先されます。
+
+それぞれが Next.js の App Router と同様に、自身のサブツリーにスコープされます。
+
+## ナビゲーション
+
+クライアントサイドナビゲーション(フルリロードなし)には `<Link>` を使います:
+
+```tsx
+import { Link } from 'murasaki'
+
+<Link href="/about">About</Link>
+```
+
+`useRouter()` は `push` / `replace` / `back` / `pathname` を命令的に提供し、
+`usePathname()` は現在のパスを読み取ります。
+
+<Callout type="info">
+  オリジンが異なる URL への通常の `<a href="https://...">` は、アプリのウィンドウ内で
+  はなく、ユーザーの**デフォルトのシステムブラウザ**で開きます — 外部リンクを特別扱いす
+  る必要はありません。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="ミドルウェア" href="/docs/guides/middleware" description="すべてのナビゲーションの前にルートガードを実行します。" />
+  <Card title="メタデータ" href="/docs/guides/metadata" description="ルートごとにドキュメントのタイトルと meta タグを設定します。" />
+</Cards>

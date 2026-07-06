@@ -1,0 +1,50 @@
+---
+title: イントロダクション
+description: デスクトップアプリのための Next.js DX — React 19 + Vite、Rust ネイティブ、Rust を書く必要はありません。
+---
+
+**murasaki** を使えば、Next.js アプリを作る感覚のままネイティブなデスクトップアプリを構築できます。ファイルベースルーティング、レイアウト、サーバーアクション、API ルート、そして React 19 — これらすべてが、Electron のバンドルされた Chromium ではなく、Rust ネイティブなウィンドウの上で動作します。
+
+あなたが書くのは React と TypeScript だけです。murasaki は小さな Rust コア(`@murasakijs/native`、tao/wry/muda をベースに構築)を同梱しており、本物のネイティブウィンドウ、ネイティブメニュー、OS との統合を提供します — **Rust を一切書く必要はありません**。
+
+## murasaki を選ぶ理由
+
+|                | murasaki                     | Electron            | Tauri                 |
+| -------------- | ----------------------------- | ------------------- | ---------------------- |
+| UI ランタイム   | OS WebView (wry)              | bundled Chromium     | OS WebView              |
+| 言語           | TypeScript / React            | TypeScript / React    | TypeScript + **Rust**  |
+| DX             | **Next.js 風**(Vite HMR）    | manual wiring         | manual wiring           |
+| メモリ(アイドル時） | Electron の約 1/5\*        | baseline              | small                   |
+| サーバーアクション | `defineAction` / `useAction` | manual IPC            | manual IPC / commands  |
+
+<sub>\* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。</sub>
+
+**murasaki を選ぶべきなのは**、React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたい人です。
+
+## できること
+
+- **ファイルベースルーティング** — `src/app/**/page.tsx`、レイアウト、動的セグメント、
+  `loading` / `error` / `not-found`、`middleware.ts`。詳しくは[ルーティング](/docs/guides/routing)を参照してください。
+- **Server Actions** — `'use server'` + `defineAction` / `useAction`、おなじみの React
+  19 の形そのままです。詳しくは[Server Actions](/docs/guides/server-actions)を参照してください。
+- **API Routes** — Next.js 風の `src/api/**/route.ts` による HTTP エンドポイント。詳しくは
+  [API Routes](/docs/guides/api-routes)を参照してください。
+- **ネイティブウィンドウ & メニュー** — 本物のネイティブウィンドウ、ネイティブメニューバー、
+  スコープ付きのネイティブコンテキストメニュー(`NSMenu` であり、HTML のポップアップでは
+  ありません)。詳しくは[Native APIs](/docs/guides/native-apis)を参照してください。
+- **UI キット** — `@murasakijs/ui`、shadcn スタイルのコンポーネントライブラリです。
+- **本格的な配布** — ポータブルでクロスアーキテクチャ対応の `.app` バンドル、コード署名 +
+  公証にも対応。詳しくは[Distribution](/docs/building/distribution)を参照してください。
+
+<Callout type="info">
+  `.app` / `.dmg` へのバンドルは、現在のところ macOS のみに対応しています。Windows
+  (`.msi`)と Linux(`.AppImage`)はロードマップに含まれており、Rust コア自体はすでに
+  5 つのターゲットすべてでビルド可能です。
+</Callout>
+
+## 次のステップ
+
+<Cards>
+  <Card title="クイックスタート" href="/docs/getting-started/quick-start" description="最初のアプリをスキャフォールドし、実行し、出荷しましょう。" />
+  <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="murasaki アプリの中で何がどこにあるか。" />
+</Cards>

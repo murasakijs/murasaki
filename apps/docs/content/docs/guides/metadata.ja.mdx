@@ -1,0 +1,57 @@
+---
+title: メタデータ
+description: ルートごとのドキュメントタイトル、description、Open Graph タグ。
+---
+
+ページやレイアウトは、静的な `metadata` オブジェクトをエクスポートするか、ルートパラメ
+ータに依存する値のために非同期の `generateMetadata()` をエクスポートできます:
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+import type { Metadata } from 'murasaki'
+
+export const metadata: Metadata = {
+  title: 'Blog',
+  description: 'Posts about murasaki.',
+}
+```
+
+```tsx
+import type { GenerateMetadata } from 'murasaki'
+
+export const generateMetadata: GenerateMetadata = async ({ params }) => {
+  return { title: `Post: ${params.slug}` }
+}
+```
+
+`Metadata` は `icons`(`icon` / `shortcut` / `apple`）と `openGraph`（`title` /
+`description` / `images`）も受け付けます。
+
+## 適用される仕組み
+
+ナビゲーションのたびに、`<AppRouter>` はメタデータをルートからリーフへと解決します —
+各祖先レイアウトの `metadata` がマッチしたページのものの下にマージされ — それをドキュ
+メントに適用します:
+
+- `document.title`(タイトルが実際に解決されたときだけ変更されます — 空にされること
+  はありません）
+- `<meta name="description">`
+- Open Graph の `<meta property="og:...">` タグ(`openGraph` フィールドが省略された場
+  合は `title` / `description` にフォールバックします）
+- `icons.icon` からの `<link rel="icon">`
+
+ページの `generateMetadata`(存在する場合)は、静的な `metadata` チェーンが解決した後
+に await され、その上にマージされます。
+
+<Callout type="warn">
+  これが設定するのは**ドキュメント**のタイトル/meta タグであり、ネイティブウィンドウの
+  タイトルバーではありません — ウィンドウのタイトルは `murasaki.config.ts` の
+  `window.title`(詳しくは[Configuration](/docs/building/configuration)を参照)から取
+  得され、起動時に一度だけ設定されます。
+</Callout>
+
+## 次へ
+
+<Cards>
+  <Card title="ルーティング" href="/docs/guides/routing" />
+  <Card title="設定" href="/docs/building/configuration" />
+</Cards>
