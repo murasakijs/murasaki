@@ -23,7 +23,13 @@ export default function Layout({ children }: LayoutProps<"/">) {
       suppressHydrationWarning
     >
       <body className="flex flex-col min-h-screen">
-        <RootProvider>{children}</RootProvider>
+        {/* `type: "static"` switches the search dialog to fetch the static
+            search index exported by app/api/search/route.ts's `staticGET`
+            and search it client-side (needed since static export has no
+            server to answer per-query search requests). */}
+        <RootProvider search={{ options: { type: "static" } }}>
+          {children}
+        </RootProvider>
       </body>
     </html>
   );
