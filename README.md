@@ -70,6 +70,7 @@ on macOS, HMENU on Windows, GtkMenu on Linux), not an HTML popup.
 - [CLI reference](#cli-reference)
 - [Configuration (`murasaki.config.ts`)](#configuration-murasakiconfigts)
 - [Server Actions](#server-actions)
+- [API Routes](#api-routes)
 - [Architecture](#architecture)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
@@ -97,7 +98,7 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB compressed
 
 The scaffold gives you a React 19 + Vite + Tailwind app with a Next.js-like
 layout — you only touch `src/app/` (pages, layouts, `globals.css`), `src/api/`
-(server actions), and `src/middleware.ts`. There's no `index.html` or entry
+(API routes), and `src/middleware.ts`. There's no `index.html` or entry
 file to maintain: murasaki owns the app shell and the client bootstrap (drop
 your own `index.html` in the project root if you want to customize the HTML
 head). `murasaki.config.ts` describes your app's identity and window.
@@ -241,7 +242,7 @@ consumed by `useUpdate` / `UpdateButton`).
 React 19-style server actions — same shape as `useActionState`:
 
 ```ts
-// src/api/actions.ts
+// src/actions.ts
 'use server'
 import { defineAction } from 'murasaki'
 import type { ActionState } from 'murasaki'
@@ -257,7 +258,7 @@ export const greet = defineAction(
 ```tsx
 // src/app/page.tsx
 import { useAction } from 'murasaki'
-import { greet } from '../api/actions'
+import { greet } from '../actions'
 
 export default function Home() {
   const [state, run, isPending] = useAction(greet, {
@@ -282,6 +283,50 @@ through TypeScript; `useAction` wraps React 19's `useActionState` directly, so
 A Vite plugin detects the `'use server'` directive and splits the module: the
 client gets a typed `fetch` stub, and the function itself runs on the
 server — a Vite middleware in dev, a small bundled Node child server in prod.
+
+---
+
+## API Routes
+
+Next.js-style file-based HTTP endpoints. A `src/api/<path>/route.ts` file
+exports one function per HTTP method, served at `/api/<path>`:
+
+```ts
+// src/api/hello/route.ts  →  GET /api/hello
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (request) => {
+  return Response.json({ message: `Hello from Node ${process.version}` })
+}
+
+export const POST: RouteHandler = async (request) => {
+  const body = await request.json()
+  return Response.json({ received: body })
+}
+```
+
+Dynamic segments use a `[name]` folder, exposed on `context.params`:
+
+```ts
+// src/api/greet/[name]/route.ts  →  GET /api/greet/:name
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (_request, { params }) => {
+  return Response.json({ greeting: `Hello, ${params.name}!` })
+}
+```
+
+Handlers take a Web `Request` and return a Web `Response` (`Response.json`,
+`new Response`, status codes, headers — all standard). They run on the server
+in both dev (a Vite middleware) and prod (the bundled Node server), so they can
+reach the filesystem, a database, or secrets. Call them with `fetch('/api/…')`
+from your client.
+
+**API routes vs. server actions** — both run on the server; pick by shape. API
+routes are addressable HTTP endpoints (any client can `fetch` them — good for
+webhooks, third-party callers, REST-ish surfaces). Server actions are typed RPC
+wired into React 19's form / `useAction` flow (no URL, no `fetch` boilerplate).
+They coexist.
 
 ---
 

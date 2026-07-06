@@ -71,6 +71,7 @@ export default function Page() {
 - [CLI リファレンス](#cli-リファレンス)
 - [設定 (`murasaki.config.ts`)](#設定-murasakiconfigts)
 - [サーバーアクション](#サーバーアクション)
+- [API ルート](#api-ルート)
 - [アーキテクチャ](#アーキテクチャ)
 - [ロードマップ](#ロードマップ)
 - [コントリビュート](#コントリビュート)
@@ -97,8 +98,8 @@ npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
 ```
 
 生成される雛形は React 19 + Vite + Tailwind のアプリで、Next.js に近い構成です。
-触るのは `src/app/`(ページ・レイアウト・`globals.css`)、`src/api/`(サーバー
-アクション)、`src/middleware.ts` だけ。`index.html` やエントリファイルの管理は
+触るのは `src/app/`(ページ・レイアウト・`globals.css`)、`src/api/`(API ルート)、
+`src/middleware.ts` だけ。`index.html` やエントリファイルの管理は
 不要です — アプリシェルとクライアント起動は murasaki が持ちます(HTML の head を
 カスタムしたい場合はプロジェクト直下に自分の `index.html` を置けます)。アプリの
 識別情報とウィンドウ設定は `murasaki.config.ts` に記述します。
@@ -243,7 +244,7 @@ export default defineConfig({
 React 19 スタイルのサーバーアクション——`useActionState` と同じ形です:
 
 ```ts
-// src/api/actions.ts
+// src/actions.ts
 'use server'
 import { defineAction } from 'murasaki'
 import type { ActionState } from 'murasaki'
@@ -259,7 +260,7 @@ export const greet = defineAction(
 ```tsx
 // src/app/page.tsx
 import { useAction } from 'murasaki'
-import { greet } from '../api/actions'
+import { greet } from '../actions'
 
 export default function Home() {
   const [state, run, isPending] = useAction(greet, {
@@ -285,6 +286,48 @@ export default function Home() {
 分割します——クライアント側には型付きの `fetch` スタブが渡り、関数の実体はサーバー側
 (開発時は Vite ミドルウェア、本番時は小さくバンドルされた Node の子サーバー)で
 実行されます。
+
+---
+
+## API ルート
+
+Next.js 風のファイルベース HTTP エンドポイント。`src/api/<path>/route.ts` が
+HTTP メソッドごとに関数を export し、`/api/<path>` で配信されます:
+
+```ts
+// src/api/hello/route.ts  →  GET /api/hello
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (request) => {
+  return Response.json({ message: `Hello from Node ${process.version}` })
+}
+
+export const POST: RouteHandler = async (request) => {
+  const body = await request.json()
+  return Response.json({ received: body })
+}
+```
+
+動的セグメントは `[name]` フォルダで表し、`context.params` に入ります:
+
+```ts
+// src/api/greet/[name]/route.ts  →  GET /api/greet/:name
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (_request, { params }) => {
+  return Response.json({ greeting: `Hello, ${params.name}!` })
+}
+```
+
+ハンドラは Web 標準の `Request` を受け取り `Response` を返します(`Response.json`・
+`new Response`・ステータス・ヘッダー、すべて標準)。dev(Vite ミドルウェア)でも
+prod(同梱の Node サーバー)でもサーバー側で動くので、ファイルシステム・DB・
+シークレットにアクセスできます。クライアントからは `fetch('/api/…')` で呼びます。
+
+**API ルート vs サーバーアクション** — どちらもサーバー側で動きます。API ルートは
+アドレス可能な HTTP エンドポイント(任意のクライアントが `fetch` でき、webhook や
+外部呼び出し・REST 的な用途に向く)。サーバーアクションは React 19 のフォーム /
+`useAction` フローに組み込まれた型付き RPC(URL 不要、`fetch` 不要)。両者は共存します。
 
 ---
 
