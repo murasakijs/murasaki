@@ -235,6 +235,63 @@ credentials from `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD`
 (an app-specific password) — never from config or a file. Both require a paid
 Apple Developer Program membership.
 
+### Signed releases with GitHub Actions
+
+Build + (optionally) sign + notarize a `.dmg` on tag push and attach it to a
+GitHub Release. Add this as `.github/workflows/release.yml` in your app:
+
+```yaml
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install
+      - name: Import signing certificate
+        if: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          CERT_PW: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KC="$RUNNER_TEMP/app.keychain-db"
+          security create-keychain -p "" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "" "$KC"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$CERT_PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+      - name: Build installer
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          HAS_CERT: ${{ secrets.APPLE_CERTIFICATE_P12 != '' }}
+        run: |
+          if [ "$HAS_CERT" = "true" ]; then
+            pnpm exec murasaki installer --sign --notarize
+          else
+            pnpm exec murasaki installer
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+```
+
+Add these repository secrets to sign + notarize (omit them all for an unsigned
+`.dmg`): `APPLE_CERTIFICATE_P12` (base64 of your Developer ID `.p12`),
+`APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`.
+
 ---
 
 ## Configuration (`murasaki.config.ts`)
