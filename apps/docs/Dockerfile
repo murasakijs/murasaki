@@ -34,6 +34,12 @@ COPY . .
 RUN corepack prepare pnpm@9.15.0 --activate \
   && pnpm install --frozen-lockfile
 
+# Build the workspace packages the docs imports at build time. The component
+# docs render `@murasakijs/ui` live, but its `dist/` is gitignored (absent from
+# the repo clone) and `pnpm install` does NOT build workspace packages — so
+# build it explicitly here, or `next build` fails to resolve `@murasakijs/ui`.
+RUN pnpm --filter @murasakijs/ui build
+
 # Deployed site URL. `NEXT_PUBLIC_*` vars are inlined by Next at BUILD time,
 # so this must be present when `next build` runs. The portable, host-agnostic
 # way to inject it is a build arg:
