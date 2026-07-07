@@ -6,55 +6,80 @@ import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { dim } from './brand.js'
 
+export type NodePlatform = 'darwin' | 'win32' | 'linux'
+export type NodeArch = 'arm64' | 'x64'
+
 /**
- * Fetch, verify, and cache the official macOS Node.js runtime for a target
- * arch/version, so `murasaki bundle` ships a portable, target-specific
- * node — not whatever node happens to be running the CLI, which is (a) the
- * wrong architecture for cross-arch builds, and (b) possibly a non-portable
- * Homebrew/nvm build linked against libs that aren't present on other
- * machines.
+ * Fetch, verify, and cache the official Node.js runtime for a target
+ * platform/arch/version, so `murasaki bundle` ships a portable,
+ * target-specific node — not whatever node happens to be running the CLI,
+ * which is (a) possibly the wrong platform/arch for a cross build, and (b)
+ * possibly a non-portable Homebrew/nvm build linked against libs that aren't
+ * present on other machines.
  *
- * Cached at `~/.murasaki/node/<version>/darwin-<arch>/node`; a second call
- * for the same version/arch returns the cached path immediately with no
- * network access.
+ * Cached at `~/.murasaki/node/<version>/<platform>-<arch>/<node|node.exe>`; a
+ * second call for the same version/platform/arch returns the cached path
+ * immediately with no network access.
  */
-export async function ensureNodeBinary(arch: 'arm64' | 'x64', version: string): Promise<string> {
-  const cacheDir = join(homedir(), '.murasaki', 'node', version, `darwin-${arch}`)
-  const cachedNode = join(cacheDir, 'node')
+export async function ensureNodeBinary(
+  platform: NodePlatform,
+  arch: NodeArch,
+  version: string,
+): Promise<string> {
+  const cacheDir = join(homedir(), '.murasaki', 'node', version, `${platform}-${arch}`)
+  const binaryName = platform === 'win32' ? 'node.exe' : 'node'
+  const cachedNode = join(cacheDir, binaryName)
   if (existsSync(cachedNode)) return cachedNode
 
-  const dist = `node-v${version}-darwin-${arch}`
-  const tarballName = `${dist}.tar.gz`
+  // nodejs.org dist filenames use "win" rather than "win32" (e.g.
+  // node-v22.9.0-win-x64.zip), unlike every other platform bucket murasaki
+  // uses elsewhere (which matches Node's own process.platform naming).
+  const distPlatform = platform === 'win32' ? 'win' : platform
+  const dist = `node-v${version}-${distPlatform}-${arch}`
+  const archiveName = platform === 'win32' ? `${dist}.zip` : `${dist}.tar.gz`
   const baseUrl = `https://nodejs.org/dist/v${version}`
 
-  process.stdout.write(`${dim(`downloading Node v${version} (darwin-${arch})…`)}\n`)
+  process.stdout.write(`${dim(`downloading Node v${version} (${platform}-${arch})…`)}\n`)
 
-  const expectedSha256 = await fetchExpectedSha256(`${baseUrl}/SHASUMS256.txt`, tarballName)
+  const expectedSha256 = await fetchExpectedSha256(`${baseUrl}/SHASUMS256.txt`, archiveName)
 
   const workDir = await mkdtemp(join(tmpdir(), 'murasaki-node-'))
   try {
-    const tarballPath = join(workDir, tarballName)
-    await downloadFile(`${baseUrl}/${tarballName}`, tarballPath)
+    const archivePath = join(workDir, archiveName)
+    await downloadFile(`${baseUrl}/${archiveName}`, archivePath)
 
-    const actualSha256 = await sha256File(tarballPath)
+    const actualSha256 = await sha256File(archivePath)
     if (actualSha256 !== expectedSha256) {
       throw new Error(
-        `murasaki: checksum mismatch for ${tarballName} — expected ${expectedSha256}, got ${actualSha256}`,
+        `murasaki: checksum mismatch for ${archiveName} — expected ${expectedSha256}, got ${actualSha256}`,
       )
     }
 
     const extractDir = join(workDir, 'extract')
     await mkdir(extractDir, { recursive: true })
-    const extract = spawnSync('tar', ['-xzf', tarballPath, '-C', extractDir])
-    if (extract.status !== 0) {
-      throw new Error(
-        `murasaki: failed to extract ${tarballName}: ${extract.stderr?.toString().trim() || extract.error}`,
-      )
-    }
 
-    const extractedNode = join(extractDir, dist, 'bin', 'node')
+    // The Windows zip lays node.exe at the archive root (node-v.../node.exe);
+    // the macOS/Linux tarball nests it under bin/ (node-v.../bin/node).
+    let extractedNode: string
+    if (platform === 'win32') {
+      const extract = spawnSync('unzip', ['-q', '-o', archivePath, '-d', extractDir])
+      if (extract.status !== 0) {
+        throw new Error(
+          `murasaki: failed to extract ${archiveName}: ${extract.stderr?.toString().trim() || extract.error}`,
+        )
+      }
+      extractedNode = join(extractDir, dist, 'node.exe')
+    } else {
+      const extract = spawnSync('tar', ['-xzf', archivePath, '-C', extractDir])
+      if (extract.status !== 0) {
+        throw new Error(
+          `murasaki: failed to extract ${archiveName}: ${extract.stderr?.toString().trim() || extract.error}`,
+        )
+      }
+      extractedNode = join(extractDir, dist, 'bin', 'node')
+    }
     if (!existsSync(extractedNode)) {
-      throw new Error(`murasaki: extracted archive is missing bin/node at ${extractedNode}`)
+      throw new Error(`murasaki: extracted archive is missing ${binaryName} at ${extractedNode}`)
     }
 
     await mkdir(cacheDir, { recursive: true })
