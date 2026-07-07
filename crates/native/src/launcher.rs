@@ -1,36 +1,171 @@
 //! Production launcher — the Rust binary that becomes the packaged app's
-//! `CFBundleExecutable` (see `src/bin/murasaki-launcher.rs`), replacing the
-//! bash-script + `node` prod launcher. Being a *real* executable (rather than
-//! a renamed copy of `node`) is what lets macOS show the product name and
-//! icon for the running process — see `Application::set_icon_path`'s doc
-//! comment for why the previous approach couldn't do that reliably.
+//! `CFBundleExecutable` on macOS or `<productName>.exe` on Windows (see
+//! `src/bin/murasaki-launcher.rs`), replacing the bash-script + `node` prod
+//! launcher. Being a *real* executable (rather than a renamed copy of
+//! `node`) is what lets macOS show the product name and icon for the running
+//! process — see `Application::set_icon_path`'s doc comment for why the
+//! previous approach couldn't do that reliably. On Windows it's what makes
+//! the taskbar/Alt-Tab title read the product name instead of `node.exe`.
 //!
 //! Mirrors `packages/murasaki/assets/prod-launcher.mjs` closely: spawns
 //! `prod-server.mjs` as a child process, reads the assigned port off a
 //! `MURASAKI_PORT=<n>` stdout line, then opens a webview pointed at
-//! `http://127.0.0.1:<port>/`. The default-menu locale resolution mirrors
-//! `packages/murasaki/src/menu-i18n.ts`.
+//! `http://127.0.0.1:<port>/`. macOS and Windows share that
+//! resources-dir → spawn-node → read-port sequence (the `shared` module
+//! below, identical pure `std::process`/IO on both); everything past that —
+//! building the window/webview and any native chrome (Dock, app menu, About
+//! panel) — is per-OS in `imp_macos`/`imp_win`, since only macOS currently
+//! wires up a native menu bar / About panel (see `webview::show_context_menu`'s
+//! Windows stub for the same story on context menus). The default-menu
+//! locale resolution mirrors `packages/murasaki/src/menu-i18n.ts` — also
+//! macOS-only for now, see `imp_win`'s doc comment for what's deferred.
 //!
-//! macOS-only (packaging only supports macOS right now — see `cli/bundle.ts`);
-//! `run_launcher` is a no-op stub elsewhere so the crate still builds
-//! everywhere the GUI stack does.
+//! Linux packaging is Phase 3; `run_launcher` is a no-op stub there (and
+//! everywhere else) so the crate still builds wherever the GUI stack does.
 
-#[cfg(target_os = "macos")]
-mod imp {
+/// Cross-platform core shared by `imp_macos` and `imp_win`: reading
+/// `murasaki-meta.json` and spawning `prod-server.mjs`. Pure
+/// `std::process`/IO with no OS-specific API calls, so unlike the window/menu
+/// code below it needs no per-OS duplicate — only the resources-dir
+/// resolution and the node binary's filename (`"node"` vs `"node.exe"`)
+/// differ, and callers pass those in.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod shared {
   use std::{
-    cell::RefCell,
-    collections::HashMap,
     fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
     path::Path,
     process::{Child, Command, Stdio},
-    rc::Rc,
     sync::mpsc,
     thread,
     time::Duration,
   };
 
   use serde::Deserialize;
+
+  /// Subset of the packaged resources dir's `murasaki-meta.json` (written by
+  /// `cli/bundle.ts`; `Contents/Resources/` on macOS, `resources/` on
+  /// Windows) this launcher needs. Fields the packager may omit
+  /// (`config.window` / `config.description` etc. are all optional in
+  /// `MurasakiConfig`) are `#[serde(default)]` so a missing JSON key becomes
+  /// `None` instead of a parse error.
+  #[derive(Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  pub(super) struct Meta {
+    pub(super) product_name: String,
+    #[serde(default)]
+    pub(super) version: Option<String>,
+    #[serde(default)]
+    pub(super) description: Option<String>,
+    #[serde(default)]
+    pub(super) copyright: Option<String>,
+    #[serde(default)]
+    pub(super) homepage: Option<String>,
+    #[serde(default)]
+    pub(super) authors: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) locales: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) width: Option<i32>,
+    #[serde(default)]
+    pub(super) height: Option<i32>,
+    #[serde(default)]
+    pub(super) vibrancy: Option<String>,
+    #[serde(default)]
+    pub(super) icon: Option<String>,
+  }
+
+  /// Reads and parses `<resources_dir>/murasaki-meta.json`.
+  pub(super) fn read_meta(resources_dir: &Path) -> Result<Meta, String> {
+    let meta_path = resources_dir.join("murasaki-meta.json");
+    let meta_raw = fs::read_to_string(&meta_path)
+      .map_err(|e| format!("read {}: {e}", meta_path.display()))?;
+    serde_json::from_str(&meta_raw).map_err(|e| format!("parse {}: {e}", meta_path.display()))
+  }
+
+  /// Spawns `<resources_dir>/<node_binary_name> prod-server.mjs` the same way
+  /// `prod-launcher.mjs` did (see that file's header comment for why
+  /// `--port 0` + reading back the assigned port is needed instead of picking
+  /// one ourselves), and blocks until it reports its port or 15s elapses —
+  /// killing the child and returning an error on timeout/failure.
+  /// `node_binary_name` (`"node"` on macOS, `"node.exe"` on Windows) is the
+  /// only per-OS difference in this whole sequence.
+  pub(super) fn spawn_prod_server(
+    resources_dir: &Path,
+    node_binary_name: &str,
+  ) -> Result<(Child, u16), String> {
+    let node_path = resources_dir.join(node_binary_name);
+    let mut child = Command::new(&node_path)
+      .arg("prod-server.mjs")
+      .arg("--client")
+      .arg(resources_dir.join("client"))
+      .arg("--registry")
+      .arg(resources_dir.join("server").join("actions.mjs"))
+      .arg("--routes")
+      .arg(resources_dir.join("server").join("routes.mjs"))
+      .arg("--port")
+      .arg("0")
+      .current_dir(resources_dir)
+      .stdin(Stdio::null())
+      .stdout(Stdio::piped())
+      .spawn()
+      .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
+
+    match wait_for_port(&mut child, Duration::from_secs(15)) {
+      Ok(port) => Ok((child, port)),
+      Err(err) => {
+        let _ = child.kill();
+        Err(err)
+      }
+    }
+  }
+
+  /// Reads `prod-server.mjs`'s stdout line-by-line looking for
+  /// `MURASAKI_PORT=<n>` (see that file's `server.listen` callback), on a
+  /// background thread so the child's pipe never fills up and blocks it.
+  /// Forwards every line to our own stdout as it goes (line-buffered, so
+  /// exact byte-for-byte interleaving with our own output isn't guaranteed —
+  /// good enough for what is essentially debug output).
+  fn wait_for_port(child: &mut Child, timeout: Duration) -> Result<u16, String> {
+    let stdout = child
+      .stdout
+      .take()
+      .ok_or_else(|| "prod-server: missing stdout pipe".to_string())?;
+    let (tx, rx) = mpsc::channel::<u16>();
+
+    thread::spawn(move || {
+      let reader = BufReader::new(stdout);
+      let mut found = false;
+      for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if !found {
+          if let Some(port) = line
+            .strip_prefix("MURASAKI_PORT=")
+            .and_then(|p| p.trim().parse::<u16>().ok())
+          {
+            found = true;
+            let _ = tx.send(port);
+          }
+        }
+        // `println!` panics if the write fails — which it does on Windows
+        // when the launcher is built with `windows_subsystem = "windows"`
+        // (see bin/murasaki-launcher.rs) and launched without an attached
+        // console (e.g. double-clicked from Explorer): there's no valid
+        // stdout handle in that case. This forwarding is debug-output-only,
+        // so best-effort-and-ignore is correct here, unlike a real error.
+        let _ = writeln!(std::io::stdout(), "{line}");
+      }
+    });
+
+    rx.recv_timeout(timeout)
+      .map_err(|_| "prod server did not report a port in time".to_string())
+  }
+}
+
+#[cfg(target_os = "macos")]
+mod imp_macos {
+  use std::{cell::RefCell, collections::HashMap, fs, path::Path, process::Command, rc::Rc};
+
   use tao::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
@@ -45,41 +180,12 @@ mod imp {
     window::{center_on_primary_monitor, SharedWindow},
   };
 
-  /// Subset of `Contents/Resources/murasaki-meta.json` (written by
-  /// `cli/bundle.ts`) this launcher needs. Fields the packager may omit
-  /// (`config.window` / `config.description` etc. are all optional in
-  /// `MurasakiConfig`) are `#[serde(default)]` so a missing JSON key becomes
-  /// `None` instead of a parse error.
-  #[derive(Deserialize)]
-  #[serde(rename_all = "camelCase")]
-  struct Meta {
-    product_name: String,
-    #[serde(default)]
-    version: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    copyright: Option<String>,
-    #[serde(default)]
-    homepage: Option<String>,
-    #[serde(default)]
-    authors: Option<Vec<String>>,
-    #[serde(default)]
-    locales: Option<Vec<String>>,
-    #[serde(default)]
-    width: Option<i32>,
-    #[serde(default)]
-    height: Option<i32>,
-    #[serde(default)]
-    vibrancy: Option<String>,
-    #[serde(default)]
-    icon: Option<String>,
-  }
+  use super::shared::{read_meta, spawn_prod_server};
 
   /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
   /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
   /// `Contents/Resources/menu-locales.json`.
-  #[derive(Deserialize, Clone)]
+  #[derive(serde::Deserialize, Clone)]
   #[serde(rename_all = "camelCase")]
   struct LocaleLabels {
     about: String,
@@ -122,39 +228,8 @@ mod imp {
       .canonicalize()
       .map_err(|e| format!("resolve Resources dir: {e}"))?;
 
-    let meta_path = resources_dir.join("murasaki-meta.json");
-    let meta_raw = fs::read_to_string(&meta_path)
-      .map_err(|e| format!("read {}: {e}", meta_path.display()))?;
-    let meta: Meta = serde_json::from_str(&meta_raw)
-      .map_err(|e| format!("parse {}: {e}", meta_path.display()))?;
-
-    // Spawn prod-server.mjs the same way prod-launcher.mjs did (see that
-    // file's header comment for why `--port 0` + reading back the assigned
-    // port is needed instead of picking one ourselves).
-    let node_path = resources_dir.join("node");
-    let mut child = Command::new(&node_path)
-      .arg("prod-server.mjs")
-      .arg("--client")
-      .arg(resources_dir.join("client"))
-      .arg("--registry")
-      .arg(resources_dir.join("server").join("actions.mjs"))
-      .arg("--routes")
-      .arg(resources_dir.join("server").join("routes.mjs"))
-      .arg("--port")
-      .arg("0")
-      .current_dir(&resources_dir)
-      .stdin(Stdio::null())
-      .stdout(Stdio::piped())
-      .spawn()
-      .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
-
-    let port = match wait_for_port(&mut child, Duration::from_secs(15)) {
-      Ok(port) => port,
-      Err(err) => {
-        let _ = child.kill();
-        return Err(err);
-      }
-    };
+    let meta = read_meta(&resources_dir)?;
+    let (mut child, port) = spawn_prod_server(&resources_dir, "node")?;
 
     set_activation_policy_regular();
 
@@ -249,41 +324,6 @@ mod imp {
         std::process::exit(0);
       }
     });
-  }
-
-  /// Reads `prod-server.mjs`'s stdout line-by-line looking for
-  /// `MURASAKI_PORT=<n>` (see that file's `server.listen` callback), on a
-  /// background thread so the child's pipe never fills up and blocks it.
-  /// Forwards every line to our own stdout as it goes (line-buffered, so
-  /// exact byte-for-byte interleaving with our own output isn't guaranteed —
-  /// good enough for what is essentially debug output).
-  fn wait_for_port(child: &mut Child, timeout: Duration) -> Result<u16, String> {
-    let stdout = child
-      .stdout
-      .take()
-      .ok_or_else(|| "prod-server: missing stdout pipe".to_string())?;
-    let (tx, rx) = mpsc::channel::<u16>();
-
-    thread::spawn(move || {
-      let reader = BufReader::new(stdout);
-      let mut found = false;
-      for line in reader.lines() {
-        let Ok(line) = line else { break };
-        if !found {
-          if let Some(port) = line
-            .strip_prefix("MURASAKI_PORT=")
-            .and_then(|p| p.trim().parse::<u16>().ok())
-          {
-            found = true;
-            let _ = tx.send(port);
-          }
-        }
-        println!("{line}");
-      }
-    });
-
-    rx.recv_timeout(timeout)
-      .map_err(|_| "prod server did not report a port in time".to_string())
   }
 
   /// Reads `Contents/Resources/menu-locales.json`. Missing or unparsable ⇒
@@ -476,12 +516,149 @@ mod imp {
   }
 }
 
-#[cfg(target_os = "macos")]
-pub fn run_launcher() {
-  imp::run();
+/// Windows launcher — window + webview only, no native menu bar / About
+/// panel yet. Deferred macOS-parity items, left for a later packaging phase:
+///  - Native menu bar (muda has a Win32 backend, but nothing builds/installs
+///    one here yet) and the About dialog it would host — mirrors
+///    `webview::show_context_menu`'s Windows stub for the same story on
+///    context menus.
+///  - The `.exe`'s PE icon (taskbar/Alt-Tab/Explorer) — `cli/bundle.ts`'s
+///    `copyIconPng` only stages `resources/icon.png` for now; embedding an
+///    icon into the PE resources needs `.ico` generation, deferred with that
+///    (see that function's doc comment). `meta.icon` is read but unused here
+///    as a result.
+///  - Locale-aware chrome (`meta.locales`) — irrelevant until there's a menu
+///    bar to localize, so unused here too.
+#[cfg(target_os = "windows")]
+mod imp_win {
+  use std::{cell::RefCell, io::Write, rc::Rc};
+
+  use tao::{
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+  };
+
+  use crate::{
+    types::WebviewOptions,
+    webview::Webview,
+    window::{center_on_primary_monitor, SharedWindow},
+  };
+
+  use super::shared::{read_meta, spawn_prod_server};
+
+  pub fn run() {
+    if let Err(err) = run_inner() {
+      // `eprintln!` panics if the write fails — which it can here since
+      // there may be no console attached (this binary is built with
+      // `windows_subsystem = "windows"`, see bin/murasaki-launcher.rs, and
+      // can be launched without a console, e.g. from Explorer). Best-effort:
+      // still exit non-zero either way.
+      let _ = writeln!(std::io::stderr(), "murasaki-launcher: {err}");
+      std::process::exit(1);
+    }
+  }
+
+  fn run_inner() -> Result<(), String> {
+    // The bundle layout is `<productName>.exe` + a sibling `resources/`
+    // directory (see cli/bundle.ts's bundleWin32 — unlike macOS's
+    // `Contents/MacOS/<exe>` + `Contents/Resources/`, there's no `..` hop)
+    // — resolve it from our own binary's location rather than the current
+    // directory, since the packaged executable can be launched from anywhere
+    // (a shortcut, the Start menu, …).
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let exe_dir = exe
+      .parent()
+      .ok_or_else(|| "murasaki-launcher: executable has no parent directory".to_string())?;
+    let resources_dir = exe_dir
+      .join("resources")
+      .canonicalize()
+      .map_err(|e| format!("resolve resources dir: {e}"))?;
+
+    let meta = read_meta(&resources_dir)?;
+    // Spawns resources/node.exe prod-server.mjs — same handshake as macOS,
+    // see `shared::spawn_prod_server`.
+    let (mut child, port) = spawn_prod_server(&resources_dir, "node.exe")?;
+
+    let event_loop = EventLoop::<()>::new();
+
+    // Matches prod-launcher.mjs's / the macOS launcher's `meta.width ?? 1000`
+    // / `meta.height ?? 700`.
+    let width = meta.width.unwrap_or(1000);
+    let height = meta.height.unwrap_or(700);
+    // Vibrancy is macOS-only (see window.rs) — a no-op here too.
+    let _ = &meta.vibrancy;
+    // Deferred — see the module doc comment above.
+    let _ = &meta.icon;
+    let _ = &meta.locales;
+    let _ = &meta.version;
+    let _ = &meta.description;
+    let _ = &meta.copyright;
+    let _ = &meta.homepage;
+    let _ = &meta.authors;
+
+    let window = WindowBuilder::new()
+      .with_title(&meta.product_name)
+      .with_inner_size(LogicalSize::new(width as f64, height as f64))
+      .with_resizable(true)
+      .build(&event_loop)
+      .map_err(|e| format!("build window: {e}"))?;
+    center_on_primary_monitor(&window);
+
+    let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
+
+    let url = format!("http://127.0.0.1:{port}/");
+    // `Webview::new` pins the WebView2 user-data directory under
+    // %LOCALAPPDATA% itself (see `webview::webview2_data_dir`'s doc comment)
+    // — no extra wiring needed here since this goes through the same
+    // constructor `murasaki dev` / `BrowserWindow::createWebview` use.
+    let _webview = Webview::new(
+      shared_window.clone(),
+      WebviewOptions {
+        url: Some(url),
+        html: None,
+        devtools: Some(false),
+        transparent: None,
+        serve_dir: None,
+      },
+    )
+    .map_err(|e| format!("build webview: {e}"))?;
+
+    // Same shutdown story as the macOS launcher (see that module's
+    // `event_loop.run` comment): tao's `EventLoop::run` never returns and
+    // explicitly documents that values not passed into it aren't dropped, so
+    // `shared_window`/`_webview` simply stay alive on this stack frame for
+    // the app's lifetime. Only `child` needs to move into the closure, to be
+    // killed on window close.
+    event_loop.run(move |event, _target, control_flow| {
+      *control_flow = ControlFlow::Wait;
+      if let Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } = event
+      {
+        *control_flow = ControlFlow::Exit;
+        // Best-effort: if we get killed before this runs (force-quit, crash),
+        // prod-server.mjs's own orphan check (`ppid === 1`) reaps it within ~2s.
+        let _ = child.kill();
+        std::process::exit(0);
+      }
+    });
+  }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "macos")]
 pub fn run_launcher() {
-  eprintln!("murasaki-launcher: unsupported platform (macOS only)");
+  imp_macos::run();
+}
+
+#[cfg(target_os = "windows")]
+pub fn run_launcher() {
+  imp_win::run();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn run_launcher() {
+  eprintln!("murasaki-launcher: unsupported platform (macOS/Windows only)");
 }

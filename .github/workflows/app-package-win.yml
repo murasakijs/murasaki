@@ -1,0 +1,122 @@
+name: App package smoke test (Windows)
+
+# Verifies the Windows packaging path end-to-end (murasaki build → murasaki
+# bundle --target win32-x64 → packaged .exe actually runs) using the native
+# addon + murasaki-launcher freshly built from THIS branch — the published
+# @murasakijs/native@0.31.0 only ships the old macOS-only stub launcher (see
+# crates/native/src/launcher.rs), so testing against it would miss the whole
+# point of this workflow. Runs on every push to a feat/** branch (this is
+# Phase 1b of Windows packaging, still landing on feat/win-linux-packaging)
+# plus workflow_dispatch for on-demand runs.
+on:
+  push:
+    branches:
+      - 'feat/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  win-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # No version pin: pnpm/action-setup@v4 reads it from the root
+      # package.json "packageManager" field (specifying both errors).
+      - uses: pnpm/action-setup@v4
+
+      # windows-latest's host toolchain is already x86_64-pc-windows-msvc —
+      # no explicit target needed (unlike native-release.yml's cross-target
+      # matrix entries).
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Scaffolds a throwaway app from the default template *inside* the
+      # pnpm workspace (examples/ is a pnpm-workspace.yaml glob) before the
+      # one-and-only `pnpm install` below, so its `murasaki` / `@murasakijs/ui`
+      # dependencies resolve to workspace symlinks pointing at this branch's
+      # code — a plain `pnpm create murasaki` (or installing the template
+      # standalone) would instead pull the published packages from npm,
+      # defeating the point of this workflow.
+      - name: Scaffold test app from the default template
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p examples/win-smoke-app
+          cp -r packages/create-murasaki/templates/default/. examples/win-smoke-app/
+          cp packages/create-murasaki/templates/default/gitignore.tpl examples/win-smoke-app/.gitignore
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('examples/win-smoke-app/package.json', 'utf8'));
+            p.name = 'win-smoke-app';
+            p.dependencies.murasaki = 'workspace:*';
+            p.dependencies['@murasakijs/ui'] = 'workspace:*';
+            fs.writeFileSync('examples/win-smoke-app/package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+
+      - name: pnpm install
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build murasaki
+        run: pnpm --filter murasaki build
+
+      - name: Build @murasakijs/ui
+        run: pnpm --filter @murasakijs/ui build
+
+      # Rebuild the native addon (.node) for this branch — see this
+      # workflow's top comment on why the published one can't be used.
+      - name: Build @murasakijs/native native addon
+        working-directory: crates/native
+        run: pnpm exec napi build --platform --release
+
+      # Rebuild murasaki-launcher for this branch. Deliberately no --target:
+      # bundle.ts's resolveLauncherBinary falls back to this exact
+      # `target/release/murasaki-launcher.exe` (host-arch build) when the
+      # bundle target matches the host, which it does here (win32-x64 on a
+      # win32-x64 runner) — see that function's doc comment in
+      # packages/murasaki/src/cli/bundle.ts.
+      - name: Build murasaki-launcher
+        working-directory: crates/native
+        run: cargo build --release --bin murasaki-launcher
+
+      - name: murasaki build (test app)
+        working-directory: examples/win-smoke-app
+        run: pnpm exec murasaki build
+
+      - name: murasaki bundle --target win32-x64 (test app)
+        working-directory: examples/win-smoke-app
+        run: pnpm exec murasaki bundle --target win32-x64
+
+      - name: Locate packaged .exe
+        id: locate
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path examples/win-smoke-app/dist/bundle -Recurse -Filter *.exe | Select-Object -First 1
+          if (-not $exe) {
+            Write-Error 'No .exe found under examples/win-smoke-app/dist/bundle'
+            exit 1
+          }
+          Write-Host "Found: $($exe.FullName)"
+          "exePath=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Launches the packaged app and polls prod-server.mjs's HTTP endpoint
+      # for a 200 (see .github/scripts/win-smoke-test.ps1's doc comment for
+      # exactly what this does and doesn't assert — briefly: it confirms
+      # node.exe spawned and served a request, and that the launcher process
+      # is still alive a couple seconds after — not full WebView2 rendering
+      # correctness, which needs manual/visual verification).
+      - name: Smoke test packaged app
+        shell: pwsh
+        run: .github/scripts/win-smoke-test.ps1 -ExePath "${{ steps.locate.outputs.exePath }}" -TimeoutSeconds 60
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-bundle
+          path: examples/win-smoke-app/dist/bundle/**
+          if-no-files-found: warn
