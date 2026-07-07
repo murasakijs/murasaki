@@ -1,0 +1,81 @@
+---
+title: Dropdown Menu
+description: Displays a menu to the user—such as a set of actions or functions—triggered by a button.
+---
+
+import { DropdownMenuDemo } from "@/components/ui-demos/dropdown-menu-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@murasakijs/ui";
+
+export function DropdownMenuDemo() {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline">Open</Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent className="w-56">
+        <DropdownMenuLabel>My Account</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem>Profile</DropdownMenuItem>
+        <DropdownMenuItem>Billing</DropdownMenuItem>
+        <DropdownMenuItem>Settings</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem>Log out</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}`}
+>
+  <DropdownMenuDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<DropdownMenu>
+  <DropdownMenuTrigger>Open</DropdownMenuTrigger>
+  <DropdownMenuContent>
+    <DropdownMenuItem>Profile</DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
+```
+
+## API Reference
+
+### Subcomponents
+
+| Component | Description |
+| --- | --- |
+| `DropdownMenu` | The root primitive. |
+| `DropdownMenuTrigger` | The element that opens the menu. Supports `asChild`. |
+| `DropdownMenuContent` | The menu popup. Accepts `sideOffset` (default `4`). |
+| `DropdownMenuItem` | A selectable item. Accepts `inset` to indent it (align with items that have an icon/indicator). |
+| `DropdownMenuCheckboxItem` | An item with a checkbox indicator. Accepts `checked`. |
+| `DropdownMenuRadioGroup` / `DropdownMenuRadioItem` | A mutually-exclusive group of items with a radio indicator. |
+| `DropdownMenuLabel` | A non-interactive heading. Accepts `inset`. |
+| `DropdownMenuSeparator` | A visual divider between items or groups. |
+| `DropdownMenuShortcut` | Right-aligned muted text for a keyboard shortcut hint. |
+| `DropdownMenuGroup` | Groups related items together. |
+| `DropdownMenuSub` / `DropdownMenuSubTrigger` / `DropdownMenuSubContent` | A nested submenu. |
+| `DropdownMenuPortal` | Portals content into `document.body`. Used internally by `DropdownMenuContent`. |
+
+All subcomponents wrap Radix UI's [`DropdownMenu`](https://www.radix-ui.com/primitives/docs/components/dropdown-menu)
+primitives and forward every other prop.

@@ -1,0 +1,77 @@
+---
+title: Alert
+description: Displays a callout for user attention.
+---
+
+import { AlertDemo } from "@/components/ui-demos/alert-demo";
+import { AlertDestructiveDemo } from "@/components/ui-demos/alert-destructive-demo";
+
+<ComponentPreview
+  code={`import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
+import { Terminal } from "lucide-react";
+
+export function AlertDemo() {
+  return (
+    <Alert>
+      <Terminal className="h-4 w-4" />
+      <AlertTitle>Heads up!</AlertTitle>
+      <AlertDescription>
+        You can add components to your app using the CLI.
+      </AlertDescription>
+    </Alert>
+  );
+}`}
+>
+  <AlertDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
+```
+
+```tsx
+<Alert>
+  <AlertTitle>Heads up!</AlertTitle>
+  <AlertDescription>
+    You can add components to your app using the CLI.
+  </AlertDescription>
+</Alert>
+```
+
+## Variants
+
+Use the `variant` prop to switch to the destructive style for errors and
+warnings.
+
+<ComponentPreview
+  code={`import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
+import { AlertCircle } from "lucide-react";
+
+export function AlertDestructiveDemo() {
+  return (
+    <Alert variant="destructive">
+      <AlertCircle className="h-4 w-4" />
+      <AlertTitle>Error</AlertTitle>
+      <AlertDescription>
+        Your session has expired. Please log in again.
+      </AlertDescription>
+    </Alert>
+  );
+}`}
+>
+  <AlertDestructiveDemo />
+</ComponentPreview>
+
+## API Reference
+
+### Props
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `variant` | `"default"` \| `"destructive"` | `"default"` |
+
+`Alert`, `AlertTitle`, and `AlertDescription` all extend the matching native
+HTML element's attributes. A leading `<svg>` child (e.g. a `lucide-react`
+icon) is automatically positioned in the top-left corner via CSS.

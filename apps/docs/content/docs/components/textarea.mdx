@@ -1,0 +1,34 @@
+---
+title: Textarea
+description: Displays a form textarea or a component that looks like a textarea.
+---
+
+import { TextareaDemo } from "@/components/ui-demos/textarea-demo";
+
+<ComponentPreview
+  code={`import { Textarea } from "@murasakijs/ui";
+
+export function TextareaDemo() {
+  return <Textarea placeholder="Type your message here." />;
+}`}
+>
+  <TextareaDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Textarea } from "@murasakijs/ui";
+```
+
+```tsx
+<Textarea placeholder="Type your message here." />
+```
+
+## API Reference
+
+### Props
+
+`Textarea` is a thin styled wrapper around the native `<textarea>` element —
+every attribute (`placeholder`, `rows`, `disabled`, `value`, `onChange`, ...)
+is forwarded straight through.

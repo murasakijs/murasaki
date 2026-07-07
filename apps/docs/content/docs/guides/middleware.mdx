@@ -17,13 +17,80 @@ const middleware: Middleware = ({ pathname }) => {
 export default middleware
 ```
 
-It may be async (e.g. an auth check) — `<AppRouter>` awaits it before
-rendering the matched route, rendering nothing in between so the guarded
-route never flashes.
+`<AppRouter>` (mounted for you by the scaffold's entry) picks this up
+automatically from the virtual route table — there's nothing to register by
+hand, and nothing happens if the file doesn't exist.
+
+## The signature
+
+```ts
+export interface MiddlewareContext {
+  pathname: string
+}
+
+export type MiddlewareResult = { redirect: string } | void | undefined
+
+export type Middleware = (
+  ctx: MiddlewareContext,
+) => MiddlewareResult | Promise<MiddlewareResult>
+```
+
+`ctx` is deliberately small — just the pathname being navigated to. There's no
+`request`/`response`, no headers, no cookies: this runs entirely client-side,
+inside the same WebView as your routes, not an edge or server runtime. To
+return early without redirecting, return nothing (`undefined`).
+
+It may be async — `<AppRouter>` awaits it before rendering the matched route,
+rendering nothing in between so the guarded route never flashes on screen.
+
+## Guarding a route
+
+The most common shape is an auth check that reads some client-side state
+(a store, `localStorage`, a cookie via `document.cookie`) and redirects
+unauthenticated visitors away from a protected path:
+
+```ts title="src/middleware.ts"
+import type { Middleware } from 'murasaki'
+import { useAuth } from '@/lib/auth'
+
+const PROTECTED = ['/settings', '/billing']
+
+const middleware: Middleware = ({ pathname }) => {
+  const isProtected = PROTECTED.some((p) => pathname.startsWith(p))
+  if (isProtected && !useAuth.getState().isSignedIn) {
+    return { redirect: '/login' }
+  }
+}
+
+export default middleware
+```
+
+## Side effects without redirecting
+
+`middleware` doesn't have to redirect anything — returning `void` lets the
+navigation through as-is, so it's also a convenient place to run a side effect
+on every navigation (analytics page views, for example):
+
+```ts title="src/middleware.ts"
+import type { Middleware } from 'murasaki'
+import { trackPageview } from '@/lib/analytics'
+
+const middleware: Middleware = ({ pathname }) => {
+  trackPageview(pathname)
+}
+
+export default middleware
+```
 
 <Callout type="info">
   A redirect loop (5+ consecutive redirects) is caught automatically: murasaki
   logs a warning and renders the current path as-is rather than hanging.
+</Callout>
+
+<Callout type="warn">
+  There's no `matcher`/`config` export to scope which paths run middleware —
+  unlike Next.js, `middleware` always runs on every navigation, and you branch
+  on `pathname` yourself inside the function (as in the examples above).
 </Callout>
 
 This is murasaki's client-side equivalent of Next.js middleware — there's no
@@ -32,5 +99,6 @@ edge runtime involved, since it runs in the same WebView as your routes.
 ## Next
 
 <Cards>
-  <Card title="Routing" href="/docs/guides/routing" />
+  <Card title="Routing" href="/docs/guides/routing" description="File-based routing, layouts, and navigation." />
+  <Card title="Metadata" href="/docs/guides/metadata" description="Set the document title and meta tags per route." />
 </Cards>

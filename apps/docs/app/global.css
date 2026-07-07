@@ -4,6 +4,19 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/*
+ * Scan @murasakijs/ui's SOURCE (not its built `dist`) so the docs' own
+ * Tailwind v4 build generates utility classes for every class name the
+ * component library's `.tsx` files reference — this is what lets a real
+ * `<Button />` (or any other component) render fully styled inside an MDX
+ * `<ComponentPreview>` without the docs app depending on the package's own
+ * (Tailwind v3) `tailwind-preset.cjs`. The components' classes are authored
+ * against the same shadcn token names (`bg-primary`, `text-card-foreground`,
+ * etc.) the docs theme below already defines, so scanning source is enough
+ * — no separate preset/config bridging is needed.
+ */
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+
 @custom-variant dark (&:is(.dark *));
 
 /*
@@ -143,6 +156,7 @@ html > body[data-scroll-locked] {
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -182,6 +196,13 @@ html > body[data-scroll-locked] {
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /*
+   * Missing from this theme until @murasakijs/ui was wired in — its Button
+   * `destructive` variant reads `text-destructive-foreground`, and every
+   * other foreground token here is near-white/near-black grayscale, so this
+   * matches `--primary-foreground` (the palette's existing near-white).
+   */
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -217,6 +238,7 @@ html > body[data-scroll-locked] {
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

@@ -3,10 +3,24 @@ title: Styling
 description: Tailwind CSS + @murasakijs/ui, a shadcn-style component library.
 ---
 
+import { ButtonDemo } from "@/components/ui-demos/button-demo"
+
 The scaffold ships Tailwind CSS and [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) — a
 shadcn/ui-style component library built on Radix primitives, styled with the
 same `cn()` + `class-variance-authority` conventions shadcn/ui users already
-know.
+know. Every component it ships is documented, live, in the
+[Components](/docs/components) section — this guide only covers how the
+library is wired into a scaffolded app.
+
+<ComponentPreview
+  code={`import { Button } from "@murasakijs/ui";
+
+export function ButtonDemo() {
+  return <Button>Button</Button>;
+}`}
+>
+  <ButtonDemo />
+</ComponentPreview>
 
 ## Setup
 
@@ -65,6 +79,10 @@ The package currently ships:
 plus `asChild` to render as a different element (Radix `Slot`) — the same
 pattern as the rest of the library.
 
+Every one of these is documented on its own page under
+[Components](/docs/components), with a live, interactive preview and the full
+prop table — not just the short list above.
+
 <Callout type="info">
   `@murasakijs/ui` is not required — it's Tailwind + Radix under the hood, so
   you can swap in your own components or another library instead.
@@ -73,5 +91,6 @@ pattern as the rest of the library.
 ## Next
 
 <Cards>
-  <Card title="Native APIs" href="/docs/guides/native-apis" />
+  <Card title="Components" href="/docs/components" description="Every @murasakijs/ui component, with live previews." />
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="What's exposed to your app from murasaki's native surface today." />
 </Cards>

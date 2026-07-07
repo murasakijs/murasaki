@@ -24,6 +24,11 @@ export const POST: RouteHandler = async (request) => {
 `Response` を返します — `Response.json(...)`、`new Response(...)`、ステータスコード、
 ヘッダーなど、すべて標準的なものです。
 
+`GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD`、`OPTIONS` のうち、ルートに必要なもの
+をいくつでもエクスポートできます。モジュールがエクスポートしていないメソッドへのリクエ
+ストは `405` になり、`/api/` 配下でどのルートにもマッチしないリクエストは、アプリの
+HTML にフォールバックするのではなく `404` になります。
+
 ## 動的セグメント
 
 `[name]` フォルダはセグメントをキャプチャし、`context.params` に公開されます:
@@ -69,6 +74,6 @@ const data = await res.json()
 ## 次へ
 
 <Cards>
-  <Card title="Server Actions" href="/docs/guides/server-actions" />
-  <Card title="ミドルウェア" href="/docs/guides/middleware" />
+  <Card title="Server Actions" href="/docs/guides/server-actions" description="フォーム向けの型付き RPC。React 19 の useAction に対応。" />
+  <Card title="ミドルウェア" href="/docs/guides/middleware" description="すべてのクライアントサイドナビゲーションの前に実行されるルートガード。" />
 </Cards>

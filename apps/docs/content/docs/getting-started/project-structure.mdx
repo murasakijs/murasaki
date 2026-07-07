@@ -10,20 +10,28 @@ there's no `index.html` or entry file to maintain.
 ```txt
 my-app/
 ├─ src/
-│  ├─ app/                 # pages, layouts, globals.css (file-based routing)
-│  │  ├─ layout.tsx        # root layout — wrap it in <App>
-│  │  ├─ page.tsx          # "/" route
-│  │  └─ about/page.tsx    # "/about" route
-│  ├─ api/                 # API route handlers -> /api/*
-│  │  └─ hello/route.ts    # GET/POST handlers
-│  ├─ actions.ts           # 'use server' functions (server actions)
-│  ├─ middleware.ts        # runs before every route (optional)
-│  ├─ lib/                 # your app code (stores, helpers)
-│  └─ assets/              # images, icons
-├─ murasaki.config.ts      # app identity, window, signing
+│  ├─ app/                    # pages, layouts, globals.css (file-based routing)
+│  │  ├─ layout.tsx           # root layout — wraps children in <App>
+│  │  ├─ page.tsx             # "/" route
+│  │  └─ about/page.tsx       # "/about" route
+│  ├─ api/                    # API route handlers -> /api/*
+│  │  ├─ hello/route.ts       # GET/POST handlers
+│  │  └─ greet/[name]/route.ts # dynamic segment -> /api/greet/:name
+│  ├─ middleware.ts           # runs before every navigation (optional)
+│  ├─ lib/                    # your app code (stores, context-menu actions, helpers)
+│  └─ assets/                 # images, icons
+├─ murasaki.config.ts         # app identity, window, signing
 ├─ tailwind.config.ts
+├─ vite.config.ts             # wires up the murasaki Vite plugin
 └─ package.json
 ```
+
+<Callout type="info">
+  There's no `src/actions.ts` in the scaffold itself, but it's the common spot
+  for `'use server'` functions — see [Server Actions](/docs/guides/server-actions).
+  A `'use server'` file can live anywhere under `src/`; it isn't tied to
+  `src/app/` or `src/api/`.
+</Callout>
 
 ## `src/app/` — routes
 
@@ -39,8 +47,9 @@ layout wraps everything in `<App>`. See [Routing](/docs/guides/routing).
 
 ## Server actions
 
-`'use server'` functions (anywhere under `src/`, e.g. `src/actions.ts`) run on
-the server and are called from the client with `useAction`. See
+Unlike `src/app/` and `src/api/`, there's no dedicated folder — a `'use
+server'` function runs on the server and is called from the client with
+`useAction`, wherever you put the file. See
 [Server Actions](/docs/guides/server-actions).
 
 ## `murasaki.config.ts`
@@ -60,3 +69,10 @@ export default defineConfig({
 ```
 
 See [Configuration](/docs/building/configuration) for every field.
+
+## Next
+
+<Cards>
+  <Card title="Routing" href="/docs/guides/routing" description="File-based routing, layouts, and navigation." />
+  <Card title="Configuration" href="/docs/building/configuration" description="Window, signing, and installer settings." />
+</Cards>

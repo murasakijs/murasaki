@@ -1,0 +1,84 @@
+---
+title: Popover
+description: Displays rich content in a portal, triggered by a button.
+---
+
+import { PopoverDemo } from "@/components/ui-demos/popover-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  Input,
+  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@murasakijs/ui";
+
+export function PopoverDemo() {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline">Open popover</Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-80">
+        <div className="grid gap-4">
+          <div className="space-y-2">
+            <h4 className="font-medium leading-none">Dimensions</h4>
+            <p className="text-sm text-muted-foreground">
+              Set the dimensions for the layer.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <div className="grid grid-cols-3 items-center gap-4">
+              <Label htmlFor="width">Width</Label>
+              <Input
+                id="width"
+                defaultValue="100%"
+                className="col-span-2 h-8"
+              />
+            </div>
+            <div className="grid grid-cols-3 items-center gap-4">
+              <Label htmlFor="height">Height</Label>
+              <Input
+                id="height"
+                defaultValue="25px"
+                className="col-span-2 h-8"
+              />
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}`}
+>
+  <PopoverDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Popover, PopoverContent, PopoverTrigger } from "@murasakijs/ui";
+```
+
+```tsx
+<Popover>
+  <PopoverTrigger>Open</PopoverTrigger>
+  <PopoverContent>Place content for the popover here.</PopoverContent>
+</Popover>
+```
+
+## API Reference
+
+### Subcomponents
+
+| Component | Description |
+| --- | --- |
+| `Popover` | The root primitive. Accepts `open`, `defaultOpen`, `onOpenChange`, `modal`. |
+| `PopoverTrigger` | The element that opens the popover. Supports `asChild`. |
+| `PopoverAnchor` | An optional element to anchor positioning to, instead of the trigger. |
+| `PopoverContent` | The popup panel. Accepts `align` (default `"center"`) and `sideOffset` (default `4`). |
+
+All subcomponents wrap Radix UI's [`Popover`](https://www.radix-ui.com/primitives/docs/components/popover)
+primitives and forward every other prop.

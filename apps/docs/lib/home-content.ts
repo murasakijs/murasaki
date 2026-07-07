@@ -13,10 +13,14 @@ export interface HomeContent {
   /** Full-bleed solid-purple/white band rendered between the hero and the
    * product window mockup — the site's boldest "color field" moment. */
   bandLabel: string;
-  /** Copy for the product window mockup section. */
+  /** Copy for the installer-artifacts showcase section. */
   mockup: {
     heading: string;
     caption: string;
+    /** Status-pill label for the macOS (available today) card. */
+    availableLabel: string;
+    /** Status-pill label for the Windows/Linux (roadmap) cards. */
+    soonLabel: string;
   };
   /** Copy for the tabbed code showcase section. */
   codeShowcase: {
@@ -141,7 +145,10 @@ const en: HomeContent = {
   bandLabel: "Open source · MIT licensed · React 19 · Vite · Rust-native",
   mockup: {
     heading: "This is what you ship.",
-    caption: "A real native window — not a browser tab.",
+    caption:
+      "One command → a real native installer. macOS .dmg today — Windows & Linux next.",
+    availableLabel: "Ships today",
+    soonLabel: "Coming soon",
   },
   codeShowcase: {
     eyebrow: "Straight from the docs",
@@ -390,7 +397,10 @@ const ja: HomeContent = {
   bandLabel: "オープンソース・MIT ライセンス・React 19・Vite・Rust ネイティブ",
   mockup: {
     heading: "実際に届けるのは、これです。",
-    caption: "本物のネイティブウィンドウ — ブラウザのタブではない。",
+    caption:
+      "1コマンドで、本物のネイティブインストーラへ。macOS の .dmg は今すぐ、Windows・Linux は近日。",
+    availableLabel: "今すぐ",
+    soonLabel: "近日",
   },
   codeShowcase: {
     eyebrow: "ドキュメントそのまま",

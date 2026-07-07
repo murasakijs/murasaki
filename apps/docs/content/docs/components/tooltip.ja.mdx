@@ -1,0 +1,68 @@
+---
+title: Tooltip
+description: 要素がキーボードフォーカスを受け取ったとき、またはマウスがホバーしたときに、関連情報を表示するポップアップです。
+---
+
+import { TooltipDemo } from "@/components/ui-demos/tooltip-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@murasakijs/ui";
+
+export function TooltipDemo() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="outline">Hover me</Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Add to library</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}`}
+>
+  <TooltipDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger>Hover</TooltipTrigger>
+    <TooltipContent>Add to library</TooltipContent>
+  </Tooltip>
+</TooltipProvider>
+```
+
+## API リファレンス
+
+### サブコンポーネント
+
+| コンポーネント | 説明 |
+| --- | --- |
+| `TooltipProvider` | ツールチップを使うツリーをラップします。少なくとも1箇所(例えばアプリのルート付近)に必要で、共有の `delayDuration` などを設定します。 |
+| `Tooltip` | 1つのツールチップのルートプリミティブ。`open`・`defaultOpen`・`onOpenChange`・`delayDuration` を受け取ります。 |
+| `TooltipTrigger` | ツールチップが紐づく要素です。`asChild` に対応しています。 |
+| `TooltipContent` | ポップアップの内容。`sideOffset`(デフォルト `8`)を受け取ります。 |
+| `TooltipPortal` | コンテンツを `document.body` にポータルします。`TooltipContent` が内部的に使用します。 |
+
+すべてのサブコンポーネントは Radix UI の [`Tooltip`](https://www.radix-ui.com/primitives/docs/components/tooltip)
+プリミティブをラップし、それ以外の props はすべてそのまま渡されます。

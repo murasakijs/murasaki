@@ -1,0 +1,101 @@
+---
+title: Sheet
+description: Dialog コンポーネントを拡張し、画面のメインコンテンツを補足するコンテンツを表示します。
+---
+
+import { SheetDemo } from "@/components/ui-demos/sheet-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@murasakijs/ui";
+
+export function SheetDemo() {
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="outline">Open</Button>
+      </SheetTrigger>
+      <SheetContent side="right">
+        <SheetHeader>
+          <SheetTitle>Edit profile</SheetTitle>
+          <SheetDescription>
+            Make changes to your profile here. Click save when you're done.
+          </SheetDescription>
+        </SheetHeader>
+      </SheetContent>
+    </Sheet>
+  );
+}`}
+>
+  <SheetDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<Sheet>
+  <SheetTrigger>Open</SheetTrigger>
+  <SheetContent side="right">
+    <SheetHeader>
+      <SheetTitle>Title</SheetTitle>
+      <SheetDescription>Description</SheetDescription>
+    </SheetHeader>
+  </SheetContent>
+</Sheet>
+```
+
+## バリアント
+
+`SheetContent` の `side` プロパティで、画面のどの端からスライドインするかを制御でき
+ます。
+
+<ComponentPreview
+  code={`<SheetContent side="top">...</SheetContent>
+<SheetContent side="right">...</SheetContent>
+<SheetContent side="bottom">...</SheetContent>
+<SheetContent side="left">...</SheetContent>`}
+>
+  <SheetDemo />
+</ComponentPreview>
+
+## API リファレンス
+
+### `SheetContent`
+
+| Prop | 型 | デフォルト |
+| --- | --- | --- |
+| `side` | `"top"` \| `"bottom"` \| `"left"` \| `"right"` | `"right"` |
+
+### その他のサブコンポーネント
+
+| コンポーネント | 説明 |
+| --- | --- |
+| `Sheet` | ルートプリミティブ(`Dialog` と同じ API)です。 |
+| `SheetTrigger` | シートを開く要素です。`asChild` に対応しています。 |
+| `SheetHeader` | `SheetTitle` / `SheetDescription` を縦に並べます。 |
+| `SheetFooter` | アクションを並べる行で、大きい画面では右寄せになります。 |
+| `SheetTitle` | シートのアクセシブルな名前です。 |
+| `SheetDescription` | シートのアクセシブルな説明です。 |
+| `SheetClose` | シートを閉じるボタンです。`asChild` に対応しています。 |
+
+`Sheet` は `Dialog` と同じ Radix UI の [`Dialog`](https://www.radix-ui.com/primitives/docs/components/dialog)
+プリミティブの上に構築されていますが、中央に表示される代わりに画面端からスライドイン
+するようスタイリングされています。

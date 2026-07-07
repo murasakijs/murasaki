@@ -1,0 +1,86 @@
+---
+title: Accordion
+description: A vertically stacked set of interactive headings that each reveal a section of content.
+---
+
+import { AccordionDemo } from "@/components/ui-demos/accordion-demo";
+
+<ComponentPreview
+  code={`import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@murasakijs/ui";
+
+export function AccordionDemo() {
+  return (
+    <Accordion type="single" collapsible className="w-full max-w-md">
+      <AccordionItem value="item-1">
+        <AccordionTrigger>Is it accessible?</AccordionTrigger>
+        <AccordionContent>
+          Yes. It adheres to the WAI-ARIA design pattern.
+        </AccordionContent>
+      </AccordionItem>
+      <AccordionItem value="item-2">
+        <AccordionTrigger>Is it styled?</AccordionTrigger>
+        <AccordionContent>
+          Yes. It comes with default styles that match the other components.
+        </AccordionContent>
+      </AccordionItem>
+      <AccordionItem value="item-3">
+        <AccordionTrigger>Is it animated?</AccordionTrigger>
+        <AccordionContent>
+          Yes. It's animated by default, but you can disable it if you prefer.
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
+  );
+}`}
+>
+  <AccordionDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<Accordion type="single" collapsible>
+  <AccordionItem value="item-1">
+    <AccordionTrigger>Is it accessible?</AccordionTrigger>
+    <AccordionContent>
+      Yes. It adheres to the WAI-ARIA design pattern.
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+```
+
+## API Reference
+
+### `Accordion`
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `type` | `"single"` \| `"multiple"` | — (required) |
+| `collapsible` | `boolean` (only when `type="single"`) | `false` |
+| `value` / `defaultValue` | `string` (single) or `string[]` (multiple) | — |
+| `onValueChange` | `(value) => void` | — |
+
+### Other subcomponents
+
+| Component | Description |
+| --- | --- |
+| `AccordionItem` | A single collapsible section. Accepts `value` (required). |
+| `AccordionTrigger` | The clickable heading; renders a rotating chevron automatically. |
+| `AccordionContent` | The collapsible panel, animated in/out via CSS. |
+
+All subcomponents wrap Radix UI's [`Accordion`](https://www.radix-ui.com/primitives/docs/components/accordion)
+primitives and forward every other prop.

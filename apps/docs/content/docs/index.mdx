@@ -13,15 +13,20 @@ window, native menus, and OS integration — **without you writing any Rust**.
 
 ## Why murasaki
 
-|                | murasaki                     | Electron           | Tauri                 |
-| -------------- | ---------------------------- | ------------------ | --------------------- |
-| UI runtime     | OS WebView (wry)             | bundled Chromium   | OS WebView            |
-| Language       | TypeScript / React           | TypeScript / React | TypeScript + **Rust** |
-| DX             | **Next.js-style** (Vite HMR) | manual wiring      | manual wiring         |
-| Memory (idle)  | ~1/5 of Electron\*           | baseline           | small                 |
-| Server actions | `defineAction` / `useAction` | manual IPC         | manual IPC / commands |
+|                 | murasaki                                     | Electron             | Tauri                 |
+| --------------- | --------------------------------------------- | --------------------- | --------------------- |
+| UI runtime      | OS WebView (wry)                               | bundled Chromium      | OS WebView            |
+| Language        | TypeScript / React                             | TypeScript / React    | TypeScript + **Rust** |
+| DX              | **Next.js-style** (Vite HMR)                   | manual wiring         | manual wiring         |
+| Memory (idle)   | ~1/5 of Electron\*                              | baseline              | small                 |
+| Installer size  | **~43 MB `.dmg`** / **~120 MB `.app`**†         | ~80–150 MB\*          | ~3–10 MB\*            |
+| Server actions  | `defineAction` / `useAction`                   | manual IPC            | manual IPC / commands |
 
-<sub>\* Commonly-cited ballpark for Electron/Tauri — not a measured benchmark.</sub>
+<sub>
+  \* Commonly-cited ballpark for Electron/Tauri — not a measured benchmark. †
+  Measured on macOS — the `.app` bundles a full Node runtime, which is where
+  most of its size comes from.
+</sub>
 
 **Choose murasaki if** you know React/Next.js and want a small-footprint desktop
 app without learning Rust or hand-wiring IPC.
@@ -37,7 +42,8 @@ app without learning Rust or hand-wiring IPC.
 - **Native window & menus** — a real native window, a native menu bar, and
   scoped native context menus (`NSMenu`, not HTML popups). See
   [Native APIs](/docs/guides/native-apis).
-- **UI kit** — `@murasakijs/ui`, a shadcn-style component library.
+- **UI kit** — `@murasakijs/ui`, a shadcn-style component library. See
+  [Styling](/docs/guides/styling) and the live [Components](/docs/components).
 - **Real distribution** — portable, cross-arch `.app` bundles, optional code
   signing + notarization. See [Distribution](/docs/building/distribution).
 
@@ -52,4 +58,6 @@ app without learning Rust or hand-wiring IPC.
 <Cards>
   <Card title="Quick start" href="/docs/getting-started/quick-start" description="Scaffold, run, and ship your first app." />
   <Card title="Project structure" href="/docs/getting-started/project-structure" description="What lives where in a murasaki app." />
+  <Card title="Components" href="/docs/components" description="Every @murasakijs/ui component, with live previews." />
+  <Card title="Guides" href="/docs/guides/routing" description="Routing, server actions, API routes, metadata, and more." />
 </Cards>

@@ -1,0 +1,37 @@
+---
+title: Progress
+description: タスクの完了度合いを示すインジケーターを表示します。
+---
+
+import { ProgressDemo } from "@/components/ui-demos/progress-demo";
+
+<ComponentPreview
+  code={`import { Progress } from "@murasakijs/ui";
+
+export function ProgressDemo() {
+  return <Progress value={60} className="w-[60%]" />;
+}`}
+>
+  <ProgressDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Progress } from "@murasakijs/ui";
+```
+
+```tsx
+<Progress value={60} />
+```
+
+## API リファレンス
+
+### Props
+
+| Prop | 型 | デフォルト |
+| --- | --- | --- |
+| `value` | `number \| null` | — |
+
+`Progress` は Radix UI の [`Progress.Root`](https://www.radix-ui.com/primitives/docs/components/progress)
+をレンダリングし、`value`(0〜100)に応じてインジケーターを水平方向に移動させます。

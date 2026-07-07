@@ -1,0 +1,69 @@
+---
+title: Radio Group
+description: A set of checkable buttons—known as radio buttons—where no more than one of the buttons can be checked at a time.
+---
+
+import { RadioGroupDemo } from "@/components/ui-demos/radio-group-demo";
+
+<ComponentPreview
+  code={`import { Label, RadioGroup, RadioGroupItem } from "@murasakijs/ui";
+
+export function RadioGroupDemo() {
+  return (
+    <RadioGroup defaultValue="comfortable" className="gap-3">
+      <div className="flex items-center gap-2">
+        <RadioGroupItem value="default" id="r1" />
+        <Label htmlFor="r1">Default</Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <RadioGroupItem value="comfortable" id="r2" />
+        <Label htmlFor="r2">Comfortable</Label>
+      </div>
+      <div className="flex items-center gap-2">
+        <RadioGroupItem value="compact" id="r3" />
+        <Label htmlFor="r3">Compact</Label>
+      </div>
+    </RadioGroup>
+  );
+}`}
+>
+  <RadioGroupDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Label, RadioGroup, RadioGroupItem } from "@murasakijs/ui";
+```
+
+```tsx
+<RadioGroup defaultValue="comfortable">
+  <div className="flex items-center gap-2">
+    <RadioGroupItem value="comfortable" id="r1" />
+    <Label htmlFor="r1">Comfortable</Label>
+  </div>
+</RadioGroup>
+```
+
+## API Reference
+
+### `RadioGroup`
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `value` | `string` | — |
+| `defaultValue` | `string` | — |
+| `onValueChange` | `(value: string) => void` | — |
+| `disabled` | `boolean` | `false` |
+| `name` | `string` | — |
+| `required` | `boolean` | `false` |
+
+### `RadioGroupItem`
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `value` | `string` | — (required) |
+| `disabled` | `boolean` | `false` |
+
+Both render Radix UI [`RadioGroup.Root`](https://www.radix-ui.com/primitives/docs/components/radio-group)
+and `RadioGroup.Item`; all other props are forwarded.

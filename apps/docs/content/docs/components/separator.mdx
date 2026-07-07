@@ -1,0 +1,56 @@
+---
+title: Separator
+description: Visually or semantically separates content.
+---
+
+import { SeparatorDemo } from "@/components/ui-demos/separator-demo";
+
+<ComponentPreview
+  code={`import { Separator } from "@murasakijs/ui";
+
+export function SeparatorDemo() {
+  return (
+    <div>
+      <div className="space-y-1">
+        <h4 className="text-sm font-medium leading-none">murasaki</h4>
+        <p className="text-sm text-muted-foreground">
+          A React 19 + Vite desktop framework.
+        </p>
+      </div>
+      <Separator className="my-4" />
+      <div className="flex h-5 items-center gap-4 text-sm">
+        <div>Blog</div>
+        <Separator orientation="vertical" />
+        <div>Docs</div>
+        <Separator orientation="vertical" />
+        <div>Source</div>
+      </div>
+    </div>
+  );
+}`}
+>
+  <SeparatorDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Separator } from "@murasakijs/ui";
+```
+
+```tsx
+<Separator />
+```
+
+## API Reference
+
+### Props
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `orientation` | `"horizontal"` \| `"vertical"` | `"horizontal"` |
+| `decorative` | `boolean` | `true` |
+
+`Separator` renders a Radix UI [`Separator.Root`](https://www.radix-ui.com/primitives/docs/components/separator).
+When `decorative` is `true` it's hidden from assistive technology (purely
+visual); set it to `false` if the separator is semantically meaningful.

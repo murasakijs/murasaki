@@ -1,0 +1,48 @@
+---
+title: Switch
+description: A control that allows the user to toggle between checked and not checked.
+---
+
+import { SwitchDemo } from "@/components/ui-demos/switch-demo";
+
+<ComponentPreview
+  code={`import { Label, Switch } from "@murasakijs/ui";
+
+export function SwitchDemo() {
+  return (
+    <div className="flex items-center gap-2">
+      <Switch id="airplane-mode" />
+      <Label htmlFor="airplane-mode">Airplane Mode</Label>
+    </div>
+  );
+}`}
+>
+  <SwitchDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Switch } from "@murasakijs/ui";
+```
+
+```tsx
+<Switch id="airplane-mode" />
+```
+
+## API Reference
+
+### Props
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `checked` | `boolean` | — |
+| `defaultChecked` | `boolean` | — |
+| `onCheckedChange` | `(checked: boolean) => void` | — |
+| `disabled` | `boolean` | `false` |
+| `required` | `boolean` | `false` |
+| `name` | `string` | — |
+| `value` | `string` | `"on"` |
+
+`Switch` renders a Radix UI [`Switch.Root`](https://www.radix-ui.com/primitives/docs/components/switch);
+all other props are forwarded to it.

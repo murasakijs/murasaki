@@ -1,0 +1,42 @@
+---
+title: Skeleton
+description: Use to show a placeholder while content is loading.
+---
+
+import { SkeletonDemo } from "@/components/ui-demos/skeleton-demo";
+
+<ComponentPreview
+  code={`import { Skeleton } from "@murasakijs/ui";
+
+export function SkeletonDemo() {
+  return (
+    <div className="flex items-center gap-4">
+      <Skeleton className="h-12 w-12 rounded-full" />
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-[250px]" />
+        <Skeleton className="h-4 w-[200px]" />
+      </div>
+    </div>
+  );
+}`}
+>
+  <SkeletonDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Skeleton } from "@murasakijs/ui";
+```
+
+```tsx
+<Skeleton className="h-4 w-[250px]" />
+```
+
+## API Reference
+
+### Props
+
+`Skeleton` renders a pulsing `<div>` with no fixed dimensions — use
+`className` (`h-*`, `w-*`, `rounded-*`) to shape it into a circle, line, or
+block matching the content it's standing in for.

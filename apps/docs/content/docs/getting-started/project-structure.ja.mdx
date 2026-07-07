@@ -10,20 +10,28 @@ description: murasaki アプリの中で何がどこにあるか。
 ```txt
 my-app/
 ├─ src/
-│  ├─ app/                 # ページ、レイアウト、globals.css(ファイルベースルーティング)
-│  │  ├─ layout.tsx        # ルートレイアウト — <App> でラップする
-│  │  ├─ page.tsx          # "/" ルート
-│  │  └─ about/page.tsx    # "/about" ルート
-│  ├─ api/                 # API ルートハンドラ -> /api/*
-│  │  └─ hello/route.ts    # GET/POST ハンドラ
-│  ├─ actions.ts           # 'use server' 関数(サーバーアクション)
-│  ├─ middleware.ts        # すべてのルートの前に実行される(任意)
-│  ├─ lib/                 # アプリのコード(ストア、ヘルパー)
-│  └─ assets/              # 画像、アイコン
-├─ murasaki.config.ts      # アプリの識別情報、ウィンドウ、署名
+│  ├─ app/                    # ページ、レイアウト、globals.css(ファイルベースルーティング)
+│  │  ├─ layout.tsx           # ルートレイアウト — children を <App> でラップする
+│  │  ├─ page.tsx             # "/" ルート
+│  │  └─ about/page.tsx       # "/about" ルート
+│  ├─ api/                    # API ルートハンドラ -> /api/*
+│  │  ├─ hello/route.ts       # GET/POST ハンドラ
+│  │  └─ greet/[name]/route.ts # 動的セグメント -> /api/greet/:name
+│  ├─ middleware.ts           # すべてのナビゲーションの前に実行される(任意)
+│  ├─ lib/                    # アプリのコード(ストア、コンテキストメニューのアクション、ヘルパー)
+│  └─ assets/                 # 画像、アイコン
+├─ murasaki.config.ts         # アプリの識別情報、ウィンドウ、署名
 ├─ tailwind.config.ts
+├─ vite.config.ts             # murasaki の Vite プラグインを配線する
 └─ package.json
 ```
+
+<Callout type="info">
+  スキャフォールド自体に `src/actions.ts` は含まれていませんが、`'use server'`
+  関数を置く一般的な場所です — 詳しくは[Server Actions](/docs/guides/server-actions)
+  を参照してください。`'use server'` ファイルは `src/` 配下のどこにでも置け、
+  `src/app/` や `src/api/` に縛られません。
+</Callout>
 
 ## `src/app/` — ルート
 
@@ -40,8 +48,9 @@ my-app/
 
 ## サーバーアクション
 
-`'use server'` 関数(`src/` 配下のどこにでも置け、例えば `src/actions.ts`)はサーバー
-上で実行され、クライアントからは `useAction` で呼び出します。詳しくは
+`src/app/` や `src/api/` と違い、専用のフォルダはありません — `'use server'`
+関数はファイルをどこに置いてもサーバー上で実行され、クライアントからは
+`useAction` で呼び出します。詳しくは
 [Server Actions](/docs/guides/server-actions)を参照してください。
 
 ## `murasaki.config.ts`
@@ -62,3 +71,10 @@ export default defineConfig({
 
 すべてのフィールドについては[Configuration](/docs/building/configuration)を参照してく
 ださい。
+
+## 次へ
+
+<Cards>
+  <Card title="ルーティング" href="/docs/guides/routing" description="ファイルベースルーティング、レイアウト、ナビゲーション。" />
+  <Card title="設定" href="/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
+</Cards>

@@ -6,9 +6,9 @@ import { Hero } from "@/components/home/hero";
 import { NativeDeepDive } from "@/components/home/native-deepdive";
 import { NumberedFeatures } from "@/components/home/numbered-features";
 import { QuickStart } from "@/components/home/quick-start";
+import { ShipArtifacts } from "@/components/home/ship-artifacts";
 import { SiteFooter } from "@/components/home/site-footer";
 import { WhyMurasaki } from "@/components/home/why-murasaki";
-import { WindowMockup } from "@/components/home/window-mockup";
 import { Wordmark } from "@/components/home/wordmark";
 import { codeSamples, contextMenuSample } from "@/lib/code-samples";
 import { homeContent } from "@/lib/home-content";
@@ -70,7 +70,12 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
         </p>
       </div>
 
-      <WindowMockup heading={t.mockup.heading} caption={t.mockup.caption} />
+      <ShipArtifacts
+        heading={t.mockup.heading}
+        caption={t.mockup.caption}
+        availableLabel={t.mockup.availableLabel}
+        soonLabel={t.mockup.soonLabel}
+      />
 
       <CodeShowcase
         eyebrow={t.codeShowcase.eyebrow}

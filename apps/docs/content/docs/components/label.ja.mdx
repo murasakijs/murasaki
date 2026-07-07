@@ -1,0 +1,40 @@
+---
+title: Label
+description: コントロールに関連付けられた、アクセシブルなラベルをレンダリングします。
+---
+
+import { LabelDemo } from "@/components/ui-demos/label-demo";
+
+<ComponentPreview
+  code={`import { Input, Label } from "@murasakijs/ui";
+
+export function LabelDemo() {
+  return (
+    <div className="grid w-full max-w-sm items-center gap-1.5">
+      <Label htmlFor="email">Email</Label>
+      <Input type="email" id="email" placeholder="Email" />
+    </div>
+  );
+}`}
+>
+  <LabelDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Label } from "@murasakijs/ui";
+```
+
+```tsx
+<Label htmlFor="email">Email</Label>
+```
+
+## API リファレンス
+
+### Props
+
+`Label` は Radix UI の [`Label.Root`](https://www.radix-ui.com/primitives/docs/components/label)
+をレンダリングし、ネイティブの `<label>` 属性をすべてそのまま渡します。`htmlFor` と
+対象コントロールの `id` を一致させておくと、ラベルをクリックしたときにそのコントロー
+ルにフォーカスが移ります。

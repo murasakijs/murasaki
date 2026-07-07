@@ -1,0 +1,47 @@
+---
+title: Avatar
+description: ユーザーを表す、フォールバック付きの画像要素です。
+---
+
+import { AvatarDemo } from "@/components/ui-demos/avatar-demo";
+
+<ComponentPreview
+  code={`import { Avatar, AvatarFallback, AvatarImage } from "@murasakijs/ui";
+
+export function AvatarDemo() {
+  return (
+    <Avatar>
+      <AvatarImage src="https://avatars.githubusercontent.com/u/297658745?s=400" alt="murasaki" />
+      <AvatarFallback>MU</AvatarFallback>
+    </Avatar>
+  );
+}`}
+>
+  <AvatarDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Avatar, AvatarFallback, AvatarImage } from "@murasakijs/ui";
+```
+
+```tsx
+<Avatar>
+  <AvatarImage src="https://avatars.githubusercontent.com/u/297658745?s=400" alt="murasaki" />
+  <AvatarFallback>MU</AvatarFallback>
+</Avatar>
+```
+
+## API リファレンス
+
+### サブコンポーネント
+
+| コンポーネント | 説明 |
+| --- | --- |
+| `Avatar` | ルートコンテナ(デフォルトで `h-10 w-10` の円形)です。 |
+| `AvatarImage` | 画像です。読み込みに成功するまでは何もレンダリングしません。`src`・`alt`・`onLoadingStatusChange` を受け取ります。 |
+| `AvatarFallback` | 画像の読み込み中、または読み込み失敗時に表示されます。`delayMs` でレンダリングを遅延できます。 |
+
+すべてのサブコンポーネントは Radix UI の [`Avatar`](https://www.radix-ui.com/primitives/docs/components/avatar)
+プリミティブをラップし、それ以外の props はすべてそのまま渡されます。

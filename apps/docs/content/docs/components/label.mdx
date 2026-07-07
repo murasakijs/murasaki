@@ -1,0 +1,39 @@
+---
+title: Label
+description: Renders an accessible label associated with controls.
+---
+
+import { LabelDemo } from "@/components/ui-demos/label-demo";
+
+<ComponentPreview
+  code={`import { Input, Label } from "@murasakijs/ui";
+
+export function LabelDemo() {
+  return (
+    <div className="grid w-full max-w-sm items-center gap-1.5">
+      <Label htmlFor="email">Email</Label>
+      <Input type="email" id="email" placeholder="Email" />
+    </div>
+  );
+}`}
+>
+  <LabelDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Label } from "@murasakijs/ui";
+```
+
+```tsx
+<Label htmlFor="email">Email</Label>
+```
+
+## API Reference
+
+### Props
+
+`Label` renders a Radix UI [`Label.Root`](https://www.radix-ui.com/primitives/docs/components/label)
+and forwards all native `<label>` attributes. Pair it with a control via
+matching `htmlFor` / `id`, and clicking the label focuses the control.

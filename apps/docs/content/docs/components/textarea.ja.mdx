@@ -1,0 +1,34 @@
+---
+title: Textarea
+description: フォームのテキストエリア、またはテキストエリアのように見えるコンポーネントを表示します。
+---
+
+import { TextareaDemo } from "@/components/ui-demos/textarea-demo";
+
+<ComponentPreview
+  code={`import { Textarea } from "@murasakijs/ui";
+
+export function TextareaDemo() {
+  return <Textarea placeholder="Type your message here." />;
+}`}
+>
+  <TextareaDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Textarea } from "@murasakijs/ui";
+```
+
+```tsx
+<Textarea placeholder="Type your message here." />
+```
+
+## API リファレンス
+
+### Props
+
+`Textarea` はネイティブの `<textarea>` 要素をスタイリングした薄いラッパーです —
+`placeholder`・`rows`・`disabled`・`value`・`onChange` など、すべての属性はそのまま
+渡されます。

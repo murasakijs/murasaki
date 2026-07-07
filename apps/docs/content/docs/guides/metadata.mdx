@@ -23,14 +23,70 @@ export const generateMetadata: GenerateMetadata = async ({ params }) => {
 }
 ```
 
-`Metadata` also accepts `icons` (`icon` / `shortcut` / `apple`) and
-`openGraph` (`title` / `description` / `images`).
+`generateMetadata` receives `{ params }` — the same dynamic-segment params
+`useParams()` reads on the client — so it can fetch a title from a CMS, an API
+route, or anything else async.
+
+## The `Metadata` shape
+
+```ts
+interface Metadata {
+  title?: string
+  description?: string
+  icons?: {
+    icon?: string
+    shortcut?: string
+    apple?: string
+  }
+  openGraph?: {
+    title?: string
+    description?: string
+    images?: string[]
+  }
+}
+```
+
+<Callout type="warn">
+  Of `icons`, only `icon` is actually rendered to the document today (as a
+  `<link rel="icon">`) — `shortcut` and `apple` are typed for forward
+  compatibility but aren't applied yet. Don't rely on them showing up in the
+  DOM.
+</Callout>
+
+## Layouts set defaults, pages override them
+
+A layout's `metadata` (or its page's) merges root → leaf: each ancestor
+layout's fields apply first, then the matched page's on top — so a layout can
+set a fallback `description` or `openGraph.images` that every page under it
+inherits unless it sets its own:
+
+```tsx title="src/app/layout.tsx"
+export const metadata: Metadata = {
+  title: 'My App',
+  openGraph: { images: ['/og-default.png'] },
+}
+```
+
+```tsx title="src/app/blog/[slug]/page.tsx"
+export const metadata: Metadata = {
+  title: 'My Post',
+  // openGraph.images still resolves to '/og-default.png' from the layout —
+  // only fields a page actually sets override the ones above it.
+}
+```
+
+The merge is per-field, not whole-object: `icons` and `openGraph` are merged
+key by key (a page setting `openGraph.title` doesn't drop the layout's
+`openGraph.images`), while top-level fields like `title` simply overwrite.
+
+A page's `generateMetadata` (if present) is awaited and merged on top of that
+whole static chain last — so it can override any field the static exports set,
+including a layout's.
 
 ## How it's applied
 
-On every navigation, `<AppRouter>` resolves metadata root → leaf — each
-ancestor layout's `metadata` merges under the matched page's — then applies it
-to the document:
+On every navigation, `<AppRouter>` resolves this whole chain and applies it to
+the document:
 
 - `document.title` (only touched when a title actually resolves — never
   blanked out)
@@ -39,8 +95,10 @@ to the document:
   `description` when `openGraph` fields are omitted)
 - `<link rel="icon">`, from `icons.icon`
 
-A page's `generateMetadata` (if present) is awaited and merged on top after
-the static `metadata` chain resolves.
+Tags murasaki previously added are removed before the new ones are applied, so
+navigating between routes replaces them cleanly instead of accumulating stale
+tags from the last route. `applyMetadata` (the function doing this, exported
+if you ever need to call it yourself) is a no-op outside a DOM environment.
 
 <Callout type="warn">
   This sets the **document's** title/meta tags, not the native window's title
@@ -52,6 +110,6 @@ the static `metadata` chain resolves.
 ## Next
 
 <Cards>
-  <Card title="Routing" href="/docs/guides/routing" />
-  <Card title="Configuration" href="/docs/building/configuration" />
+  <Card title="Routing" href="/docs/guides/routing" description="File-based routing, layouts, and navigation." />
+  <Card title="Configuration" href="/docs/building/configuration" description="Window, signing, and installer settings." />
 </Cards>

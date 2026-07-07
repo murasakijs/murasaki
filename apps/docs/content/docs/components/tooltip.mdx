@@ -1,0 +1,68 @@
+---
+title: Tooltip
+description: A popup that displays information related to an element when the element receives keyboard focus or the mouse hovers over it.
+---
+
+import { TooltipDemo } from "@/components/ui-demos/tooltip-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@murasakijs/ui";
+
+export function TooltipDemo() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="outline">Hover me</Button>
+        </TooltipTrigger>
+        <TooltipContent>
+          <p>Add to library</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}`}
+>
+  <TooltipDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<TooltipProvider>
+  <Tooltip>
+    <TooltipTrigger>Hover</TooltipTrigger>
+    <TooltipContent>Add to library</TooltipContent>
+  </Tooltip>
+</TooltipProvider>
+```
+
+## API Reference
+
+### Subcomponents
+
+| Component | Description |
+| --- | --- |
+| `TooltipProvider` | Wraps the part of your tree that uses tooltips; required at least once (e.g. once near the app root), configures shared `delayDuration` etc. |
+| `Tooltip` | The root primitive for a single tooltip. Accepts `open`, `defaultOpen`, `onOpenChange`, `delayDuration`. |
+| `TooltipTrigger` | The element the tooltip is attached to. Supports `asChild`. |
+| `TooltipContent` | The popup content. Accepts `sideOffset` (default `8`). |
+| `TooltipPortal` | Portals content into `document.body`. Used internally by `TooltipContent`. |
+
+All subcomponents wrap Radix UI's [`Tooltip`](https://www.radix-ui.com/primitives/docs/components/tooltip)
+primitives and forward every other prop.

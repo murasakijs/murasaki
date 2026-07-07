@@ -3,11 +3,25 @@ title: スタイリング
 description: Tailwind CSS + @murasakijs/ui、shadcn スタイルのコンポーネントライブラリ。
 ---
 
+import { ButtonDemo } from "@/components/ui-demos/button-demo"
+
 スキャフォールドには Tailwind CSS と
 [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) が同梱されています —
 Radix プリミティブの上に構築された shadcn/ui スタイルのコンポーネントライブラリで、
 shadcn/ui ユーザーがすでに知っている `cn()` + `class-variance-authority` の慣習でスタ
-イリングされています。
+イリングされています。それが提供するすべてのコンポーネントは、
+[Components](/docs/components) セクションでライブに文書化されています — このガイド
+では、ライブラリがスキャフォールドされたアプリにどう組み込まれているかだけを扱います。
+
+<ComponentPreview
+  code={`import { Button } from "@murasakijs/ui";
+
+export function ButtonDemo() {
+  return <Button>Button</Button>;
+}`}
+>
+  <ButtonDemo />
+</ComponentPreview>
 
 ## セットアップ
 
@@ -70,6 +84,10 @@ function Example() {
 て、別の要素としてレンダーするための `asChild`（Radix の `Slot`）をサポートしています
 — ライブラリの他の部分と同じパターンです。
 
+これらすべては、[Components](/docs/components) の下でそれぞれ専用ページとして文書化
+されており、上のリストだけでなく、ライブでインタラクティブなプレビューと完全な props
+テーブルが用意されています。
+
 <Callout type="info">
   `@murasakijs/ui` は必須ではありません — その正体は Tailwind + Radix なので、代わりに
   自分のコンポーネントや別のライブラリに差し替えることもできます。
@@ -78,5 +96,6 @@ function Example() {
 ## 次へ
 
 <Cards>
-  <Card title="ネイティブ API" href="/docs/guides/native-apis" />
+  <Card title="コンポーネント" href="/docs/components" description="@murasakijs/ui のすべてのコンポーネントを、ライブプレビュー付きで。" />
+  <Card title="ネイティブ API" href="/docs/guides/native-apis" description="現時点で、murasaki のネイティブサーフェスからアプリに公開されているもの。" />
 </Cards>

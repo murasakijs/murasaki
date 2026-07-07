@@ -1,0 +1,58 @@
+---
+title: Tabs
+description: A set of layered sections of content—known as tab panels—that are displayed one at a time.
+---
+
+import { TabsDemo } from "@/components/ui-demos/tabs-demo";
+
+<ComponentPreview
+  code={`import { Tabs, TabsContent, TabsList, TabsTrigger } from "@murasakijs/ui";
+
+export function TabsDemo() {
+  return (
+    <Tabs defaultValue="account" className="w-[400px]">
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="account">Account</TabsTrigger>
+        <TabsTrigger value="password">Password</TabsTrigger>
+      </TabsList>
+      <TabsContent value="account">
+        Make changes to your account here.
+      </TabsContent>
+      <TabsContent value="password">Change your password here.</TabsContent>
+    </Tabs>
+  );
+}`}
+>
+  <TabsDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@murasakijs/ui";
+```
+
+```tsx
+<Tabs defaultValue="account">
+  <TabsList>
+    <TabsTrigger value="account">Account</TabsTrigger>
+    <TabsTrigger value="password">Password</TabsTrigger>
+  </TabsList>
+  <TabsContent value="account">Account settings.</TabsContent>
+  <TabsContent value="password">Password settings.</TabsContent>
+</Tabs>
+```
+
+## API Reference
+
+### Subcomponents
+
+| Component | Description |
+| --- | --- |
+| `Tabs` | The root primitive. Accepts `value`, `defaultValue`, `onValueChange`, `orientation`. |
+| `TabsList` | The row of triggers. |
+| `TabsTrigger` | A tab button. Accepts `value` (required) and `disabled`. |
+| `TabsContent` | The panel shown when its matching `value` is active. |
+
+All subcomponents wrap Radix UI's [`Tabs`](https://www.radix-ui.com/primitives/docs/components/tabs)
+primitives and forward every other prop.

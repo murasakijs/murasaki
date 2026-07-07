@@ -1,0 +1,58 @@
+---
+title: Tabs
+description: 一度に1つずつ表示される、タブパネルと呼ばれる階層化されたコンテンツのセットです。
+---
+
+import { TabsDemo } from "@/components/ui-demos/tabs-demo";
+
+<ComponentPreview
+  code={`import { Tabs, TabsContent, TabsList, TabsTrigger } from "@murasakijs/ui";
+
+export function TabsDemo() {
+  return (
+    <Tabs defaultValue="account" className="w-[400px]">
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="account">Account</TabsTrigger>
+        <TabsTrigger value="password">Password</TabsTrigger>
+      </TabsList>
+      <TabsContent value="account">
+        Make changes to your account here.
+      </TabsContent>
+      <TabsContent value="password">Change your password here.</TabsContent>
+    </Tabs>
+  );
+}`}
+>
+  <TabsDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@murasakijs/ui";
+```
+
+```tsx
+<Tabs defaultValue="account">
+  <TabsList>
+    <TabsTrigger value="account">Account</TabsTrigger>
+    <TabsTrigger value="password">Password</TabsTrigger>
+  </TabsList>
+  <TabsContent value="account">Account settings.</TabsContent>
+  <TabsContent value="password">Password settings.</TabsContent>
+</Tabs>
+```
+
+## API リファレンス
+
+### サブコンポーネント
+
+| コンポーネント | 説明 |
+| --- | --- |
+| `Tabs` | ルートプリミティブ。`value`・`defaultValue`・`onValueChange`・`orientation` を受け取ります。 |
+| `TabsList` | トリガーを並べる行です。 |
+| `TabsTrigger` | タブボタンです。`value`(必須)と `disabled` を受け取ります。 |
+| `TabsContent` | 対応する `value` がアクティブなときに表示されるパネルです。 |
+
+すべてのサブコンポーネントは Radix UI の [`Tabs`](https://www.radix-ui.com/primitives/docs/components/tabs)
+プリミティブをラップし、それ以外の props はすべてそのまま渡されます。

@@ -24,6 +24,11 @@ export const POST: RouteHandler = async (request) => {
 returns a Web `Response` — `Response.json(...)`, `new Response(...)`, status
 codes, headers, all standard.
 
+Export any of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, or `OPTIONS` —
+whichever ones a route needs. A request for a method the module doesn't
+export gets a `405`; a request under `/api/` that doesn't match any route gets
+a `404` rather than falling through to the app's HTML.
+
 ## Dynamic segments
 
 A `[name]` folder captures a segment, exposed on `context.params`:
@@ -67,6 +72,6 @@ They coexist in the same app.
 ## Next
 
 <Cards>
-  <Card title="Server Actions" href="/docs/guides/server-actions" />
-  <Card title="Middleware" href="/docs/guides/middleware" />
+  <Card title="Server Actions" href="/docs/guides/server-actions" description="Typed RPC for forms, wired to React 19's useAction." />
+  <Card title="Middleware" href="/docs/guides/middleware" description="A route guard that runs before every client-side navigation." />
 </Cards>

@@ -1,0 +1,76 @@
+---
+title: Alert
+description: ユーザーの注意を引くためのコールアウトを表示します。
+---
+
+import { AlertDemo } from "@/components/ui-demos/alert-demo";
+import { AlertDestructiveDemo } from "@/components/ui-demos/alert-destructive-demo";
+
+<ComponentPreview
+  code={`import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
+import { Terminal } from "lucide-react";
+
+export function AlertDemo() {
+  return (
+    <Alert>
+      <Terminal className="h-4 w-4" />
+      <AlertTitle>Heads up!</AlertTitle>
+      <AlertDescription>
+        You can add components to your app using the CLI.
+      </AlertDescription>
+    </Alert>
+  );
+}`}
+>
+  <AlertDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
+```
+
+```tsx
+<Alert>
+  <AlertTitle>Heads up!</AlertTitle>
+  <AlertDescription>
+    You can add components to your app using the CLI.
+  </AlertDescription>
+</Alert>
+```
+
+## バリアント
+
+`variant` プロパティで、エラーや警告向けの destructive スタイルに切り替えられます。
+
+<ComponentPreview
+  code={`import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
+import { AlertCircle } from "lucide-react";
+
+export function AlertDestructiveDemo() {
+  return (
+    <Alert variant="destructive">
+      <AlertCircle className="h-4 w-4" />
+      <AlertTitle>Error</AlertTitle>
+      <AlertDescription>
+        Your session has expired. Please log in again.
+      </AlertDescription>
+    </Alert>
+  );
+}`}
+>
+  <AlertDestructiveDemo />
+</ComponentPreview>
+
+## API リファレンス
+
+### Props
+
+| Prop | 型 | デフォルト |
+| --- | --- | --- |
+| `variant` | `"default"` \| `"destructive"` | `"default"` |
+
+`Alert`・`AlertTitle`・`AlertDescription` はいずれも、対応するネイティブ HTML 要素の
+属性を拡張しています。先頭の `<svg>` 子要素(`lucide-react` のアイコンなど)は、CSS
+によって自動的に左上に配置されます。

@@ -1,0 +1,37 @@
+---
+title: Progress
+description: Displays an indicator showing the completion progress of a task.
+---
+
+import { ProgressDemo } from "@/components/ui-demos/progress-demo";
+
+<ComponentPreview
+  code={`import { Progress } from "@murasakijs/ui";
+
+export function ProgressDemo() {
+  return <Progress value={60} className="w-[60%]" />;
+}`}
+>
+  <ProgressDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Progress } from "@murasakijs/ui";
+```
+
+```tsx
+<Progress value={60} />
+```
+
+## API Reference
+
+### Props
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `value` | `number \| null` | — |
+
+`Progress` renders a Radix UI [`Progress.Root`](https://www.radix-ui.com/primitives/docs/components/progress)
+whose indicator is translated horizontally based on `value` (0–100).

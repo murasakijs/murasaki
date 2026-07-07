@@ -1,0 +1,57 @@
+---
+title: Separator
+description: コンテンツを視覚的・意味的に区切ります。
+---
+
+import { SeparatorDemo } from "@/components/ui-demos/separator-demo";
+
+<ComponentPreview
+  code={`import { Separator } from "@murasakijs/ui";
+
+export function SeparatorDemo() {
+  return (
+    <div>
+      <div className="space-y-1">
+        <h4 className="text-sm font-medium leading-none">murasaki</h4>
+        <p className="text-sm text-muted-foreground">
+          A React 19 + Vite desktop framework.
+        </p>
+      </div>
+      <Separator className="my-4" />
+      <div className="flex h-5 items-center gap-4 text-sm">
+        <div>Blog</div>
+        <Separator orientation="vertical" />
+        <div>Docs</div>
+        <Separator orientation="vertical" />
+        <div>Source</div>
+      </div>
+    </div>
+  );
+}`}
+>
+  <SeparatorDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Separator } from "@murasakijs/ui";
+```
+
+```tsx
+<Separator />
+```
+
+## API リファレンス
+
+### Props
+
+| Prop | 型 | デフォルト |
+| --- | --- | --- |
+| `orientation` | `"horizontal"` \| `"vertical"` | `"horizontal"` |
+| `decorative` | `boolean` | `true` |
+
+`Separator` は Radix UI の [`Separator.Root`](https://www.radix-ui.com/primitives/docs/components/separator)
+をレンダリングします。`decorative` が `true` の場合、支援技術からは隠されます(純粋に
+見た目のための区切り線として扱われます)。区切りに意味がある場合は `false` を指定して
+ください。

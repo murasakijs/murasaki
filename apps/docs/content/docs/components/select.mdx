@@ -1,0 +1,75 @@
+---
+title: Select
+description: Displays a list of options for the user to pick from—triggered by a button.
+---
+
+import { SelectDemo } from "@/components/ui-demos/select-demo";
+
+<ComponentPreview
+  code={`import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@murasakijs/ui";
+
+export function SelectDemo() {
+  return (
+    <Select>
+      <SelectTrigger className="w-[180px]">
+        <SelectValue placeholder="Select a fruit" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="apple">Apple</SelectItem>
+        <SelectItem value="banana">Banana</SelectItem>
+        <SelectItem value="blueberry">Blueberry</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}`}
+>
+  <SelectDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<Select>
+  <SelectTrigger className="w-[180px]">
+    <SelectValue placeholder="Select a fruit" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="apple">Apple</SelectItem>
+  </SelectContent>
+</Select>
+```
+
+## API Reference
+
+### Subcomponents
+
+| Component | Description |
+| --- | --- |
+| `Select` | The root primitive. Accepts `value`, `defaultValue`, `onValueChange`, `disabled`, `name`, `required`. |
+| `SelectGroup` | Groups related `SelectItem`s together. |
+| `SelectValue` | Displays the selected value, or `placeholder` when empty. |
+| `SelectTrigger` | The button that opens the popup. |
+| `SelectContent` | The popup itself. Accepts `position` (`"item-aligned"` \| `"popper"`, default `"popper"`). |
+| `SelectLabel` | A non-interactive label inside `SelectContent`/`SelectGroup`. |
+| `SelectItem` | A selectable option. Accepts `value` (required) and `disabled`. |
+| `SelectSeparator` | A visual divider between items or groups. |
+| `SelectScrollUpButton` / `SelectScrollDownButton` | Scroll affordances rendered automatically inside `SelectContent`. |
+
+All subcomponents wrap Radix UI's [`Select`](https://www.radix-ui.com/primitives/docs/components/select)
+primitives and forward every other prop.

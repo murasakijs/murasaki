@@ -1,0 +1,101 @@
+---
+title: Sheet
+description: Extends the Dialog component to display content that complements the main content of the screen.
+---
+
+import { SheetDemo } from "@/components/ui-demos/sheet-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@murasakijs/ui";
+
+export function SheetDemo() {
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="outline">Open</Button>
+      </SheetTrigger>
+      <SheetContent side="right">
+        <SheetHeader>
+          <SheetTitle>Edit profile</SheetTitle>
+          <SheetDescription>
+            Make changes to your profile here. Click save when you're done.
+          </SheetDescription>
+        </SheetHeader>
+      </SheetContent>
+    </Sheet>
+  );
+}`}
+>
+  <SheetDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<Sheet>
+  <SheetTrigger>Open</SheetTrigger>
+  <SheetContent side="right">
+    <SheetHeader>
+      <SheetTitle>Title</SheetTitle>
+      <SheetDescription>Description</SheetDescription>
+    </SheetHeader>
+  </SheetContent>
+</Sheet>
+```
+
+## Variants
+
+`SheetContent`'s `side` prop controls which edge of the screen it slides in
+from.
+
+<ComponentPreview
+  code={`<SheetContent side="top">...</SheetContent>
+<SheetContent side="right">...</SheetContent>
+<SheetContent side="bottom">...</SheetContent>
+<SheetContent side="left">...</SheetContent>`}
+>
+  <SheetDemo />
+</ComponentPreview>
+
+## API Reference
+
+### `SheetContent`
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `side` | `"top"` \| `"bottom"` \| `"left"` \| `"right"` | `"right"` |
+
+### Other subcomponents
+
+| Component | Description |
+| --- | --- |
+| `Sheet` | The root primitive (same API as `Dialog`). |
+| `SheetTrigger` | The element that opens the sheet. Supports `asChild`. |
+| `SheetHeader` | Vertical stack for `SheetTitle` / `SheetDescription`. |
+| `SheetFooter` | A row for actions, right-aligned on larger screens. |
+| `SheetTitle` | The sheet's accessible name. |
+| `SheetDescription` | The sheet's accessible description. |
+| `SheetClose` | A button that closes the sheet. Supports `asChild`. |
+
+`Sheet` is built on the same Radix UI [`Dialog`](https://www.radix-ui.com/primitives/docs/components/dialog)
+primitives as `Dialog`, styled to slide in from an edge of the viewport
+instead of appearing centered.

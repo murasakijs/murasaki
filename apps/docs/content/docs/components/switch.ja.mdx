@@ -1,0 +1,48 @@
+---
+title: Switch
+description: チェック済みと未チェックを切り替えられるコントロールです。
+---
+
+import { SwitchDemo } from "@/components/ui-demos/switch-demo";
+
+<ComponentPreview
+  code={`import { Label, Switch } from "@murasakijs/ui";
+
+export function SwitchDemo() {
+  return (
+    <div className="flex items-center gap-2">
+      <Switch id="airplane-mode" />
+      <Label htmlFor="airplane-mode">Airplane Mode</Label>
+    </div>
+  );
+}`}
+>
+  <SwitchDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Switch } from "@murasakijs/ui";
+```
+
+```tsx
+<Switch id="airplane-mode" />
+```
+
+## API リファレンス
+
+### Props
+
+| Prop | 型 | デフォルト |
+| --- | --- | --- |
+| `checked` | `boolean` | — |
+| `defaultChecked` | `boolean` | — |
+| `onCheckedChange` | `(checked: boolean) => void` | — |
+| `disabled` | `boolean` | `false` |
+| `required` | `boolean` | `false` |
+| `name` | `string` | — |
+| `value` | `string` | `"on"` |
+
+`Switch` は Radix UI の [`Switch.Root`](https://www.radix-ui.com/primitives/docs/components/switch)
+をレンダリングし、それ以外の props はすべて内部にそのまま渡されます。

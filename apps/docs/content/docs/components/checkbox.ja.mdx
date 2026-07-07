@@ -1,0 +1,48 @@
+---
+title: Checkbox
+description: チェック済みと未チェックを切り替えられるコントロールです。
+---
+
+import { CheckboxDemo } from "@/components/ui-demos/checkbox-demo";
+
+<ComponentPreview
+  code={`import { Checkbox, Label } from "@murasakijs/ui";
+
+export function CheckboxDemo() {
+  return (
+    <div className="flex items-center gap-2">
+      <Checkbox id="terms" />
+      <Label htmlFor="terms">Accept terms and conditions</Label>
+    </div>
+  );
+}`}
+>
+  <CheckboxDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Checkbox } from "@murasakijs/ui";
+```
+
+```tsx
+<Checkbox id="terms" />
+```
+
+## API リファレンス
+
+### Props
+
+| Prop | 型 | デフォルト |
+| --- | --- | --- |
+| `checked` | `boolean \| "indeterminate"` | — |
+| `defaultChecked` | `boolean \| "indeterminate"` | — |
+| `onCheckedChange` | `(checked: boolean \| "indeterminate") => void` | — |
+| `disabled` | `boolean` | `false` |
+| `required` | `boolean` | `false` |
+| `name` | `string` | — |
+| `value` | `string` | `"on"` |
+
+`Checkbox` は Radix UI の [`Checkbox.Root`](https://www.radix-ui.com/primitives/docs/components/checkbox)
+をレンダリングし、それ以外の props はすべて内部にそのまま渡されます。

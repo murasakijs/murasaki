@@ -1,0 +1,82 @@
+---
+title: Card
+description: ヘッダー・コンテンツ・フッターを持つカードを表示します。
+---
+
+import { CardDemo } from "@/components/ui-demos/card-demo";
+
+<ComponentPreview
+  code={`import {
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+  Input,
+  Label,
+} from "@murasakijs/ui";
+
+export function CardDemo() {
+  return (
+    <Card className="w-full max-w-sm">
+      <CardHeader>
+        <CardTitle>Create project</CardTitle>
+        <CardDescription>Deploy your new project in one click.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid w-full items-center gap-1.5">
+          <Label htmlFor="name">Name</Label>
+          <Input id="name" placeholder="Name of your project" />
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button className="w-full">Deploy</Button>
+      </CardFooter>
+    </Card>
+  );
+}`}
+>
+  <CardDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<Card>
+  <CardHeader>
+    <CardTitle>Card title</CardTitle>
+    <CardDescription>Card description</CardDescription>
+  </CardHeader>
+  <CardContent>Content</CardContent>
+  <CardFooter>Footer</CardFooter>
+</Card>
+```
+
+## API リファレンス
+
+### サブコンポーネント
+
+| コンポーネント | レンダリング内容 |
+| --- | --- |
+| `Card` | 外側のボーダー付きコンテナです。 |
+| `CardHeader` | `CardTitle` / `CardDescription` を縦に並べます。 |
+| `CardTitle` | カードの見出しです。 |
+| `CardDescription` | タイトル下に表示する控えめな補足テキストです。 |
+| `CardContent` | カードの本体部分です。 |
+| `CardFooter` | 主にボタンなどのアクションを並べる行です。 |
+
+すべてのサブコンポーネントは `HTMLAttributes<HTMLDivElement>` を拡張しているため、
+ネイティブの `<div>` の props(`className`・`onClick` など)をどれにでも渡せます。

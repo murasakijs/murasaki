@@ -1,0 +1,42 @@
+---
+title: Skeleton
+description: コンテンツの読み込み中に表示するプレースホルダーです。
+---
+
+import { SkeletonDemo } from "@/components/ui-demos/skeleton-demo";
+
+<ComponentPreview
+  code={`import { Skeleton } from "@murasakijs/ui";
+
+export function SkeletonDemo() {
+  return (
+    <div className="flex items-center gap-4">
+      <Skeleton className="h-12 w-12 rounded-full" />
+      <div className="space-y-2">
+        <Skeleton className="h-4 w-[250px]" />
+        <Skeleton className="h-4 w-[200px]" />
+      </div>
+    </div>
+  );
+}`}
+>
+  <SkeletonDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import { Skeleton } from "@murasakijs/ui";
+```
+
+```tsx
+<Skeleton className="h-4 w-[250px]" />
+```
+
+## API リファレンス
+
+### Props
+
+`Skeleton` は固定サイズを持たない、パルスアニメーション付きの `<div>` をレンダリング
+します — `className`(`h-*`・`w-*`・`rounded-*`)で、置き換えたいコンテンツに合わせて
+円形・線・ブロックの形に整えてください。

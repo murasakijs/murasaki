@@ -1,0 +1,75 @@
+---
+title: Select
+description: ボタンで開く、ユーザーが選択肢から選べるリストを表示します。
+---
+
+import { SelectDemo } from "@/components/ui-demos/select-demo";
+
+<ComponentPreview
+  code={`import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@murasakijs/ui";
+
+export function SelectDemo() {
+  return (
+    <Select>
+      <SelectTrigger className="w-[180px]">
+        <SelectValue placeholder="Select a fruit" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="apple">Apple</SelectItem>
+        <SelectItem value="banana">Banana</SelectItem>
+        <SelectItem value="blueberry">Blueberry</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}`}
+>
+  <SelectDemo />
+</ComponentPreview>
+
+## 使い方
+
+```tsx
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@murasakijs/ui";
+```
+
+```tsx
+<Select>
+  <SelectTrigger className="w-[180px]">
+    <SelectValue placeholder="Select a fruit" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="apple">Apple</SelectItem>
+  </SelectContent>
+</Select>
+```
+
+## API リファレンス
+
+### サブコンポーネント
+
+| コンポーネント | 説明 |
+| --- | --- |
+| `Select` | ルートプリミティブ。`value`・`defaultValue`・`onValueChange`・`disabled`・`name`・`required` を受け取ります。 |
+| `SelectGroup` | 関連する `SelectItem` をグループ化します。 |
+| `SelectValue` | 選択中の値、未選択時は `placeholder` を表示します。 |
+| `SelectTrigger` | ポップアップを開くボタンです。 |
+| `SelectContent` | ポップアップ本体。`position`(`"item-aligned"` \| `"popper"`、デフォルト `"popper"`)を受け取ります。 |
+| `SelectLabel` | `SelectContent`/`SelectGroup` 内の非インタラクティブなラベルです。 |
+| `SelectItem` | 選択可能なオプション。`value`(必須)と `disabled` を受け取ります。 |
+| `SelectSeparator` | 項目やグループ間の視覚的な区切り線です。 |
+| `SelectScrollUpButton` / `SelectScrollDownButton` | `SelectContent` 内に自動でレンダリングされるスクロール用ボタンです。 |
+
+すべてのサブコンポーネントは Radix UI の [`Select`](https://www.radix-ui.com/primitives/docs/components/select)
+プリミティブをラップし、それ以外の props はすべてそのまま渡されます。

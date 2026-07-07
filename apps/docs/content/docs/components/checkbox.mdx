@@ -1,0 +1,48 @@
+---
+title: Checkbox
+description: A control that allows the user to toggle between checked and not checked.
+---
+
+import { CheckboxDemo } from "@/components/ui-demos/checkbox-demo";
+
+<ComponentPreview
+  code={`import { Checkbox, Label } from "@murasakijs/ui";
+
+export function CheckboxDemo() {
+  return (
+    <div className="flex items-center gap-2">
+      <Checkbox id="terms" />
+      <Label htmlFor="terms">Accept terms and conditions</Label>
+    </div>
+  );
+}`}
+>
+  <CheckboxDemo />
+</ComponentPreview>
+
+## Usage
+
+```tsx
+import { Checkbox } from "@murasakijs/ui";
+```
+
+```tsx
+<Checkbox id="terms" />
+```
+
+## API Reference
+
+### Props
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `checked` | `boolean \| "indeterminate"` | — |
+| `defaultChecked` | `boolean \| "indeterminate"` | — |
+| `onCheckedChange` | `(checked: boolean \| "indeterminate") => void` | — |
+| `disabled` | `boolean` | `false` |
+| `required` | `boolean` | `false` |
+| `name` | `string` | — |
+| `value` | `string` | `"on"` |
+
+`Checkbox` renders a Radix UI [`Checkbox.Root`](https://www.radix-ui.com/primitives/docs/components/checkbox);
+all other props are forwarded to it.

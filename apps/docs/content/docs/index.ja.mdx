@@ -9,15 +9,20 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
 
 ## murasaki を選ぶ理由
 
-|                | murasaki                     | Electron            | Tauri                 |
-| -------------- | ----------------------------- | ------------------- | ---------------------- |
-| UI ランタイム   | OS WebView (wry)              | bundled Chromium     | OS WebView              |
-| 言語           | TypeScript / React            | TypeScript / React    | TypeScript + **Rust**  |
-| DX             | **Next.js 風**(Vite HMR）    | manual wiring         | manual wiring           |
-| メモリ(アイドル時） | Electron の約 1/5\*        | baseline              | small                   |
-| サーバーアクション | `defineAction` / `useAction` | manual IPC            | manual IPC / commands  |
+|                     | murasaki                       | Electron            | Tauri                  |
+| ------------------- | ------------------------------- | ------------------- | ---------------------- |
+| UI ランタイム       | OS WebView (wry)                | bundled Chromium     | OS WebView              |
+| 言語                | TypeScript / React              | TypeScript / React    | TypeScript + **Rust**  |
+| DX                  | **Next.js 風**(Vite HMR）      | manual wiring         | manual wiring           |
+| メモリ(アイドル時） | Electron の約 1/5\*             | baseline              | small                   |
+| インストーラーサイズ | **~43 MB `.dmg`** / **~120 MB `.app`**†  | ~80–150 MB\*  | ~3–10 MB\*             |
+| サーバーアクション  | `defineAction` / `useAction`    | manual IPC            | manual IPC / commands  |
 
-<sub>\* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。</sub>
+<sub>
+  \* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。
+  † macOS で実測。`.app` はフル Node ランタイムを同梱しているため、サイズの大部分はそこか
+  ら来ています。
+</sub>
 
 **murasaki を選ぶべきなのは**、React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたい人です。
 
@@ -32,7 +37,9 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
 - **ネイティブウィンドウ & メニュー** — 本物のネイティブウィンドウ、ネイティブメニューバー、
   スコープ付きのネイティブコンテキストメニュー(`NSMenu` であり、HTML のポップアップでは
   ありません)。詳しくは[Native APIs](/docs/guides/native-apis)を参照してください。
-- **UI キット** — `@murasakijs/ui`、shadcn スタイルのコンポーネントライブラリです。
+- **UI キット** — `@murasakijs/ui`、shadcn スタイルのコンポーネントライブラリです。詳しく
+  は[スタイリング](/docs/guides/styling)とライブの[コンポーネント](/docs/components)を
+  参照してください。
 - **本格的な配布** — ポータブルでクロスアーキテクチャ対応の `.app` バンドル、コード署名 +
   公証にも対応。詳しくは[Distribution](/docs/building/distribution)を参照してください。
 
@@ -47,4 +54,6 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
 <Cards>
   <Card title="クイックスタート" href="/docs/getting-started/quick-start" description="最初のアプリをスキャフォールドし、実行し、出荷しましょう。" />
   <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="murasaki アプリの中で何がどこにあるか。" />
+  <Card title="コンポーネント" href="/docs/components" description="@murasakijs/ui のすべてのコンポーネントを、ライブプレビュー付きで。" />
+  <Card title="ガイド" href="/docs/guides/routing" description="ルーティング、サーバーアクション、API ルート、メタデータなど。" />
 </Cards>

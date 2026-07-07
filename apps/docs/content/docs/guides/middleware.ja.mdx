@@ -17,13 +17,81 @@ const middleware: Middleware = ({ pathname }) => {
 export default middleware
 ```
 
-これは非同期(例えば認証チェック)でも構いません — `<AppRouter>` はマッチしたルートを
-レンダーする前にそれを await し、その間は何もレンダーしないため、ガードされたルートが
-一瞬でも表示されることはありません。
+`<AppRouter>`(スキャフォールドのエントリがマウントします)は、この関数を仮想ルートテ
+ーブルから自動的に読み込みます — 手動で登録する必要はなく、このファイルが存在しなくて
+も何も起こりません。
+
+## シグネチャ
+
+```ts
+export interface MiddlewareContext {
+  pathname: string
+}
+
+export type MiddlewareResult = { redirect: string } | void | undefined
+
+export type Middleware = (
+  ctx: MiddlewareContext,
+) => MiddlewareResult | Promise<MiddlewareResult>
+```
+
+`ctx` は意図的に小さく保たれています — ナビゲーション先の pathname だけです。
+`request`/`response` もヘッダーも cookie もありません — これは完全にクライアントサイ
+ドで、あなたのルートと同じ WebView の中で実行され、エッジや server ランタイムではあり
+ません。リダイレクトせずに早期リターンするには、何も返さない(`undefined`)だけです。
+
+非同期でも構いません — `<AppRouter>` はマッチしたルートをレンダーする前にそれを await
+し、その間は何もレンダーしないため、ガードされたルートが一瞬でも表示されることはありま
+せん。
+
+## ルートをガードする
+
+もっとも一般的な形は、クライアントサイドの状態(ストア、`localStorage`、あるいは
+`document.cookie` 経由の cookie)を読んで、未認証の訪問者を保護されたパスから遠ざける
+認証チェックです:
+
+```ts title="src/middleware.ts"
+import type { Middleware } from 'murasaki'
+import { useAuth } from '@/lib/auth'
+
+const PROTECTED = ['/settings', '/billing']
+
+const middleware: Middleware = ({ pathname }) => {
+  const isProtected = PROTECTED.some((p) => pathname.startsWith(p))
+  if (isProtected && !useAuth.getState().isSignedIn) {
+    return { redirect: '/login' }
+  }
+}
+
+export default middleware
+```
+
+## リダイレクトなしの副作用
+
+`middleware` は必ずしもリダイレクトする必要はありません — `void` を返せばナビゲーショ
+ンはそのまま通過するため、すべてのナビゲーションで副作用を実行する場所(例えば分析用の
+ページビュー計測)としても便利です:
+
+```ts title="src/middleware.ts"
+import type { Middleware } from 'murasaki'
+import { trackPageview } from '@/lib/analytics'
+
+const middleware: Middleware = ({ pathname }) => {
+  trackPageview(pathname)
+}
+
+export default middleware
+```
 
 <Callout type="info">
   リダイレクトループ(5回以上連続したリダイレクト)は自動的に検出されます: murasaki は
   警告をログに出力し、ハングする代わりに現在のパスをそのままレンダーします。
+</Callout>
+
+<Callout type="warn">
+  どのパスでミドルウェアを実行するかを絞り込む `matcher`/`config` のようなエクスポート
+  はありません — Next.js と異なり、`middleware` は常にすべてのナビゲーションで実行され
+  るため、上の例のように関数の中で `pathname` に応じて自分で分岐します。
 </Callout>
 
 これは Next.js のミドルウェアに相当する murasaki のクライアントサイド版です —
@@ -32,5 +100,6 @@ export default middleware
 ## 次へ
 
 <Cards>
-  <Card title="ルーティング" href="/docs/guides/routing" />
+  <Card title="ルーティング" href="/docs/guides/routing" description="ファイルベースルーティング、レイアウト、ナビゲーション。" />
+  <Card title="メタデータ" href="/docs/guides/metadata" description="ルートごとにドキュメントタイトルと meta タグを設定します。" />
 </Cards>
