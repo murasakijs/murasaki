@@ -1,6 +1,6 @@
 import { resolve, join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -661,15 +661,19 @@ SectionEnd
  * `wix` isn't on PATH (expected on macOS/Linux — WiX only runs on Windows;
  * verified in CI) or compilation fails.
  *
- * Adapts the pre-v1 `src/wix.ts`'s technique (deterministic GUIDs, WiX v4's
- * `<Files Include="dir\**" />` shorthand to harvest a folder without a
- * separate `heat.exe` pass) to the current `dist/bundle/<productName>/`
- * layout, plus a Start Menu shortcut component (not present in the archived
- * version). No WebView2 bootstrap here — the NSIS installer above carries
- * that; the MSI assumes the runtime is already present (documented in
- * config.ts). No UI wizard either (skips the `WixToolset.UI.wixext`
- * extension dependency) — the MSI is the silent/scripted-deploy option,
- * NSIS is the friendly one.
+ * Ports the pre-v1 `src/wix.ts`'s deterministic-GUID technique to the
+ * current `dist/bundle/<productName>/` layout, plus a Start Menu shortcut
+ * component (not present in the archived version). Unlike that archived
+ * version, files are enumerated explicitly (one `<Component>`/`<File>` per
+ * file, mirroring `bundleDir`'s tree as nested `<Directory>` elements) rather
+ * than via WiX's `<Files Include="dir\**" />` auto-harvest shorthand — that
+ * shorthand is rejected (`WIX0005`) under `ComponentGroup`/`Feature`/
+ * `Directory` in WiX v4.0.6 (confirmed against the real toolset, both
+ * locally via `dotnet wix.dll build` and in CI), so it can't be used here.
+ * No WebView2 bootstrap here — the NSIS installer above carries that; the
+ * MSI assumes the runtime is already present (documented in config.ts). No
+ * UI wizard either (skips the `WixToolset.UI.wixext` extension dependency)
+ * — the MSI is the silent/scripted-deploy option, NSIS is the friendly one.
  */
 async function buildMsiInstaller(opts: {
   cwd: string
@@ -703,7 +707,7 @@ async function buildMsiInstaller(opts: {
     const wxsPath = join(wxsDir, 'installer.wxs')
     await writeFile(
       wxsPath,
-      wxsScript({ displayName: productName, version: wixVersion, publisher, upgradeCode, productCode, bundleDir }),
+      await wxsScript({ displayName: productName, version: wixVersion, publisher, upgradeCode, productCode, bundleDir }),
     )
 
     const result = spawnSync('wix', ['build', wxsPath, '-arch', wixArch, '-out', msiPath], {
@@ -723,22 +727,21 @@ async function buildMsiInstaller(opts: {
   }
 }
 
-function wxsScript(opts: {
+async function wxsScript(opts: {
   displayName: string
   version: string
   publisher: string
   upgradeCode: string
   productCode: string
   bundleDir: string
-}): string {
+}): Promise<string> {
   const { displayName, version, publisher, upgradeCode, productCode, bundleDir } = opts
   const name = escapeXmlAttr(displayName)
   const manufacturer = escapeXmlAttr(publisher)
-  // WiX's `<Files Include>` glob wants `\` even in a source-relative sense
-  // on non-Windows hosts too (it's WiX's own path syntax, not the shell's) —
-  // matching the pre-v1 wix.ts, which used the same `\**` suffix
-  // unconditionally.
-  const sourceGlob = `${bundleDir}\\**`
+
+  const { dirTree, files } = await collectWxsTree(bundleDir)
+  const dirTreeXml = renderWxsDirTree(dirTree, '        ')
+  const filesXml = renderWxsFileComponents(files)
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
@@ -754,20 +757,22 @@ function wxsScript(opts: {
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Feature Id="Main" Title="${name}" Level="1">
-      <ComponentGroupRef Id="HarvestedFiles" />
+      <ComponentGroupRef Id="Files" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="${name}" />
+      <Directory Id="INSTALLFOLDER" Name="${name}">
+${dirTreeXml}
+      </Directory>
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="AppProgramMenuFolder" Name="${name}" />
     </StandardDirectory>
 
-    <ComponentGroup Id="HarvestedFiles" Directory="INSTALLFOLDER">
-      <Files Include="${escapeXmlAttr(sourceGlob)}" />
+    <ComponentGroup Id="Files">
+${filesXml}
     </ComponentGroup>
 
     <Component Id="StartMenuShortcut" Directory="AppProgramMenuFolder" Guid="*">
@@ -782,6 +787,102 @@ function wxsScript(opts: {
   </Package>
 </Wix>
 `
+}
+
+/** One directory under `INSTALLFOLDER` — `children` nest the same way on disk. */
+interface WxsDirNode {
+  id: string
+  name: string
+  children: WxsDirNode[]
+}
+
+/** One `<Component>`/`<File>` pair — `parentId` is `INSTALLFOLDER` or a `WxsDirNode.id`. */
+interface WxsFileEntry {
+  id: string
+  parentId: string
+  absPath: string
+}
+
+/**
+ * Recursively walks `bundleDir`, building the `<Directory>` tree WiX needs
+ * authored inline under `INSTALLFOLDER` (unlike `<Component>`, `<Directory>`
+ * has no by-reference form — see `wxsScript`'s doc comment on why the
+ * `<Files Include>` shorthand that would've avoided this walk doesn't work
+ * in WiX v4.0.6) alongside a flat list of every real file, each already
+ * pointing at its parent directory's Id.
+ */
+async function collectWxsTree(
+  bundleDir: string,
+): Promise<{ dirTree: WxsDirNode[]; files: WxsFileEntry[] }> {
+  const files: WxsFileEntry[] = []
+
+  async function walk(absDir: string, relDir: string, parentId: string): Promise<WxsDirNode[]> {
+    const entries = (await readdir(absDir, { withFileTypes: true })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )
+    const nodes: WxsDirNode[] = []
+    for (const entry of entries) {
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name
+      const abs = join(absDir, entry.name)
+      if (entry.isDirectory()) {
+        const id = wxsId('dir', rel)
+        const children = await walk(abs, rel, id)
+        nodes.push({ id, name: entry.name, children })
+      } else if (entry.isFile()) {
+        files.push({ id: wxsId('f', rel), parentId, absPath: abs })
+      }
+      // Anything else (symlinks, …) isn't expected in a staged bundle —
+      // skipped rather than erroring, same "best-effort" posture as the rest
+      // of this file's degrade-gracefully conventions.
+    }
+    return nodes
+  }
+
+  const dirTree = await walk(bundleDir, '', 'INSTALLFOLDER')
+  return { dirTree, files }
+}
+
+/**
+ * A WiX Id derived from `relPath` (`kind` is `"dir"` or `"f"`): sanitized to
+ * WiX's allowed charset (`[A-Za-z0-9_.]`, starting with a letter/underscore)
+ * plus an 8-char hash of the *full* relative path so same-named files/dirs
+ * in different parents can't collide after sanitization truncates/mangles
+ * their names.
+ */
+function wxsId(kind: 'dir' | 'f', relPath: string): string {
+  const hash = createHash('sha256').update(relPath).digest('hex').slice(0, 8)
+  const base = relPath
+    .replace(/[\\/]/g, '_')
+    .replace(/[^A-Za-z0-9_.]/g, '_')
+    .slice(0, 40)
+  return `${kind}_${base}_${hash}`
+}
+
+/** Renders the `<Directory>` tree nested under `INSTALLFOLDER`, indented `indent` deep, 2 spaces per level — mirrors this file's existing indentation convention. */
+function renderWxsDirTree(nodes: WxsDirNode[], indent: string): string {
+  return nodes
+    .map((n) => {
+      const name = escapeXmlAttr(n.name)
+      if (n.children.length === 0) return `${indent}<Directory Id="${n.id}" Name="${name}" />`
+      return (
+        `${indent}<Directory Id="${n.id}" Name="${name}">\n` +
+        `${renderWxsDirTree(n.children, `${indent}  `)}\n` +
+        `${indent}</Directory>`
+      )
+    })
+    .join('\n')
+}
+
+/** Renders one `<Component Guid="*">`/`<File>` pair per file — `Guid="*"` lets WiX derive a stable GUID from each component's (single, so implicit) key path, same technique the `StartMenuShortcut` component above already uses. */
+function renderWxsFileComponents(files: WxsFileEntry[]): string {
+  return files
+    .map(
+      (f) =>
+        `      <Component Directory="${f.parentId}" Guid="*">\n` +
+        `        <File Id="${f.id}" Source="${escapeXmlAttr(f.absPath)}" />\n` +
+        `      </Component>`,
+    )
+    .join('\n')
 }
 
 function escapeXmlAttr(s: string): string {
