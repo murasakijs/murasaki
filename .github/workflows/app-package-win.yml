@@ -1,15 +1,24 @@
 name: App package smoke test (Windows)
 
 # Verifies the Windows packaging path end-to-end (murasaki build → murasaki
-# bundle --target win32-x64 → packaged .exe actually runs) using the native
+# bundle --target win32-<arch> → packaged .exe actually runs) using the native
 # addon + murasaki-launcher freshly built from THIS branch — the published
 # @murasakijs/native@0.31.0 only ships the old macOS-only stub launcher (see
 # crates/native/src/launcher.rs), so testing against it would miss the whole
 # point of this workflow. Also builds and verifies the NSIS `-setup.exe` +
-# WiX `.msi` installers (murasaki installer --target win32-x64, Phase 2 of
+# WiX `.msi` installers (murasaki installer --target win32-<arch>, Phase 2 of
 # Windows packaging — see packages/murasaki/src/cli/installer.ts's win32
 # path), which only run for real on Windows (WiX in particular is
 # Windows-only), so this workflow is their only pre-merge verification.
+#
+# Runs the whole pipeline once per supported win32 arch via a matrix — x64
+# and arm64 (ia32/x86 isn't a supported target) — each on a runner that's
+# native for that arch: windows-latest (x86_64) and windows-11-arm (a
+# GitHub-hosted native ARM64 runner, free for public repos). Both legs are
+# therefore genuine native builds rather than cross-compiles, so every Rust/
+# napi build step below can keep relying on host-arch auto-detection exactly
+# like the original single-arch job did.
+#
 # Runs on every push to a feat/** branch (still landing on
 # feat/win-linux-packaging) plus workflow_dispatch for on-demand runs.
 on:
@@ -23,7 +32,18 @@ permissions:
 
 jobs:
   win-smoke:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-latest
+            rustTarget: x86_64-pc-windows-msvc
+          - arch: arm64
+            runner: windows-11-arm
+            rustTarget: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    name: win-smoke (${{ matrix.arch }})
     steps:
       - uses: actions/checkout@v4
 
@@ -35,14 +55,21 @@ jobs:
       # package.json "packageManager" field (specifying both errors).
       - uses: pnpm/action-setup@v4
 
-      # windows-latest's host toolchain is already x86_64-pc-windows-msvc —
-      # no explicit target needed (unlike native-release.yml's cross-target
-      # matrix entries).
+      # Both matrix runners are native for their arch (windows-latest is
+      # x86_64, windows-11-arm is aarch64) — no cross-target flag is needed
+      # on any Rust build step below (unlike native-release.yml's
+      # cross-target matrix entries); `targets:` here just makes sure the
+      # matching target is installed on top of whatever "stable" already
+      # defaults to on each host.
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTarget }}
 
       # Cache the cargo registry + target dir so the ~700 dependency crates
       # (the multi-minute bottleneck) compile only on the first run; on later
-      # pushes only our own crate recompiles, cutting the job from ~9m to a few.
+      # pushes only our own crate recompiles, cutting the job from ~9m to a
+      # few. Keys per-runner (and therefore per-arch) automatically, so the
+      # two matrix legs never share (or clobber) each other's cache.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: crates/native
@@ -88,9 +115,9 @@ jobs:
       # Rebuild murasaki-launcher for this branch. Deliberately no --target:
       # bundle.ts's resolveLauncherBinary falls back to this exact
       # `target/release/murasaki-launcher.exe` (host-arch build) when the
-      # bundle target matches the host, which it does here (win32-x64 on a
-      # win32-x64 runner) — see that function's doc comment in
-      # packages/murasaki/src/cli/bundle.ts.
+      # bundle target matches the host, which it does on both matrix legs
+      # (win32-x64 on windows-latest, win32-arm64 on windows-11-arm) — see
+      # that function's doc comment in packages/murasaki/src/cli/bundle.ts.
       - name: Build murasaki-launcher
         working-directory: crates/native
         run: cargo build --release --bin murasaki-launcher
@@ -99,9 +126,9 @@ jobs:
         working-directory: examples/win-smoke-app
         run: pnpm exec murasaki build
 
-      - name: murasaki bundle --target win32-x64 (test app)
+      - name: murasaki bundle --target win32-${{ matrix.arch }} (test app)
         working-directory: examples/win-smoke-app
-        run: pnpm exec murasaki bundle --target win32-x64
+        run: pnpm exec murasaki bundle --target win32-${{ matrix.arch }}
 
       - name: Locate packaged .exe
         id: locate
@@ -128,22 +155,36 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: win32-bundle
+          name: win32-bundle-${{ matrix.arch }}
           path: examples/win-smoke-app/dist/bundle/**
           if-no-files-found: warn
 
       # ── Phase 2: installer toolchains + build/verify ───────────────────
 
+      # choco itself + makensis both run under Windows-on-ARM's built-in x86
+      # emulation on the windows-11-arm runner (choco has no native arm64
+      # NSIS package) — expected to work transparently, but marked
+      # non-fatal on the arm64 leg in case that emulation path turns out to
+      # be unavailable on this particular runner image. installer.ts's
+      # buildNsisInstaller already degrades gracefully (warns + skips) if
+      # makensis never lands on PATH, so a failure here just means this
+      # leg's NSIS installer is skipped rather than the whole arm64 job
+      # going red.
       - name: Install NSIS
         shell: pwsh
+        continue-on-error: ${{ matrix.arch == 'arm64' }}
         run: |
           choco install nsis -y
           # choco doesn't always shim makensis onto PATH; add its dir so
           # installer.ts's `makensis -VERSION` detection finds it.
           echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
 
+      # WiX is a .NET global tool, so it runs natively on arm64 — expected to
+      # work unmodified there too, but marked non-fatal on that leg for the
+      # same reason as the NSIS step above.
       - name: Install WiX v4
         shell: pwsh
+        continue-on-error: ${{ matrix.arch == 'arm64' }}
         run: |
           # Pin to v4 (not the latest v7) — WiX v6+ gates `wix build` behind the
           # Open Source Maintenance Fee EULA (error WIX7015), and installer.ts's
@@ -153,55 +194,93 @@ jobs:
           # which isn't on PATH by default — add it so `wix --version` resolves.
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
 
-      - name: murasaki installer --target win32-x64 (test app)
+      - name: murasaki installer --target win32-${{ matrix.arch }} (test app)
         working-directory: examples/win-smoke-app
         # --no-build: reuse the bundle produced by the earlier `murasaki
-        # bundle --target win32-x64` step above rather than re-bundling (this
-        # is also what exercises the win32 installer path's own re-bundle
-        # skip logic — see installer.ts's installerWin32).
-        run: pnpm exec murasaki installer --target win32-x64 --no-build
+        # bundle --target win32-<arch>` step above rather than re-bundling
+        # (this is also what exercises the win32 installer path's own
+        # re-bundle skip logic — see installer.ts's installerWin32). Note
+        # this step itself can't fail from a missing makensis/wix — both are
+        # optional local tools that installer.ts detects and skips
+        # individually (warn + skip), see installer.ts's installerWin32 doc
+        # comment.
+        run: pnpm exec murasaki installer --target win32-${{ matrix.arch }} --no-build
 
+      # Locates whichever installer artifacts got produced. The portable zip
+      # has no external tool dependency, so it's always mandatory. The NSIS
+      # -setup.exe/.msi are mandatory on the x64 leg (both toolchains always
+      # install cleanly there) but best-effort on the arm64 leg: if the
+      # Install NSIS/WiX steps above degraded (see their comments), murasaki
+      # installer already warned + skipped that installer type rather than
+      # throwing, so its absence here is expected — reported as a warning,
+      # not a failure.
       - name: Locate installer artifacts
         id: locate-installers
         shell: pwsh
         run: |
-          $setup = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *-setup.exe | Select-Object -First 1
-          $msi = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *.msi | Select-Object -First 1
           $zip = Get-ChildItem -Path examples/win-smoke-app/dist/bundle -Filter *.zip | Select-Object -First 1
-          if (-not $setup) { Write-Error 'No NSIS -setup.exe found under examples/win-smoke-app/dist'; exit 1 }
-          if (-not $msi) { Write-Error 'No .msi found under examples/win-smoke-app/dist (WiX build likely failed)'; exit 1 }
           if (-not $zip) { Write-Error 'No portable .zip found under examples/win-smoke-app/dist/bundle'; exit 1 }
-          Write-Host "setup.exe: $($setup.FullName) ($($setup.Length) bytes)"
-          Write-Host "msi:       $($msi.FullName) ($($msi.Length) bytes)"
-          Write-Host "zip:       $($zip.FullName) ($($zip.Length) bytes)"
-          "setupPath=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "msiPath=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "zip: $($zip.FullName) ($($zip.Length) bytes)"
           "zipPath=$($zip.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      # Asserts both installers are well-formed by checking their magic
-      # bytes rather than trusting the file extension — cheap and doesn't
-      # need msiexec/admin rights: setup.exe must be a PE (MZ magic), .msi
-      # must be an OLE Compound File (the container format Windows Installer
-      # uses). WiX/makensis already exited non-zero on a real build failure
-      # (installer.ts throws/warns and the previous step's file search would
-      # come up empty), so this step is mainly a sanity check on top of that.
+          $mandatory = '${{ matrix.arch }}' -eq 'x64'
+
+          $setup = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *-setup.exe | Select-Object -First 1
+          if ($setup) {
+            Write-Host "setup.exe: $($setup.FullName) ($($setup.Length) bytes)"
+            "setupPath=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } elseif ($mandatory) {
+            Write-Error 'No NSIS -setup.exe found under examples/win-smoke-app/dist'
+            exit 1
+          } else {
+            Write-Host '::warning::No NSIS -setup.exe found on the arm64 leg — makensis was likely unavailable on windows-11-arm (see the Install NSIS step above).'
+          }
+
+          $msi = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *.msi | Select-Object -First 1
+          if ($msi) {
+            Write-Host "msi: $($msi.FullName) ($($msi.Length) bytes)"
+            "msiPath=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          } elseif ($mandatory) {
+            Write-Error 'No .msi found under examples/win-smoke-app/dist (WiX build likely failed)'
+            exit 1
+          } else {
+            Write-Host '::warning::No .msi found on the arm64 leg — wix was likely unavailable on windows-11-arm (see the Install WiX v4 step above).'
+          }
+
+      # Asserts whichever installers were produced above are well-formed by
+      # checking their magic bytes rather than trusting the file extension —
+      # cheap and doesn't need msiexec/admin rights: setup.exe must be a PE
+      # (MZ magic), .msi must be an OLE Compound File (the container format
+      # Windows Installer uses). WiX/makensis already exited non-zero on a
+      # real build failure (installer.ts throws/warns and the previous
+      # step's file search would come up empty), so this step is mainly a
+      # sanity check on top of that. Each check is skipped (rather than
+      # failed) when its path output is empty — only possible on the arm64
+      # leg, when the corresponding tool was unavailable (see the previous
+      # step).
       - name: Verify installers are well-formed
         shell: pwsh
         run: |
-          $setupBytes = [System.IO.File]::ReadAllBytes("${{ steps.locate-installers.outputs.setupPath }}")
-          if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) {
-            Write-Error 'setup.exe does not start with the MZ (PE) magic'
-            exit 1
+          $setupPath = "${{ steps.locate-installers.outputs.setupPath }}"
+          if ($setupPath) {
+            $setupBytes = [System.IO.File]::ReadAllBytes($setupPath)
+            if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) {
+              Write-Error 'setup.exe does not start with the MZ (PE) magic'
+              exit 1
+            }
+            Write-Host 'setup.exe is well-formed.'
           }
 
-          $msiBytes = [System.IO.File]::ReadAllBytes("${{ steps.locate-installers.outputs.msiPath }}")
-          $msiMagic = [byte[]](0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1)
-          if (Compare-Object $msiBytes[0..7] $msiMagic) {
-            Write-Error '.msi does not start with the OLE Compound File magic'
-            exit 1
+          $msiPath = "${{ steps.locate-installers.outputs.msiPath }}"
+          if ($msiPath) {
+            $msiBytes = [System.IO.File]::ReadAllBytes($msiPath)
+            $msiMagic = [byte[]](0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1)
+            if (Compare-Object $msiBytes[0..7] $msiMagic) {
+              Write-Error '.msi does not start with the OLE Compound File magic'
+              exit 1
+            }
+            Write-Host '.msi is well-formed.'
           }
-
-          Write-Host 'setup.exe and .msi are well-formed.'
 
       # Bonus verification: actually run the NSIS installer silently (per-user
       # default install mode needs no admin/UAC prompt, so this works
@@ -209,9 +288,12 @@ jobs:
       # then reuse the same smoke test the portable bundle got above. Marked
       # `continue-on-error` per this workflow's spec — the mandatory checks
       # above already assert the installers themselves are real, so a flaky
-      # silent-install/launch here shouldn't fail the whole job.
+      # silent-install/launch here shouldn't fail the whole job. Skipped
+      # entirely if setup.exe wasn't produced (only possible on the arm64
+      # leg — see "Locate installer artifacts" above).
       - name: Silent-install the NSIS installer and smoke test
         id: silent-install
+        if: steps.locate-installers.outputs.setupPath != ''
         shell: pwsh
         continue-on-error: true
         run: |
@@ -235,7 +317,7 @@ jobs:
           .github/scripts/win-smoke-test.ps1 -ExePath $installedExe.FullName -TimeoutSeconds 60
 
       - name: Report silent-install smoke test result
-        if: always()
+        if: always() && steps.locate-installers.outputs.setupPath != ''
         shell: pwsh
         run: |
           if ('${{ steps.silent-install.outcome }}' -ne 'success') {
@@ -244,11 +326,11 @@ jobs:
             Write-Host 'Silent-install smoke test passed.'
           }
 
-      # Full set: both installers + the portable zip.
+      # Full set: both installers + the portable zip (whichever exist).
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: win32-installers
+          name: win32-installers-${{ matrix.arch }}
           path: |
             examples/win-smoke-app/dist/*-setup.exe
             examples/win-smoke-app/dist/*.msi
@@ -260,7 +342,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: win32-setup-msi
+          name: win32-setup-msi-${{ matrix.arch }}
           path: |
             examples/win-smoke-app/dist/*-setup.exe
             examples/win-smoke-app/dist/*.msi
