@@ -76,8 +76,6 @@ export interface NativeWindow {
   createWebview(opts: WebviewOptions): NativeWebview
   setTitle(t: string): void
   setSize(w: number, h: number): void
-  minimize(): void
-  toggleMaximize(): void
   close(): void
 }
 

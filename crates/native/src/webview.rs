@@ -48,18 +48,6 @@ struct ContextMenuPayload {
   y: Option<f64>,
 }
 
-/// Payload for `{ kind: "windowControl", action, direction? }` messages
-/// posted by the web layer's custom "VS Code-style" title bar (Windows/Linux
-/// only — see `window.__MURASAKI__.titleBarStyle`, injected by
-/// `murasaki_global_script` below). `direction` is only present for
-/// `action: "startResize"`.
-#[derive(serde::Deserialize)]
-struct WindowControlPayload {
-  action: String,
-  #[serde(default)]
-  direction: Option<String>,
-}
-
 #[napi]
 pub struct Webview {
   webview: Rc<RefCell<Option<WebView>>>,
@@ -124,91 +112,6 @@ fn is_external_url(target: &str) -> bool {
   }
 }
 
-/// Contract 2 of the custom title bar design: `window.__MURASAKI__ = {
-/// platform, titleBarStyle }`, describing the host so the web layer can
-/// decide whether to render its own title bar instead of relying on OS
-/// decorations. `platform` mirrors Node's `process.platform` naming
-/// (`"win32"` / `"darwin"`, everything else passed through as-is, e.g.
-/// `"linux"`). `titleBarStyle` is hardcoded per-OS for now — `"native"` on
-/// macOS (which keeps its native decorations/menu bar untouched, see
-/// `application.rs`/`launcher.rs`'s `#[cfg(not(target_os = "macos"))]`
-/// frameless gating), `"custom"` everywhere else. No config knob yet; that's
-/// deferred to a later task.
-fn murasaki_global_script() -> String {
-  let platform = match std::env::consts::OS {
-    "windows" => "win32",
-    "macos" => "darwin",
-    other => other,
-  };
-  let title_bar_style = if cfg!(target_os = "macos") { "native" } else { "custom" };
-  format!("window.__MURASAKI__ = {{ platform: {platform:?}, titleBarStyle: {title_bar_style:?} }};")
-}
-
-/// Handles `{ kind: "windowControl", action, direction? }` messages — reached
-/// straight from the IPC closure for the same reason `show_native_context_menu`
-/// above is (Node's loop is blocked while `Application::run()`/the prod
-/// launcher's `EventLoop::run` are active). Unlike that function, none of
-/// these tao calls are modal, so there's no need to drop the `RefCell`
-/// borrow before calling them — except for `"close"`, which needs a
-/// *mutable* borrow to drop the window, so it's handled up front, before the
-/// shared immutable borrow below is taken.
-fn handle_window_control(window_slot: &SharedWindow, payload: &WindowControlPayload) {
-  if payload.action == "close" {
-    // Mirrors `BrowserWindow::close` (window.rs) exactly: dropping the tao
-    // `Window` here is the correct behavior in dev — it doesn't touch the
-    // Node process, same as that napi method. In the packaged launcher
-    // (`launcher.rs`'s `imp_win`), dropping the window makes tao post
-    // `WindowEvent::Destroyed`, which that launcher's event loop treats the
-    // same as the OS `CloseRequested` path (kill the spawned prod-server
-    // child, exit the process) — see that module for the other half of
-    // this. Never calls `std::process::exit` itself.
-    window_slot.borrow_mut().take();
-    return;
-  }
-
-  let guard = window_slot.borrow();
-  let Some(window) = guard.as_ref() else { return };
-
-  match payload.action.as_str() {
-    "minimize" => window.set_minimized(true),
-    "maximize" => window.set_maximized(!window.is_maximized()),
-    "startDrag" => {
-      if let Err(e) = window.drag_window() {
-        eprintln!("murasaki: windowControl startDrag failed: {e}");
-      }
-    }
-    "startResize" => match payload.direction.as_deref().and_then(parse_resize_direction) {
-      Some(dir) => {
-        if let Err(e) = window.drag_resize_window(dir) {
-          eprintln!("murasaki: windowControl startResize failed: {e}");
-        }
-      }
-      None => eprintln!(
-        "murasaki: windowControl startResize: missing or unrecognized direction {:?}",
-        payload.direction
-      ),
-    },
-    other => eprintln!("murasaki: windowControl: unrecognized action {other:?}"),
-  }
-}
-
-/// Maps Contract 1's `direction` strings to tao's `ResizeDirection`. `None`
-/// for anything unrecognized.
-fn parse_resize_direction(s: &str) -> Option<tao::window::ResizeDirection> {
-  use tao::window::ResizeDirection::*;
-  Some(match s {
-    "north" => North,
-    "south" => South,
-    "east" => East,
-    "west" => West,
-    "northEast" => NorthEast,
-    "northWest" => NorthWest,
-    "southEast" => SouthEast,
-    "southWest" => SouthWest,
-    _ => return None,
-  })
-}
-
 impl Webview {
   pub(crate) fn new(window: SharedWindow, opts: WebviewOptions) -> Result<Self> {
     let on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>> =
@@ -230,11 +133,7 @@ impl Webview {
       Box::leak(Box::new(WebContext::new(webview2_data_dir())));
     let mut builder = WebViewBuilder::new_with_web_context(web_context)
       .with_devtools(opts.devtools.unwrap_or(cfg!(debug_assertions)))
-      .with_transparent(opts.transparent.unwrap_or(false))
-      // Contract 2 of the custom title bar design: `window.__MURASAKI__`,
-      // set before any page script runs, on every OS and every call site
-      // (dev + prod) — see `murasaki_global_script`'s doc comment below.
-      .with_initialization_script(murasaki_global_script());
+      .with_transparent(opts.transparent.unwrap_or(false));
 
     // IPC: JS calls window.ipc.postMessage(str). Context menus are handled
     // synchronously right here (Node's loop is blocked by `Application::run`
@@ -261,17 +160,6 @@ impl Webview {
             payload.x,
             payload.y,
           );
-        }
-        return;
-      }
-
-      // Custom title bar (Windows/Linux) — see the module doc comment above
-      // for why this, like `contextMenu`, is handled here instead of round-
-      // tripping through Node.
-      if kind.as_deref() == Some("windowControl") {
-        match serde_json::from_str::<WindowControlPayload>(&body) {
-          Ok(payload) => handle_window_control(&ipc_window_slot, &payload),
-          Err(e) => eprintln!("murasaki: windowControl: failed to parse IPC payload: {e}"),
         }
         return;
       }

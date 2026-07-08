@@ -90,28 +90,6 @@ export {
   DropdownMenuRadioGroup,
 } from './components/dropdown-menu.js'
 
-export {
-  Menubar,
-  MenubarMenu,
-  MenubarTrigger,
-  MenubarContent,
-  MenubarItem,
-  MenubarSeparator,
-  MenubarLabel,
-  MenubarShortcut,
-  MenubarGroup,
-  MenubarPortal,
-  MenubarSub,
-  MenubarSubContent,
-  MenubarSubTrigger,
-  MenubarCheckboxItem,
-  MenubarRadioGroup,
-  MenubarRadioItem,
-} from './components/menubar.js'
-
-export { TitleBar } from './components/title-bar.js'
-export type { TitleBarProps } from './components/title-bar.js'
-
 export { Tabs, TabsList, TabsTrigger, TabsContent } from './components/tabs.js'
 
 export { Avatar, AvatarImage, AvatarFallback } from './components/avatar.js'

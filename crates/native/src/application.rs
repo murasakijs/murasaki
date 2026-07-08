@@ -125,16 +125,6 @@ impl Application {
       ))
       .with_resizable(opts.resizable.unwrap_or(true));
 
-    // Frameless on Windows/Linux so the web layer can render its own "VS
-    // Code-style" title bar (see `webview.rs`'s `handle_window_control` for
-    // the IPC side of that) — `#[cfg(not(target_os = "macos"))]`, not a
-    // runtime `if`, so this can never affect macOS, which keeps its native
-    // decorations + menu bar exactly as today.
-    #[cfg(not(target_os = "macos"))]
-    {
-      builder = builder.with_decorations(false);
-    }
-
     if let (Some(w), Some(h)) = (opts.min_width, opts.min_height) {
       builder = builder.with_min_inner_size(LogicalSize::new(w as f64, h as f64));
     }
@@ -178,16 +168,7 @@ impl Application {
 
       match event {
         Event::WindowEvent {
-          // `CloseRequested` = OS-level close (native close button / Alt+F4).
-          // `Destroyed` = the web layer's custom "VS Code-style" title bar
-          // close button, whose `{ kind: "windowControl", action: "close" }`
-          // IPC message (webview.rs) drops the tao `Window`, which posts
-          // `Destroyed`. On Windows dev the window is frameless, so the
-          // custom button is the *only* close affordance — routing it here
-          // (rather than just dropping the window and leaving Vite/Node
-          // running) makes it kill the dev server + exit, same as a native
-          // close. macOS dev keeps its decorations, so both paths apply.
-          event: WindowEvent::CloseRequested | WindowEvent::Destroyed,
+          event: WindowEvent::CloseRequested,
           ..
         } => {
           *control_flow = ControlFlow::Exit;

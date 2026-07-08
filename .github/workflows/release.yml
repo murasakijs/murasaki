@@ -45,16 +45,14 @@ jobs:
         # that don't exist here. Standard install is enough for CI.
         run: pnpm install --no-frozen-lockfile
 
-      # @murasakijs/ui ships its own compiled dist (plus styles.css /
-      # tailwind-preset.cjs at the package root). It versions independently of
-      # the framework, so it is NOT part of the tag-match check below. It must
-      # build BEFORE murasaki, which now imports its TitleBar/Menubar (for the
-      # built-in custom title bar) and resolves it via dist/index.d.ts.
-      - name: Build @murasakijs/ui
-        run: pnpm --filter @murasakijs/ui build
-
       - name: Build murasaki
         run: pnpm --filter murasaki build
+
+      # @murasakijs/ui ships its own compiled dist (plus styles.css /
+      # tailwind-preset.cjs at the package root). It versions independently of
+      # the framework, so it is NOT part of the tag-match check below.
+      - name: Build @murasakijs/ui
+        run: pnpm --filter @murasakijs/ui build
 
       # npm always ships README.md from the package dir (regardless of `files`),
       # so copy the root README into each package before publishing — otherwise
@@ -78,32 +76,27 @@ jobs:
             echo "$pkg version OK: $PKG_VERSION"
           done
 
-      # `npm publish` (unlike `pnpm publish`) does NOT rewrite workspace:
-      # protocol dependencies. murasaki depends on two workspace packages —
-      # @murasakijs/native (workspace:^, published by native-release.yml) and
-      # @murasakijs/ui (workspace:*, published below, since the built-in custom
-      # title bar imports its TitleBar/Menubar) — so replace BOTH with real
-      # published version ranges here before publishing. CI-only: the committed
-      # packages/murasaki/package.json keeps the workspace: specifiers so the
+      # `npm publish` (unlike `pnpm publish`) does not rewrite the
+      # workspace:^ dependency on @murasakijs/native. Replace it here with the
+      # real published version before publishing. This mutation is CI-only:
+      # the committed packages/murasaki/package.json keeps workspace:^ so the
       # monorepo's local link keeps working.
-      - name: Resolve workspace dependencies to real versions
+      - name: Resolve workspace:^ dependency to real version
         run: |
           node -e "
           const fs = require('fs');
           const pkgPath = 'packages/murasaki/package.json';
           const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-          pkg.dependencies['@murasakijs/native'] = '^' + require('./crates/native/package.json').version;
-          pkg.dependencies['@murasakijs/ui'] = '^' + require('./packages/ui/package.json').version;
+          const nativeVersion = require('./crates/native/package.json').version;
+          pkg.dependencies['@murasakijs/native'] = '^' + nativeVersion;
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
           "
-          for dep in '@murasakijs/native' '@murasakijs/ui'; do
-            DEP=$(node -p "require('./packages/murasaki/package.json').dependencies['$dep']")
-            echo "Resolved $dep to: $DEP"
-            if [[ "$DEP" == workspace:* ]] || ! [[ "$DEP" =~ ^\^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-              echo "::error::$dep dependency was not resolved to a real version: $DEP"
-              exit 1
-            fi
-          done
+          DEP=$(node -p "require('./packages/murasaki/package.json').dependencies['@murasakijs/native']")
+          echo "Resolved @murasakijs/native to: $DEP"
+          if [[ "$DEP" == workspace:* ]] || ! [[ "$DEP" =~ ^\^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::@murasakijs/native dependency was not resolved to a real version: $DEP"
+            exit 1
+          fi
 
       # Keep the scaffolder template in sync with the release. create-murasaki's
       # default template pins `murasaki` in its package.json, and for a 0.x
@@ -154,37 +147,34 @@ jobs:
           fi
           echo "@murasakijs/native@${NATIVE_VERSION} is published — OK to release the framework."
 
-      # @murasakijs/ui versions independently of the framework and publishes at
-      # its own package.json version (idempotent: skip if that version is
-      # already on npm). It publishes BEFORE murasaki and create-murasaki, both
-      # of which now depend on it (murasaki's built-in title bar imports its
-      # TitleBar/Menubar; the default template uses it) — neither may ship
-      # pointing at a UI version that isn't on npm yet. If this version isn't on
-      # npm and can't be OIDC-published (the very first version must be
-      # published manually and its Trusted Publisher configured first), this
-      # step fails here, before murasaki is published, rather than shipping a
-      # murasaki whose @murasakijs/ui dependency users can't install.
-      - name: Publish packages/ui
-        working-directory: packages/ui
-        run: |
-          V=$(node -p "require('./package.json').version")
-          if npm view "@murasakijs/ui@$V" version >/dev/null 2>&1; then
-            echo "@murasakijs/ui@$V already published — skipping."
-          else
-            npm publish --provenance --access public
-          fi
-
       # @murasakijs/native itself is published separately by native-release.yml.
       # Each publish is idempotent: skip if that exact version is already on
       # npm, so re-running after a partial failure (e.g. only one package
-      # published) doesn't error on the already-published one. Publishes AFTER
-      # @murasakijs/ui above, which it now depends on.
+      # published) doesn't error on the already-published one.
       - name: Publish packages/murasaki
         working-directory: packages/murasaki
         run: |
           V=$(node -p "require('./package.json').version")
           if npm view "murasaki@$V" version >/dev/null 2>&1; then
             echo "murasaki@$V already published — skipping."
+          else
+            npm publish --provenance --access public
+          fi
+
+      # @murasakijs/ui versions independently of the framework and publishes at
+      # its own package.json version (idempotent: skip if that version is
+      # already on npm). This runs BEFORE create-murasaki because the default
+      # template depends on @murasakijs/ui — the scaffolder must not ship
+      # pointing at a UI version that isn't on npm yet. The very first version
+      # must be published manually and its Trusted Publisher configured on npm
+      # before CI can OIDC-publish subsequent versions; until then this step
+      # simply skips the already-published 0.1.0.
+      - name: Publish packages/ui
+        working-directory: packages/ui
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "@murasakijs/ui@$V" version >/dev/null 2>&1; then
+            echo "@murasakijs/ui@$V already published — skipping."
           else
             npm publish --provenance --access public
           fi

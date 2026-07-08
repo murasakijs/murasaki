@@ -46,7 +46,6 @@
   },
   "dependencies": {
     "@murasakijs/native": "workspace:^",
-    "@murasakijs/ui": "workspace:*",
     "vite": "^5.4.0",
     "@vitejs/plugin-react": "^4.3.0",
     "picocolors": "^1.1.0",
