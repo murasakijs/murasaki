@@ -21,6 +21,7 @@ import {
   MenubarItem,
   MenubarMenu,
   MenubarSeparator,
+  MenubarShortcut,
   MenubarTrigger,
   TitleBar,
 } from '@murasakijs/ui'
@@ -34,33 +35,36 @@ import {
   type ResizeDirection,
 } from './window-controls.js'
 
-type MenuEntry = { label: string; onSelect: () => void } | { separator: true }
+type MenuEntry = { label: string; shortcut?: string; onSelect: () => void } | { separator: true }
 
 interface MenuModel {
   label: string
   items: MenuEntry[]
 }
 
+// Shortcut labels are Ctrl-based: this menu bar only renders on Windows/Linux
+// (macOS keeps its native menu). The Edit accelerators are handled natively by
+// the WebView on focused editable content; the labels just surface them.
 const MENU_MODEL: MenuModel[] = [
   {
     label: 'File',
-    items: [{ label: 'Exit', onSelect: () => closeWindow() }],
+    items: [{ label: 'Exit', shortcut: 'Alt+F4', onSelect: () => closeWindow() }],
   },
   {
     label: 'Edit',
     items: [
-      { label: 'Undo', onSelect: () => document.execCommand('undo') },
-      { label: 'Redo', onSelect: () => document.execCommand('redo') },
+      { label: 'Undo', shortcut: 'Ctrl+Z', onSelect: () => document.execCommand('undo') },
+      { label: 'Redo', shortcut: 'Ctrl+Y', onSelect: () => document.execCommand('redo') },
       { separator: true },
-      { label: 'Cut', onSelect: () => document.execCommand('cut') },
-      { label: 'Copy', onSelect: () => document.execCommand('copy') },
-      { label: 'Paste', onSelect: () => document.execCommand('paste') },
-      { label: 'Select All', onSelect: () => document.execCommand('selectAll') },
+      { label: 'Cut', shortcut: 'Ctrl+X', onSelect: () => document.execCommand('cut') },
+      { label: 'Copy', shortcut: 'Ctrl+C', onSelect: () => document.execCommand('copy') },
+      { label: 'Paste', shortcut: 'Ctrl+V', onSelect: () => document.execCommand('paste') },
+      { label: 'Select All', shortcut: 'Ctrl+A', onSelect: () => document.execCommand('selectAll') },
     ],
   },
   {
     label: 'View',
-    items: [{ label: 'Reload', onSelect: () => location.reload() }],
+    items: [{ label: 'Reload', shortcut: 'Ctrl+R', onSelect: () => location.reload() }],
   },
   {
     label: 'Window',
@@ -123,6 +127,7 @@ export function WindowChrome() {
                   ) : (
                     <MenubarItem key={item.label} onSelect={item.onSelect}>
                       {item.label}
+                      {item.shortcut && <MenubarShortcut>{item.shortcut}</MenubarShortcut>}
                     </MenubarItem>
                   ),
                 )}
