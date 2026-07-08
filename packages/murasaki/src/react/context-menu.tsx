@@ -24,8 +24,30 @@
  * scoped right-click `preventDefault`s (so the window default, gated on
  * `defaultPrevented`, stays quiet) and `stopPropagation`s (so a nested trigger
  * wins over an outer one).
+ *
+ * Scopes are isolated by default (innermost wins, nothing else shows). Pass
+ * `inherit` on a `<ContextMenuTrigger>` to opt that scope into pulling in its
+ * enclosing scope's items too — a separator, then the parent's items — and the
+ * parent's own `inherit` decides whether the chain keeps going outward from
+ * there, up to the app-wide default menu (the outermost root scope):
+ *
+ *   <ContextMenuTrigger id="card" inherit>
+ *     <Card />
+ *   </ContextMenuTrigger>
+ *   // Right-click the card → card items, then a separator, then the app-wide
+ *   // default menu's items.
  */
-import { Children, cloneElement, isValidElement, useEffect, useId, useRef } from 'react'
+import {
+  Children,
+  cloneElement,
+  createContext,
+  isValidElement,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+} from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { post } from './rpc.js'
 import type { ContextMenuItem as WireMenuItem } from './rpc.js'
@@ -74,6 +96,62 @@ let windowMenu: MenuRef | null = null
 
 function openNative(items: WireMenuItem[], x: number, y: number) {
   post({ kind: 'contextMenu', items, x, y })
+}
+
+// ---------------------------------------------------------------------------
+// Scope chain — opt-in inheritance. A <ContextMenuTrigger> normally resolves
+// only its own scope (see ContextMenuTrigger below); when it (or an enclosing
+// trigger) sets `inherit`, we also need to know *which* scope encloses it and
+// whether that one inherits too. React context carries that chain down the
+// tree (robust to portals and to whatever's rendered in between — unlike
+// walking real DOM ancestry), one frame per <ContextMenuTrigger>, ordered
+// outermost-first (a trigger's own frame is appended last for its children).
+// The app-wide/global menu is the implicit root beyond the outermost frame —
+// it has no `inherit` of its own since it has no parent to pull from.
+// ---------------------------------------------------------------------------
+
+interface ScopeFrame {
+  id: string
+  inherit: boolean
+}
+
+const ScopeChainContext = createContext<ScopeFrame[]>([])
+
+/**
+ * Walks outward from `selfId` — self, then each enclosing `ancestors` frame
+ * nearest-first — collecting every scope's items as long as the current
+ * scope's `inherit` is true. Stops (without including the parent) the moment
+ * one is false. If every frame in the chain inherits, the walk continues into
+ * the implicit root: the app-wide default menu.
+ */
+function resolveScopeChain(selfId: string, selfInherit: boolean, ancestors: ScopeFrame[]): WireMenuItem[] {
+  const frames: ScopeFrame[] = [{ id: selfId, inherit: selfInherit }]
+  for (let i = ancestors.length - 1; i >= 0; i--) frames.push(ancestors[i])
+
+  const groups: WireMenuItem[][] = []
+  for (const frame of frames) {
+    const menu = scopedMenus.get(frame.id)
+    groups.push(menu ? menu.current.items : [])
+    if (!frame.inherit) return mergeScopeGroups(groups)
+  }
+  // Every scope in the explicit chain opted in — the app-wide default is the
+  // outermost root scope, so it's what the chain reaches next.
+  groups.push(windowMenu ? windowMenu.current.items : [])
+  return mergeScopeGroups(groups)
+}
+
+/** Joins non-empty item groups with a single separator; drops empty ones (and
+ * their separator) entirely, so an inheriting-but-item-less scope contributes
+ * nothing rather than a stray divider. */
+function mergeScopeGroups(groups: WireMenuItem[][]): WireMenuItem[] {
+  const out: WireMenuItem[] = []
+  let sep = 0
+  for (const group of groups) {
+    if (group.length === 0) continue
+    if (out.length > 0) out.push({ id: `chain-sep-${sep++}`, role: 'separator' })
+    out.push(...group)
+  }
+  return out
 }
 
 function onMenuClick(e: Event) {
@@ -192,6 +270,13 @@ export interface ContextMenuTriggerProps {
   /** Links this region to the `useContextMenu(id, …)` of the same name. */
   id: string
   /**
+   * Also pull in the enclosing scope's items (a separator, then its items) —
+   * and, if that scope inherits too, recurse outward from there, up to the
+   * app-wide default menu (the outermost root scope). Defaults to `false`:
+   * this scope's items only, same as today.
+   */
+  inherit?: boolean
+  /**
    * Attach the handler to the child element directly (no wrapper node). Defaults
    * to `true` when there's a single element child, `false` otherwise (then a
    * `display: contents` `<span>` carries the handler). Set it explicitly to
@@ -201,22 +286,28 @@ export interface ContextMenuTriggerProps {
   children?: ReactNode
 }
 
-export function ContextMenuTrigger({ id, asChild, children }: ContextMenuTriggerProps) {
+export function ContextMenuTrigger({ id, inherit = false, asChild, children }: ContextMenuTriggerProps) {
+  const ancestors = useContext(ScopeChainContext)
+
   const onContextMenu = (e: {
     preventDefault(): void
     stopPropagation(): void
     clientX: number
     clientY: number
   }) => {
-    const menu = scopedMenus.get(id)
-    // No menu registered for this id: leave the event alone so it bubbles to the
-    // window-default handler instead of swallowing the right-click.
-    if (!menu) return
+    const items = resolveScopeChain(id, inherit, ancestors)
+    // Claim the click if this scope owns a menu (even an intentionally empty
+    // one — that's how a scope silences the click entirely) or the chain
+    // resolved to something via inheritance. Otherwise leave the event alone
+    // so it bubbles to the window-default handler instead of swallowing the
+    // right-click.
+    if (items.length === 0 && !scopedMenus.has(id)) return
     e.preventDefault()
-    // Innermost menu wins: stop the event before it reaches an enclosing
-    // trigger, so a nested scoped menu overrides an outer one in its region.
+    // Stop the event here — we've already resolved the full chain ourselves
+    // (via ancestors, not DOM bubbling), so an enclosing trigger doesn't also
+    // need to (and shouldn't) run its own handler for the same click.
     e.stopPropagation()
-    openNative(menu.current.items, e.clientX, e.clientY)
+    openNative(items, e.clientX, e.clientY)
   }
 
   // Default to cloning the child when it's a lone element (the common case — no
@@ -225,20 +316,30 @@ export function ContextMenuTrigger({ id, asChild, children }: ContextMenuTrigger
   const sole = kids.length === 1 && isValidElement(kids[0]) ? (kids[0] as ReactElement) : null
   const clone = asChild === true || (asChild === undefined && sole !== null)
 
+  // What nested triggers (however deep, including through portals) see as
+  // their enclosing chain — this scope appended after whatever enclosed it.
+  const nextAncestors = useMemo<ScopeFrame[]>(() => [...ancestors, { id, inherit }], [ancestors, id, inherit])
+
   if (clone) {
     const child = (sole ?? Children.only(children)) as ReactElement<{ onContextMenu?: (e: any) => void }>
-    return cloneElement(child, {
-      onContextMenu: (e: any) => {
-        child.props.onContextMenu?.(e)
-        onContextMenu(e)
-      },
-    })
+    return (
+      <ScopeChainContext.Provider value={nextAncestors}>
+        {cloneElement(child, {
+          onContextMenu: (e: any) => {
+            child.props.onContextMenu?.(e)
+            onContextMenu(e)
+          },
+        })}
+      </ScopeChainContext.Provider>
+    )
   }
 
   return (
-    <span style={{ display: 'contents' }} onContextMenu={onContextMenu}>
-      {children}
-    </span>
+    <ScopeChainContext.Provider value={nextAncestors}>
+      <span style={{ display: 'contents' }} onContextMenu={onContextMenu}>
+        {children}
+      </span>
+    </ScopeChainContext.Provider>
   )
 }
 
