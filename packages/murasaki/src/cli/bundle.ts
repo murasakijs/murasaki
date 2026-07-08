@@ -1,10 +1,13 @@
 import { resolve, dirname, join, relative, sep } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import pngToIco from 'png-to-ico'
+import { PNG } from 'pngjs'
+import { NtExecutable, NtExecutableResource, Data, Resource } from 'resedit'
 import build from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote } from './brand.js'
@@ -240,15 +243,23 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
   await copyFile(menuLocalesSrc, join(resourcesDir, 'menu-locales.json'))
 
-  // resources/icon.ico + icon.png. A real .ico needs a multi-size PNG->ICO
-  // conversion; the tools available for that (sips/iconutil) are macOS-only,
-  // which would make this win32 path host-dependent again — so for now this
-  // only stages icon.png (read by the launcher at runtime the same way the
-  // macOS build reads it for NSApp.applicationIconImage, once Phase 1b wires
-  // up the win32 equivalent). Proper .ico generation (and wiring it into the
-  // .exe's PE resources so Explorer/taskbar show it) is deferred to a later
-  // packaging phase.
-  const iconResource = config.icon ? await copyIconPng(cwd, config.icon, resourcesDir) : null
+  // resources/icon.ico + icon.png — the .ico is what actually makes
+  // Explorer/taskbar/title bar show the app's icon (see
+  // embedWin32ExeResources below); the plain PNG is kept alongside it for
+  // parity with the macOS bundle's runtime-readable icon.png (currently
+  // unused at win32 runtime — see imp_win's doc comment in launcher.rs).
+  const iconResource = config.icon ? await buildWin32Icon(cwd, config.icon, resourcesDir) : null
+
+  // Embed resources/icon.ico + version-info (ProductName, FileVersion,
+  // CompanyName, …) into <productName>.exe's PE resources — this is what
+  // Explorer/taskbar/title bar/Start menu actually read; without it the
+  // prebuilt launcher binary shows Windows' generic default icon. No-op if
+  // iconResource is null (icon generation itself was skipped above).
+  await embedWin32ExeResources(
+    join(outDir, `${productName}.exe`),
+    config,
+    iconResource ? join(resourcesDir, 'icon.ico') : null,
+  )
 
   // resources/murasaki-meta.json — same shape the macOS path writes, read by
   // the launcher binary at runtime.
@@ -692,13 +703,18 @@ async function buildIcon(
 }
 
 /**
- * `config.icon` (a PNG) → `<resourcesDir>/icon.png`, for the win32 bundle.
- * No `.ico` yet — see bundleWin32's icon comment for why (host-independence:
- * generating one cheaply needs sips, which is macOS-only). Same return
- * contract as buildIcon: the meta.json-relative icon path, or `null` if
- * `iconPath` doesn't resolve to a file.
+ * `config.icon` (a PNG) → `<resourcesDir>/icon.png` + `icon.ico`, for the
+ * win32 bundle. The `.ico` fan-out (16/24/32/48/64/256 — the standard
+ * Windows icon sizes: 16/32/48/256 cover Explorer's small/medium/large/
+ * extra-large views, 24/64 the odd sizes some Windows UI still asks for) is
+ * done with `pngjs` (decode + our own `resizePng` below) and `png-to-ico`
+ * (re-encode as `.ico`) — both pure JS, so unlike sips/iconutil this runs
+ * the same way on any host, including the Windows CI runner itself. Same
+ * return contract as `buildIcon` (the macOS counterpart): the
+ * meta.json-relative icon path, or `null` if `iconPath` doesn't resolve to
+ * a file.
  */
-async function copyIconPng(
+async function buildWin32Icon(
   cwd: string,
   iconPath: string,
   resourcesDir: string,
@@ -709,7 +725,136 @@ async function copyIconPng(
     return null
   }
   await copyFile(src, join(resourcesDir, 'icon.png'))
+
+  const source = PNG.sync.read(await readFile(src))
+  const sizes = [16, 24, 32, 48, 64, 256]
+  const ico = await pngToIco(sizes.map((size) => resizePng(source, size)))
+  await writeFile(join(resourcesDir, 'icon.ico'), ico)
+
   return 'icon.png'
+}
+
+/**
+ * Resizes a decoded RGBA `pngjs` image to `size`x`size` via bilinear
+ * sampling, returning a re-encoded PNG buffer — the resize step
+ * `buildWin32Icon` needs (pngjs itself only encodes/decodes, it doesn't
+ * resize) to fan a single source PNG out to every `.ico` size.
+ */
+function resizePng(src: PNG, size: number): Buffer {
+  const dst = new PNG({ width: size, height: size })
+  for (let y = 0; y < size; y++) {
+    const sy = Math.min(Math.max(((y + 0.5) * src.height) / size - 0.5, 0), src.height - 1)
+    const y0 = Math.floor(sy)
+    const y1 = Math.min(y0 + 1, src.height - 1)
+    const ty = sy - y0
+    for (let x = 0; x < size; x++) {
+      const sx = Math.min(Math.max(((x + 0.5) * src.width) / size - 0.5, 0), src.width - 1)
+      const x0 = Math.floor(sx)
+      const x1 = Math.min(x0 + 1, src.width - 1)
+      const tx = sx - x0
+      const dstIdx = (y * size + x) * 4
+      for (let c = 0; c < 4; c++) {
+        const p00 = src.data[(y0 * src.width + x0) * 4 + c]
+        const p10 = src.data[(y0 * src.width + x1) * 4 + c]
+        const p01 = src.data[(y1 * src.width + x0) * 4 + c]
+        const p11 = src.data[(y1 * src.width + x1) * 4 + c]
+        const top = p00 + (p10 - p00) * tx
+        const bottom = p01 + (p11 - p01) * tx
+        dst.data[dstIdx + c] = Math.round(top + (bottom - top) * ty)
+      }
+    }
+  }
+  return PNG.sync.write(dst)
+}
+
+/**
+ * Embeds `resources/icon.ico` + a version-info resource into the just-copied
+ * `<productName>.exe`'s PE resources, using `resedit` — a pure-JS PE
+ * resource editor (built on `pe-library`), so like the rest of this file's
+ * win32 path it runs unmodified on macOS/Linux (cross-bundling/CI) as well
+ * as a Windows runner, no rcedit/Wine needed. This is what makes Explorer,
+ * the taskbar, the title bar, and the Start menu show the app's icon instead
+ * of Windows' generic default — the prebuilt `murasaki-launcher.exe` ships
+ * with no icon resource of its own (see `buildWin32Icon`'s doc comment).
+ * No-op if `iconIcoPath` is `null` (icon generation was itself skipped, see
+ * `bundleWin32`).
+ */
+async function embedWin32ExeResources(
+  exePath: string,
+  config: MurasakiConfig,
+  iconIcoPath: string | null,
+): Promise<void> {
+  if (!iconIcoPath) return
+
+  const exe = NtExecutable.from(await readFile(exePath))
+  const res = NtExecutableResource.from(exe)
+
+  // Icon group — language-neutral (lang 0) so it shows regardless of the end
+  // user's system locale, same as most Windows resource-generation tools'
+  // (rcedit, winres, Visual Studio's default .rc) default. ID 1 mirrors
+  // those same tools' conventional "main icon" resource ID; the prebuilt
+  // launcher has no pre-existing icon-group entry, so this is added rather
+  // than replaced.
+  const iconFile = Data.IconFile.from(await readFile(iconIcoPath))
+  Resource.IconGroupEntry.replaceIconsForResource(
+    res.entries,
+    1,
+    0,
+    iconFile.icons.map((item) => item.data),
+  )
+
+  // Version info — the fields Explorer's file-Properties "Details" tab (and
+  // the taskbar/Alt-Tab tooltip) read. lang 1033 / codepage 1200 (en-US,
+  // Unicode) is the conventional default most single-language Windows apps
+  // use.
+  const LANG = 1033
+  const CODEPAGE = 1200
+  const [major, minor, patch, rev] = parseVersionParts(config.version)
+  const vi = Resource.VersionInfo.fromEntries(res.entries)[0] ?? Resource.VersionInfo.createEmpty()
+  vi.setFileVersion(major, minor, patch, rev, LANG)
+  vi.setProductVersion(major, minor, patch, rev, LANG)
+  vi.setStringValues(
+    { lang: LANG, codepage: CODEPAGE },
+    {
+      ProductName: config.productName,
+      FileDescription: config.description ?? config.productName,
+      CompanyName: resolveWindowsPublisher(config),
+      OriginalFilename: `${config.productName}.exe`,
+    },
+  )
+  vi.outputToResourceEntries(res.entries)
+
+  res.outputResource(exe)
+  await writeFile(exePath, Buffer.from(exe.generate()))
+}
+
+/**
+ * `config.version` (e.g. `"1.2.3"` or `"1.2.3-beta.1"`) → the 4-part
+ * `major.minor.patch.build` tuple `resedit`'s `VersionInfo.setFileVersion`/
+ * `setProductVersion` want. Non-numeric trailing text (pre-release tags, …)
+ * is dropped by `parseInt`; missing/unparsable parts default to 0.
+ */
+function parseVersionParts(version: string | undefined): [number, number, number, number] {
+  const parts = (version ?? '0.0.0').split('.').map((p) => parseInt(p, 10) || 0)
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0, parts[3] ?? 0]
+}
+
+/**
+ * CompanyName for the exe's version-info resource above — mirrors
+ * installer.ts's `resolveWindowsPublisher` (same priority chain: `config
+ * .installer.windows.publisher`, else `authors`, else `copyright`, else
+ * `productName`). Kept as its own copy here rather than a shared import so
+ * this file has no dependency on installer.ts, matching the existing
+ * direction of that dependency (installer.ts imports from bundle.ts, not the
+ * reverse).
+ */
+function resolveWindowsPublisher(config: MurasakiConfig): string {
+  return (
+    config.installer?.windows?.publisher ??
+    (config.authors && config.authors.length > 0 ? config.authors.join(', ') : undefined) ??
+    config.copyright ??
+    config.productName
+  )
 }
 
 function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean): string {
