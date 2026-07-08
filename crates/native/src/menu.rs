@@ -1,5 +1,7 @@
-//! muda-based menu builder — used for the app menu bar, tray menus, and
-//! the **context menu popup** (see `webview::show_context_menu`).
+//! muda-based menu builder — used for the app menu bar, tray menus, the
+//! **context menu popup** (see `webview::show_context_menu`), and (Windows
+//! only) the native menu bar attached via `Menu::init_for_hwnd` (see
+//! `build_windows_menu_bar` below).
 
 use napi::bindgen_prelude::{Error, Result, Status};
 use muda::{accelerator::Accelerator, AboutMetadata, Icon, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -164,6 +166,101 @@ fn load_icon_rgba(path: &str) -> Option<Icon> {
   };
 
   Icon::from_rgba(rgba, width, height).ok()
+}
+
+/// Windows only: stable item ids for `build_windows_menu_bar`'s custom
+/// `MenuItem`s, shared with `webview::poll_menu_bar_events` (the event-loop
+/// poll that dispatches clicks on these — see that function) so the builder
+/// and the dispatcher never drift apart.
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_menu_bar_ids {
+  pub(crate) const EXIT: &str = "murasaki-menu-bar:exit";
+  pub(crate) const UNDO: &str = "murasaki-menu-bar:undo";
+  pub(crate) const REDO: &str = "murasaki-menu-bar:redo";
+  pub(crate) const CUT: &str = "murasaki-menu-bar:cut";
+  pub(crate) const COPY: &str = "murasaki-menu-bar:copy";
+  pub(crate) const PASTE: &str = "murasaki-menu-bar:paste";
+  pub(crate) const SELECT_ALL: &str = "murasaki-menu-bar:selectAll";
+  pub(crate) const MINIMIZE: &str = "murasaki-menu-bar:minimize";
+}
+
+/// Builds the native Win32 menu bar (File / Edit / Window), attached via
+/// `Menu::init_for_hwnd` (see `application.rs::create_window` and
+/// `launcher.rs`'s `imp_win`). Windows has no "bold app name" menu concept
+/// like macOS's app menu, so this is a plain top-level bar rather than
+/// `build_default_app_menu`'s App/Edit/Window shape — just File/Edit/Window.
+///
+/// Every item here is a **custom** `MenuItem` with a stable id
+/// (`windows_menu_bar_ids`), not a muda `PredefinedMenuItem` like the macOS
+/// builder uses. On macOS, predefined Edit items (`copy:`/`paste:`/etc.) ride
+/// Cocoa's responder chain into the focused `WKWebView`, which handles them
+/// natively — Windows has no equivalent: muda's Windows `PredefinedMenuItem`s
+/// for Undo/Redo/Cut/Copy/Paste/SelectAll target native Win32 edit controls,
+/// which a WebView2 host window never is, so they'd be silent no-ops here.
+/// Instead, clicks are picked up asynchronously via `muda::MenuEvent::receiver()`
+/// (the menu bar is persistent, unlike the modal context-menu popup in
+/// `webview.rs`) and mapped to `document.execCommand(...)` in the webview for
+/// the Edit items, or handled natively (window/process) for Minimize/Exit —
+/// see `webview::poll_menu_bar_events`.
+///
+/// `labels` mirrors macOS's `MenuLabels` (see that struct's doc comment and
+/// `build_default_app_menu`), but `menu-locales.json` has no "File"/"Exit"
+/// entry (only the macOS App/Edit/Window vocabulary) — "File" always falls
+/// back to the English literal, and "Exit" reuses the localized `quit` label
+/// (close enough: both mean "close the app"). Flagged here as a known gap
+/// rather than blocking on adding new locale keys.
+///
+/// No keyboard accelerators are set on these items: muda's own docs note
+/// accelerators are inert on Windows unless the host also runs
+/// `TranslateAcceleratorW` against `Menu::haccel()` in its raw message loop,
+/// which tao doesn't expose a hook for — so they'd show a shortcut hint that
+/// doesn't actually fire. Left off rather than shipping a decorative-only,
+/// possibly-misleading label.
+#[cfg(target_os = "windows")]
+pub(crate) fn build_windows_menu_bar(labels: Option<&crate::types::MenuLabels>) -> Result<Menu> {
+  use windows_menu_bar_ids as ids;
+
+  let menu = Menu::new();
+
+  let file_menu = Submenu::new("File", true);
+  let exit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Exit");
+  file_menu
+    .append(&MenuItem::with_id(ids::EXIT, exit_label, true, None))
+    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+
+  let edit_menu = Submenu::new(labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"), true);
+  edit_menu
+    .append_items(&[
+      &MenuItem::with_id(ids::UNDO, labels.and_then(|l| l.undo.as_deref()).unwrap_or("Undo"), true, None),
+      &MenuItem::with_id(ids::REDO, labels.and_then(|l| l.redo.as_deref()).unwrap_or("Redo"), true, None),
+      &PredefinedMenuItem::separator(),
+      &MenuItem::with_id(ids::CUT, labels.and_then(|l| l.cut.as_deref()).unwrap_or("Cut"), true, None),
+      &MenuItem::with_id(ids::COPY, labels.and_then(|l| l.copy.as_deref()).unwrap_or("Copy"), true, None),
+      &MenuItem::with_id(ids::PASTE, labels.and_then(|l| l.paste.as_deref()).unwrap_or("Paste"), true, None),
+      &MenuItem::with_id(
+        ids::SELECT_ALL,
+        labels.and_then(|l| l.select_all.as_deref()).unwrap_or("Select All"),
+        true,
+        None,
+      ),
+    ])
+    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+
+  let window_menu = Submenu::new(labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"), true);
+  window_menu
+    .append(&MenuItem::with_id(
+      ids::MINIMIZE,
+      labels.and_then(|l| l.minimize.as_deref()).unwrap_or("Minimize"),
+      true,
+      None,
+    ))
+    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+
+  menu
+    .append_items(&[&file_menu, &edit_menu, &window_menu])
+    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+
+  Ok(menu)
 }
 
 fn append_item(menu: &Menu, item: &MenuItemOptions) -> Result<()> {

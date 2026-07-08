@@ -42,6 +42,14 @@ impl BrowserWindow {
       window: Rc::new(RefCell::new(Some(window))),
     }
   }
+
+  /// Windows only: a clone-able handle to the underlying window, so
+  /// `Application` can act on it from the tao event loop (see
+  /// `webview::poll_menu_bar_events`'s Minimize handling).
+  #[cfg(target_os = "windows")]
+  pub(crate) fn handle(&self) -> SharedWindow {
+    self.window.clone()
+  }
 }
 
 #[napi]

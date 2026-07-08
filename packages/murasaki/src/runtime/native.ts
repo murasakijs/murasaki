@@ -4,9 +4,10 @@
  */
 
 /**
- * macOS only. Localized labels for the standard App/Edit/Window menu bar —
- * see `../menu-i18n.ts` for the resolver. All fields optional since any
- * left unset fall back to muda's English default on the native side.
+ * Localized labels for the standard menu bar — macOS's App/Edit/Window and
+ * Windows's File/Edit/Window — see `../menu-i18n.ts` for the resolver. All
+ * fields optional since any left unset fall back to an English default on
+ * the native side. Unused on Linux (no default menu bar there yet).
  */
 export interface MenuLabels {
   about?: string
@@ -49,7 +50,8 @@ export interface WindowOptions {
   homepage?: string
   /** Populates the authors field of the native "About <app>" panel. */
   authors?: string[]
-  /** macOS only. Localized labels for the standard App/Edit/Window menu bar. */
+  /** Localized labels for the standard menu bar (macOS App/Edit/Window,
+   * Windows File/Edit/Window). */
   menuLabels?: MenuLabels
 }
 

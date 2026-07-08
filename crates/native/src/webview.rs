@@ -48,6 +48,15 @@ struct ContextMenuPayload {
   y: Option<f64>,
 }
 
+/// Windows only: a clone-able handle to the internal wry `WebView`, so
+/// `Application` can reach into it from the tao event loop to dispatch native
+/// menu-bar clicks (see `poll_menu_bar_events` below). Named/typed like
+/// `window::SharedWindow` for the same reason: the menu bar is persistent, so
+/// unlike the context-menu popup below, nothing can grab this synchronously
+/// off a single call's `self`.
+#[cfg(target_os = "windows")]
+pub(crate) type SharedWebview = Rc<RefCell<Option<WebView>>>;
+
 #[napi]
 pub struct Webview {
   webview: Rc<RefCell<Option<WebView>>>,
@@ -215,6 +224,12 @@ impl Webview {
       on_ipc,
       _window: window,
     })
+  }
+
+  /// Windows only: see `SharedWebview`'s doc comment.
+  #[cfg(target_os = "windows")]
+  pub(crate) fn handle(&self) -> SharedWebview {
+    self.webview.clone()
   }
 }
 
@@ -444,6 +459,85 @@ fn show_native_context_menu(
     if let Some(wv) = webview_slot.borrow().as_ref() {
       let _ = wv.evaluate_script(&js);
     }
+  }
+}
+
+/// Windows only: polls muda's global menu-event channel for clicks on the
+/// **native menu bar** built by `menu::build_windows_menu_bar` and installed
+/// via `Menu::init_for_hwnd` (see `application.rs::create_window` and
+/// `launcher.rs`'s `imp_win`). Unlike the context-menu popup above — modal,
+/// so it reads its one expected event synchronously right after
+/// `show_context_menu_for_hwnd` returns — the menu bar is persistent: clicks
+/// arrive asynchronously, whenever the user picks an item, so this is called
+/// once per tao event-loop tick instead (see both call sites' `event_loop.run`
+/// closures).
+///
+/// Drains every pending event (`while let`, not just the first) in case more
+/// than one queued up between two ticks. Ids outside `windows_menu_bar_ids`
+/// (e.g. an app's own `useContextMenu` popup, which posts to this same global
+/// channel) are ignored here rather than acted on — in practice they're never
+/// seen here anyway, since the popup's own `try_recv()` above runs
+/// synchronously in the same call stack as its click, before this function's
+/// caller gets a turn.
+///
+/// Returns whether the Exit item was clicked — Minimize and the Edit items
+/// are fully handled inside this function (native window call / webview
+/// dispatch respectively), but Exit needs process-shutdown semantics that
+/// differ between callers (kill the spawned `node` child in the prod
+/// launcher vs. run the registered `onQuit` JS callback in the dev path via
+/// `Application`), so it's left for the caller to act on.
+#[cfg(target_os = "windows")]
+pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &SharedWebview) -> bool {
+  use crate::menu::windows_menu_bar_ids as ids;
+
+  let mut exit_requested = false;
+
+  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    let id = event.id().as_ref();
+    if id == ids::EXIT {
+      exit_requested = true;
+    } else if id == ids::MINIMIZE {
+      if let Some(w) = window_slot.borrow().as_ref() {
+        w.set_minimized(true);
+      }
+    } else if id == ids::UNDO {
+      run_menu_bar_edit_command(webview_slot, "undo", ids::UNDO);
+    } else if id == ids::REDO {
+      run_menu_bar_edit_command(webview_slot, "redo", ids::REDO);
+    } else if id == ids::CUT {
+      run_menu_bar_edit_command(webview_slot, "cut", ids::CUT);
+    } else if id == ids::COPY {
+      run_menu_bar_edit_command(webview_slot, "copy", ids::COPY);
+    } else if id == ids::PASTE {
+      run_menu_bar_edit_command(webview_slot, "paste", ids::PASTE);
+    } else if id == ids::SELECT_ALL {
+      run_menu_bar_edit_command(webview_slot, "selectAll", ids::SELECT_ALL);
+    }
+  }
+
+  exit_requested
+}
+
+/// Runs `document.execCommand(command)` in the webview for a native menu-bar
+/// Edit item — see `menu::build_windows_menu_bar`'s doc comment for why these
+/// are custom items dispatched this way instead of muda `PredefinedMenuItem`s.
+///
+/// Also fires the same `murasaki:menuclick` `CustomEvent` the context-menu
+/// path above dispatches (with `id`, one of `windows_menu_bar_ids`, as
+/// `detail`), so an app can still observe or override these via the same
+/// mechanism `useContextMenu` listens on — but doesn't *depend* on any
+/// listener existing: the framework's own default-menu-action JS layer (from
+/// an earlier custom-title-bar iteration, since reverted — see git history)
+/// no longer ships, so `execCommand` runs unconditionally first, up front in
+/// this same script, rather than only as an app-registered handler's effect.
+#[cfg(target_os = "windows")]
+fn run_menu_bar_edit_command(webview_slot: &SharedWebview, command: &str, id: &str) {
+  let js = format!(
+    "document.execCommand('{command}');window.dispatchEvent(new CustomEvent('murasaki:menuclick',{{detail:{}}}))",
+    serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
+  );
+  if let Some(wv) = webview_slot.borrow().as_ref() {
+    let _ = wv.evaluate_script(&js);
   }
 }
 

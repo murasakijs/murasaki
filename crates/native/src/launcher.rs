@@ -35,6 +35,7 @@
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod shared {
   use std::{
+    collections::HashMap,
     fs,
     io::{BufRead, BufReader, Write},
     path::Path,
@@ -45,6 +46,8 @@ mod shared {
   };
 
   use serde::Deserialize;
+
+  use crate::types::MenuLabels;
 
   /// Subset of the packaged resources dir's `murasaki-meta.json` (written by
   /// `cli/bundle.ts`; `Contents/Resources/` on macOS, `resources/` on
@@ -195,11 +198,133 @@ mod shared {
     rx.recv_timeout(timeout)
       .map_err(|_| "prod server did not report a port in time".to_string())
   }
+
+  /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
+  /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
+  /// `menu-locales.json` (`Contents/Resources/` on macOS, `resources/` on
+  /// Windows). Shared by both launchers: only the raw "read the OS UI
+  /// language" step differs between them (`imp_macos::macos_ui_language` vs
+  /// `imp_win::windows_ui_language`) — everything below is plain string/table
+  /// logic with nothing macOS- or Windows-specific about it.
+  #[derive(Deserialize, Clone)]
+  #[serde(rename_all = "camelCase")]
+  pub(super) struct LocaleLabels {
+    pub(super) about: String,
+    pub(super) services: String,
+    pub(super) hide: String,
+    pub(super) hide_others: String,
+    pub(super) show_all: String,
+    pub(super) quit: String,
+    pub(super) edit: String,
+    pub(super) undo: String,
+    pub(super) redo: String,
+    pub(super) cut: String,
+    pub(super) copy: String,
+    pub(super) paste: String,
+    pub(super) select_all: String,
+    pub(super) window: String,
+    pub(super) minimize: String,
+    pub(super) zoom: String,
+  }
+
+  /// Reads `<resources_dir>/menu-locales.json`. Missing or unparsable ⇒ empty
+  /// map, which makes `resolve_menu_labels` fall through to muda's English
+  /// defaults (see `MenuLabels`'s doc comment in types.rs).
+  pub(super) fn load_menu_locales(resources_dir: &Path) -> HashMap<String, LocaleLabels> {
+    let path = resources_dir.join("menu-locales.json");
+    fs::read_to_string(&path)
+      .ok()
+      .and_then(|raw| serde_json::from_str(&raw).ok())
+      .unwrap_or_default()
+  }
+
+  /// Mirrors `menu-i18n.ts`'s `normalizeLocale()`.
+  pub(super) fn normalize_locale(raw: &str) -> String {
+    let lc = raw.to_lowercase().replace('_', "-");
+    if lc.starts_with("ja") {
+      "ja".to_string()
+    } else if lc.starts_with("zh") {
+      "zh-CN".to_string()
+    } else if lc.starts_with("ko") {
+      "ko".to_string()
+    } else if lc.starts_with("es") {
+      "es".to_string()
+    } else if lc.starts_with("fr") {
+      "fr".to_string()
+    } else if lc.starts_with("de") {
+      "de".to_string()
+    } else {
+      "en".to_string()
+    }
+  }
+
+  /// Mirrors `menu-i18n.ts`'s `resolveMenuLabels()`: resolves the default-menu
+  /// labels for `locale`, constrained to `allowed` (the app's configured
+  /// `locales`) when given, falling back to `allowed[0]` (normalized) if the
+  /// detected locale isn't one of them, and to muda's English defaults
+  /// (`None` fields) if the locale table has neither key nor `"en"`.
+  pub(super) fn resolve_menu_labels(
+    product_name: &str,
+    locale: &str,
+    allowed: Option<&[String]>,
+    table: &HashMap<String, LocaleLabels>,
+  ) -> MenuLabels {
+    let mut key = locale.to_string();
+    if let Some(allowed) = allowed {
+      if !allowed.is_empty() {
+        let normalized_allowed: Vec<String> = allowed.iter().map(|a| normalize_locale(a)).collect();
+        if !normalized_allowed.iter().any(|a| a == &key) {
+          key = normalize_locale(&allowed[0]);
+        }
+      }
+    }
+
+    let Some(t) = table.get(&key).or_else(|| table.get("en")) else {
+      return MenuLabels {
+        about: None,
+        services: None,
+        hide: None,
+        hide_others: None,
+        show_all: None,
+        quit: None,
+        edit: None,
+        undo: None,
+        redo: None,
+        cut: None,
+        copy: None,
+        paste: None,
+        select_all: None,
+        window: None,
+        minimize: None,
+        zoom: None,
+      };
+    };
+
+    let fill = |s: &str| s.replace("{app}", product_name);
+    MenuLabels {
+      about: Some(fill(&t.about)),
+      services: Some(t.services.clone()),
+      hide: Some(fill(&t.hide)),
+      hide_others: Some(t.hide_others.clone()),
+      show_all: Some(t.show_all.clone()),
+      quit: Some(fill(&t.quit)),
+      edit: Some(t.edit.clone()),
+      undo: Some(t.undo.clone()),
+      redo: Some(t.redo.clone()),
+      cut: Some(t.cut.clone()),
+      copy: Some(t.copy.clone()),
+      paste: Some(t.paste.clone()),
+      select_all: Some(t.select_all.clone()),
+      window: Some(t.window.clone()),
+      minimize: Some(t.minimize.clone()),
+      zoom: Some(t.zoom.clone()),
+    }
+  }
 }
 
 #[cfg(target_os = "macos")]
 mod imp_macos {
-  use std::{cell::RefCell, collections::HashMap, fs, path::Path, process::Command, rc::Rc};
+  use std::{cell::RefCell, path::Path, process::Command, rc::Rc};
 
   use tao::{
     dpi::LogicalSize,
@@ -210,36 +335,12 @@ mod imp_macos {
 
   use crate::{
     menu::{build_default_app_menu, AboutInfo},
-    types::{MenuLabels, WebviewOptions},
+    types::WebviewOptions,
     webview::Webview,
     window::{center_on_primary_monitor, SharedWindow},
   };
 
-  use super::shared::{read_meta, spawn_prod_server};
-
-  /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
-  /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
-  /// `Contents/Resources/menu-locales.json`.
-  #[derive(serde::Deserialize, Clone)]
-  #[serde(rename_all = "camelCase")]
-  struct LocaleLabels {
-    about: String,
-    services: String,
-    hide: String,
-    hide_others: String,
-    show_all: String,
-    quit: String,
-    edit: String,
-    undo: String,
-    redo: String,
-    cut: String,
-    copy: String,
-    paste: String,
-    select_all: String,
-    window: String,
-    minimize: String,
-    zoom: String,
-  }
+  use super::shared::{load_menu_locales, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server};
 
   pub fn run() {
     if let Err(err) = run_inner() {
@@ -364,17 +465,6 @@ mod imp_macos {
     });
   }
 
-  /// Reads `Contents/Resources/menu-locales.json`. Missing or unparsable ⇒
-  /// empty map, which makes `resolve_menu_labels` fall through to muda's
-  /// English defaults (see `MenuLabels`'s doc comment in types.rs).
-  fn load_menu_locales(resources_dir: &Path) -> HashMap<String, LocaleLabels> {
-    let path = resources_dir.join("menu-locales.json");
-    fs::read_to_string(&path)
-      .ok()
-      .and_then(|raw| serde_json::from_str(&raw).ok())
-      .unwrap_or_default()
-  }
-
   /// Best-effort system UI language, normalized to a shipped locale key.
   /// Mirrors `menu-i18n.ts`'s `detectLocale()` — macOS only, so unlike the JS
   /// version there's no `Intl`/env-var fallback chain, just `AppleLanguages`.
@@ -436,89 +526,6 @@ mod imp_macos {
       return Some(tag);
     }
     None
-  }
-
-  /// Mirrors `menu-i18n.ts`'s `normalizeLocale()`.
-  fn normalize_locale(raw: &str) -> String {
-    let lc = raw.to_lowercase().replace('_', "-");
-    if lc.starts_with("ja") {
-      "ja".to_string()
-    } else if lc.starts_with("zh") {
-      "zh-CN".to_string()
-    } else if lc.starts_with("ko") {
-      "ko".to_string()
-    } else if lc.starts_with("es") {
-      "es".to_string()
-    } else if lc.starts_with("fr") {
-      "fr".to_string()
-    } else if lc.starts_with("de") {
-      "de".to_string()
-    } else {
-      "en".to_string()
-    }
-  }
-
-  /// Mirrors `menu-i18n.ts`'s `resolveMenuLabels()`: resolves the default-menu
-  /// labels for `locale`, constrained to `allowed` (the app's configured
-  /// `locales`) when given, falling back to `allowed[0]` (normalized) if the
-  /// detected locale isn't one of them, and to muda's English defaults
-  /// (`None` fields) if the locale table has neither key nor `"en"`.
-  fn resolve_menu_labels(
-    product_name: &str,
-    locale: &str,
-    allowed: Option<&[String]>,
-    table: &HashMap<String, LocaleLabels>,
-  ) -> MenuLabels {
-    let mut key = locale.to_string();
-    if let Some(allowed) = allowed {
-      if !allowed.is_empty() {
-        let normalized_allowed: Vec<String> = allowed.iter().map(|a| normalize_locale(a)).collect();
-        if !normalized_allowed.iter().any(|a| a == &key) {
-          key = normalize_locale(&allowed[0]);
-        }
-      }
-    }
-
-    let Some(t) = table.get(&key).or_else(|| table.get("en")) else {
-      return MenuLabels {
-        about: None,
-        services: None,
-        hide: None,
-        hide_others: None,
-        show_all: None,
-        quit: None,
-        edit: None,
-        undo: None,
-        redo: None,
-        cut: None,
-        copy: None,
-        paste: None,
-        select_all: None,
-        window: None,
-        minimize: None,
-        zoom: None,
-      };
-    };
-
-    let fill = |s: &str| s.replace("{app}", product_name);
-    MenuLabels {
-      about: Some(fill(&t.about)),
-      services: Some(t.services.clone()),
-      hide: Some(fill(&t.hide)),
-      hide_others: Some(t.hide_others.clone()),
-      show_all: Some(t.show_all.clone()),
-      quit: Some(fill(&t.quit)),
-      edit: Some(t.edit.clone()),
-      undo: Some(t.undo.clone()),
-      redo: Some(t.redo.clone()),
-      cut: Some(t.cut.clone()),
-      copy: Some(t.copy.clone()),
-      paste: Some(t.paste.clone()),
-      select_all: Some(t.select_all.clone()),
-      window: Some(t.window.clone()),
-      minimize: Some(t.minimize.clone()),
-      zoom: Some(t.zoom.clone()),
-    }
   }
 
   /// Sets `NSApp.applicationIconImage` — mirrors `Application::set_icon_path`
@@ -622,14 +629,22 @@ mod win_job {
   }
 }
 
-/// Windows launcher — window + webview only, no native menu bar / About
-/// panel yet. Deferred macOS-parity items, left for a later packaging phase:
-///  - Native menu bar (muda has a Win32 backend, but nothing builds/installs
-///    one here yet) and the About dialog it would host — mirrors
-///    `webview::show_context_menu`'s Windows stub for the same story on
-///    context menus.
-///  - Locale-aware chrome (`meta.locales`) — irrelevant until there's a menu
-///    bar to localize, so unused here too.
+/// Windows launcher — window + webview + native menu bar (File/Edit/Window),
+/// attached via `Menu::init_for_hwnd` and localized the same way macOS's app
+/// menu is: `menu-locales.json` + the locale resolver in `shared` (this
+/// launcher can't call into Node's `menu-i18n.ts` either — see `imp_macos`'s
+/// module for that same constraint). See `menu::build_windows_menu_bar` for
+/// why its items are custom `MenuItem`s (not muda `PredefinedMenuItem`s like
+/// macOS uses) and `webview::poll_menu_bar_events` for how their clicks are
+/// picked up in the event loop below and dispatched into the webview.
+///
+/// Deferred macOS-parity items, left for a later packaging phase:
+///  - The "About <app>" panel — mirrors `webview::show_context_menu`'s
+///    Windows stub for the same story on context menus. Windows conventionally
+///    surfaces this under a Help menu, which isn't part of this bar yet.
+///  - Menu-bar keyboard accelerators (Ctrl+Z etc.) — see
+///    `menu::build_windows_menu_bar`'s doc comment for why they're
+///    intentionally left unset rather than shipped as inert decoration.
 ///
 /// The window's own icon (title bar / Alt-Tab thumbnail) *is* handled here
 /// (`load_window_icon` below): `cli/bundle.ts`'s `embedWin32ExeResources`
@@ -650,16 +665,18 @@ mod imp_win {
     dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
+    platform::windows::WindowExtWindows,
     window::{Icon, WindowBuilder},
   };
 
   use crate::{
+    menu::build_windows_menu_bar,
     types::WebviewOptions,
-    webview::Webview,
+    webview::{poll_menu_bar_events, Webview},
     window::{center_on_primary_monitor, SharedWindow},
   };
 
-  use super::shared::{read_meta, spawn_prod_server};
+  use super::shared::{load_menu_locales, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server};
   use super::win_job::KillOnCloseJob;
 
   pub fn run() {
@@ -716,8 +733,8 @@ mod imp_win {
     let height = meta.height.unwrap_or(700);
     // Vibrancy is macOS-only (see window.rs) — a no-op here too.
     let _ = &meta.vibrancy;
-    // Deferred — see the module doc comment above.
-    let _ = &meta.locales;
+    // Deferred — see the module doc comment above (no "About" panel/Help menu
+    // yet, so these have nowhere to surface).
     let _ = &meta.version;
     let _ = &meta.description;
     let _ = &meta.copyright;
@@ -743,14 +760,38 @@ mod imp_win {
       .map_err(|e| format!("build window: {e}"))?;
     center_on_primary_monitor(&window);
 
+    // Read the HWND before `window` moves into `shared_window` below —
+    // `init_for_hwnd` just needs the raw handle, not the tao `Window` itself.
+    let hwnd = window.hwnd();
+
     let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
+
+    // Native menu bar (File/Edit/Window) — localized the same way as macOS's
+    // app menu (see the module doc comment above for why this launcher has
+    // its own locale resolution instead of calling into `menu-i18n.ts`).
+    let locale_table = load_menu_locales(&resources_dir);
+    let locale = detect_locale();
+    let menu_labels = resolve_menu_labels(
+      &meta.product_name,
+      &locale,
+      meta.locales.as_deref(),
+      &locale_table,
+    );
+    let menu_bar = build_windows_menu_bar(Some(&menu_labels))
+      .map_err(|e| format!("build menu bar: {e}"))?;
+    // SAFETY: `hwnd` names the window built above, which is still open (its
+    // event loop hasn't run yet). A failure here is cosmetic (missing menu
+    // bar) — log and keep going rather than error the launcher out over it.
+    if let Err(e) = unsafe { menu_bar.init_for_hwnd(hwnd) } {
+      let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to attach the menu bar: {e}");
+    }
 
     let url = format!("http://127.0.0.1:{port}/");
     // `Webview::new` pins the WebView2 user-data directory under
     // %LOCALAPPDATA% itself (see `webview::webview2_data_dir`'s doc comment)
     // — no extra wiring needed here since this goes through the same
     // constructor `murasaki dev` / `BrowserWindow::createWebview` use.
-    let _webview = Webview::new(
+    let webview = Webview::new(
       shared_window.clone(),
       WebviewOptions {
         url: Some(url),
@@ -761,15 +802,32 @@ mod imp_win {
       },
     )
     .map_err(|e| format!("build webview: {e}"))?;
+    // Handle the menu bar's event loop poll dispatches into — see
+    // `poll_menu_bar_events` below and its doc comment in webview.rs.
+    let webview_handle = webview.handle();
 
     // Same shutdown story as the macOS launcher (see that module's
     // `event_loop.run` comment): tao's `EventLoop::run` never returns and
     // explicitly documents that values not passed into it aren't dropped, so
-    // `shared_window`/`_webview`/`job` simply stay alive on this stack frame
-    // for the app's lifetime. Only `child` needs to move into the closure, to
-    // be killed on window close.
+    // `webview`/`menu_bar`/`job` simply stay alive on this stack frame for the
+    // app's lifetime (`shared_window` and `webview_handle` move into the
+    // closure below, since the menu-bar poll needs them every tick). Only
+    // `child` needs to move into the closure too, to be killed on window
+    // close/Exit.
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
+
+      // Native menu-bar clicks (Edit commands + Minimize) arrive
+      // asynchronously — see `poll_menu_bar_events`'s doc comment — so this
+      // is checked every tick rather than read synchronously like the
+      // context-menu popup in webview.rs. Exit is handled the same way as
+      // the window's own close button, just below.
+      if poll_menu_bar_events(&shared_window, &webview_handle) {
+        *control_flow = ControlFlow::Exit;
+        let _ = child.kill();
+        std::process::exit(0);
+      }
+
       if let Event::WindowEvent {
         event: WindowEvent::CloseRequested,
         ..
@@ -786,6 +844,36 @@ mod imp_win {
         std::process::exit(0);
       }
     });
+  }
+
+  /// Best-effort system UI language, normalized to a shipped locale key.
+  /// Mirrors `menu-i18n.ts`'s `detectLocale()` and `imp_macos::detect_locale`
+  /// — Windows locale names are already a clean BCP-47-ish tag (e.g. "ja-JP"),
+  /// unlike macOS's `AppleLanguages`, so there's no property-list parsing
+  /// step to mirror here.
+  fn detect_locale() -> String {
+    let raw = windows_ui_language().unwrap_or_else(|| "en".to_string());
+    normalize_locale(&raw)
+  }
+
+  /// The user's default Windows locale name (e.g. "en-US"), or `None` if the
+  /// call fails. `GetUserDefaultLocaleName` reflects the regional format
+  /// setting rather than strictly the UI display language, but for our
+  /// coarse `normalize_locale` bucketing (just the language prefix) the two
+  /// agree closely enough in practice.
+  fn windows_ui_language() -> Option<String> {
+    use windows::Win32::Globalization::GetUserDefaultLocaleName;
+
+    // LOCALE_NAME_MAX_LENGTH (85, per the Win32 docs) — `buf` must be at
+    // least this long or the call fails.
+    let mut buf = [0u16; 85];
+    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
+    if len <= 0 {
+      return None;
+    }
+    // `len` includes the null terminator; trim it before decoding.
+    let end = usize::try_from(len - 1).ok()?;
+    Some(String::from_utf16_lossy(&buf[..end]))
   }
 
   /// Decodes a PNG at `path` into a `tao::window::Icon` for the window's
