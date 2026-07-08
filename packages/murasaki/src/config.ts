@@ -109,6 +109,38 @@ export interface MurasakiConfig {
        * normally don't need to set this yourself.
        */
       upgradeCode?: string
+
+      /**
+       * Installer/uninstaller icon (`.ico`). Applied to the NSIS installer
+       * (`MUI_ICON`/`MUI_UNICON`) and the MSI's Add/Remove Programs entry
+       * (`ARPPRODUCTICON`). Defaults to the app icon already generated from
+       * top-level `icon` (`<bundle>/resources/icon.ico`); if that's also
+       * unset, both installers fall back to their own default icon.
+       */
+      icon?: string
+      /**
+       * Wizard header/banner image. Path (relative to project root) to a
+       * BMP: 150×57 for the NSIS installer (`MUI_HEADERIMAGE_BITMAP`), 493×58
+       * for the MSI (`WixUIBannerBmp`) — the same file is handed to both, so
+       * pick whichever size matters more, or provide one sized for the
+       * installer you care about. Unset uses each installer's plain default.
+       */
+      banner?: string
+      /**
+       * Welcome/finish page side image. Path (relative to project root) to a
+       * BMP: 164×314 for the NSIS installer (`MUI_WELCOMEFINISHPAGE_BITMAP`),
+       * 493×312 for the MSI (`WixUIDialogBmp`) — same file handed to both.
+       * Unset uses each installer's plain default.
+       */
+      sidebar?: string
+      /**
+       * License shown on a license-acceptance page. Path (relative to
+       * project root) to a `.txt`/`.rtf` for the NSIS installer
+       * (`MUI_PAGE_LICENSE` — added only when this is set) and a `.rtf` for
+       * the MSI (`WixUILicenseRtf` — the MSI wizard always has a license
+       * page, so a minimal placeholder is used when this is unset).
+       */
+      license?: string
     }
   }
 

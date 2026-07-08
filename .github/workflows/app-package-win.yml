@@ -194,6 +194,18 @@ jobs:
           # which isn't on PATH by default — add it so `wix --version` resolves.
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
 
+      # The MSI's WixUI wizard (Round 2 — see wxsScript's doc comment in
+      # installer.ts) needs WixToolset.UI.wixext fetched into the extension
+      # cache before `wix build -ext WixToolset.UI.wixext` can resolve it;
+      # pinned to the extension's 4.0.6 release to match the pinned v4 core
+      # above (an unpinned `add` grabs the latest — v7 — which isn't
+      # compatible with the v4 core toolset). Same non-fatal-on-arm64
+      # posture as the "Install WiX v4" step above.
+      - name: Install WiX UI extension
+        shell: pwsh
+        continue-on-error: ${{ matrix.arch == 'arm64' }}
+        run: wix extension add -g WixToolset.UI.wixext/4.0.6
+
       - name: murasaki installer --target win32-${{ matrix.arch }} (test app)
         working-directory: examples/win-smoke-app
         # --no-build: reuse the bundle produced by the earlier `murasaki

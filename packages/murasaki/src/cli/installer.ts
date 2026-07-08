@@ -413,8 +413,12 @@ async function installerWin32(
 
   await mkdir(resolve(cwd, 'dist'), { recursive: true })
 
-  const madeNsis = await buildNsisInstaller({ cwd, config, productName, version, bundleDir })
-  const madeMsi = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch })
+  // Resolved once and handed to both builders below so a missing/misconfigured
+  // asset only warns a single time (rather than once per installer type).
+  const branding = resolveWindowsBranding(cwd, config, bundleDir)
+
+  const madeNsis = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding })
+  const madeMsi = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
 
   if (!madeNsis && !madeMsi) {
     process.stdout.write(
@@ -433,6 +437,60 @@ function resolveWindowsPublisher(config: MurasakiConfig): string {
     config.copyright ??
     config.productName
   )
+}
+
+/**
+ * Resolved `installer.windows` branding assets (absolute host-filesystem
+ * paths), shared by both the NSIS and MSI builders — see each field's doc
+ * comment in config.ts for the exact size/format each installer expects and
+ * which NSIS/MSI setting it maps to. Any field is `null` when unset (or
+ * configured but missing on disk, after a warning) — each generator omits
+ * the corresponding customization, no fallback asset shipped for `banner`/
+ * `sidebar`/`license` (NSIS side; the MSI's license page provides its own
+ * placeholder — see `resolveMsiLicenseRtf`).
+ */
+interface WindowsBranding {
+  icon: string | null
+  banner: string | null
+  sidebar: string | null
+  license: string | null
+}
+
+/** Resolves `configuredPath` (relative to `cwd`) to an absolute path, warning and returning `null` if it's set but doesn't exist. `null` (no warning) if unset. */
+function resolveBrandingAsset(
+  cwd: string,
+  configuredPath: string | undefined,
+  label: string,
+): string | null {
+  if (!configuredPath) return null
+  const abs = resolve(cwd, configuredPath)
+  if (!existsSync(abs)) {
+    process.stdout.write(`\n${warn(`installer: ${label} ${configuredPath} not found, skipping`)}\n`)
+    return null
+  }
+  return abs
+}
+
+/** The installer icon: `installer.windows.icon` if set (and found), else the app icon's generated `<bundleDir>/resources/icon.ico` (from top-level `config.icon`), else `null` (both installers fall back to their own default icon). */
+function resolveWindowsIcon(cwd: string, config: MurasakiConfig, bundleDir: string): string | null {
+  const configured = resolveBrandingAsset(cwd, config.installer?.windows?.icon, 'installer icon')
+  if (configured) return configured
+  const defaultIcon = join(bundleDir, 'resources', 'icon.ico')
+  return existsSync(defaultIcon) ? defaultIcon : null
+}
+
+function resolveWindowsBranding(
+  cwd: string,
+  config: MurasakiConfig,
+  bundleDir: string,
+): WindowsBranding {
+  const windows = config.installer?.windows
+  return {
+    icon: resolveWindowsIcon(cwd, config, bundleDir),
+    banner: resolveBrandingAsset(cwd, windows?.banner, 'installer banner'),
+    sidebar: resolveBrandingAsset(cwd, windows?.sidebar, 'installer sidebar'),
+    license: resolveBrandingAsset(cwd, windows?.license, 'installer license'),
+  }
 }
 
 /**
@@ -481,6 +539,63 @@ function nsisEscape(s: string): string {
 }
 
 /**
+ * BCP-47 locale → NSIS built-in language file name (NSIS ships these under
+ * its own `Contents/Language files/`) — covers the locale set murasaki's
+ * native menu i18n ships translations for (see menu-i18n.ts's
+ * `DEFAULT_LOCALES`). Locales outside this set fall back to English, same as
+ * `resolveMenuLabels` falling back to its `FALLBACK` locale.
+ */
+const NSIS_LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English',
+  ja: 'Japanese',
+  'zh-Hans': 'SimpChinese',
+  ko: 'Korean',
+  es: 'Spanish',
+  fr: 'French',
+  de: 'German',
+}
+
+/**
+ * Resolves `config.locales` to the ordered, deduplicated NSIS language names
+ * to declare via `MUI_LANGUAGE` — the first entry becomes the installer's
+ * default/fallback language (the same "first entry wins" convention
+ * `resolveMenuLabels` uses for the native menu). Defaults to `['English']`
+ * when `locales` is unset or empty, so the installer stays single-language
+ * with no picker (see `nsiScript`'s `hasLanguagePicker`) unless the app opts
+ * into multiple locales.
+ */
+function nsisLanguageNames(locales: string[] | undefined): string[] {
+  const list = locales && locales.length > 0 ? locales : ['en']
+  const names: string[] = []
+  for (const locale of list) {
+    const mapped = NSIS_LANGUAGE_NAMES[locale] ?? 'English'
+    if (!names.includes(mapped)) names.push(mapped)
+  }
+  return names
+}
+
+/**
+ * The `${LANG_<NAME>}` NSIS preprocessor constant for a language name from
+ * `nsisLanguageNames` (e.g. `"Japanese"` → `${LANG_JAPANESE}`). Built by
+ * plain concatenation rather than a template literal so the literal
+ * `${...}` reaches the generated `.nsi` text instead of being evaluated as a
+ * JS interpolation.
+ */
+function nsisLangConstant(languageName: string): string {
+  return '${LANG_' + languageName.toUpperCase() + '}'
+}
+
+/**
+ * The finish page's "Launch <app>" button text — the one app-specific custom
+ * string in this script, so it's the one wrapped in a `LangString` (below).
+ * Translated for Japanese; every other language falls back to the English
+ * text, per this round's "keep it simple, don't over-translate" scope.
+ */
+function finishRunText(productName: string, languageName: string): string {
+  return languageName === 'Japanese' ? `${productName} を起動` : `Launch ${productName}`
+}
+
+/**
  * Generates the `.nsi` script and runs `makensis` against it to produce
  * `dist/<productName>-<version>-setup.exe`. Returns `false` (without
  * throwing) if `makensis` isn't on PATH or compilation fails, so the caller
@@ -492,8 +607,9 @@ async function buildNsisInstaller(opts: {
   productName: string
   version: string
   bundleDir: string
+  branding: WindowsBranding
 }): Promise<boolean> {
-  const { cwd, config, productName, version, bundleDir } = opts
+  const { cwd, config, productName, version, bundleDir, branding } = opts
 
   if (!detectTool('makensis', ['-VERSION'])) {
     process.stdout.write(
@@ -514,7 +630,16 @@ async function buildNsisInstaller(opts: {
     const nsiPath = join(nsiDir, 'installer.nsi')
     await writeFile(
       nsiPath,
-      nsiScript({ productName, version, publisher, bundleDir, setupPath, installMode }),
+      nsiScript({
+        productName,
+        version,
+        publisher,
+        bundleDir,
+        setupPath,
+        installMode,
+        locales: config.locales,
+        branding,
+      }),
     )
 
     const result = spawnSync('makensis', [nsiPath], { encoding: 'utf8' })
@@ -540,6 +665,19 @@ async function buildNsisInstaller(opts: {
  * per-machine (`$PROGRAMFILES64\<productName>`, admin required) depending on
  * `installMode` — see `config.installer.windows.installMode`'s doc comment.
  *
+ * `locales` (top-level `config.locales`) drives which `MUI_LANGUAGE`s get
+ * declared (see `nsisLanguageNames`); when more than one resolves, a
+ * language-selection dialog is shown at launch (`MUI_LANGDLL_DISPLAY` in
+ * `.onInit`), reserved early for solid compression
+ * (`MUI_RESERVEFILE_LANGDLL`), and the choice is persisted to the registry
+ * (`MUI_LANGDLL_REGISTRY_*`) so the separately-run uninstaller picks it back
+ * up (`MUI_UNGETLANGUAGE` in `un.onInit`) instead of re-prompting. With 0/1
+ * locale, none of that is emitted — just the plain single-language installer.
+ * `branding` (`config.installer.windows.{icon,banner,sidebar,license}`) maps
+ * onto `MUI_ICON`/`MUI_UNICON`, `MUI_HEADERIMAGE_BITMAP`,
+ * `MUI_WELCOMEFINISHPAGE_BITMAP`, and an optional `MUI_PAGE_LICENSE` (added
+ * only when `branding.license` is set).
+ *
  * `$INSTDIR`/`$SMPROGRAMS`/etc. below are genuine NSIS runtime variables
  * (single `$`, resolved on the *target* Windows machine at install time) —
  * distinct from the `${...}` JS template interpolations used throughout to
@@ -555,8 +693,10 @@ function nsiScript(opts: {
   bundleDir: string
   setupPath: string
   installMode: 'perUser' | 'perMachine'
+  locales?: string[]
+  branding: WindowsBranding
 }): string {
-  const { productName, version, publisher, bundleDir, setupPath, installMode } = opts
+  const { productName, version, publisher, bundleDir, setupPath, installMode, locales, branding } = opts
   const name = nsisEscape(productName)
   const pub = nsisEscape(publisher)
   const perMachine = installMode === 'perMachine'
@@ -565,8 +705,9 @@ function nsiScript(opts: {
   const regRoot = perMachine ? 'HKLM' : 'HKCU'
   // Runtime (target-machine) Windows paths — always backslash-separated
   // regardless of the build host, unlike the compile-time (host-filesystem)
-  // paths below (setupPath / bundleDir), which use whatever separator
-  // `node:path` gave them for the host actually running `makensis`.
+  // paths below (setupPath / bundleDir / branding assets), which use
+  // whatever separator `node:path` gave them for the host actually running
+  // `makensis`.
   const installDir = perMachine ? `$PROGRAMFILES64\\${name}` : `$LOCALAPPDATA\\Programs\\${name}`
   const uninstallRegKey = `Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${name}`
   const exeRuntimePath = `$INSTDIR\\${name}.exe`
@@ -575,7 +716,71 @@ function nsiScript(opts: {
   // too (a long-standing NSIS/DOS glob convention, not a literal dot filter).
   const sourceGlob = join(bundleDir, '*.*')
 
-  return `Unicode true
+  const languageNames = nsisLanguageNames(locales)
+  const hasLanguagePicker = languageNames.length > 1
+
+  const brandingDefines = [
+    branding.icon ? `!define MUI_ICON "${nsisEscape(branding.icon)}"` : '',
+    branding.icon ? `!define MUI_UNICON "${nsisEscape(branding.icon)}"` : '',
+    branding.banner ? '!define MUI_HEADERIMAGE' : '',
+    branding.banner ? `!define MUI_HEADERIMAGE_BITMAP "${nsisEscape(branding.banner)}"` : '',
+    branding.sidebar ? `!define MUI_WELCOMEFINISHPAGE_BITMAP "${nsisEscape(branding.sidebar)}"` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const langDllDefines = hasLanguagePicker
+    ? [
+        `!define MUI_LANGDLL_REGISTRY_ROOT "${regRoot}"`,
+        `!define MUI_LANGDLL_REGISTRY_KEY "Software\\${name}"`,
+        `!define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"`,
+      ].join('\n')
+    : ''
+
+  const pages = [
+    '!insertmacro MUI_PAGE_WELCOME',
+    branding.license ? `!insertmacro MUI_PAGE_LICENSE "${nsisEscape(branding.license)}"` : '',
+    '!insertmacro MUI_PAGE_DIRECTORY',
+    '!insertmacro MUI_PAGE_INSTFILES',
+    `!define MUI_FINISHPAGE_RUN "${exeRuntimePath}"`,
+    // Resolved at runtime via the LangString reference ($(...)) rather than
+    // inlined directly, so it's translated per the selected installer
+    // language — see the LangString declarations below.
+    '!define MUI_FINISHPAGE_RUN_TEXT "$(FINISHPAGE_RUN_TEXT)"',
+    '!insertmacro MUI_PAGE_FINISH',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const languageMacros = languageNames.map((n) => `!insertmacro MUI_LANGUAGE "${n}"`).join('\n')
+
+  // One LangString per declared language — English + a Japanese translation
+  // at minimum; every other declared language falls back to the English
+  // text (see `finishRunText`). Standard wizard strings (Next/Back/Install/
+  // …) come from NSIS's own bundled per-language files and need no
+  // translation here.
+  const langStrings = languageNames
+    .map(
+      (n) =>
+        `LangString FINISHPAGE_RUN_TEXT ${nsisLangConstant(n)} "${nsisEscape(finishRunText(productName, n))}"`,
+    )
+    .join('\n')
+
+  // Solid compression (SetCompressor /SOLID below) decompresses the whole
+  // data block before any of it is usable, so the language dialog's own
+  // resources must be reserved first — otherwise the dialog couldn't show
+  // until the entire (potentially large) install payload had decompressed.
+  const reserveLangDll = hasLanguagePicker ? '!insertmacro MUI_RESERVEFILE_LANGDLL' : ''
+
+  const onInit = hasLanguagePicker
+    ? `Function .onInit\n  !insertmacro MUI_LANGDLL_DISPLAY\nFunctionEnd`
+    : ''
+
+  const unOnInit = hasLanguagePicker
+    ? `Function un.onInit\n  !insertmacro MUI_UNGETLANGUAGE\nFunctionEnd`
+    : ''
+
+  const header = `Unicode true
 !include "MUI2.nsh"
 
 Name "${name}"
@@ -584,20 +789,9 @@ InstallDir "${installDir}"
 RequestExecutionLevel ${execLevel}
 SetCompressor /SOLID lzma
 
-!define MUI_ABORTWARNING
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_DIRECTORY
-!insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "${exeRuntimePath}"
-!define MUI_FINISHPAGE_RUN_TEXT "Launch ${name}"
-!insertmacro MUI_PAGE_FINISH
+!define MUI_ABORTWARNING`
 
-!insertmacro MUI_UNPAGE_CONFIRM
-!insertmacro MUI_UNPAGE_INSTFILES
-
-!insertmacro MUI_LANGUAGE "English"
-
-Section "Install"
+  const installSection = `Section "Install"
   SetShellVarContext ${shellCtx}
   SetOutPath "$INSTDIR"
   File /r "${sourceGlob}"
@@ -618,9 +812,9 @@ Section "Install"
   WriteRegStr ${regRoot} "${uninstallRegKey}" "QuietUninstallString" '"$INSTDIR\\Uninstall.exe" /S'
   WriteRegDWORD ${regRoot} "${uninstallRegKey}" "NoModify" 1
   WriteRegDWORD ${regRoot} "${uninstallRegKey}" "NoRepair" 1
-SectionEnd
+SectionEnd`
 
-; Checks both the per-machine and per-user WebView2 Evergreen client
+  const webview2Fn = `; Checks both the per-machine and per-user WebView2 Evergreen client
 ; registry keys; if neither reports an installed version ("pv"), downloads
 ; and silently runs Microsoft's Evergreen Bootstrapper so the app has a
 ; WebView2 runtime to render into on first launch.
@@ -642,17 +836,54 @@ Function CheckWebView2
   webview2_download_failed:
   DetailPrint "WebView2 bootstrapper download failed - the app may not run until the runtime is installed manually."
   webview2_present:
-FunctionEnd
+FunctionEnd`
 
-Section "Uninstall"
+  const uninstallSection = `Section "Uninstall"
   SetShellVarContext ${shellCtx}
   RMDir /r "$INSTDIR"
   Delete "$SMPROGRAMS\\${name}\\${name}.lnk"
   RMDir "$SMPROGRAMS\\${name}"
   Delete "$DESKTOP\\${name}.lnk"
   DeleteRegKey ${regRoot} "${uninstallRegKey}"
-SectionEnd
-`
+SectionEnd`
+
+  return (
+    [
+      header,
+      brandingDefines,
+      langDllDefines,
+      pages,
+      '!insertmacro MUI_UNPAGE_CONFIRM\n!insertmacro MUI_UNPAGE_INSTFILES',
+      languageMacros,
+      langStrings,
+      reserveLangDll,
+      installSection,
+      onInit,
+      webview2Fn,
+      uninstallSection,
+      unOnInit,
+    ]
+      .filter(Boolean)
+      .join('\n\n') + '\n'
+  )
+}
+
+/**
+ * Resolves the MSI wizard's `WixUILicenseRtf` path: `branding.license` if set
+ * (already existence-checked, see `resolveWindowsBranding`), else a minimal
+ * placeholder `.rtf` written into `wxsDir` — unlike the NSIS side (where the
+ * license page itself is skipped when unconfigured), `WixUI_InstallDir`'s
+ * license page is always part of the wizard sequence, so it always needs
+ * *some* RTF to display.
+ */
+async function resolveMsiLicenseRtf(branding: WindowsBranding, wxsDir: string): Promise<string> {
+  if (branding.license) return branding.license
+  const placeholderPath = join(wxsDir, 'license-placeholder.rtf')
+  await writeFile(
+    placeholderPath,
+    String.raw`{\rtf1\ansi\deff0{\fonttbl{\f0\fswiss Helvetica;}}\f0\pard\fs18 No license was provided for this application.\par}`,
+  )
+  return placeholderPath
 }
 
 /**
@@ -671,9 +902,11 @@ SectionEnd
  * `Directory` in WiX v4.0.6 (confirmed against the real toolset, both
  * locally via `dotnet wix.dll build` and in CI), so it can't be used here.
  * No WebView2 bootstrap here — the NSIS installer above carries that; the
- * MSI assumes the runtime is already present (documented in config.ts). No
- * UI wizard either (skips the `WixToolset.UI.wixext` extension dependency)
- * — the MSI is the silent/scripted-deploy option, NSIS is the friendly one.
+ * MSI assumes the runtime is already present (documented in config.ts).
+ *
+ * Uses the standard `WixUI_InstallDir` wizard from the `WixToolset.UI.wixext`
+ * extension (welcome → license → install-dir → install → finish), passed via
+ * `-ext` below — see `wxsScript`'s doc comment for the UI wiring itself.
  */
 async function buildMsiInstaller(opts: {
   cwd: string
@@ -682,8 +915,9 @@ async function buildMsiInstaller(opts: {
   version: string
   bundleDir: string
   arch: Arch
+  branding: WindowsBranding
 }): Promise<boolean> {
-  const { cwd, config, productName, version, bundleDir, arch } = opts
+  const { cwd, config, productName, version, bundleDir, arch, branding } = opts
 
   if (!detectTool('wix', ['--version'])) {
     process.stdout.write(
@@ -704,15 +938,31 @@ async function buildMsiInstaller(opts: {
 
   const wxsDir = await mkdtemp(join(tmpdir(), 'murasaki-wix-'))
   try {
+    // WixUI_InstallDir's license page always needs an RTF; fall back to a
+    // generated placeholder when `branding.license` is unset (see the
+    // function's doc comment).
+    const licenseRtf = await resolveMsiLicenseRtf(branding, wxsDir)
+
     const wxsPath = join(wxsDir, 'installer.wxs')
     await writeFile(
       wxsPath,
-      await wxsScript({ displayName: productName, version: wixVersion, publisher, upgradeCode, productCode, bundleDir }),
+      await wxsScript({
+        displayName: productName,
+        version: wixVersion,
+        publisher,
+        upgradeCode,
+        productCode,
+        bundleDir,
+        branding,
+        licenseRtf,
+      }),
     )
 
-    const result = spawnSync('wix', ['build', wxsPath, '-arch', wixArch, '-out', msiPath], {
-      encoding: 'utf8',
-    })
+    const result = spawnSync(
+      'wix',
+      ['build', wxsPath, '-arch', wixArch, '-ext', 'WixToolset.UI.wixext', '-out', msiPath],
+      { encoding: 'utf8' },
+    )
     if (result.status !== 0) {
       process.stdout.write(
         `\n${warn('installer: wix build failed, skipping the .msi installer:')}\n${dim((result.stderr || result.stdout).trim())}\n\n`,
@@ -727,6 +977,18 @@ async function buildMsiInstaller(opts: {
   }
 }
 
+/**
+ * Generates the `.wxs` (WiX v4) source, wired up with the standard
+ * `WixUI_InstallDir` wizard from `WixToolset.UI.wixext` (referenced via the
+ * `ui:` namespace/`<ui:WixUI>` element — the extension itself is passed to
+ * `wix build` via `-ext`, see `buildMsiInstaller`): welcome → license →
+ * install-dir → install → finish, matching the NSIS installer's flow.
+ * `licenseRtf` backs the license page (`WixUILicenseRtf`, always set — see
+ * `resolveMsiLicenseRtf`); `branding.banner`/`branding.sidebar` back
+ * `WixUIBannerBmp`/`WixUIDialogBmp` when configured, else the extension's own
+ * plain default imagery is used; `branding.icon` backs `ARPPRODUCTICON` (Add/
+ * Remove Programs) when configured.
+ */
 async function wxsScript(opts: {
   displayName: string
   version: string
@@ -734,8 +996,10 @@ async function wxsScript(opts: {
   upgradeCode: string
   productCode: string
   bundleDir: string
+  branding: WindowsBranding
+  licenseRtf: string
 }): Promise<string> {
-  const { displayName, version, publisher, upgradeCode, productCode, bundleDir } = opts
+  const { displayName, version, publisher, upgradeCode, productCode, bundleDir, branding, licenseRtf } = opts
   const name = escapeXmlAttr(displayName)
   const manufacturer = escapeXmlAttr(publisher)
 
@@ -743,8 +1007,24 @@ async function wxsScript(opts: {
   const dirTreeXml = renderWxsDirTree(dirTree, '        ')
   const filesXml = renderWxsFileComponents(files)
 
+  const iconXml = branding.icon
+    ? `\n    <Icon Id="ProductIcon" SourceFile="${escapeXmlAttr(branding.icon)}" />\n    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />`
+    : ''
+
+  const uiVariablesXml = [
+    `    <WixVariable Id="WixUILicenseRtf" Value="${escapeXmlAttr(licenseRtf)}" />`,
+    branding.banner
+      ? `    <WixVariable Id="WixUIBannerBmp" Value="${escapeXmlAttr(branding.banner)}" />`
+      : '',
+    branding.sidebar
+      ? `    <WixVariable Id="WixUIDialogBmp" Value="${escapeXmlAttr(branding.sidebar)}" />`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
   return `<?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
     Name="${name}"
     Manufacturer="${manufacturer}"
@@ -755,6 +1035,10 @@ async function wxsScript(opts: {
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+${iconXml}
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+${uiVariablesXml}
 
     <Feature Id="Main" Title="${name}" Level="1">
       <ComponentGroupRef Id="Files" />
