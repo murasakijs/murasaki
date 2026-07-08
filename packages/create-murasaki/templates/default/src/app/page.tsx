@@ -77,10 +77,11 @@ export default function Page() {
           Hello, Murasaki <span aria-hidden>🦋</span>
         </h1>
         <p className="mt-3 text-muted-foreground">
-          Right-click the card for its own menu — or anywhere else for the app menu.
+          Right-click the card — with <code>inherit</code> its menu also shows the
+          app-wide items — or right-click anywhere else for just the app menu.
         </p>
 
-        <ContextMenuTrigger id="card">
+        <ContextMenuTrigger id="card" inherit>
           <Card className="mt-8 text-center">
             <CardHeader>
               <CardTitle>Try it out</CardTitle>
