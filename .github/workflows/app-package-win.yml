@@ -40,6 +40,13 @@ jobs:
       # matrix entries).
       - uses: dtolnay/rust-toolchain@stable
 
+      # Cache the cargo registry + target dir so the ~700 dependency crates
+      # (the multi-minute bottleneck) compile only on the first run; on later
+      # pushes only our own crate recompiles, cutting the job from ~9m to a few.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/native
+
       # Scaffolds a throwaway app from the default template *inside* the
       # pnpm workspace (examples/ is a pnpm-workspace.yaml glob) before the
       # one-and-only `pnpm install` below, so its `murasaki` / `@murasakijs/ui`
@@ -117,13 +124,6 @@ jobs:
       - name: Smoke test packaged app
         shell: pwsh
         run: .github/scripts/win-smoke-test.ps1 -ExePath "${{ steps.locate.outputs.exePath }}" -TimeoutSeconds 60
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: win32-bundle
-          path: examples/win-smoke-app/dist/bundle/**
-          if-no-files-found: warn
 
       # ── Phase 2: installer toolchains + build/verify ───────────────────
 
@@ -244,5 +244,4 @@ jobs:
           path: |
             examples/win-smoke-app/dist/*-setup.exe
             examples/win-smoke-app/dist/*.msi
-            examples/win-smoke-app/dist/bundle/*.zip
           if-no-files-found: warn
