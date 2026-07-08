@@ -27,15 +27,16 @@
  *
  * Scopes are isolated by default (innermost wins, nothing else shows). Pass
  * `inherit` on a `<ContextMenuTrigger>` to opt that scope into pulling in its
- * enclosing scope's items too — a separator, then the parent's items — and the
- * parent's own `inherit` decides whether the chain keeps going outward from
- * there, up to the app-wide default menu (the outermost root scope):
+ * enclosing scope's items too — the inherited (ancestor/app) items are shown
+ * ABOVE the scope's own items, separated by a divider — and the parent's own
+ * `inherit` decides whether the chain keeps going outward from there, up to the
+ * app-wide default menu (the outermost root scope):
  *
  *   <ContextMenuTrigger id="card" inherit>
  *     <Card />
  *   </ContextMenuTrigger>
- *   // Right-click the card → card items, then a separator, then the app-wide
- *   // default menu's items.
+ *   // Right-click the card → the app-wide default menu's items, a separator,
+ *   // then the card's own items.
  */
 import {
   Children,
@@ -140,13 +141,16 @@ function resolveScopeChain(selfId: string, selfInherit: boolean, ancestors: Scop
   return mergeScopeGroups(groups)
 }
 
-/** Joins non-empty item groups with a single separator; drops empty ones (and
- * their separator) entirely, so an inheriting-but-item-less scope contributes
- * nothing rather than a stray divider. */
+/** Joins the scope groups into one menu with a single separator between each —
+ * INHERITED items (app-wide / ancestors) first, the innermost scope's own items
+ * LAST. Empty groups (and their separator) are dropped, so an inheriting-but-
+ * item-less scope contributes nothing rather than a stray divider. */
 function mergeScopeGroups(groups: WireMenuItem[][]): WireMenuItem[] {
   const out: WireMenuItem[] = []
   let sep = 0
-  for (const group of groups) {
+  // `groups` arrives innermost-first; render outermost-first so the inherited
+  // (parent/app) items sit above the child scope's own items.
+  for (const group of [...groups].reverse()) {
     if (group.length === 0) continue
     if (out.length > 0) out.push({ id: `chain-sep-${sep++}`, role: 'separator' })
     out.push(...group)

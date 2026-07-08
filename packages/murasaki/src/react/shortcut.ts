@@ -98,11 +98,12 @@ export function parseShortcut(spec: string): {
 
   for (const token of modifierTokens) {
     switch (token) {
+      // `command`/`cmd`/`mod` are the cross-platform primary modifier: the Cmd
+      // key on macOS, Ctrl elsewhere — matching the "CmdOrCtrl" accelerator we
+      // display. Windows/Linux have no Cmd key, so matching metaKey there (as
+      // `command` used to, unlike the label) made these shortcuts unfireable.
       case 'command':
       case 'cmd':
-        meta = true
-        acceleratorParts.push('CmdOrCtrl')
-        break
       case 'mod':
         if (mac) meta = true
         else ctrl = true
