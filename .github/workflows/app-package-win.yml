@@ -5,9 +5,13 @@ name: App package smoke test (Windows)
 # addon + murasaki-launcher freshly built from THIS branch — the published
 # @murasakijs/native@0.31.0 only ships the old macOS-only stub launcher (see
 # crates/native/src/launcher.rs), so testing against it would miss the whole
-# point of this workflow. Runs on every push to a feat/** branch (this is
-# Phase 1b of Windows packaging, still landing on feat/win-linux-packaging)
-# plus workflow_dispatch for on-demand runs.
+# point of this workflow. Also builds and verifies the NSIS `-setup.exe` +
+# WiX `.msi` installers (murasaki installer --target win32-x64, Phase 2 of
+# Windows packaging — see packages/murasaki/src/cli/installer.ts's win32
+# path), which only run for real on Windows (WiX in particular is
+# Windows-only), so this workflow is their only pre-merge verification.
+# Runs on every push to a feat/** branch (still landing on
+# feat/win-linux-packaging) plus workflow_dispatch for on-demand runs.
 on:
   push:
     branches:
@@ -119,4 +123,123 @@ jobs:
         with:
           name: win32-bundle
           path: examples/win-smoke-app/dist/bundle/**
+          if-no-files-found: warn
+
+      # ── Phase 2: installer toolchains + build/verify ───────────────────
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          # choco doesn't always shim makensis onto PATH; add its dir so
+          # installer.ts's `makensis -VERSION` detection finds it.
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+
+      - name: Install WiX v4
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix
+          # `dotnet tool --global` drops wix.exe under %USERPROFILE%\.dotnet\tools,
+          # which isn't on PATH by default — add it so `wix --version` resolves.
+          echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+
+      - name: murasaki installer --target win32-x64 (test app)
+        working-directory: examples/win-smoke-app
+        # --no-build: reuse the bundle produced by the earlier `murasaki
+        # bundle --target win32-x64` step above rather than re-bundling (this
+        # is also what exercises the win32 installer path's own re-bundle
+        # skip logic — see installer.ts's installerWin32).
+        run: pnpm exec murasaki installer --target win32-x64 --no-build
+
+      - name: Locate installer artifacts
+        id: locate-installers
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *-setup.exe | Select-Object -First 1
+          $msi = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *.msi | Select-Object -First 1
+          $zip = Get-ChildItem -Path examples/win-smoke-app/dist/bundle -Filter *.zip | Select-Object -First 1
+          if (-not $setup) { Write-Error 'No NSIS -setup.exe found under examples/win-smoke-app/dist'; exit 1 }
+          if (-not $msi) { Write-Error 'No .msi found under examples/win-smoke-app/dist (WiX build likely failed)'; exit 1 }
+          if (-not $zip) { Write-Error 'No portable .zip found under examples/win-smoke-app/dist/bundle'; exit 1 }
+          Write-Host "setup.exe: $($setup.FullName) ($($setup.Length) bytes)"
+          Write-Host "msi:       $($msi.FullName) ($($msi.Length) bytes)"
+          Write-Host "zip:       $($zip.FullName) ($($zip.Length) bytes)"
+          "setupPath=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "msiPath=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "zipPath=$($zip.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Asserts both installers are well-formed by checking their magic
+      # bytes rather than trusting the file extension — cheap and doesn't
+      # need msiexec/admin rights: setup.exe must be a PE (MZ magic), .msi
+      # must be an OLE Compound File (the container format Windows Installer
+      # uses). WiX/makensis already exited non-zero on a real build failure
+      # (installer.ts throws/warns and the previous step's file search would
+      # come up empty), so this step is mainly a sanity check on top of that.
+      - name: Verify installers are well-formed
+        shell: pwsh
+        run: |
+          $setupBytes = [System.IO.File]::ReadAllBytes("${{ steps.locate-installers.outputs.setupPath }}")
+          if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) {
+            Write-Error 'setup.exe does not start with the MZ (PE) magic'
+            exit 1
+          }
+
+          $msiBytes = [System.IO.File]::ReadAllBytes("${{ steps.locate-installers.outputs.msiPath }}")
+          $msiMagic = [byte[]](0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1)
+          if (Compare-Object $msiBytes[0..7] $msiMagic) {
+            Write-Error '.msi does not start with the OLE Compound File magic'
+            exit 1
+          }
+
+          Write-Host 'setup.exe and .msi are well-formed.'
+
+      # Bonus verification: actually run the NSIS installer silently (per-user
+      # default install mode needs no admin/UAC prompt, so this works
+      # unattended in CI), confirm it landed under %LOCALAPPDATA%\Programs,
+      # then reuse the same smoke test the portable bundle got above. Marked
+      # `continue-on-error` per this workflow's spec — the mandatory checks
+      # above already assert the installers themselves are real, so a flaky
+      # silent-install/launch here shouldn't fail the whole job.
+      - name: Silent-install the NSIS installer and smoke test
+        id: silent-install
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $setup = "${{ steps.locate-installers.outputs.setupPath }}"
+          Write-Host "Silent-installing $setup ..."
+          $proc = Start-Process -FilePath $setup -ArgumentList '/S' -PassThru -Wait
+          if ($proc.ExitCode -ne 0) {
+            Write-Error "Silent install exited with code $($proc.ExitCode)"
+            exit 1
+          }
+
+          $installedExe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -ne 'Uninstall.exe' } |
+            Select-Object -First 1
+          if (-not $installedExe) {
+            Write-Error "Silent install did not produce an .exe under $env:LOCALAPPDATA\Programs"
+            exit 1
+          }
+          Write-Host "Installed exe: $($installedExe.FullName)"
+
+          .github/scripts/win-smoke-test.ps1 -ExePath $installedExe.FullName -TimeoutSeconds 60
+
+      - name: Report silent-install smoke test result
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.silent-install.outcome }}' -ne 'success') {
+            Write-Host '::warning::Silent-install smoke test did not pass (non-blocking — see the "Silent-install the NSIS installer and smoke test" step above). The installers themselves were already verified as well-formed.'
+          } else {
+            Write-Host 'Silent-install smoke test passed.'
+          }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-installers
+          path: |
+            examples/win-smoke-app/dist/*-setup.exe
+            examples/win-smoke-app/dist/*.msi
+            examples/win-smoke-app/dist/bundle/*.zip
           if-no-files-found: warn

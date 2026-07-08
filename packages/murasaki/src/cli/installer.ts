@@ -1,11 +1,12 @@
 import { resolve, join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, cp, copyFile, mkdir, symlink } from 'node:fs/promises'
+import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { success, warn, error, dim, unsignedNote } from './brand.js'
-import bundle from './bundle.js'
+import bundle, { parseTarget, type Arch } from './bundle.js'
 import type { MurasakiConfig } from '../config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -14,21 +15,32 @@ const DEFAULT_WINDOW = { width: 640, height: 420 }
 const DEFAULT_ICON_SIZE = 128
 
 /**
- * Wrap the `.app` produced by `bundle` into a drag-to-install `.dmg`, via
- * `hdiutil` — the same tool Finder uses under the hood, so no extra
- * dependency is needed on macOS.
- *
- * Produces a styled DMG (background image, fixed window, positioned icons —
- * app on the left, Applications on the right) using the classic
- * create-rw / attach / osascript / detach / convert-to-UDZO sequence. If the
- * `osascript` styling step fails for any reason, falls back to a plain
- * `hdiutil create -format UDZO` so `murasaki installer` never hard-fails.
+ * Produce a distributable installer for `--target <platform>-<arch>` (reuses
+ * `bundle`'s `--target` parsing — see bundle.ts's `parseTarget`), defaulting
+ * to the host platform/`config.targets[0]` the same way `bundle` does. Routes
+ * to the darwin `.dmg` path (below) or the win32 NSIS/MSI path
+ * (`installerWin32`); any other target prints a "not supported yet" notice
+ * and returns, same UX as `bundle`'s unsupported-target handling.
  */
 export default async function installer(argv: string[]) {
   const cwd = process.cwd()
+  const config = await loadUserConfig(cwd)
+  const target = parseTarget(argv, config)
+
+  if (target.platform === 'win32') {
+    await installerWin32(argv, cwd, config, target.arch)
+    return
+  }
+
+  if (target.platform !== 'darwin') {
+    process.stdout.write(`\n${warn(`installer: ${target.platform} is not supported yet.`)}\n\n`)
+    return
+  }
 
   if (process.platform !== 'darwin') {
-    process.stdout.write(`\n${warn('installer: only macOS (.dmg) is supported right now.')}\n\n`)
+    process.stdout.write(
+      `\n${warn('installer: a .dmg can only be built while running on macOS (win32 targets can be built from any host with makensis/wix installed).')}\n\n`,
+    )
     return
   }
 
@@ -44,7 +56,6 @@ export default async function installer(argv: string[]) {
     )
   }
 
-  const config = await loadUserConfig(cwd)
   const productName = config.productName
   const version = config.version ?? '0.0.0'
   const appDir = resolve(cwd, 'dist/bundle', `${productName}.app`)
@@ -362,6 +373,423 @@ async function plainDmg(staging: string, productName: string, dmgPath: string): 
     process.stderr.write(`\n${error('hdiutil failed')}\n\n${result.stderr}\n`)
     process.exit(result.status ?? 1)
   }
+}
+
+// ── Windows: NSIS `.exe` + WiX `.msi` installers ───────────────────────────
+
+/** The Evergreen WebView2 runtime's client registry GUID (Microsoft's own, not murasaki's) — see `nsiScript`'s `CheckWebView2`. */
+const WEBVIEW2_CLIENT_GUID = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+/** Microsoft's permalink to the WebView2 Evergreen Bootstrapper (the small stub installer that fetches the actual runtime). */
+const WEBVIEW2_BOOTSTRAPPER_URL = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
+
+/**
+ * win32 counterpart of the macOS `.dmg` path above: (re-)bundles via `bundle`
+ * (mirrors the DMG path's re-bundle-by-default / `--no-build` convention),
+ * then produces a NSIS `-setup.exe` and a WiX `.msi` from the staged
+ * `dist/bundle/<productName>/` folder (bundle.ts's `bundleWin32`).
+ *
+ * Both `makensis` and `wix` are optional local tools — like the macOS path
+ * degrading to a plain DMG when Automation permission is missing, this warns
+ * and skips whichever tool isn't found rather than hard-failing, so
+ * `murasaki installer --target win32-x64` still succeeds wherever only one
+ * (or neither) is installed — e.g. this can run on a Mac with `makensis`
+ * installed via `brew install makensis` to verify the NSIS script compiles,
+ * even though `wix` (Windows-only) will always skip there. Both tools run in
+ * CI (windows-latest), where both are installed.
+ */
+async function installerWin32(
+  argv: string[],
+  cwd: string,
+  config: MurasakiConfig,
+  arch: Arch,
+): Promise<void> {
+  const productName = config.productName
+  const version = config.version ?? '0.0.0'
+  const bundleDir = resolve(cwd, 'dist/bundle', productName)
+
+  // Same re-bundle-by-default / --no-build convention as the darwin path.
+  const skipBuild = argv.includes('--no-build')
+  if (!skipBuild || !existsSync(bundleDir)) await bundle(argv)
+
+  await mkdir(resolve(cwd, 'dist'), { recursive: true })
+
+  const madeNsis = await buildNsisInstaller({ cwd, config, productName, version, bundleDir })
+  const madeMsi = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch })
+
+  if (!madeNsis && !madeMsi) {
+    process.stdout.write(
+      `\n${warn('installer: neither makensis nor wix were found on PATH — no Windows installer produced.')}\n` +
+        `${dim('  the portable folder/.zip from `murasaki bundle --target win32-x64` still works.')}\n` +
+        `${dim('  install NSIS (https://nsis.sourceforge.net/, or `brew install makensis` on macOS) and/or WiX v4 (`dotnet tool install --global wix`).')}\n\n`,
+    )
+  }
+}
+
+/** Publisher shown in both installers' UI/registry — `config.installer.windows.publisher`, else `authors`, else `copyright`, else `productName`. */
+function resolveWindowsPublisher(config: MurasakiConfig): string {
+  return (
+    config.installer?.windows?.publisher ??
+    (config.authors && config.authors.length > 0 ? config.authors.join(', ') : undefined) ??
+    config.copyright ??
+    config.productName
+  )
+}
+
+/**
+ * Deterministic GUID derived from `seed` via SHA-256 — same input always
+ * produces the same GUID, which is what makes MSI upgrades work (WiX's
+ * `MajorUpgrade` matches on a stable `UpgradeCode`) without murasaki having
+ * to persist generated GUIDs anywhere. Ported from the pre-v1 `src/wix.ts`.
+ */
+function deriveGuid(seed: string): string {
+  const hash = createHash('sha256').update(seed).digest('hex')
+  return [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    `4${hash.slice(13, 16)}`, // version nibble 4 ("name-based", loosely)
+    `${((parseInt(hash.slice(16, 18), 16) & 0x3f) | 0x80).toString(16)}${hash.slice(18, 20)}`, // variant bits 10xxxxxx
+    hash.slice(20, 32),
+  ]
+    .join('-')
+    .toUpperCase()
+}
+
+/** `"1.2.3"` → `"1.2.3.0"`, `"1.2"` → `"1.2.0.0"` — WiX/MSI versions are always 4 components. */
+function padVersion(version: string): string {
+  const parts = version
+    .split(/[.-]/)
+    .slice(0, 4)
+    .map((p) => p.replace(/[^0-9]/g, '') || '0')
+  while (parts.length < 4) parts.push('0')
+  return parts.join('.')
+}
+
+/** `spawnSync(cmd, versionArgs)` succeeding (exit 0, no spawn error) — used to detect `makensis`/`wix` without hard-failing when they're missing. */
+function detectTool(cmd: string, versionArgs: string[]): boolean {
+  const result = spawnSync(cmd, versionArgs, { encoding: 'utf8' })
+  return !result.error && result.status === 0
+}
+
+/**
+ * Escapes a string for use inside a double-quoted NSIS literal: `$` starts a
+ * variable/constant reference and `"` closes the string, so both need NSIS's
+ * own escapes (`$$` and `$\"` respectively) rather than the backslash
+ * escaping used to keep them literal in the generated JS below.
+ */
+function nsisEscape(s: string): string {
+  return s.replace(/\$/g, '$$$$').replace(/"/g, '$\\"')
+}
+
+/**
+ * Generates the `.nsi` script and runs `makensis` against it to produce
+ * `dist/<productName>-<version>-setup.exe`. Returns `false` (without
+ * throwing) if `makensis` isn't on PATH or compilation fails, so the caller
+ * can fall through to the "no installer produced" notice.
+ */
+async function buildNsisInstaller(opts: {
+  cwd: string
+  config: MurasakiConfig
+  productName: string
+  version: string
+  bundleDir: string
+}): Promise<boolean> {
+  const { cwd, config, productName, version, bundleDir } = opts
+
+  if (!detectTool('makensis', ['-VERSION'])) {
+    process.stdout.write(
+      `\n${warn('installer: makensis not found — skipping the NSIS .exe installer.')}\n` +
+        `${dim('  install NSIS: https://nsis.sourceforge.net/ (or `brew install makensis` on macOS, which can compile — but not run — the installer).')}\n\n`,
+    )
+    return false
+  }
+
+  const setupPath = resolve(cwd, 'dist', `${productName}-${version}-setup.exe`)
+  await rm(setupPath, { force: true })
+
+  const installMode = config.installer?.windows?.installMode ?? 'perUser'
+  const publisher = resolveWindowsPublisher(config)
+
+  const nsiDir = await mkdtemp(join(tmpdir(), 'murasaki-nsis-'))
+  try {
+    const nsiPath = join(nsiDir, 'installer.nsi')
+    await writeFile(
+      nsiPath,
+      nsiScript({ productName, version, publisher, bundleDir, setupPath, installMode }),
+    )
+
+    const result = spawnSync('makensis', [nsiPath], { encoding: 'utf8' })
+    if (result.status !== 0) {
+      process.stdout.write(
+        `\n${warn('installer: makensis failed, skipping the NSIS installer:')}\n${dim((result.stderr || result.stdout).trim())}\n\n`,
+      )
+      return false
+    }
+
+    process.stdout.write(`\n${success(`installer written  ${dim(setupPath)}`)}\n\n`)
+    return true
+  } finally {
+    await rm(nsiDir, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Builds the NSIS script text. Uses Modern UI 2 (`MUI2.nsh`, bundled with
+ * every NSIS install) for the wizard pages, `NSISdl` (also bundled) to fetch
+ * the WebView2 Evergreen Bootstrapper when the runtime isn't already present,
+ * and installs per-user (`$LOCALAPPDATA\Programs\<productName>`, no admin) or
+ * per-machine (`$PROGRAMFILES64\<productName>`, admin required) depending on
+ * `installMode` — see `config.installer.windows.installMode`'s doc comment.
+ *
+ * `$INSTDIR`/`$SMPROGRAMS`/etc. below are genuine NSIS runtime variables
+ * (single `$`, resolved on the *target* Windows machine at install time) —
+ * distinct from the `${...}` JS template interpolations used throughout to
+ * splice in already-known values (product name, paths, …) at *generation*
+ * time. Every value that ends up inside an NSIS double-quoted string goes
+ * through `nsisEscape` first so a stray `$`/`"` in config text (product name,
+ * publisher, …) can't corrupt the script.
+ */
+function nsiScript(opts: {
+  productName: string
+  version: string
+  publisher: string
+  bundleDir: string
+  setupPath: string
+  installMode: 'perUser' | 'perMachine'
+}): string {
+  const { productName, version, publisher, bundleDir, setupPath, installMode } = opts
+  const name = nsisEscape(productName)
+  const pub = nsisEscape(publisher)
+  const perMachine = installMode === 'perMachine'
+  const execLevel = perMachine ? 'admin' : 'user'
+  const shellCtx = perMachine ? 'all' : 'current'
+  const regRoot = perMachine ? 'HKLM' : 'HKCU'
+  // Runtime (target-machine) Windows paths — always backslash-separated
+  // regardless of the build host, unlike the compile-time (host-filesystem)
+  // paths below (setupPath / bundleDir), which use whatever separator
+  // `node:path` gave them for the host actually running `makensis`.
+  const installDir = perMachine ? `$PROGRAMFILES64\\${name}` : `$LOCALAPPDATA\\Programs\\${name}`
+  const uninstallRegKey = `Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${name}`
+  const exeRuntimePath = `$INSTDIR\\${name}.exe`
+  // NSIS's `File /r "dir\*.*"` is the standard idiom for "everything under
+  // dir, recursively" — despite the name, `*.*` matches extension-less files
+  // too (a long-standing NSIS/DOS glob convention, not a literal dot filter).
+  const sourceGlob = join(bundleDir, '*.*')
+
+  return `Unicode true
+!include "MUI2.nsh"
+
+Name "${name}"
+OutFile "${nsisEscape(setupPath)}"
+InstallDir "${installDir}"
+RequestExecutionLevel ${execLevel}
+SetCompressor /SOLID lzma
+
+!define MUI_ABORTWARNING
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN "${exeRuntimePath}"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch ${name}"
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+
+Section "Install"
+  SetShellVarContext ${shellCtx}
+  SetOutPath "$INSTDIR"
+  File /r "${sourceGlob}"
+
+  CreateDirectory "$SMPROGRAMS\\${name}"
+  CreateShortcut "$SMPROGRAMS\\${name}\\${name}.lnk" "${exeRuntimePath}"
+  CreateShortcut "$DESKTOP\\${name}.lnk" "${exeRuntimePath}"
+
+  Call CheckWebView2
+
+  WriteUninstaller "$INSTDIR\\Uninstall.exe"
+
+  WriteRegStr ${regRoot} "${uninstallRegKey}" "DisplayName" "${name}"
+  WriteRegStr ${regRoot} "${uninstallRegKey}" "DisplayVersion" "${nsisEscape(version)}"
+  WriteRegStr ${regRoot} "${uninstallRegKey}" "Publisher" "${pub}"
+  WriteRegStr ${regRoot} "${uninstallRegKey}" "InstallLocation" "$INSTDIR"
+  WriteRegStr ${regRoot} "${uninstallRegKey}" "UninstallString" '"$INSTDIR\\Uninstall.exe"'
+  WriteRegStr ${regRoot} "${uninstallRegKey}" "QuietUninstallString" '"$INSTDIR\\Uninstall.exe" /S'
+  WriteRegDWORD ${regRoot} "${uninstallRegKey}" "NoModify" 1
+  WriteRegDWORD ${regRoot} "${uninstallRegKey}" "NoRepair" 1
+SectionEnd
+
+; Checks both the per-machine and per-user WebView2 Evergreen client
+; registry keys; if neither reports an installed version ("pv"), downloads
+; and silently runs Microsoft's Evergreen Bootstrapper so the app has a
+; WebView2 runtime to render into on first launch.
+Function CheckWebView2
+  ReadRegStr $0 HKLM "SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_CLIENT_GUID}" "pv"
+  StrCmp $0 "" webview2_check_user webview2_present
+  webview2_check_user:
+  ReadRegStr $0 HKCU "SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_CLIENT_GUID}" "pv"
+  StrCmp $0 "" webview2_download webview2_present
+  webview2_download:
+  DetailPrint "WebView2 Runtime not found - downloading the Evergreen Bootstrapper..."
+  NSISdl::download "${WEBVIEW2_BOOTSTRAPPER_URL}" "$TEMP\\MicrosoftEdgeWebview2Setup.exe"
+  Pop $0
+  StrCmp $0 "success" webview2_install webview2_download_failed
+  webview2_install:
+  ExecWait '"$TEMP\\MicrosoftEdgeWebview2Setup.exe" /silent /install'
+  Delete "$TEMP\\MicrosoftEdgeWebview2Setup.exe"
+  Goto webview2_present
+  webview2_download_failed:
+  DetailPrint "WebView2 bootstrapper download failed - the app may not run until the runtime is installed manually."
+  webview2_present:
+FunctionEnd
+
+Section "Uninstall"
+  SetShellVarContext ${shellCtx}
+  RMDir /r "$INSTDIR"
+  Delete "$SMPROGRAMS\\${name}\\${name}.lnk"
+  RMDir "$SMPROGRAMS\\${name}"
+  Delete "$DESKTOP\\${name}.lnk"
+  DeleteRegKey ${regRoot} "${uninstallRegKey}"
+SectionEnd
+`
+}
+
+/**
+ * Generates the `.wxs` (WiX v4) source and runs `wix build` to produce
+ * `dist/<productName>-<version>.msi`. Returns `false` (without throwing) if
+ * `wix` isn't on PATH (expected on macOS/Linux — WiX only runs on Windows;
+ * verified in CI) or compilation fails.
+ *
+ * Adapts the pre-v1 `src/wix.ts`'s technique (deterministic GUIDs, WiX v4's
+ * `<Files Include="dir\**" />` shorthand to harvest a folder without a
+ * separate `heat.exe` pass) to the current `dist/bundle/<productName>/`
+ * layout, plus a Start Menu shortcut component (not present in the archived
+ * version). No WebView2 bootstrap here — the NSIS installer above carries
+ * that; the MSI assumes the runtime is already present (documented in
+ * config.ts). No UI wizard either (skips the `WixToolset.UI.wixext`
+ * extension dependency) — the MSI is the silent/scripted-deploy option,
+ * NSIS is the friendly one.
+ */
+async function buildMsiInstaller(opts: {
+  cwd: string
+  config: MurasakiConfig
+  productName: string
+  version: string
+  bundleDir: string
+  arch: Arch
+}): Promise<boolean> {
+  const { cwd, config, productName, version, bundleDir, arch } = opts
+
+  if (!detectTool('wix', ['--version'])) {
+    process.stdout.write(
+      `\n${warn('installer: wix not found — skipping the .msi installer (expected on macOS/Linux; WiX is Windows-only).')}\n` +
+        `${dim('  install: dotnet tool install --global wix')}\n\n`,
+    )
+    return false
+  }
+
+  const msiPath = resolve(cwd, 'dist', `${productName}-${version}.msi`)
+  await rm(msiPath, { force: true })
+
+  const publisher = resolveWindowsPublisher(config)
+  const wixVersion = padVersion(version)
+  const upgradeCode = config.installer?.windows?.upgradeCode ?? deriveGuid(`${config.appId}.upgrade`)
+  const productCode = deriveGuid(`${config.appId}.${wixVersion}`)
+  const wixArch = arch === 'arm64' ? 'arm64' : 'x64'
+
+  const wxsDir = await mkdtemp(join(tmpdir(), 'murasaki-wix-'))
+  try {
+    const wxsPath = join(wxsDir, 'installer.wxs')
+    await writeFile(
+      wxsPath,
+      wxsScript({ displayName: productName, version: wixVersion, publisher, upgradeCode, productCode, bundleDir }),
+    )
+
+    const result = spawnSync('wix', ['build', wxsPath, '-arch', wixArch, '-out', msiPath], {
+      encoding: 'utf8',
+    })
+    if (result.status !== 0) {
+      process.stdout.write(
+        `\n${warn('installer: wix build failed, skipping the .msi installer:')}\n${dim((result.stderr || result.stdout).trim())}\n\n`,
+      )
+      return false
+    }
+
+    process.stdout.write(`\n${success(`installer written  ${dim(msiPath)}`)}\n\n`)
+    return true
+  } finally {
+    await rm(wxsDir, { recursive: true, force: true })
+  }
+}
+
+function wxsScript(opts: {
+  displayName: string
+  version: string
+  publisher: string
+  upgradeCode: string
+  productCode: string
+  bundleDir: string
+}): string {
+  const { displayName, version, publisher, upgradeCode, productCode, bundleDir } = opts
+  const name = escapeXmlAttr(displayName)
+  const manufacturer = escapeXmlAttr(publisher)
+  // WiX's `<Files Include>` glob wants `\` even in a source-relative sense
+  // on non-Windows hosts too (it's WiX's own path syntax, not the shell's) —
+  // matching the pre-v1 wix.ts, which used the same `\**` suffix
+  // unconditionally.
+  const sourceGlob = `${bundleDir}\\**`
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="${name}"
+    Manufacturer="${manufacturer}"
+    Version="${version}"
+    UpgradeCode="${upgradeCode}"
+    ProductCode="${productCode}"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Feature Id="Main" Title="${name}" Level="1">
+      <ComponentGroupRef Id="HarvestedFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="${name}" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppProgramMenuFolder" Name="${name}" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="HarvestedFiles" Directory="INSTALLFOLDER">
+      <Files Include="${escapeXmlAttr(sourceGlob)}" />
+    </ComponentGroup>
+
+    <Component Id="StartMenuShortcut" Directory="AppProgramMenuFolder" Guid="*">
+      <Shortcut
+        Id="AppStartMenuShortcut"
+        Name="${name}"
+        Target="[INSTALLFOLDER]${name}.exe"
+        WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveAppProgramMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\\${manufacturer}\\${name}" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>
+`
+}
+
+function escapeXmlAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
 }
 
 async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {

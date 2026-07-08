@@ -516,6 +516,74 @@ mod imp_macos {
   }
 }
 
+/// Windows Job Object wrapping the spawned `node.exe` child so the OS kills
+/// it as soon as this launcher process's handle to the job closes — which
+/// happens automatically on process exit, *any* way it exits (clean
+/// shutdown, force-kill from Task Manager, or a crash). Unlike macOS/Linux,
+/// Windows doesn't reparent an orphaned child to a pid the child could
+/// detect (`prod-server.mjs`'s `ppid === 1` check — see its comment — is a
+/// no-op there), so without this a killed/crashed launcher would leave
+/// `node.exe` running indefinitely. Kept as its own small module so the
+/// win32-specific Win32 API calls stay out of `imp_win::run_inner`.
+#[cfg(target_os = "windows")]
+mod win_job {
+  use windows::{
+    core::PCWSTR,
+    Win32::{
+      Foundation::{CloseHandle, HANDLE},
+      System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+      },
+    },
+  };
+
+  pub(super) struct KillOnCloseJob(HANDLE);
+
+  impl KillOnCloseJob {
+    /// Creates the job object and sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+    /// on it. Best-effort: returns `None` on any failure rather than
+    /// erroring the launcher out — the app still runs, just without this
+    /// orphan-kill safety net.
+    pub(super) fn new() -> Option<Self> {
+      let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.ok()?;
+
+      let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+      info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      let configured = unsafe {
+        SetInformationJobObject(
+          job,
+          JobObjectExtendedLimitInformation,
+          &info as *const _ as *const core::ffi::c_void,
+          std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+      };
+      if configured.is_err() {
+        let _ = unsafe { CloseHandle(job) };
+        return None;
+      }
+      Some(Self(job))
+    }
+
+    /// Assigns `child` to this job — from this point on, Windows kills it
+    /// (and anything it spawns, which inherits into the same job) once the
+    /// job handle closes. Best-effort: a `false` return just means this
+    /// child didn't get the orphan-kill protection, not a fatal error.
+    pub(super) fn assign(&self, child: &std::process::Child) -> bool {
+      use std::os::windows::io::AsRawHandle;
+      let process = HANDLE(child.as_raw_handle());
+      unsafe { AssignProcessToJobObject(self.0, process) }.is_ok()
+    }
+  }
+
+  impl Drop for KillOnCloseJob {
+    fn drop(&mut self) {
+      let _ = unsafe { CloseHandle(self.0) };
+    }
+  }
+}
+
 /// Windows launcher — window + webview only, no native menu bar / About
 /// panel yet. Deferred macOS-parity items, left for a later packaging phase:
 ///  - Native menu bar (muda has a Win32 backend, but nothing builds/installs
@@ -547,6 +615,7 @@ mod imp_win {
   };
 
   use super::shared::{read_meta, spawn_prod_server};
+  use super::win_job::KillOnCloseJob;
 
   pub fn run() {
     if let Err(err) = run_inner() {
@@ -580,6 +649,17 @@ mod imp_win {
     // Spawns resources/node.exe prod-server.mjs — same handshake as macOS,
     // see `shared::spawn_prod_server`.
     let (mut child, port) = spawn_prod_server(&resources_dir, "node.exe")?;
+
+    // Orphan protection (see `win_job`'s module doc comment) — assign the
+    // freshly spawned node.exe to a KILL_ON_JOB_CLOSE job so it can't outlive
+    // this launcher process, even if that's a crash rather than a clean exit.
+    // `job` is intentionally kept alive on this stack frame for the rest of
+    // `run_inner` (see the `event_loop.run` comment near the bottom of this
+    // function for why nothing here needs an explicit lifetime beyond that).
+    let job = KillOnCloseJob::new();
+    if let Some(job) = &job {
+      job.assign(&child);
+    }
 
     let event_loop = EventLoop::<()>::new();
 
@@ -628,9 +708,9 @@ mod imp_win {
     // Same shutdown story as the macOS launcher (see that module's
     // `event_loop.run` comment): tao's `EventLoop::run` never returns and
     // explicitly documents that values not passed into it aren't dropped, so
-    // `shared_window`/`_webview` simply stay alive on this stack frame for
-    // the app's lifetime. Only `child` needs to move into the closure, to be
-    // killed on window close.
+    // `shared_window`/`_webview`/`job` simply stay alive on this stack frame
+    // for the app's lifetime. Only `child` needs to move into the closure, to
+    // be killed on window close.
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
       if let Event::WindowEvent {
@@ -639,8 +719,12 @@ mod imp_win {
       } = event
       {
         *control_flow = ControlFlow::Exit;
-        // Best-effort: if we get killed before this runs (force-quit, crash),
-        // prod-server.mjs's own orphan check (`ppid === 1`) reaps it within ~2s.
+        // Best-effort direct kill on the clean-shutdown path. If we instead
+        // get killed before this ever runs (force-quit, crash), it's the
+        // `job` assigned above — not this — that reaps `child`: Windows has
+        // no ppid-reparenting signal for `prod-server.mjs` to detect itself
+        // (unlike macOS/Linux's `ppid === 1` check), so the Job Object is
+        // what actually guarantees no orphaned `node.exe` here.
         let _ = child.kill();
         std::process::exit(0);
       }

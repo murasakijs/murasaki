@@ -1,4 +1,4 @@
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, relative, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -12,11 +12,11 @@ import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import type { MurasakiConfig } from '../config.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 
-type Arch = 'arm64' | 'x64'
-type Platform = NodePlatform
+export type Arch = 'arm64' | 'x64'
+export type Platform = NodePlatform
 
 /** `--target <platform>-<arch>` (or `config.targets[0]`, or the host). */
-type BundleTarget = { platform: Platform; arch: Arch }
+export type BundleTarget = { platform: Platform; arch: Arch }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -176,7 +176,7 @@ export default async function bundle(argv: string[]) {
   // currently requires this package. Kept for now to minimize risk.
   const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
   await mkdir(dirname(nativeDest), { recursive: true })
-  await cp(nativeDir, nativeDest, { recursive: true })
+  await copyNativeModule(nativeDir, nativeDest)
 
   // Contents/Info.plist
   await writeFile(
@@ -267,12 +267,64 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
 
   // resources/node_modules/@murasakijs/native — external native binding,
   // copied as-is since its .node binary is arch-specific and can't go
-  // through esbuild/tsc.
+  // through esbuild/tsc (dev-only Rust artifacts filtered out).
   const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
   await mkdir(dirname(nativeDest), { recursive: true })
-  await cp(nativeDir, nativeDest, { recursive: true })
+  await copyNativeModule(nativeDir, nativeDest)
 
   process.stdout.write(`\n${success(`bundle written  ${dim(outDir)}`)}\n\n`)
+
+  // dist/bundle/<productName>-win32-<arch>.zip — a no-install "portable"
+  // deliverable alongside the installers (murasaki installer --target
+  // win32-*, cli/installer.ts): unzip anywhere and run <productName>.exe.
+  const zipPath = await zipWin32Bundle(resolve(cwd, 'dist/bundle'), productName, arch)
+  process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
+}
+
+/**
+ * Zips the just-staged `<bundleRoot>/<productName>/` folder into
+ * `<bundleRoot>/<productName>-win32-<arch>.zip`, preserving the folder name
+ * as the archive's top-level entry (so extracting it drops a
+ * `<productName>/` folder containing `<productName>.exe` + `resources/`,
+ * same shape as the unzipped bundle). Shells out rather than adding a zip
+ * dependency: the posix `zip` CLI ships on every GitHub Actions macOS/Linux
+ * runner (and this repo's dev machines), and PowerShell's `Compress-Archive`
+ * ships with every Windows runner/install — between the two, this covers
+ * both cross-bundling off macOS and running natively on the win32 CI runner.
+ */
+async function zipWin32Bundle(bundleRoot: string, productName: string, arch: Arch): Promise<string> {
+  const zipPath = join(bundleRoot, `${productName}-win32-${arch}.zip`)
+  await rm(zipPath, { force: true })
+
+  // `-q` (zip) keeps stdout from growing an "adding: <file>" line per file —
+  // bundles can have thousands of entries, which both spams the terminal and
+  // risks overrunning spawnSync's buffered stdout; maxBuffer is also raised
+  // defensively for the same reason (Compress-Archive is quiet by default,
+  // no flag needed there).
+  const result =
+    process.platform === 'win32'
+      ? spawnSync(
+          'powershell',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `Compress-Archive -Path '${productName}' -DestinationPath '${zipPath}' -Force`,
+          ],
+          { cwd: bundleRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+        )
+      : spawnSync('zip', ['-rq', zipPath, productName], {
+          cwd: bundleRoot,
+          encoding: 'utf8',
+          maxBuffer: 256 * 1024 * 1024,
+        })
+
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `murasaki: failed to create ${zipPath}: ${(result.stderr || result.stdout || result.error?.message || '').trim()}`,
+    )
+  }
+  return zipPath
 }
 
 /**
@@ -462,7 +514,7 @@ function parseArch(argv: string[]): Arch {
  * later pass (e.g. a loop in the `release` command); pass `--target`
  * explicitly to pick a specific one.
  */
-function parseTarget(argv: string[], config: MurasakiConfig): BundleTarget {
+export function parseTarget(argv: string[], config: MurasakiConfig): BundleTarget {
   const i = argv.indexOf('--target')
   if (i >= 0) return parseTargetId(argv[i + 1])
   if (config.targets && config.targets.length > 0) return parseTargetId(config.targets[0])
@@ -487,6 +539,33 @@ function parseTargetId(id: string | undefined): BundleTarget {
  * `node_modules/murasaki/node_modules/` (e.g. `file:`/link installs) rather
  * than hoisting it to the project root.
  */
+/**
+ * Vendor `@murasakijs/native` into the bundle, EXCLUDING dev-only artifacts.
+ * A published tarball ships only the `.node` binaries + launcher + JS shim, but
+ * when the package is workspace-linked to `crates/native` (dev tree, or CI that
+ * scaffolds the app inside the workspace) a naive recursive copy drags in the
+ * Rust `target/` dir (multi-GB) and the crate source — which would then get
+ * zipped/wrapped into every installer. This filter keeps the bundle small in
+ * both cases (the excluded dirs simply don't exist in a real npm install).
+ */
+async function copyNativeModule(nativeDir: string, dest: string): Promise<void> {
+  const EXCLUDE_DIRS = new Set(['target', 'src', 'npm', 'node_modules', '.git'])
+  await cp(nativeDir, dest, {
+    recursive: true,
+    filter: (src) => {
+      const rel = relative(nativeDir, src)
+      if (rel === '') return true
+      const top = rel.split(sep)[0]
+      if (EXCLUDE_DIRS.has(top)) return false
+      // dev-only files at the package root (Rust/build config, not shipped)
+      if (!rel.includes(sep) && /^(Cargo\.(toml|lock)|build\.rs|\.gitignore)$/.test(rel)) {
+        return false
+      }
+      return true
+    },
+  })
+}
+
 function resolveNativeModuleDir(cwd: string): string {
   const bases = [resolve(cwd, 'package.json'), fileURLToPath(import.meta.url)]
   for (const base of bases) {

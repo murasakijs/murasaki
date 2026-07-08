@@ -41,6 +41,18 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSVisualEffectView", "NSView", "NSWindow", "NSImage"] }
 objc2-foundation = "0.3"
 
+# Windows Job Object (src/launcher.rs's KillOnCloseJob) — kills the spawned
+# node.exe child when the launcher process exits for any reason, including a
+# crash, since Windows has no ppid-reparenting orphan signal to fall back on
+# (unlike macOS/Linux — see prod-server.mjs's `ppid === 1` check).
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
 [build-dependencies]
 napi-build = "2"
 

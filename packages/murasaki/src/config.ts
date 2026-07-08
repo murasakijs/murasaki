@@ -75,7 +75,7 @@ export interface MurasakiConfig {
   /** Icon source (PNG). `murasaki icon` fans this out to .icns/.ico/set. */
   icon?: string
 
-  /** `murasaki installer` DMG styling. Omit to use murasaki's default background. */
+  /** `murasaki installer` styling/options — macOS `.dmg` fields plus Windows `.exe`/`.msi` fields below. */
   installer?: {
     /** Path (relative to project root) to a custom DMG background PNG. Overrides murasaki's default. */
     background?: string
@@ -83,6 +83,28 @@ export interface MurasakiConfig {
     window?: { width: number; height: number }
     /** Icon size in the DMG window. Default 128. */
     iconSize?: number
+
+    /** Windows NSIS (`.exe`)/MSI (`.msi`) installer options. */
+    windows?: {
+      /**
+       * `'perUser'` installs to `%LOCALAPPDATA%\Programs\<productName>` with
+       * no admin prompt (the NSIS installer's default — the friendlier
+       * choice for an unsigned app). `'perMachine'` installs to
+       * `Program Files` and requires admin. The MSI installer is always
+       * per-machine (WiX/Windows Installer convention) regardless of this
+       * setting. Default `'perUser'`.
+       */
+      installMode?: 'perUser' | 'perMachine'
+      /** Publisher name shown in the installer UI and Add/Remove Programs. Defaults to `authors.join(', ')`, then `copyright`, then `productName`. */
+      publisher?: string
+      /**
+       * MSI UpgradeCode (a GUID) — must stay stable across versions for
+       * upgrades to replace rather than duplicate-install. Defaults to a
+       * GUID deterministically derived from `appId` (SHA-256-based), so you
+       * normally don't need to set this yourself.
+       */
+      upgradeCode?: string
+    }
   }
 
   /**
