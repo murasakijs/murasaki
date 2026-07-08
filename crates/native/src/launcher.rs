@@ -628,22 +628,29 @@ mod win_job {
 ///    one here yet) and the About dialog it would host — mirrors
 ///    `webview::show_context_menu`'s Windows stub for the same story on
 ///    context menus.
-///  - The `.exe`'s PE icon (taskbar/Alt-Tab/Explorer) — `cli/bundle.ts`'s
-///    `copyIconPng` only stages `resources/icon.png` for now; embedding an
-///    icon into the PE resources needs `.ico` generation, deferred with that
-///    (see that function's doc comment). `meta.icon` is read but unused here
-///    as a result.
 ///  - Locale-aware chrome (`meta.locales`) — irrelevant until there's a menu
 ///    bar to localize, so unused here too.
+///
+/// The window's own icon (title bar / Alt-Tab thumbnail) *is* handled here
+/// (`load_window_icon` below): `cli/bundle.ts`'s `embedWin32ExeResources`
+/// already embeds `resources/icon.ico` into the `.exe`'s PE resources, which
+/// covers Explorer/taskbar/Start menu — but tao's own `WindowBuilder` sets no
+/// `hIcon` on its `WNDCLASSEX`, so without this the window chrome itself
+/// (top-left corner, Alt-Tab) falls back to Windows' generic default even on
+/// a properly icon-embedded `.exe`. Decoding `resources/icon.png` (the same
+/// file `meta.icon` already points at for macOS's About panel) and setting
+/// it via `WindowBuilder::with_window_icon` fixes that; tao's Windows backend
+/// sets both `ICON_SMALL` and `ICON_BIG` (`WM_SETICON`) from the one image,
+/// so there's no separate small/big asset to manage.
 #[cfg(target_os = "windows")]
 mod imp_win {
-  use std::{cell::RefCell, io::Write, rc::Rc};
+  use std::{cell::RefCell, io::Write, path::Path, rc::Rc};
 
   use tao::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::WindowBuilder,
+    window::{Icon, WindowBuilder},
   };
 
   use crate::{
@@ -710,7 +717,6 @@ mod imp_win {
     // Vibrancy is macOS-only (see window.rs) — a no-op here too.
     let _ = &meta.vibrancy;
     // Deferred — see the module doc comment above.
-    let _ = &meta.icon;
     let _ = &meta.locales;
     let _ = &meta.version;
     let _ = &meta.description;
@@ -718,10 +724,21 @@ mod imp_win {
     let _ = &meta.homepage;
     let _ = &meta.authors;
 
+    // Title-bar/Alt-Tab window icon — see the module doc comment above for
+    // why this is needed in addition to the .exe's already-embedded PE icon.
+    // `None` (no `config.icon`, or a decode failure) just means
+    // `with_window_icon` leaves tao's default in place, same as before this.
+    let window_icon = meta
+      .icon
+      .as_ref()
+      .map(|icon| resources_dir.join(icon))
+      .and_then(|path| load_window_icon(&path));
+
     let window = WindowBuilder::new()
       .with_title(&meta.product_name)
       .with_inner_size(LogicalSize::new(width as f64, height as f64))
       .with_resizable(true)
+      .with_window_icon(window_icon)
       .build(&event_loop)
       .map_err(|e| format!("build window: {e}"))?;
     center_on_primary_monitor(&window);
@@ -769,6 +786,41 @@ mod imp_win {
         std::process::exit(0);
       }
     });
+  }
+
+  /// Decodes a PNG at `path` into a `tao::window::Icon` for the window's
+  /// title-bar/Alt-Tab icon — same decode logic as `menu::load_icon_rgba`
+  /// (macOS's About-panel icon), just producing tao's `Icon` type instead of
+  /// muda's; `png` (already a dependency for that macOS path) is reused
+  /// as-is rather than pulling in a second decoder. Returns `None` on any
+  /// decode failure (unreadable file, unsupported color type, etc.) — the
+  /// caller falls back to no icon (tao's default) rather than erroring the
+  /// launcher out over a cosmetic issue.
+  fn load_window_icon(path: &Path) -> Option<Icon> {
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = png::Decoder::new(file);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(frame.buffer_size());
+
+    let info = reader.info();
+    let (width, height) = (info.width, info.height);
+
+    let rgba = match (info.color_type, info.bit_depth) {
+      (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
+      (png::ColorType::Rgb, png::BitDepth::Eight) => {
+        let mut out = Vec::with_capacity(buf.len() / 3 * 4);
+        for chunk in buf.chunks_exact(3) {
+          out.extend_from_slice(chunk);
+          out.push(255);
+        }
+        out
+      }
+      _ => return None,
+    };
+
+    Icon::from_rgba(rgba, width, height).ok()
   }
 }
 

@@ -330,6 +330,10 @@ jobs:
 
       - name: Report silent-install smoke test result
         if: always() && steps.locate-installers.outputs.setupPath != ''
+        # Purely informational (re-surfaces the silent-install outcome). Don't
+        # let a transient pwsh-launch flake on this trivial step (seen once as
+        # 0xC0000142 on the windows-11-arm runner) fail the whole matrix leg.
+        continue-on-error: true
         shell: pwsh
         run: |
           if ('${{ steps.silent-install.outcome }}' -ne 'success') {
