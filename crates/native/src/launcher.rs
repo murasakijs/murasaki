@@ -738,6 +738,11 @@ mod imp_win {
       .with_title(&meta.product_name)
       .with_inner_size(LogicalSize::new(width as f64, height as f64))
       .with_resizable(true)
+      // Frameless: the web layer renders its own "VS Code-style" title bar
+      // instead (see `webview.rs`'s injected `window.__MURASAKI__` and its
+      // `handle_window_control` IPC branch) — this module is `#[cfg(target_os
+      // = "windows")]` already, so this is Windows-only by construction.
+      .with_decorations(false)
       .with_window_icon(window_icon)
       .build(&event_loop)
       .map_err(|e| format!("build window: {e}"))?;
@@ -771,7 +776,17 @@ mod imp_win {
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
       if let Event::WindowEvent {
-        event: WindowEvent::CloseRequested,
+        // `CloseRequested` is the OS-level close request (Alt+F4, the
+        // taskbar's "Close window" — both still delivered even though the
+        // window has no decorations, see `.with_decorations(false)` above).
+        // `Destroyed` is how the web layer's custom title bar reaches this
+        // same shutdown path: its `{ kind: "windowControl", action: "close"
+        // }` IPC message (`webview.rs`'s `handle_window_control`) just drops
+        // the shared tao `Window`, and dropping a tao `Window` on Windows
+        // posts a message that ends in `DestroyWindow`, which fires
+        // `Destroyed` here — so the native and the custom close button both
+        // quit the app the same way.
+        event: WindowEvent::CloseRequested | WindowEvent::Destroyed,
         ..
       } = event
       {
