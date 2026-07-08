@@ -11,6 +11,11 @@ export interface WindowConfig {
    * the native binding — setting it is a no-op today (support is planned).
    */
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
+  /**
+   * Windows only — show the backend Node console window (useful for
+   * CLI/debug logs). Default `false` (standalone GUI, no console).
+   */
+  console?: boolean
 }
 
 export type UpdaterConfig =

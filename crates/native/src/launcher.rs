@@ -15,10 +15,13 @@
 //! below, identical pure `std::process`/IO on both); everything past that —
 //! building the window/webview and any native chrome (Dock, app menu, About
 //! panel) — is per-OS in `imp_macos`/`imp_win`, since only macOS currently
-//! wires up a native menu bar / About panel (see `webview::show_context_menu`'s
-//! Windows stub for the same story on context menus). The default-menu
-//! locale resolution mirrors `packages/murasaki/src/menu-i18n.ts` — also
-//! macOS-only for now, see `imp_win`'s doc comment for what's deferred.
+//! wires up a native menu bar / About panel. (The right-click context menu is
+//! a separate story — `webview::show_context_menu` — and is implemented on
+//! both macOS and Windows; both `imp_macos`/`imp_win` build their webview via
+//! the same `crate::webview::Webview::new`, so this launcher gets it for
+//! free.) The default-menu locale resolution mirrors
+//! `packages/murasaki/src/menu-i18n.ts` — also macOS-only for now, see
+//! `imp_win`'s doc comment for what's deferred.
 //!
 //! Linux packaging is Phase 3; `run_launcher` is a no-op stub there (and
 //! everywhere else) so the crate still builds wherever the GUI stack does.
@@ -73,6 +76,14 @@ mod shared {
     pub(super) vibrancy: Option<String>,
     #[serde(default)]
     pub(super) icon: Option<String>,
+    /// Windows only — show the backend `node.exe` console window instead of
+    /// hiding it (see `spawn_prod_server`'s `CREATE_NO_WINDOW` handling
+    /// below). Missing key ⇒ `false` (the default: no console), matching
+    /// `WindowConfig.console` in `packages/murasaki/src/config.ts`. Ignored
+    /// on macOS, where the spawned `node` was never given a console to begin
+    /// with.
+    #[serde(default)]
+    pub(super) console: bool,
   }
 
   /// Reads and parses `<resources_dir>/murasaki-meta.json`.
@@ -89,13 +100,17 @@ mod shared {
   /// one ourselves), and blocks until it reports its port or 15s elapses —
   /// killing the child and returning an error on timeout/failure.
   /// `node_binary_name` (`"node"` on macOS, `"node.exe"` on Windows) is the
-  /// only per-OS difference in this whole sequence.
+  /// only per-OS difference in the command line; `console` (Windows-only,
+  /// see the `CREATE_NO_WINDOW` block below) is the only other per-OS
+  /// difference in this whole sequence.
   pub(super) fn spawn_prod_server(
     resources_dir: &Path,
     node_binary_name: &str,
+    console: bool,
   ) -> Result<(Child, u16), String> {
     let node_path = resources_dir.join(node_binary_name);
-    let mut child = Command::new(&node_path)
+    let mut cmd = Command::new(&node_path);
+    cmd
       .arg("prod-server.mjs")
       .arg("--client")
       .arg(resources_dir.join("client"))
@@ -107,7 +122,27 @@ mod shared {
       .arg("0")
       .current_dir(resources_dir)
       .stdin(Stdio::null())
-      .stdout(Stdio::piped())
+      .stdout(Stdio::piped());
+
+    // Windows only: `node.exe` is a console-subsystem binary, so with no
+    // creation flag Windows allocates a console window for it as soon as
+    // it's spawned — even though this launcher itself is windowless
+    // (`#![windows_subsystem = "windows"]`, see bin/murasaki-launcher.rs).
+    // `CREATE_NO_WINDOW` suppresses that. stdout is still piped either way
+    // (see above) for the `MURASAKI_PORT` handshake, so hiding the console
+    // loses nothing — unless the app opts in via `window.console: true` in
+    // murasaki.config.ts (e.g. to see CLI/debug logs), in which case we
+    // leave the default (visible) console behavior alone.
+    #[cfg(target_os = "windows")]
+    if !console {
+      use std::os::windows::process::CommandExt;
+      const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+      cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = console;
+
+    let mut child = cmd
       .spawn()
       .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
 
@@ -229,7 +264,10 @@ mod imp_macos {
       .map_err(|e| format!("resolve Resources dir: {e}"))?;
 
     let meta = read_meta(&resources_dir)?;
-    let (mut child, port) = spawn_prod_server(&resources_dir, "node")?;
+    // `meta.console` is Windows-only (see that field's doc comment) — ignored
+    // here, `spawn_prod_server` only acts on it under `#[cfg(target_os =
+    // "windows")]`.
+    let (mut child, port) = spawn_prod_server(&resources_dir, "node", meta.console)?;
 
     set_activation_policy_regular();
 
@@ -647,8 +685,10 @@ mod imp_win {
 
     let meta = read_meta(&resources_dir)?;
     // Spawns resources/node.exe prod-server.mjs — same handshake as macOS,
-    // see `shared::spawn_prod_server`.
-    let (mut child, port) = spawn_prod_server(&resources_dir, "node.exe")?;
+    // see `shared::spawn_prod_server`. `meta.console` (default `false`) hides
+    // the console window `node.exe` would otherwise get, via
+    // `CREATE_NO_WINDOW` — see that function's doc comment.
+    let (mut child, port) = spawn_prod_server(&resources_dir, "node.exe", meta.console)?;
 
     // Orphan protection (see `win_job`'s module doc comment) — assign the
     // freshly spawned node.exe to a KILL_ON_JOB_CLOSE job so it can't outlive

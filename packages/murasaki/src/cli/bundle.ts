@@ -347,6 +347,7 @@ function metaJson(config: MurasakiConfig, productName: string, iconResource: str
       width: config.window?.width,
       height: config.window?.height,
       vibrancy: config.window?.vibrancy,
+      console: config.window?.console,
       icon: iconResource ?? undefined,
     },
     null,

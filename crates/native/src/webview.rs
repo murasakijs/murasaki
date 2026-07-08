@@ -1,13 +1,16 @@
 //! Webview — wry WebView + IPC channel + **native context menu popup**.
 //!
 //! Context menus are handled entirely on the Rust side (see
-//! `show_native_context_menu` below): `Application::run()` blocks Node's
-//! libuv loop for as long as the app is open, so a round-trip through
-//! `onIpcMessage` back into JS never fires. Instead the IPC handler below
-//! intercepts `{ kind: "contextMenu" }` messages itself, pops the muda menu
-//! synchronously, and reports the clicked item back to the page via
-//! `evaluate_script` (which runs inside WebKit and isn't affected by the
-//! blocked Node loop).
+//! `show_native_context_menu` below, one variant per platform):
+//! `Application::run()` blocks Node's libuv loop for as long as the app is
+//! open, so a round-trip through `onIpcMessage` back into JS never fires.
+//! Instead the IPC handler below intercepts `{ kind: "contextMenu" }`
+//! messages itself, pops the muda menu synchronously — via a modal call that
+//! pumps its own nested run/message loop (`show_context_menu_for_nsview` on
+//! macOS, `show_context_menu_for_hwnd` on Windows) — and reports the clicked
+//! item back to the page via `evaluate_script` (which runs inside the
+//! platform webview — WebKit on macOS, WebView2 on Windows — and isn't
+//! affected by the blocked Node loop).
 
 use napi::{
   bindgen_prelude::{Error, Result, Status},
@@ -50,10 +53,14 @@ pub struct Webview {
   webview: Rc<RefCell<Option<WebView>>>,
   on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>>,
   /// Keep the tao window alive for as long as the webview exists. wry's WebView
-  /// only *borrows* the window's NSView — if the tao `Window` is dropped, the
-  /// NSWindow closes and the webview goes offscreen. Holding a clone of the
-  /// shared window handle prevents that even when the intermediate
+  /// only *borrows* the window's NSView/HWND — if the tao `Window` is dropped,
+  /// the native window closes and the webview goes offscreen. Holding a clone
+  /// of the shared window handle prevents that even when the intermediate
   /// `BrowserWindow` returned by `Application::createWindow` goes out of scope.
+  /// Also doubles, on Windows, as how `show_native_context_menu` gets the
+  /// HWND to pop the context menu against (see that function) — macOS instead
+  /// reaches through `webview` for the NSView, so there `_window` is held but
+  /// never explicitly read.
   _window: SharedWindow,
 }
 
@@ -133,6 +140,10 @@ impl Webview {
     // and can't round-trip); everything else still forwards to Node.
     let ipc_slot = on_ipc.clone();
     let ipc_webview_slot = webview_slot.clone();
+    // Only read on Windows (see `show_native_context_menu`'s HWND lookup) —
+    // cloned unconditionally to keep this closure identical across
+    // platforms rather than duplicating `with_ipc_handler`.
+    let ipc_window_slot = window.clone();
     builder = builder.with_ipc_handler(move |request| {
       let body = request.body().clone();
 
@@ -142,7 +153,13 @@ impl Webview {
 
       if kind.as_deref() == Some("contextMenu") {
         if let Ok(payload) = serde_json::from_str::<ContextMenuPayload>(&body) {
-          show_native_context_menu(&ipc_webview_slot, &payload.items, payload.x, payload.y);
+          show_native_context_menu(
+            &ipc_window_slot,
+            &ipc_webview_slot,
+            &payload.items,
+            payload.x,
+            payload.y,
+          );
         }
         return;
       }
@@ -250,23 +267,13 @@ impl Webview {
   /// directly from the IPC handler — see the module doc comment.
   #[napi(js_name = "showContextMenu")]
   pub fn show_context_menu(&self, menu: MenuOptions, position: Option<Position>) -> Result<()> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
       let (x, y) = match position {
         Some(p) => (Some(p.x), Some(p.y)),
         None => (None, None),
       };
-      show_native_context_menu(&self.webview, &menu.items, x, y);
-    }
-    #[cfg(target_os = "windows")]
-    {
-      // Windows path — needs the parent window's HWND, not the webview's.
-      // Deferred to a follow-up; the JS API shape is stable.
-      let _ = (menu, position);
-      return Err(Error::new(
-        Status::GenericFailure,
-        "showContextMenu on Windows is wired up but not yet implemented",
-      ));
+      show_native_context_menu(&self._window, &self.webview, &menu.items, x, y);
     }
     #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android"), not(target_os = "freebsd")))]
     {
@@ -292,15 +299,24 @@ impl Webview {
 /// `murasaki:menuclick` `CustomEvent`. Called both from the IPC handler
 /// (`{ kind: "contextMenu" }`) and from the public `showContextMenu` method.
 ///
-/// `x`/`y` are accepted but currently unused — position is always `None`
-/// (cursor position). See the two open questions in the doc comment below.
+/// `window_slot` is unused here (macOS reaches through `webview_slot` for the
+/// NSView instead) — it exists only so the three platform variants of this
+/// function share one signature/call site. `x`/`y` are accepted but
+/// currently unused — position is always `None` (cursor position). See the
+/// two open questions in the doc comment below. (The Windows variant below
+/// *does* honor `x`/`y` — muda's Windows backend makes the screen-coordinate
+/// conversion straightforward via `ClientToScreen`, whereas the equivalent
+/// for `show_context_menu_for_nsview` was left as an open question here.)
 #[cfg(target_os = "macos")]
 fn show_native_context_menu(
+  window_slot: &SharedWindow,
   webview_slot: &Rc<RefCell<Option<WebView>>>,
   items: &[MenuItemOptions],
   _x: Option<f64>,
   _y: Option<f64>,
 ) {
+  let _ = window_slot;
+
   use muda::ContextMenu;
   use wry::WebViewExtMacOS;
 
@@ -346,10 +362,96 @@ fn show_native_context_menu(
   }
 }
 
-/// Windows/Linux: not wired through the Rust IPC handler yet — mirrors the
-/// (also unimplemented) direct-call path in `Webview::show_context_menu`.
-#[cfg(not(target_os = "macos"))]
+/// Windows: same shape as the macOS version above — build the muda menu, pop
+/// it up synchronously, then report the clicked item back into page JS.
+///
+/// Two differences from macOS, both because muda's Windows backend makes them
+/// straightforward where the NSView-based macOS one didn't (see that
+/// function's doc comment):
+///  - Anchored to the top-level window's **HWND** (`window_slot`, not
+///    `webview_slot` — the webview has no separate HWND of its own here) via
+///    `tao::platform::windows::WindowExtWindows::hwnd`.
+///  - Honors the caller's `x`/`y` instead of always falling back to the
+///    cursor position. `x`/`y` are the IPC payload's `clientX`/`clientY`
+///    (see `packages/murasaki/src/react/rpc.ts` and `context-menu.tsx`) —
+///    logical pixels relative to the webview's client area. Passed through
+///    as `Position::Logical` and converted to a screen point internally via
+///    `ClientToScreen`, which is exact *as long as the webview fills the
+///    window's entire client area with no offset* (true today — see
+///    `Webview::new`, which never sub-positions the webview within the
+///    window). If murasaki ever adds custom window chrome that insets the
+///    webview, this mapping would need to add that offset.
+#[cfg(target_os = "windows")]
 fn show_native_context_menu(
+  window_slot: &SharedWindow,
+  webview_slot: &Rc<RefCell<Option<WebView>>>,
+  items: &[MenuItemOptions],
+  x: Option<f64>,
+  y: Option<f64>,
+) {
+  use muda::{
+    dpi::{LogicalPosition, Position},
+    ContextMenu,
+  };
+  use tao::platform::windows::WindowExtWindows;
+
+  let menu = match build_menu(items) {
+    Ok(m) => m,
+    Err(_) => return,
+  };
+
+  // Grab the HWND and drop the RefCell borrow *before* calling
+  // `show_context_menu_for_hwnd` below — like the macOS call above, it's
+  // modal (internally it's a `TrackPopupMenu` call, which pumps its own
+  // nested message loop until the user dismisses the menu or picks an item),
+  // and re-entrant access to `window_slot` while our borrow was still live
+  // would panic with `BorrowError` if a window event fires during that
+  // nested loop.
+  let hwnd: isize = {
+    let guard = window_slot.borrow();
+    match guard.as_ref() {
+      Some(w) => w.hwnd(),
+      None => return,
+    }
+  };
+
+  let position = match (x, y) {
+    (Some(x), Some(y)) => Some(Position::Logical(LogicalPosition::new(x, y))),
+    _ => None,
+  };
+
+  // SAFETY: `hwnd` was read from a live tao `Window` just above (the borrow
+  // guard is dropped before this call, per the comment above).
+  //
+  // `MenuEvent::receiver().try_recv()` below is guaranteed to already have
+  // the click queued by the time `show_context_menu_for_hwnd` returns: muda's
+  // Windows backend calls `MenuEvent::send` (the same global channel
+  // `MenuEvent::receiver()` reads on every platform) from inside the
+  // `TrackPopupMenu`-driven nested loop, before that call unwinds — unlike
+  // the macOS path above, this isn't an assumption, it's how
+  // `show_context_menu_for_hwnd` is implemented (see
+  // `muda::platform_impl::windows::MenuChild::show_context_menu_for_hwnd`).
+  unsafe {
+    menu.show_context_menu_for_hwnd(hwnd, position);
+  }
+
+  if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    let id = event.id().as_ref();
+    let js = format!(
+      "window.dispatchEvent(new CustomEvent('murasaki:menuclick',{{detail:{}}}))",
+      serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
+    );
+    if let Some(wv) = webview_slot.borrow().as_ref() {
+      let _ = wv.evaluate_script(&js);
+    }
+  }
+}
+
+/// Linux: not wired through the Rust IPC handler yet — mirrors the (also
+/// unimplemented) direct-call path in `Webview::show_context_menu`.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn show_native_context_menu(
+  _window_slot: &SharedWindow,
   _webview_slot: &Rc<RefCell<Option<WebView>>>,
   _items: &[MenuItemOptions],
   _x: Option<f64>,
