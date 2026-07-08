@@ -45,14 +45,16 @@ jobs:
         # that don't exist here. Standard install is enough for CI.
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build murasaki
-        run: pnpm --filter murasaki build
-
       # @murasakijs/ui ships its own compiled dist (plus styles.css /
       # tailwind-preset.cjs at the package root). It versions independently of
-      # the framework, so it is NOT part of the tag-match check below.
+      # the framework, so it is NOT part of the tag-match check below. It must
+      # build BEFORE murasaki, which now imports its TitleBar/Menubar (for the
+      # built-in custom title bar) and resolves it via dist/index.d.ts.
       - name: Build @murasakijs/ui
         run: pnpm --filter @murasakijs/ui build
+
+      - name: Build murasaki
+        run: pnpm --filter murasaki build
 
       # npm always ships README.md from the package dir (regardless of `files`),
       # so copy the root README into each package before publishing — otherwise

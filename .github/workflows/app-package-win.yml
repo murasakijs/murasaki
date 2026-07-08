@@ -100,11 +100,15 @@ jobs:
       - name: pnpm install
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build murasaki
-        run: pnpm --filter murasaki build
-
+      # @murasakijs/ui must build first: murasaki now imports its TitleBar/
+      # Menubar (for the built-in custom title bar), and murasaki's tsc build
+      # resolves @murasakijs/ui via its dist/index.d.ts — which won't exist on
+      # a fresh CI checkout until this step runs.
       - name: Build @murasakijs/ui
         run: pnpm --filter @murasakijs/ui build
+
+      - name: Build murasaki
+        run: pnpm --filter murasaki build
 
       # Rebuild the native addon (.node) for this branch — see this
       # workflow's top comment on why the published one can't be used.
