@@ -57,6 +57,16 @@ export type {
   ActionRunProps,
 } from './react/context-menu.js'
 
+export { useAppMenu } from './react/app-menu.js'
+export type {
+  AppMenu,
+  AppMenuRole,
+  AppMenuItemSpec,
+  AppMenuEntry,
+  AppMenuItemRole,
+  AppMenuAction,
+} from './react/app-menu.js'
+
 export {
   UpdateButton,
   useUpdate,

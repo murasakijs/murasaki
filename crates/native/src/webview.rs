@@ -1,16 +1,26 @@
-//! Webview — wry WebView + IPC channel + **native context menu popup**.
+//! Webview — wry WebView + IPC channel + **native context menu popup** +
+//! **native app-menu bar** (`useAppMenu`).
 //!
-//! Context menus are handled entirely on the Rust side (see
-//! `show_native_context_menu` below, one variant per platform):
+//! Both are handled entirely on the Rust side (see `show_native_context_menu`
+//! and `handle_app_menu_message` below, one variant per platform each):
 //! `Application::run()` blocks Node's libuv loop for as long as the app is
 //! open, so a round-trip through `onIpcMessage` back into JS never fires.
-//! Instead the IPC handler below intercepts `{ kind: "contextMenu" }`
-//! messages itself, pops the muda menu synchronously — via a modal call that
+//! Instead the IPC handler below intercepts `{ kind: "contextMenu" }` and
+//! `{ kind: "appMenu" }` messages itself.
+//!
+//! Context menus pop the muda menu synchronously — via a modal call that
 //! pumps its own nested run/message loop (`show_context_menu_for_nsview` on
-//! macOS, `show_context_menu_for_hwnd` on Windows) — and reports the clicked
+//! macOS, `show_context_menu_for_hwnd` on Windows) — and report the clicked
 //! item back to the page via `evaluate_script` (which runs inside the
 //! platform webview — WebKit on macOS, WebView2 on Windows — and isn't
 //! affected by the blocked Node loop).
+//!
+//! The app menu (`useAppMenu`) instead **replaces** the standing menu
+//! bar/NSMenu — see `AppMenuContext` and `handle_app_menu_message` — and its
+//! clicks arrive asynchronously (whenever the user picks an item, not
+//! synchronously like a popup), picked up by `poll_app_menu_events` (macOS)
+//! / `poll_menu_bar_events` (Windows), polled once per tao event-loop tick
+//! from `Application::run` and `launcher.rs`'s per-platform launchers.
 
 use napi::{
   bindgen_prelude::{Error, Result, Status},
@@ -25,7 +35,7 @@ use wry::{
 };
 
 use crate::{
-  menu::build_menu,
+  menu::{build_menu, AppMenuSpec, SharedMenu},
   types::{MenuItemOptions, MenuOptions, Position, WebviewOptions},
   window::SharedWindow,
 };
@@ -48,14 +58,50 @@ struct ContextMenuPayload {
   y: Option<f64>,
 }
 
-/// Windows only: a clone-able handle to the internal wry `WebView`, so
-/// `Application` can reach into it from the tao event loop to dispatch native
-/// menu-bar clicks (see `poll_menu_bar_events` below). Named/typed like
-/// `window::SharedWindow` for the same reason: the menu bar is persistent, so
-/// unlike the context-menu popup below, nothing can grab this synchronously
-/// off a single call's `self`.
-#[cfg(target_os = "windows")]
+/// Payload for `{ kind: "appMenu", menus }` messages posted by `useAppMenu`
+/// (see `packages/murasaki/src/react/app-menu.tsx`).
+#[derive(serde::Deserialize)]
+struct AppMenuPayload {
+  menus: Vec<AppMenuSpec>,
+}
+
+/// A clone-able handle to the internal wry `WebView`, so `Application`/the
+/// prod launchers can reach into it from the tao event loop to dispatch
+/// native menu clicks (see `poll_menu_bar_events` / `poll_app_menu_events`
+/// below). Named/typed like `window::SharedWindow` for the same reason: the
+/// menu bar/app menu is persistent, so unlike the context-menu popup below,
+/// nothing can grab this synchronously off a single call's `self`.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) type SharedWebview = Rc<RefCell<Option<WebView>>>;
+
+/// Extra context `Webview::new` needs to install/replace the application
+/// menu on demand — see `{ kind: "appMenu" }` in `with_ipc_handler` below and
+/// `handle_app_menu_message`. Bundled into one struct (rather than loose
+/// `Webview::new` parameters) so `about_info` (macOS-only) can be
+/// `#[cfg]`-gated per-field instead of needing a different `Webview::new`
+/// signature per platform.
+#[derive(Clone)]
+pub(crate) struct AppMenuContext {
+  /// The currently-installed application menu. The caller (`Application` /
+  /// `launcher.rs`'s per-platform launcher) has already built and installed
+  /// the startup default menu into this exact slot before constructing the
+  /// `Webview` — a `{ kind: "appMenu" }` IPC message replaces its contents
+  /// (old dropped, new installed) with an app-declared one instead. Shared
+  /// (not owned) so `Application`'s/the launcher's own bookkeeping and this
+  /// replacement logic always agree on what's currently installed.
+  pub menu_slot: SharedMenu,
+  /// Resolved once at startup (see `Application::create_window` /
+  /// `launcher.rs`'s locale resolvers) — reused so `useAppMenu`'s
+  /// `'editMenu'`/`'windowMenu'`/item-role labels are localized exactly like
+  /// the startup default menu, without a second (webview-side) locale
+  /// lookup.
+  pub menu_labels: Option<crate::types::MenuLabels>,
+  /// macOS only — needed to prepend the standard app-name (About/Services/
+  /// Hide/Quit) submenu ahead of whatever `useAppMenu` declares. See
+  /// `handle_app_menu_message`'s doc comment for why v1 always prepends it.
+  #[cfg(target_os = "macos")]
+  pub about_info: crate::menu::AboutInfoOwned,
+}
 
 #[napi]
 pub struct Webview {
@@ -122,7 +168,7 @@ fn is_external_url(target: &str) -> bool {
 }
 
 impl Webview {
-  pub(crate) fn new(window: SharedWindow, opts: WebviewOptions) -> Result<Self> {
+  pub(crate) fn new(window: SharedWindow, opts: WebviewOptions, app_menu: AppMenuContext) -> Result<Self> {
     let on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>> =
       Rc::new(RefCell::new(None));
     // Created empty and filled in *after* `builder.build()` below, but a
@@ -144,15 +190,19 @@ impl Webview {
       .with_devtools(opts.devtools.unwrap_or(cfg!(debug_assertions)))
       .with_transparent(opts.transparent.unwrap_or(false));
 
-    // IPC: JS calls window.ipc.postMessage(str). Context menus are handled
-    // synchronously right here (Node's loop is blocked by `Application::run`
-    // and can't round-trip); everything else still forwards to Node.
+    // IPC: JS calls window.ipc.postMessage(str). Context menus and app-menu
+    // (re)installs are handled synchronously right here (Node's loop is
+    // blocked by `Application::run` and can't round-trip); everything else
+    // still forwards to Node.
     let ipc_slot = on_ipc.clone();
     let ipc_webview_slot = webview_slot.clone();
     // Only read on Windows (see `show_native_context_menu`'s HWND lookup) —
     // cloned unconditionally to keep this closure identical across
     // platforms rather than duplicating `with_ipc_handler`.
     let ipc_window_slot = window.clone();
+    // Moved in (not cloned): nothing else in `Webview::new` needs `app_menu`
+    // after this point.
+    let ipc_app_menu = app_menu;
     builder = builder.with_ipc_handler(move |request| {
       let body = request.body().clone();
 
@@ -169,6 +219,13 @@ impl Webview {
             payload.x,
             payload.y,
           );
+        }
+        return;
+      }
+
+      if kind.as_deref() == Some("appMenu") {
+        if let Ok(payload) = serde_json::from_str::<AppMenuPayload>(&body) {
+          handle_app_menu_message(&ipc_window_slot, &ipc_app_menu, &payload.menus);
         }
         return;
       }
@@ -226,8 +283,8 @@ impl Webview {
     })
   }
 
-  /// Windows only: see `SharedWebview`'s doc comment.
-  #[cfg(target_os = "windows")]
+  /// See `SharedWebview`'s doc comment.
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
   pub(crate) fn handle(&self) -> SharedWebview {
     self.webview.clone()
   }
@@ -366,14 +423,7 @@ fn show_native_context_menu(
   }
 
   if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
-    let id = event.id().as_ref();
-    let js = format!(
-      "window.dispatchEvent(new CustomEvent('murasaki:menuclick',{{detail:{}}}))",
-      serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
-    );
-    if let Some(wv) = webview_slot.borrow().as_ref() {
-      let _ = wv.evaluate_script(&js);
-    }
+    dispatch_menu_click(webview_slot, event.id().as_ref());
   }
 }
 
@@ -451,14 +501,21 @@ fn show_native_context_menu(
   }
 
   if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
-    let id = event.id().as_ref();
-    let js = format!(
-      "window.dispatchEvent(new CustomEvent('murasaki:menuclick',{{detail:{}}}))",
-      serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
-    );
-    if let Some(wv) = webview_slot.borrow().as_ref() {
-      let _ = wv.evaluate_script(&js);
-    }
+    dispatch_menu_click(webview_slot, event.id().as_ref());
+  }
+}
+
+/// Dispatches `id` into the webview as a `murasaki:menuclick` `CustomEvent`
+/// — the click-reporting half of every native-menu code path in this file:
+/// context-menu popups on both platforms above, the Windows menu bar's
+/// unrecognized-id fallback, and macOS's app-menu poll below.
+fn dispatch_menu_click(webview_slot: &Rc<RefCell<Option<WebView>>>, id: &str) {
+  let js = format!(
+    "window.dispatchEvent(new CustomEvent('murasaki:menuclick',{{detail:{}}}))",
+    serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
+  );
+  if let Some(wv) = webview_slot.borrow().as_ref() {
+    let _ = wv.evaluate_script(&js);
   }
 }
 
@@ -474,18 +531,20 @@ fn show_native_context_menu(
 ///
 /// Drains every pending event (`while let`, not just the first) in case more
 /// than one queued up between two ticks. Ids outside `windows_menu_bar_ids`
-/// (e.g. an app's own `useContextMenu` popup, which posts to this same global
-/// channel) are ignored here rather than acted on — in practice they're never
-/// seen here anyway, since the popup's own `try_recv()` above runs
-/// synchronously in the same call stack as its click, before this function's
-/// caller gets a turn.
+/// are treated as a `useAppMenu` custom-item click (see
+/// `menu::build_windows_app_menu_from_spec`) and dispatched via
+/// `dispatch_menu_click` — in principle an app's own `useContextMenu` popup
+/// also posts to this same global channel, but never actually reaches here:
+/// its own `try_recv()` above runs synchronously in the same call stack as
+/// its click, before this function's caller gets a turn.
 ///
-/// Returns whether the Exit item was clicked — Minimize and the Edit items
-/// are fully handled inside this function (native window call / webview
-/// dispatch respectively), but Exit needs process-shutdown semantics that
-/// differ between callers (kill the spawned `node` child in the prod
-/// launcher vs. run the registered `onQuit` JS callback in the dev path via
-/// `Application`), so it's left for the caller to act on.
+/// Returns whether the Exit item was clicked — Minimize/Zoom, the Edit
+/// items, and unrecognized (custom) ids are fully handled inside this
+/// function (native window call / webview dispatch respectively), but Exit
+/// needs process-shutdown semantics that differ between callers (kill the
+/// spawned `node` child in the prod launcher vs. run the registered
+/// `onQuit` JS callback in the dev path via `Application`), so it's left for
+/// the caller to act on.
 #[cfg(target_os = "windows")]
 pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &SharedWebview) -> bool {
   use crate::menu::windows_menu_bar_ids as ids;
@@ -500,6 +559,10 @@ pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &Sh
       if let Some(w) = window_slot.borrow().as_ref() {
         w.set_minimized(true);
       }
+    } else if id == ids::ZOOM {
+      if let Some(w) = window_slot.borrow().as_ref() {
+        w.set_maximized(!w.is_maximized());
+      }
     } else if id == ids::UNDO {
       run_menu_bar_edit_command(webview_slot, "undo", ids::UNDO);
     } else if id == ids::REDO {
@@ -512,11 +575,95 @@ pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &Sh
       run_menu_bar_edit_command(webview_slot, "paste", ids::PASTE);
     } else if id == ids::SELECT_ALL {
       run_menu_bar_edit_command(webview_slot, "selectAll", ids::SELECT_ALL);
+    } else {
+      dispatch_menu_click(webview_slot, id);
     }
   }
 
   exit_requested
 }
+
+/// macOS only: polls muda's global menu-event channel for clicks on CUSTOM
+/// (non-role) application-menu items declared via `useAppMenu` — see
+/// `menu::build_macos_app_menu_from_spec`. macOS's role items (Undo/Redo/
+/// Cut/Copy/Paste/Select All/Minimize/Zoom/Close/Quit) are real muda
+/// `PredefinedMenuItem`s riding Cocoa's responder chain straight into the
+/// focused `WKWebView` or the window manager — those never reach this
+/// channel, so every event seen here is, by construction, a custom
+/// `useAppMenu` item click that needs dispatching into the webview. Called
+/// once per tao event-loop tick from `Application::run` and `launcher.rs`'s
+/// `imp_macos`, mirroring `poll_menu_bar_events`'s role on Windows in the
+/// same two call sites. (Before `useAppMenu`, macOS never needed this: the
+/// startup default menu was 100% predefined items, so nothing was ever
+/// pushed to this channel — that's why this function is new while
+/// `poll_menu_bar_events` already existed.)
+#[cfg(target_os = "macos")]
+pub(crate) fn poll_app_menu_events(webview_slot: &SharedWebview) {
+  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    dispatch_menu_click(webview_slot, event.id().as_ref());
+  }
+}
+
+/// Replaces the currently-installed application menu — the "REPLACE the
+/// retained menu" half of the `{ kind: "appMenu" }` IPC branch (see
+/// `Webview::new`'s `with_ipc_handler`).
+///
+/// **Ordering matters on Windows**: muda's `Menu::Drop` impl calls
+/// `SetMenu(hwnd, null)` for every hwnd it's still attached to. If the OLD
+/// menu were dropped *after* the new one's `init_for_hwnd`, that drop would
+/// immediately blank out the just-installed bar — so the old menu is taken
+/// out of `ctx.menu_slot` (dropping it) *before* building/attaching the new
+/// one. (macOS's `Menu::init_for_nsapp` just overwrites `NSApp.mainMenu`'s
+/// pointer — Cocoa's own retain keeps the old `NSMenu`'s Objective-C side
+/// alive independent of muda's Rust wrapper, so this ordering isn't strictly
+/// required there, but the same take-first pattern is applied uniformly
+/// since it's harmless and keeps the two platform variants symmetric.)
+#[cfg(target_os = "macos")]
+fn handle_app_menu_message(_window_slot: &SharedWindow, ctx: &AppMenuContext, menus: &[AppMenuSpec]) {
+  let about = ctx.about_info.as_ref();
+  let menu = match crate::menu::build_macos_app_menu_from_spec(menus, &about, ctx.menu_labels.as_ref()) {
+    Ok(m) => m,
+    Err(_) => return,
+  };
+
+  ctx.menu_slot.borrow_mut().take();
+  menu.init_for_nsapp();
+  *ctx.menu_slot.borrow_mut() = Some(menu);
+}
+
+/// Windows counterpart of the macOS `handle_app_menu_message` above — see
+/// that function's doc comment for the drop-before-install ordering
+/// requirement, which is load-bearing here (unlike on macOS).
+#[cfg(target_os = "windows")]
+fn handle_app_menu_message(window_slot: &SharedWindow, ctx: &AppMenuContext, menus: &[AppMenuSpec]) {
+  use tao::platform::windows::WindowExtWindows;
+
+  let hwnd: isize = {
+    let guard = window_slot.borrow();
+    match guard.as_ref() {
+      Some(w) => w.hwnd(),
+      None => return,
+    }
+  };
+
+  let menu = match crate::menu::build_windows_app_menu_from_spec(menus, ctx.menu_labels.as_ref()) {
+    Ok(m) => m,
+    Err(_) => return,
+  };
+
+  // Drop the OLD menu first — see this function's doc comment.
+  ctx.menu_slot.borrow_mut().take();
+  // SAFETY: `hwnd` was read from a live tao `Window` just above.
+  if let Err(e) = unsafe { menu.init_for_hwnd(hwnd) } {
+    eprintln!("murasaki: failed to attach app menu: {e}");
+  }
+  *ctx.menu_slot.borrow_mut() = Some(menu);
+}
+
+/// Linux: not implemented yet — mirrors the (also unimplemented) direct-call
+/// path in `Webview::show_context_menu`.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn handle_app_menu_message(_window_slot: &SharedWindow, _ctx: &AppMenuContext, _menus: &[AppMenuSpec]) {}
 
 /// Runs `document.execCommand(command)` in the webview for a native menu-bar
 /// Edit item — see `menu::build_windows_menu_bar`'s doc comment for why these

@@ -334,9 +334,9 @@ mod imp_macos {
   };
 
   use crate::{
-    menu::{build_default_app_menu, AboutInfo},
+    menu::{build_default_app_menu, AboutInfo, AboutInfoOwned, SharedMenu},
     types::WebviewOptions,
-    webview::Webview,
+    webview::{AppMenuContext, Webview},
     window::{center_on_primary_monitor, SharedWindow},
   };
 
@@ -417,13 +417,31 @@ mod imp_macos {
     let menu = build_default_app_menu(&about, Some(&menu_labels))
       .map_err(|e| format!("build menu: {e}"))?;
     menu.init_for_nsapp();
+    // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
+    // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
+    let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu)));
+
+    let about_owned = AboutInfoOwned {
+      name: meta.product_name.clone(),
+      icon_path: icon_path.as_ref().and_then(|p| p.to_str()).map(String::from),
+      version: meta.version.clone(),
+      description: meta.description.clone(),
+      copyright: meta.copyright.clone(),
+      homepage: meta.homepage.clone(),
+      authors: meta.authors.clone(),
+    };
+    let app_menu_context = AppMenuContext {
+      menu_slot: app_menu_slot.clone(),
+      menu_labels: Some(menu_labels.clone()),
+      about_info: about_owned,
+    };
 
     let url = format!("http://127.0.0.1:{port}/");
     // `Webview::new` gives us the external-link navigation handler for free
     // (see webview.rs) — kept alive for the app's lifetime, see the comment
     // on `event_loop.run` below for why it's fine that it's never touched
     // again after this.
-    let _webview = Webview::new(
+    let webview = Webview::new(
       shared_window.clone(),
       WebviewOptions {
         url: Some(url),
@@ -432,8 +450,12 @@ mod imp_macos {
         transparent: None,
         serve_dir: None,
       },
+      app_menu_context,
     )
     .map_err(|e| format!("build webview: {e}"))?;
+    // Handle the app-menu poll below dispatches clicks into — see
+    // `poll_app_menu_events`'s doc comment in webview.rs.
+    let webview_handle = webview.handle();
 
     // Dock/About-panel icon — mirrors Application::set_icon_path. As the real
     // CFBundleExecutable, CFBundleIconFile (see cli/bundle.ts's Info.plist)
@@ -445,12 +467,18 @@ mod imp_macos {
 
     // tao's `EventLoop::run` never returns (`-> !`) and explicitly documents
     // that "values not passed to this function will *not* be dropped" — so
-    // `menu`/`_webview`/`shared_window`, though never referenced again after
-    // this point, simply stay alive on this stack frame for as long as the
-    // app runs. Only `child` needs to move into the closure, to be killed on
-    // window close.
+    // `webview`/`app_menu_slot`/`shared_window`, though never referenced
+    // again after this point, simply stay alive on this stack frame for as
+    // long as the app runs. `webview_handle` and `child` move into the
+    // closure below — the former so the app-menu poll can reach the webview
+    // every tick, the latter to be killed on window close.
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
+
+      // Drain clicks on `useAppMenu`'s custom (non-role) items every tick —
+      // see `poll_app_menu_events`'s doc comment in webview.rs.
+      crate::webview::poll_app_menu_events(&webview_handle);
+
       if let Event::WindowEvent {
         event: WindowEvent::CloseRequested,
         ..
@@ -670,9 +698,9 @@ mod imp_win {
   };
 
   use crate::{
-    menu::build_windows_menu_bar,
+    menu::{build_windows_menu_bar, SharedMenu},
     types::WebviewOptions,
-    webview::{poll_menu_bar_events, Webview},
+    webview::{poll_menu_bar_events, AppMenuContext, Webview},
     window::{center_on_primary_monitor, SharedWindow},
   };
 
@@ -785,6 +813,13 @@ mod imp_win {
     if let Err(e) = unsafe { menu_bar.init_for_hwnd(hwnd) } {
       let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to attach the menu bar: {e}");
     }
+    // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
+    // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
+    let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu_bar)));
+    let app_menu_context = AppMenuContext {
+      menu_slot: app_menu_slot.clone(),
+      menu_labels: Some(menu_labels.clone()),
+    };
 
     let url = format!("http://127.0.0.1:{port}/");
     // `Webview::new` pins the WebView2 user-data directory under
@@ -800,6 +835,7 @@ mod imp_win {
         transparent: None,
         serve_dir: None,
       },
+      app_menu_context,
     )
     .map_err(|e| format!("build webview: {e}"))?;
     // Handle the menu bar's event loop poll dispatches into — see
@@ -809,9 +845,9 @@ mod imp_win {
     // Same shutdown story as the macOS launcher (see that module's
     // `event_loop.run` comment): tao's `EventLoop::run` never returns and
     // explicitly documents that values not passed into it aren't dropped, so
-    // `webview`/`menu_bar`/`job` simply stay alive on this stack frame for the
-    // app's lifetime (`shared_window` and `webview_handle` move into the
-    // closure below, since the menu-bar poll needs them every tick). Only
+    // `webview`/`app_menu_slot`/`job` simply stay alive on this stack frame
+    // for the app's lifetime (`shared_window` and `webview_handle` move into
+    // the closure below, since the menu-bar poll needs them every tick). Only
     // `child` needs to move into the closure too, to be killed on window
     // close/Exit.
     event_loop.run(move |event, _target, control_flow| {
