@@ -290,6 +290,11 @@ fn predefined_localized(role: &str, labels: Option<&crate::types::MenuLabels>) -
     "copy" => Some(PredefinedMenuItem::copy(labels.and_then(|l| l.copy.as_deref()))),
     "paste" => Some(PredefinedMenuItem::paste(labels.and_then(|l| l.paste.as_deref()))),
     "selectAll" => Some(PredefinedMenuItem::select_all(labels.and_then(|l| l.select_all.as_deref()))),
+    // A `{ separator: true }` spec is serialized to the wire as `role:
+    // "separator"` (see app-menu.tsx / context-menu.tsx), so it arrives here,
+    // not through `item.separator` — mirror the context-menu path's
+    // `predefined()`, which handles it the same way.
+    "separator" => Some(PredefinedMenuItem::separator()),
     _ => None,
   }
 }
@@ -623,6 +628,15 @@ fn append_app_menu_item_windows(
   }
 
   if let Some(role) = item.role.as_deref() {
+    // A `{ separator: true }` spec reaches the wire as `role: "separator"`
+    // (see app-menu.tsx), not `item.separator` — and `windows_role_item`
+    // returns `MenuItem`, which can't be a separator, so handle it here.
+    if role == "separator" {
+      sub
+        .append(&PredefinedMenuItem::separator())
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+      return Ok(());
+    }
     if let Some(mi) = windows_role_item(role, labels) {
       sub
         .append(&mi)
