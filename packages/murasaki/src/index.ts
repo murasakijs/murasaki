@@ -41,8 +41,6 @@ export {
 export { App } from './react/app.js'
 export type { AppProps } from './react/app.js'
 
-export { WindowChrome } from './react/window-chrome.js'
-
 export {
   useContextMenu,
   ContextMenuTrigger,

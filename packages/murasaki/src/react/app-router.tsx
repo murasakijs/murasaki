@@ -5,6 +5,7 @@ import { applyMetadata } from './metadata.js'
 import type { GenerateMetadata, Metadata } from './metadata.js'
 import type { Middleware } from './middleware.js'
 import { DevErrorOverlay, reportDevError } from './error-overlay.js'
+import { WindowFrame } from './window-chrome.js'
 
 /**
  * Shape of a namespace import (`import * as mod from '...'`) for a page,
@@ -359,7 +360,15 @@ export function AppRouter({
   return (
     <>
       <RouterContext.Provider value={routerValue}>
-        <ParamsContext.Provider value={params}>{element}</ParamsContext.Provider>
+        <ParamsContext.Provider value={params}>
+          {/*
+           * The custom title bar + its reserved space wrap the whole app HERE,
+           * above the user's layout.tsx — so editing app code can't remove or
+           * break the window chrome. WindowFrame self-hides the bar where it
+           * doesn't apply (macOS / native / no host).
+           */}
+          <WindowFrame>{element}</WindowFrame>
+        </ParamsContext.Provider>
       </RouterContext.Provider>
       {process.env.NODE_ENV !== 'production' && <DevErrorOverlay />}
     </>

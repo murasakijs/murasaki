@@ -14,7 +14,7 @@
  * it through the existing `menu-locales.json` / `menu-i18n.ts` machinery is a
  * deliberate fast-follow, not done here.
  */
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import {
   Menubar,
   MenubarContent,
@@ -133,5 +133,29 @@ export function WindowChrome() {
       </TitleBar>
       <ResizeEdges />
     </>
+  )
+}
+
+/**
+ * The window frame murasaki wraps around EVERY app — rendered by the router
+ * (see app-router.tsx), ABOVE the user's own layout.tsx, so the custom title
+ * bar and the space it reserves can't be removed or broken by editing app
+ * code. `<WindowChrome>` sits on top (self-hiding when it doesn't apply) and
+ * the scrollable content region fills the rest.
+ *
+ * `contain: layout` makes that content region the containing block for the
+ * app's `position: fixed` descendants, so an app's `fixed top-0` header
+ * anchors to the top of the CONTENT area — just below the title bar — instead
+ * of escaping to the window's very top and overlapping it. When the title bar
+ * is hidden the region fills the whole window, so `fixed` resolves to the
+ * window top exactly as before. (Radix popovers/menus portal to <body>,
+ * outside this region, so their viewport-relative positioning is unaffected.)
+ */
+export function WindowFrame({ children }: { children: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100%' }}>
+      <WindowChrome />
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', contain: 'layout' }}>{children}</div>
+    </div>
   )
 }
