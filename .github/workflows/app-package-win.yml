@@ -125,6 +125,13 @@ jobs:
         shell: pwsh
         run: .github/scripts/win-smoke-test.ps1 -ExePath "${{ steps.locate.outputs.exePath }}" -TimeoutSeconds 60
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-bundle
+          path: examples/win-smoke-app/dist/bundle/**
+          if-no-files-found: warn
+
       # ── Phase 2: installer toolchains + build/verify ───────────────────
 
       - name: Install NSIS
@@ -237,10 +244,23 @@ jobs:
             Write-Host 'Silent-install smoke test passed.'
           }
 
+      # Full set: both installers + the portable zip.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: win32-installers
+          path: |
+            examples/win-smoke-app/dist/*-setup.exe
+            examples/win-smoke-app/dist/*.msi
+            examples/win-smoke-app/dist/bundle/*.zip
+          if-no-files-found: warn
+
+      # Lean artifact: just the two installers, for a quick download while
+      # iterating on Windows behavior (skips the ~200MB raw bundle + portable zip).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win32-setup-msi
           path: |
             examples/win-smoke-app/dist/*-setup.exe
             examples/win-smoke-app/dist/*.msi
