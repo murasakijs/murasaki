@@ -138,7 +138,10 @@ jobs:
       - name: Install WiX v4
         shell: pwsh
         run: |
-          dotnet tool install --global wix
+          # Pin to v4 (not the latest v7) — WiX v6+ gates `wix build` behind the
+          # Open Source Maintenance Fee EULA (error WIX7015), and installer.ts's
+          # generated .wxs targets the v4 toolset. v4 is MIT with no fee.
+          dotnet tool install --global wix --version 4.0.6
           # `dotnet tool --global` drops wix.exe under %USERPROFILE%\.dotnet\tools,
           # which isn't on PATH by default — add it so `wix --version` resolves.
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
