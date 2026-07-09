@@ -10,20 +10,28 @@ prebuilt binaries for Linux (x64/arm64); Linux app packaging is on the roadmap.
 
 ## Cross-arch builds
 
-The `.app` bundles a portable, target-specific Node runtime (a checksum-verified
+The bundle carries a portable, target-specific Node runtime (a checksum-verified
 download from nodejs.org, cached under `~/.murasaki/node/`) plus the compiled
 native launcher binary — not whatever `node` happens to be running the CLI. That
 means an Apple Silicon dev machine can also produce an Intel build, and vice
 versa:
 
 ```bash
-murasaki bundle --arch x64     # build an x64 .app on an Apple Silicon Mac
-murasaki bundle --arch arm64   # build an arm64 .app on an Intel Mac
+murasaki bundle --arch x64             # x64 .app on an Apple Silicon Mac
+murasaki bundle --arch arm64           # arm64 .app on an Intel Mac
+murasaki bundle --target win32-arm64   # an arm64 Windows bundle
 ```
 
-`murasaki installer` forwards `--arch` to `bundle` the same way.
+`murasaki installer` forwards `--arch` / `--target` to `bundle` the same way.
+Windows targets are `win32-x64` / `win32-arm64`.
 
 ## Signing & notarization
+
+<Callout type="info">
+  This section is macOS-specific (Apple Developer ID + notarization). Windows
+  installers currently ship unsigned; Authenticode signing for the `.exe` /
+  `.msi` is a separate flow, tracked for a later release.
+</Callout>
 
 By default, `murasaki bundle` / `murasaki installer` produce an **unsigned**
 (ad-hoc) `.app` / `.dmg` — recipients open it the first time with right-click →

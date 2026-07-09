@@ -11,20 +11,28 @@ description: 本物のネイティブインストーラを出荷する — ク�
 
 ## クロスアーキテクチャビルド
 
-`.app` には、ポータブルでターゲット固有の Node ランタイム(nodejs.org からのチェック
+バンドルには、ポータブルでターゲット固有の Node ランタイム(nodejs.org からのチェック
 サム検証済みダウンロードで、`~/.murasaki/node/` にキャッシュされます)と、コンパイル
 済みのネイティブランチャーバイナリが同梱されます — CLI をたまたま実行している
 `node` ではありません。つまり、Apple Silicon の開発マシンから Intel 向けビルドを生成
 することも、その逆もできます:
 
 ```bash
-murasaki bundle --arch x64     # Apple Silicon Mac 上で x64 の .app をビルド
-murasaki bundle --arch arm64   # Intel Mac 上で arm64 の .app をビルド
+murasaki bundle --arch x64             # Apple Silicon Mac 上で x64 の .app をビルド
+murasaki bundle --arch arm64           # Intel Mac 上で arm64 の .app をビルド
+murasaki bundle --target win32-arm64   # arm64 の Windows バンドル
 ```
 
-`murasaki installer` も、同じ方法で `--arch` を `bundle` に転送します。
+`murasaki installer` も、同じ方法で `--arch` / `--target` を `bundle` に転送します。
+Windows は `win32-x64` / `win32-arm64`。
 
 ## 署名と公証
+
+<Callout type="info">
+  このセクションは macOS 専用です(Apple Developer ID + 公証)。Windows のインストーラは
+  現状未署名で出荷されます。`.exe` / `.msi` の Authenticode 署名は別フローで、後日の
+  リリースで対応予定です。
+</Callout>
 
 デフォルトでは、`murasaki bundle` / `murasaki installer` は**未署名**(アドホック)
 の `.app` / `.dmg` を生成します — 受け取った側は、初回のみ右クリック →**開く**、また
