@@ -25,8 +25,11 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "Murasaki — Next.js DX for desktop apps",
-    template: "%s · Murasaki",
+    // Brand-first on the top page (the landing is Murasaki's own claim);
+    // child pages read naturally the other way ("Docs | Murasaki") via the
+    // template.
+    default: "Murasaki | Next.js DX for desktop apps",
+    template: "%s | Murasaki",
   },
   description: homeContent.en.subhead,
   applicationName: "Murasaki",

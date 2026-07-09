@@ -1,140 +1,129 @@
 import { codeToHtml } from "shiki";
-import { CodeShowcase } from "@/components/home/code-showcase";
-import { CtaBand } from "@/components/home/cta-band";
-import { Distribution } from "@/components/home/distribution";
-import { Hero } from "@/components/home/hero";
-import { NativeDeepDive } from "@/components/home/native-deepdive";
-import { NumberedFeatures } from "@/components/home/numbered-features";
-import { QuickStart } from "@/components/home/quick-start";
-import { ShipArtifacts } from "@/components/home/ship-artifacts";
+import { LpMotion } from "@/components/home/lp-motion";
+import { PxArtifacts } from "@/components/home/px-artifacts";
+import { PxConverge } from "@/components/home/px-converge";
+import { PxCta } from "@/components/home/px-cta";
+import { PxFeatures } from "@/components/home/px-features";
+import { PxHero } from "@/components/home/px-hero";
+import { PxManifesto } from "@/components/home/px-manifesto";
+import { PxMarquee } from "@/components/home/px-marquee";
+import { DitherDivider } from "@/components/home/px-pixel";
+import { PxScroll } from "@/components/home/px-scroll";
+import { PxShowcase } from "@/components/home/px-showcase";
+import { PxVersus } from "@/components/home/px-versus";
 import { SiteFooter } from "@/components/home/site-footer";
-import { WhyMurasaki } from "@/components/home/why-murasaki";
-import { Wordmark } from "@/components/home/wordmark";
-import { codeSamples, contextMenuSample } from "@/lib/code-samples";
-import { homeContent } from "@/lib/home-content";
+import { appMenuSample } from "@/lib/code-samples";
+import { homeContent, lpExtra } from "@/lib/home-content";
+import { lpFontVariables } from "@/lib/lp-fonts";
 
 const githubUrl = "https://github.com/murasakijs/murasaki";
 const installCommand = "pnpm create murasaki@latest my-app";
 
-// Matches CODE_CARD_BG in components/home/code-showcase.tsx — the code
-// panel is a deliberately fixed dark "device" card, independent of the
-// docs site's own light/dark theme.
+const PAPER = "#f4f2ed";
+const INKFIELD = "#0e0e10";
+const PURPLE = "#7c3aed";
+
+// The code panel is a deliberately fixed dark "device" card, independent of
+// the docs site's own light/dark theme.
 const CODE_THEME = "vesper";
 
+/**
+ * The landing page, v3 — the pixel edition. Design language: the
+ * pixel-butterfly logo's 16px cell is the atomic unit (graph-paper texture,
+ * checkerboard dither seams between color fields, Silkscreen micro-labels,
+ * a GSAP-assembled pixel butterfly, a Matter.js pixel rain finale), set in
+ * an editorial paper/ink system with purple as the single accent.
+ *
+ * Scroll stack: Lenis (inertia) + GSAP ScrollTrigger (choreography, incl.
+ * the pinned native-proof scene) + framer-motion (menu micro-interactions)
+ * + Matter.js (physics finale). Server component: content + Shiki happen at
+ * build time; animation lives in `"use client"` leaves. The `lp-*`/`px-*`
+ * styles and fonts are scoped to this subtree — docs stay untouched.
+ */
 export default async function HomePage(props: PageProps<"/[lang]">) {
   const { lang } = await props.params;
   const t = homeContent[lang] ?? homeContent.en;
+  const x = lpExtra[lang] ?? lpExtra.en;
 
-  const highlighted = await Promise.all(
-    codeSamples.map(
-      async (sample) =>
-        [
-          sample.id,
-          await codeToHtml(sample.code, {
-            lang: sample.lang,
-            theme: CODE_THEME,
-          }),
-        ] as const,
-    ),
-  );
-  const htmlById = new Map(highlighted);
-  const codeTabs = t.codeShowcase.tabs.map((tab, i) => ({
-    ...tab,
-    html: htmlById.get(codeSamples[i].id) ?? "",
-  }));
-
-  const contextMenuHtml = await codeToHtml(contextMenuSample.code, {
-    lang: contextMenuSample.lang,
+  const appMenuHtml = await codeToHtml(appMenuSample.code, {
+    lang: appMenuSample.lang,
     theme: CODE_THEME,
   });
 
+  const getStartedHref = `/${lang}/docs/getting-started/quick-start`;
+
   return (
-    <div className="flex flex-1 flex-col" lang={lang}>
-      <Hero
-        lang={lang}
-        eyebrow={t.eyebrow}
-        headline={t.headline}
-        subhead={t.subhead}
-        getStartedLabel={t.getStarted}
-        getStartedHref={`/${lang}/docs/getting-started/quick-start`}
-        githubLabel={t.github}
-        githubHref={githubUrl}
-        installCommand={installCommand}
-      />
+    <div
+      lang={lang}
+      className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#0e0e10]`}
+    >
+      <LpMotion>
+        <PxScroll />
 
-      {/* A full-bleed, solid-purple/white band — the site's boldest "color
-          field" moment, deliberately not theme-reactive. */}
-      <div className="bg-purple-600 py-3 text-white">
-        <p className="px-6 text-center font-mono text-xs tracking-wide uppercase sm:text-sm">
-          {t.bandLabel}
-        </p>
-      </div>
+        <PxHero
+          eyebrow={t.eyebrow}
+          headline={t.headline}
+          getStartedLabel={t.getStarted}
+          getStartedHref={getStartedHref}
+          githubLabel={t.github}
+          githubHref={githubUrl}
+          installCommand={installCommand}
+          tategaki={x.tategaki}
+          scrollCue={x.scrollCue}
+        />
 
-      <ShipArtifacts
-        heading={t.mockup.heading}
-        caption={t.mockup.caption}
-        availableLabel={t.mockup.availableLabel}
-        soonLabel={t.mockup.soonLabel}
-      />
+        <DitherDivider from={PAPER} to={PURPLE} />
+        <PxMarquee phrases={x.marquee} />
+        <DitherDivider from={PURPLE} to={INKFIELD} />
 
-      <CodeShowcase
-        eyebrow={t.codeShowcase.eyebrow}
-        heading={t.codeShowcase.heading}
-        description={t.codeShowcase.description}
-        tabs={codeTabs}
-      />
+        <PxConverge left={x.converge.left} right={x.converge.right} />
 
-      <NumberedFeatures
-        eyebrow={t.featuresEyebrow}
-        heading={t.featuresHeading}
-        description={t.featuresIntro}
-        features={t.features}
-      />
+        <PxShowcase
+          t={t.nativeDeepDive}
+          demo={x.demo}
+          codeHtml={appMenuHtml}
+          codeLabel={t.nativeDeepDive.codeLabel}
+        />
 
-      <WhyMurasaki
-        eyebrow={t.whyMurasaki.eyebrow}
-        heading={t.whyMurasaki.heading}
-        paragraph={t.whyMurasaki.paragraph}
-        tableHeadings={t.whyMurasaki.tableHeadings}
-        rows={t.comparisonRows}
-        statValue={t.whyMurasaki.statValue}
-        statLabel={t.whyMurasaki.statLabel}
-        footnote={t.comparisonFootnote}
-      />
+        <PxManifesto
+          text={x.manifesto}
+          counterLabel={x.manifestoCounterLabel}
+        />
 
-      <NativeDeepDive
-        eyebrow={t.nativeDeepDive.eyebrow}
-        heading={t.nativeDeepDive.heading}
-        paragraph={t.nativeDeepDive.paragraph}
-        bullets={t.nativeDeepDive.bullets}
-        codeLabel={t.nativeDeepDive.codeLabel}
-        codeHtml={contextMenuHtml}
-        menuMockLabel={t.nativeDeepDive.menuMockLabel}
-      />
+        <DitherDivider from={INKFIELD} to={PAPER} />
 
-      <Distribution
-        eyebrow={t.distribution.eyebrow}
-        heading={t.distribution.heading}
-        paragraph={t.distribution.paragraph}
-        steps={t.distribution.steps}
-        platforms={t.distribution.platforms}
-      />
+        <PxFeatures
+          eyebrow={t.featuresEyebrow}
+          heading={t.featuresHeading}
+          intro={t.featuresIntro}
+          features={t.features}
+        />
 
-      <QuickStart
-        eyebrow={t.quickStart.eyebrow}
-        heading={t.quickStart.heading}
-        steps={t.quickStart.steps}
-      />
+        <PxVersus
+          t={t.whyMurasaki}
+          rows={t.comparisonRows}
+          footnote={t.comparisonFootnote}
+        />
 
-      <CtaBand
-        heading={t.ctaBand.heading}
-        paragraph={t.ctaBand.paragraph}
-        installCommand={installCommand}
-        getStartedLabel={t.getStarted}
-        getStartedHref={`/${lang}/docs/getting-started/quick-start`}
-      />
+        <PxArtifacts
+          heading={t.mockup.heading}
+          caption={t.mockup.caption}
+          platforms={t.distribution.platforms}
+        />
 
-      <Wordmark />
+        <DitherDivider from={PAPER} to={INKFIELD} />
+
+        <PxCta
+          quickstart={t.quickStart}
+          heading={t.ctaBand.heading}
+          paragraph={t.ctaBand.paragraph}
+          installCommand={installCommand}
+          getStartedLabel={t.getStarted}
+          getStartedHref={getStartedHref}
+          githubLabel={t.github}
+          githubHref={githubUrl}
+        />
+      </LpMotion>
 
       <SiteFooter
         lang={lang}

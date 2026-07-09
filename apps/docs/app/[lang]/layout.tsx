@@ -35,20 +35,14 @@ export async function generateMetadata(
   const t = homeContent[lang] ?? homeContent.en;
   const parentOpenGraph = (await parent).openGraph ?? {};
 
-  // Just the tagline — the root layout's title `template` ("%s · Murasaki")
-  // appends the brand name, so repeating it here would double up into
-  // "Murasaki — ... · Murasaki". Matches how docs pages already title
-  // themselves (e.g. "Quick start" -> "Quick start · Murasaki").
+  // Brand-first on the landing ("Murasaki | tagline") — the default title is
+  // used as-is (not templated), while child pages (docs) resolve through the
+  // template as "Quick start | Murasaki".
   const pageTitle =
     lang === "ja"
-      ? "デスクトップアプリのための Next.js DX"
-      : "Next.js DX for desktop apps";
-  // The fuller, brand-prefixed title for OG/Twitter cards, which aren't run
-  // through that title template.
-  const socialTitle =
-    lang === "ja"
-      ? "Murasaki — デスクトップアプリのための Next.js DX"
-      : "Murasaki — Next.js DX for desktop apps";
+      ? "Murasaki | デスクトップアプリのための Next.js DX"
+      : "Murasaki | Next.js DX for desktop apps";
+  const socialTitle = pageTitle;
 
   return {
     // An object (not a plain string) re-declares the "%s · Murasaki"
@@ -58,7 +52,10 @@ export async function generateMetadata(
     // this, `app/[lang]/docs/[[...slug]]/page.tsx`'s own `title: page.data.title`
     // would render bare ("Quick start") instead of templated
     // ("Quick start · Murasaki").
-    title: { default: pageTitle, template: "%s · Murasaki" },
+    // `absolute` (not `default`): the landing's brand-first title must NOT be
+    // re-run through the ROOT layout's "%s | Murasaki" template (which would
+    // double the brand). `template` still applies to child docs pages.
+    title: { absolute: pageTitle, template: "%s | Murasaki" },
     description: t.subhead,
     alternates: {
       // The default language ("en") has no URL prefix (see lib/i18n.ts's

@@ -641,3 +641,168 @@ const ja: HomeContent = {
 };
 
 export const homeContent: Record<string, HomeContent> = { en, ja };
+
+// ---------------------------------------------------------------------------
+// Strings that exist only for the redesigned landing page (the "紫 /
+// Murasaki" bold-grotesque direction) — kept separate from HomeContent so
+// the canonical copy above stays the single source of truth for facts.
+// ---------------------------------------------------------------------------
+export interface LpExtra {
+  /** Phrases looping in the marquee band (joined with a separator glyph). */
+  marquee: string[];
+  /** Vertical Japanese rail on the hero's right edge (pure art direction —
+   * shown in both locales, like a hanko/colophon). */
+  tategaki: string;
+  /** The live native-window demo (proof-by-demo section). The window's
+   * CONTENT is a faithful miniature of the real `create-murasaki` scaffold
+   * home — so it stays English in every locale (it's a screenshot of the
+   * product, and the menu labels must match the code panel beside it).
+   * Only the captions around the window localize. */
+  demo: {
+    windowTitle: string;
+    menus: {
+      label: string;
+      items: { label: string; shortcut?: string; divider?: boolean }[];
+    }[];
+    contentTitle: string;
+    /** The scaffold home's tagline, verbatim. */
+    tagline: string;
+    /** The scaffold home's "Edit … and save to reload." hint, verbatim. */
+    editHint: { before: string; code: string; after: string };
+    /** The scaffold home's three resource cards. */
+    cards: string[];
+    /** The scaffold home's CTA button label, verbatim. */
+    demoCta: string;
+    /** Caption under the code panel — "this code → that menu". */
+    codeCaption: string;
+    /** Small hint that the menus are clickable. */
+    tryHint: string;
+  };
+  /** Pinned converging headline — the two halves slide together while the
+   * viewport holds (the madewithgsap hero move). */
+  converge: { left: string; right: string };
+  /** Word/character-illuminated manifesto (scroll-linked, pinned). */
+  manifesto: string;
+  /** Silkscreen progress counter shown while the manifesto is pinned. */
+  manifestoCounterLabel: string;
+  /** Scroll cue label at the bottom of the hero. */
+  scrollCue: string;
+}
+
+const lpEn: LpExtra = {
+  marquee: [
+    "Next.js DX for desktop",
+    "Native windows",
+    "Native menus",
+    "~1/5 Electron memory",
+    "React 19",
+    "Vite HMR",
+    "Rust-native",
+    "No Rust required",
+    "MIT licensed",
+  ],
+  tategaki: "紫は蝶のように軽い",
+  demo: {
+    windowTitle: "Murasaki App",
+    menus: [
+      {
+        label: "File",
+        items: [{ label: "Close Window", shortcut: "⌘W" }],
+      },
+      {
+        label: "Edit",
+        items: [
+          { label: "Undo", shortcut: "⌘Z" },
+          { label: "Redo", shortcut: "⇧⌘Z" },
+          { label: "", divider: true },
+          { label: "Cut", shortcut: "⌘X" },
+          { label: "Copy", shortcut: "⌘C" },
+          { label: "Paste", shortcut: "⌘V" },
+          { label: "Select All", shortcut: "⌘A" },
+        ],
+      },
+      {
+        label: "View",
+        items: [{ label: "Reload", shortcut: "⌘R" }],
+      },
+    ],
+    contentTitle: "Hello, Murasaki 🦋",
+    tagline:
+      "The Next.js developer experience — file-based routing, server actions and native menus — in a lightweight Rust shell.",
+    editHint: {
+      before: "Edit ",
+      code: "src/app/page.tsx",
+      after: " and save to reload.",
+    },
+    cards: ["Docs", "GitHub", "murasaki_js"],
+    demoCta: "Try the interactive demo",
+    codeCaption:
+      "This code becomes that menu. NSMenu on macOS, HMENU on Windows.",
+    tryHint: "Try the menus — View → Reload works.",
+  },
+  converge: { left: "Native apps.", right: "Web DX." },
+  manifesto:
+    "Build native desktop apps with file-based routing, server actions, and React 19 — in a Rust-native window, not Electron's Chromium. Without writing Rust.",
+  manifestoCounterLabel: "Lit",
+  scrollCue: "Scroll",
+};
+
+const lpJa: LpExtra = {
+  marquee: [
+    "デスクトップのための Next.js DX",
+    "ネイティブウィンドウ",
+    "ネイティブメニュー",
+    "メモリは Electron の約1/5",
+    "React 19",
+    "Vite HMR",
+    "Rust ネイティブ",
+    "Rust 不要",
+    "MIT ライセンス",
+  ],
+  tategaki: "紫は蝶のように軽い",
+  demo: {
+    windowTitle: "Murasaki App",
+    menus: [
+      {
+        label: "File",
+        items: [{ label: "Close Window", shortcut: "⌘W" }],
+      },
+      {
+        label: "Edit",
+        items: [
+          { label: "Undo", shortcut: "⌘Z" },
+          { label: "Redo", shortcut: "⇧⌘Z" },
+          { label: "", divider: true },
+          { label: "Cut", shortcut: "⌘X" },
+          { label: "Copy", shortcut: "⌘C" },
+          { label: "Paste", shortcut: "⌘V" },
+          { label: "Select All", shortcut: "⌘A" },
+        ],
+      },
+      {
+        label: "View",
+        items: [{ label: "Reload", shortcut: "⌘R" }],
+      },
+    ],
+    contentTitle: "Hello, Murasaki 🦋",
+    tagline:
+      "The Next.js developer experience — file-based routing, server actions and native menus — in a lightweight Rust shell.",
+    editHint: {
+      before: "Edit ",
+      code: "src/app/page.tsx",
+      after: " and save to reload.",
+    },
+    cards: ["Docs", "GitHub", "murasaki_js"],
+    demoCta: "Try the interactive demo",
+    codeCaption:
+      "このコードが、このメニューになります。macOS では NSMenu、Windows では HMENU。",
+    tryHint: "メニューを触ってみてください — 表示 → 再読み込みは動きます。",
+  },
+  converge: { left: "ネイティブアプリ。", right: "Web の DX。" },
+  manifesto:
+    "ファイルベースルーティング、サーバーアクション、React 19 でネイティブなデスクトップアプリを構築 — Electron の Chromium ではなく、Rust ネイティブなウィンドウで。Rust を書く必要はありません。",
+  manifestoCounterLabel: "Lit",
+  scrollCue: "Scroll",
+};
+
+export const lpExtra: Record<string, LpExtra> = { en: lpEn, ja: lpJa };
