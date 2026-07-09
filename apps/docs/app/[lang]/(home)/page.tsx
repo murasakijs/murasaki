@@ -14,9 +14,11 @@ import { PxScroll } from "@/components/home/px-scroll";
 import { PxShowcase } from "@/components/home/px-showcase";
 import { PxVersus } from "@/components/home/px-versus";
 import { SiteFooter } from "@/components/home/site-footer";
+import { JsonLd } from "@/components/json-ld";
 import { appMenuSample } from "@/lib/code-samples";
 import { homeContent, lpExtra } from "@/lib/home-content";
 import { lpFontVariables } from "@/lib/lp-fonts";
+import { absoluteUrl, localizedDocsPath, localizedHomePath } from "@/lib/seo";
 
 const githubUrl = "https://github.com/murasakijs/murasaki";
 const installCommand = "pnpm create murasaki@latest my-app";
@@ -52,13 +54,64 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
     theme: CODE_THEME,
   });
 
-  const getStartedHref = `/${lang}/docs/getting-started/quick-start`;
+  const getStartedHref = localizedDocsPath(lang, [
+    "getting-started",
+    "quick-start",
+  ]);
+  const pageUrl = absoluteUrl(localizedHomePath(lang));
+  const creatorId = `${absoluteUrl("/")}#creator`;
+  const websiteId = `${absoluteUrl("/")}#website`;
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Person",
+        "@id": creatorId,
+        name: "ichi",
+      },
+      {
+        "@type": "WebSite",
+        "@id": websiteId,
+        name: "Murasaki",
+        url: absoluteUrl("/"),
+        creator: { "@id": creatorId },
+        inLanguage: ["en", "ja"],
+      },
+      {
+        "@type": "WebPage",
+        "@id": `${pageUrl}#webpage`,
+        name:
+          lang === "ja"
+            ? "Murasaki — デスクトップアプリのための Next.js DX"
+            : "Murasaki — Next.js DX for desktop apps",
+        description: t.subhead,
+        url: pageUrl,
+        inLanguage: lang,
+        isPartOf: { "@id": websiteId },
+        about: { "@id": `${absoluteUrl("/")}#software` },
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": `${absoluteUrl("/")}#software`,
+        name: "Murasaki",
+        description: t.subhead,
+        url: absoluteUrl("/"),
+        codeRepository: githubUrl,
+        license: `${githubUrl}/blob/main/LICENSE`,
+        programmingLanguage: ["TypeScript", "Rust"],
+        runtimePlatform: ["macOS", "Windows", "Linux"],
+        author: { "@id": creatorId },
+        sameAs: [githubUrl, "https://x.com/murasaki_js"],
+      },
+    ],
+  };
 
   return (
     <div
       lang={lang}
       className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#0e0e10]`}
     >
+      <JsonLd data={structuredData} />
       <LpMotion>
         <PxScroll />
 

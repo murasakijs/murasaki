@@ -46,10 +46,10 @@ RUN pnpm --filter @murasakijs/ui build
 #   docker build --build-arg NEXT_PUBLIC_SITE_URL=https://example.com ...
 # When the arg is omitted we `unset` it before building so an EMPTY value
 # can't clobber one provided another way (e.g. apps/docs/.env, which Dokploy's
-# "Create Environment File" writes and `next build` auto-loads); app/layout.tsx
-# falls back to a sane default if it ends up absent. Do NOT turn this into a
-# bare `ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}` — an unset arg would
-# then hard-set it to "" and `new URL("")` fails the build.
+# "Create Environment File" writes and `next build` auto-loads); lib/seo.ts
+# falls back to the production origin if it ends up absent. Do NOT turn this
+# into a bare `ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}` — an unset arg
+# would then hard-set it to "" and `new URL("")` fails the build.
 ARG NEXT_PUBLIC_SITE_URL
 RUN if [ -z "$NEXT_PUBLIC_SITE_URL" ]; then unset NEXT_PUBLIC_SITE_URL; fi; \
     pnpm --filter murasaki-docs build

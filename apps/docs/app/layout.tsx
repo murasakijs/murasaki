@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Geist, Inter } from "next/font/google";
 import { fraunces, geistMono, notoSansJP, zenOldMincho } from "@/lib/fonts";
 import { homeContent } from "@/lib/home-content";
+import { siteUrl } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -10,17 +11,6 @@ const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 const inter = Inter({
   subsets: ["latin"],
 });
-
-// `NEXT_PUBLIC_SITE_URL` lets the deployed origin change (GitHub Pages today,
-// murasaki.dev on a VPS later) without a code edit — every relative URL in
-// metadata (canonical, hreflang, og/twitter images) resolves against this.
-// Falls back to the current live GitHub Pages URL, matching next.config.mjs's
-// static-export target; not murasaki.dev yet since that domain isn't live.
-// `?.trim() ||` (not `??`): an env var set to an empty/whitespace string
-// (e.g. a build arg passed through unset) must fall back too — `new URL("")`
-// would otherwise throw "Invalid URL" and fail the build.
-const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL?.trim() || "https://murasakijs.github.io";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -33,6 +23,10 @@ export const metadata: Metadata = {
   },
   description: homeContent.en.subhead,
   applicationName: "Murasaki",
+  authors: [{ name: "Murasaki", url: siteUrl }],
+  creator: "Murasaki",
+  publisher: "Murasaki",
+  category: "developer tools",
   keywords: [
     "murasaki",
     "desktop apps",
@@ -59,6 +53,17 @@ export const metadata: Metadata = {
     // No `images` here either — Next.js falls back to `openGraph.images`
     // when `twitter.images` isn't explicitly set (see app/[lang]/layout.tsx
     // for the per-locale generateMetadata that keeps this working there).
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
   },
 };
 

@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 import Link from "next/link";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
 import { localizeDocsHref } from "@/lib/localize-href";
+import { localizedHomePath } from "@/lib/seo";
 
 interface FooterColumn {
   heading: string;
@@ -76,7 +77,7 @@ export function SiteFooter({
 
         <div className="mt-16 flex flex-col items-center justify-between gap-6 border-t border-border pt-8 sm:flex-row">
           <Link
-            href={`/${lang}`}
+            href={localizedHomePath(lang)}
             className="flex items-center gap-2"
             aria-label="Murasaki home"
           >

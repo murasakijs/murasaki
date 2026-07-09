@@ -6,9 +6,10 @@ description: Murasaki アプリをスキャフォールドし、HMR 付きで実
 ## 前提条件
 
 - **Node.js 22 以上**
-- **macOS**(Apple Silicon または Intel)— `.app` / `.dmg` のビルドに必要です。`murasaki
-  dev` 自体はクロスプラットフォームで動作しますが、バンドルは現在 macOS のみ対応してい
-  ます。
+- `murasaki dev` は **macOS、Windows、Linux** で動作します。macOS の `.app` / `.dmg`
+  は macOS 上でビルドする必要があります。ポータブルな Windows フォルダー / `.zip` は
+  どのホストからでもクロスビルドできます。Linux 向けアプリパッケージはロードマップにあ
+  ります。
 
 ## スキャフォールド
 
@@ -38,22 +39,30 @@ Vite の開発サーバーの上にネイティブウィンドウが開きます
 ## 配布物をビルドする
 
 ```bash
-pnpm bundle       # -> dist/bundle/<App>.app
-pnpm installer    # -> dist/<App>-<version>.dmg  (ドラッグ&ドロップでインストール)
+pnpm bundle
+pnpm installer
 ```
 
-`.app` にはポータブルな Node ランタイムとネイティブランチャーが同梱されているため、ビル
-ドしたマシンだけでなく他の Mac でも動作します。別のアーキテクチャ向けにビルドするには:
+バンドルにはポータブルな Node ランタイムとネイティブランチャーが同梱されるため、ビルド
+したマシン以外でも動作します。macOS では最初の2コマンドで `.app` と `.dmg` を生成しま
+す。Windows ターゲットを指定すると、どのホストからでもポータブルな Windows フォルダー
+と `.zip` を作成できます。
 
 ```bash
-pnpm bundle --arch x64     # Apple Silicon Mac 上で x64 の .app をビルドする
+pnpm bundle --arch x64            # ターゲットアーキテクチャを指定
+pnpm bundle --target win32-x64    # ポータブルな Windows フォルダー + .zip
 ```
 
+`pnpm installer --target win32-x64` は、`makensis` があれば NSIS `.exe`、Windows 上で WiX
+v4 があれば MSI `.msi` も生成します。どちらの任意ツールもない場合、Windows インストー
+ラーは生成されませんが、ポータブルな `.zip` は利用できます。ツールのセットアップと全
+ターゲットは[配布](/docs/building/distribution)を参照してください。
+
 <Callout type="warn">
-  署名されていないビルドは、他のマシンで Gatekeeper をトリガーします(受け取った側は初
-  回のみ右クリック→**開く**が必要です)。警告なしで署名・公証済みのアプリを配布する方法
-  は、[Distribution → Signing](/docs/building/distribution#signing--notarization)
-  を参照してください。
+  macOS では、署名されていないビルドは他のマシンで Gatekeeper をトリガーします(受け
+  取った側は初回のみ右クリック→**開く**が必要です)。警告なしで署名・公証済みのアプリ
+  を配布する方法は、[Distribution →
+  Signing](/docs/building/distribution#signing--notarization) を参照してください。
 </Callout>
 
 ## 次へ

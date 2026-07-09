@@ -140,9 +140,7 @@ export function PxHero({
         </p>
 
         <h1 className="lp-display font-extrabold">
-          <span className="sr-only">{BRAND}</span>
           <span
-            aria-hidden="true"
             data-hero-title
             className="block text-[clamp(4rem,16.5vw,15rem)] leading-[0.85] tracking-[-0.04em]"
           >
@@ -161,20 +159,19 @@ export function PxHero({
               </span>
             ))}
           </span>
+          <span className="mt-10 block overflow-hidden">
+            <span
+              data-hero-tagline
+              className="lp-display block max-w-2xl text-[clamp(1.3rem,2.8vw,2rem)] font-semibold leading-tight"
+            >
+              {/* Explicit joiner: `prefix` doesn't carry its own trailing
+                  space (ja has an empty prefix and needs none). */}
+              {headline.prefix && `${headline.prefix} `}
+              {headline.highlight}
+              {headline.suffix}
+            </span>
+          </span>
         </h1>
-
-        <div className="mt-10 overflow-hidden">
-          <p
-            data-hero-tagline
-            className="lp-display max-w-2xl text-[clamp(1.3rem,2.8vw,2rem)] font-semibold leading-tight"
-          >
-            {/* Explicit joiner: `prefix` doesn't carry its own trailing
-                space (ja has an empty prefix and needs none). */}
-            {headline.prefix && `${headline.prefix} `}
-            {headline.highlight}
-            {headline.suffix}
-          </p>
-        </div>
 
         <div
           data-hero-actions

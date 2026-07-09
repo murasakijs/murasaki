@@ -2,6 +2,7 @@ import { RootProvider } from "fumadocs-ui/provider/next";
 import type { Metadata, ResolvingMetadata } from "next";
 import { homeContent } from "@/lib/home-content";
 import { i18n } from "@/lib/i18n";
+import { localizedAlternates, localizedHomePath } from "@/lib/seo";
 
 export default async function Layout({
   children,
@@ -16,17 +17,10 @@ export function generateStaticParams() {
   return i18n.languages.map((lang) => ({ lang }));
 }
 
-function localizedHome(lang: string) {
-  return lang === i18n.defaultLanguage ? "/" : `/${lang}`;
-}
-
 // Locale-appropriate title/description (copy reused from lib/home-content.ts
 // so it stays consistent with the home page's own headline/subhead), plus
-// hreflang alternates and an `openGraph.locale`. Nested route segments (docs
-// pages, the home page) don't declare their own `alternates`, so this stays
-// the effective canonical/hreflang for everything under `/${lang}` unless a
-// segment overrides it — docs sub-pages don't yet set a page-specific
-// canonical, which would be a reasonable follow-up.
+// hreflang alternates and an `openGraph.locale`. Docs pages override these
+// home URLs with their own page-specific canonical and alternates.
 export async function generateMetadata(
   { params }: LayoutProps<"/[lang]">,
   parent: ResolvingMetadata,
@@ -60,11 +54,8 @@ export async function generateMetadata(
     alternates: {
       // The default language ("en") has no URL prefix (see lib/i18n.ts's
       // `hideLocale: "default-locale"`), so its home page is `/`, not `/en`.
-      canonical: localizedHome(lang),
-      languages: {
-        ...Object.fromEntries(i18n.languages.map((l) => [l, localizedHome(l)])),
-        "x-default": localizedHome(i18n.defaultLanguage),
-      },
+      canonical: localizedHomePath(lang),
+      languages: localizedAlternates(localizedHomePath),
     },
     openGraph: {
       // Re-spread the parent (root layout)'s already-resolved openGraph —
@@ -75,6 +66,7 @@ export async function generateMetadata(
       locale: lang === "ja" ? "ja_JP" : "en_US",
       title: socialTitle,
       description: t.subhead,
+      url: localizedHomePath(lang),
     },
   };
 }

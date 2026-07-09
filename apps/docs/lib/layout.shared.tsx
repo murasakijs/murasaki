@@ -1,6 +1,7 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import Link from "next/link";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
+import { localizedDocsPath, localizedHomePath } from "./seo";
 import { appName, gitConfig } from "./shared";
 
 export function baseOptions(lang: string): BaseLayoutProps {
@@ -13,7 +14,7 @@ export function baseOptions(lang: string): BaseLayoutProps {
           {appName}
         </span>
       ),
-      url: `/${lang}`,
+      url: localizedHomePath(lang),
       // `nav.children` is fumadocs-ui's supported "arbitrary content next to
       // the title" slot — rendered exactly ONCE, as a plain sibling inside
       // the header's <nav>, before the nav-items <ul>. This is why it's used
@@ -26,7 +27,7 @@ export function baseOptions(lang: string): BaseLayoutProps {
       // duality, so a plain <Link> here is valid HTML everywhere it renders.
       children: (
         <Link
-          href={`/${lang}/docs`}
+          href={localizedDocsPath(lang)}
           className="ml-4 text-sm font-medium underline underline-offset-4"
         >
           Docs

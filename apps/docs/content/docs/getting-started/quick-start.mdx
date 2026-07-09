@@ -6,8 +6,9 @@ description: Scaffold a Murasaki app, run it with HMR, and build a distributable
 ## Prerequisites
 
 - **Node.js 22+**
-- **macOS** (Apple Silicon or Intel) for building `.app` / `.dmg`. `murasaki dev`
-  works cross-platform; bundling is macOS-only for now.
+- `murasaki dev` runs on **macOS, Windows, and Linux**. A macOS `.app` / `.dmg`
+  must be built on macOS; a portable Windows folder / `.zip` can be cross-built
+  from any host. Linux app packaging is on the roadmap.
 
 ## Scaffold
 
@@ -35,21 +36,31 @@ scoped menu — both are real `NSMenu`s, not HTML popups.
 ## Build a distributable
 
 ```bash
-pnpm bundle       # -> dist/bundle/<App>.app
-pnpm installer    # -> dist/<App>-<version>.dmg  (drag-to-install)
+pnpm bundle
+pnpm installer
 ```
 
-The `.app` ships a portable Node runtime and a native launcher, so it runs on
-other Macs — not just your build machine. To build for the other architecture:
+The bundle ships a portable Node runtime and a native launcher, so it runs on
+other machines — not just your build machine. On macOS, the first two commands
+produce an `.app` and `.dmg`. A portable Windows folder / `.zip` can be built
+from any host by selecting a Windows target:
 
 ```bash
-pnpm bundle --arch x64     # build an x64 .app on an Apple Silicon Mac
+pnpm bundle --arch x64            # choose the target architecture
+pnpm bundle --target win32-x64    # portable Windows folder + .zip
 ```
 
+`pnpm installer --target win32-x64` additionally creates an NSIS `.exe` when
+`makensis` is installed, and an MSI `.msi` when WiX v4 is installed on Windows.
+If neither optional tool is available, no Windows installer is produced; the
+portable `.zip` still works. See [Distribution](/docs/building/distribution)
+for tool setup and all targets.
+
 <Callout type="warn">
-  Unsigned builds trigger Gatekeeper on other machines (recipients right-click →
-  **Open** the first time). To ship a signed, notarized app with no warning, see
-  [Distribution → Signing](/docs/building/distribution#signing--notarization).
+  On macOS, unsigned builds trigger Gatekeeper on other machines (recipients
+  right-click → **Open** the first time). To ship a signed, notarized app with
+  no warning, see [Distribution →
+  Signing](/docs/building/distribution#signing--notarization).
 </Callout>
 
 ## Next

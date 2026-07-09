@@ -168,9 +168,8 @@ export default function OpengraphImage() {
           right: 0,
           height: "14px",
           display: "flex",
-          backgroundImage:
-            "repeating-conic-gradient(#7c3aed 0% 25%, #111014 0% 50%)",
-          backgroundSize: "14px 14px",
+          backgroundImage: "linear-gradient(90deg, #7c3aed 50%, #111014 50%)",
+          backgroundSize: "28px 14px",
         }}
       />
     </div>,
