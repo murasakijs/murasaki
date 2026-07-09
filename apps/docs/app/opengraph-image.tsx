@@ -1,48 +1,64 @@
 import { ImageResponse } from "next/og";
 import { BUTTERFLY_VIEWBOX, butterflyRects } from "@/lib/butterfly-rects";
-import { homeContent } from "@/lib/home-content";
 
-// Site-level social share image (Open Graph + Twitter — see
-// app/layout.tsx's `twitter` metadata, which has no `images` of its own so
-// Next.js's metadata resolver falls back to this same openGraph image for
-// Twitter Cards too, rather than duplicating a near-identical
-// twitter-image.tsx). English-only for now: the docs/[lang] tree renders ja
-// pages too, but this static image lives outside `app/[lang]` (a per-locale
-// version would need its own route under each locale, which is awkward
-// under `output: 'export'` for a single top-level file convention) — see
-// app/[lang]/layout.tsx's generateMetadata for how `openGraph.locale` is
-// still set correctly per language while reusing this one image.
+// Site-level social share image (Open Graph + Twitter). The composition mirrors
+// the landing page's editorial art direction: graph paper, oversized grotesque
+// type, a ghosted 紫, pixel details, and a compact terminal command.
 export const alt = "Murasaki — Next.js DX for desktop apps";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
-// Required for `output: 'export'` — this route has no dynamic params, so it
-// prerenders once at build time into a static file (see app/og/docs/[...slug]/
-// route.tsx for the same pattern on a dynamic route).
 export const revalidate = false;
 
-const PURPLE = "#A855F7";
-const DEEP_PURPLE = "#5B21B6";
-const DARK = "#0B0518";
+const PAPER = "#f4f2ed";
+const INK = "#111014";
+const PURPLE = "#7c3aed";
 
 export default function OpengraphImage() {
-  const { bandLabel } = homeContent.en;
-
   return new ImageResponse(
     <div
       style={{
         width: "100%",
         height: "100%",
+        position: "relative",
         display: "flex",
         flexDirection: "column",
-        justifyContent: "space-between",
-        padding: "88px 96px",
-        background: DARK,
+        overflow: "hidden",
+        padding: "62px 72px 54px",
+        color: INK,
+        backgroundColor: PAPER,
+        backgroundImage:
+          "linear-gradient(rgba(17,16,20,0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(17,16,20,0.055) 1px, transparent 1px)",
+        backgroundSize: "16px 16px",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "28px" }}>
+      <div
+        style={{
+          position: "absolute",
+          right: "-34px",
+          top: "-112px",
+          display: "flex",
+          fontFamily: "serif",
+          fontSize: "500px",
+          fontWeight: 800,
+          lineHeight: 1,
+          color: "rgba(17,16,20,0.045)",
+        }}
+      >
+        紫
+      </div>
+
+      <div
+        style={{
+          position: "absolute",
+          right: "58px",
+          top: "60px",
+          display: "flex",
+          opacity: 0.92,
+        }}
+      >
         <svg
-          width={102}
-          height={(102 * 12) / 17}
+          width={178}
+          height={(178 * 12) / 17}
           viewBox={BUTTERFLY_VIEWBOX}
           shapeRendering="crispEdges"
           aria-hidden="true"
@@ -58,60 +74,105 @@ export default function OpengraphImage() {
             />
           ))}
         </svg>
-        <p
-          style={{
-            fontSize: "88px",
-            fontWeight: 800,
-            color: PURPLE,
-            margin: 0,
-            letterSpacing: "-3px",
-          }}
-        >
-          Murasaki
-        </p>
       </div>
 
-      <p
+      <div
         style={{
-          fontSize: "48px",
-          fontWeight: 600,
-          color: "#F5F0FF",
-          margin: 0,
-          maxWidth: "980px",
+          display: "flex",
+          alignItems: "center",
+          fontFamily: "monospace",
+          fontSize: "15px",
+          fontWeight: 700,
+          letterSpacing: "5px",
+          textTransform: "uppercase",
+        }}
+      >
+        <span style={{ color: PURPLE, marginRight: "14px" }}>01</span>
+        React 19 · Vite · Rust-native
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          marginTop: "48px",
+          fontSize: "142px",
+          fontWeight: 900,
+          letterSpacing: "-8px",
+          lineHeight: 0.83,
+        }}
+      >
+        Murasaki
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          marginTop: "36px",
+          fontSize: "38px",
+          fontWeight: 700,
+          letterSpacing: "-1.2px",
         }}
       >
         Next.js DX for desktop apps.
-      </p>
+      </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+      <div
+        style={{
+          marginTop: "auto",
+          display: "flex",
+          alignItems: "stretch",
+          gap: "18px",
+        }}
+      >
+        <div
+          style={{
+            width: "570px",
+            height: "74px",
+            display: "flex",
+            alignItems: "center",
+            border: "2px solid rgba(17,16,20,0.82)",
+            background: INK,
+            color: "#f8f6f1",
+            padding: "0 24px",
+            fontFamily: "monospace",
+            fontSize: "25px",
+            boxShadow: "9px 9px 0 rgba(124,58,237,0.18)",
+          }}
+        >
+          <span style={{ color: "#a855f7", marginRight: "14px" }}>$</span>
+          pnpm create murasaki@latest my-app
+        </div>
+
         <div
           style={{
             display: "flex",
-            width: "56px",
-            height: "10px",
-            background: PURPLE,
-          }}
-        />
-        <div
-          style={{
-            display: "flex",
-            width: "20px",
-            height: "10px",
-            background: DEEP_PURPLE,
-          }}
-        />
-        <p
-          style={{
-            fontSize: "24px",
-            color: "rgba(240,240,240,0.6)",
-            margin: 0,
-            letterSpacing: "1px",
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "flex-end",
+            fontFamily: "monospace",
+            fontSize: "14px",
+            fontWeight: 700,
+            letterSpacing: "2.5px",
             textTransform: "uppercase",
           }}
         >
-          {bandLabel}
-        </p>
+          Native windows&nbsp;&nbsp;·&nbsp;&nbsp;No Rust required
+        </div>
       </div>
+
+      <div
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: "14px",
+          display: "flex",
+          backgroundImage:
+            "repeating-conic-gradient(#7c3aed 0% 25%, #111014 0% 50%)",
+          backgroundSize: "14px 14px",
+        }}
+      />
     </div>,
     size,
   );
