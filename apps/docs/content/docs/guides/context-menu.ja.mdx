@@ -3,7 +3,7 @@ title: コンテキストメニュー
 description: useContextMenu で本物の OS コンテキストメニューを宣言する — HTML ポップアップは一切関与しません。
 ---
 
-murasaki のコンテキストメニューは、マークアップではなくフックで宣言するため、あなたの
+Murasaki のコンテキストメニューは、マークアップではなくフックで宣言するため、あなたの
 state のすぐ隣で使えます — その `action` は `useState` のセッターをクロージャできます。
 HTML は一切レンダーされません。項目は Rust 側に投げられ、本物の OS メニュー(macOS で
 は `NSMenu`、Windows では `HMENU`、Linux では `GtkMenu`)がポップアップします。
@@ -116,6 +116,6 @@ useContextMenu('card', [
 ## 次へ
 
 <Cards>
-  <Card title="ネイティブ API" href="/docs/guides/native-apis" description="murasaki のネイティブサーフェスの残り。" />
+  <Card title="ネイティブ API" href="/docs/guides/native-apis" description="Murasaki のネイティブサーフェスの残り。" />
   <Card title="スタイリング" href="/docs/guides/styling" description="Tailwind + @murasakijs/ui。" />
 </Cards>

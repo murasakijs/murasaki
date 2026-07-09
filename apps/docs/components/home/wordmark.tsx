@@ -6,7 +6,7 @@ import { ButterflyMark } from "@/components/home/butterfly-mark";
 const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 
 /**
- * A giant closing wordmark — "murasaki" in massive `.font-display` type
+ * A giant closing wordmark — "Murasaki" in massive `.font-display` type
  * with the brand mark, echoing Hermes' giant "HERMES" close. The brand name
  * itself is never translated, so this renders identically in both locales
  * (the `ja` mincho cut still applies via `.font-display`'s `:lang(ja)`
@@ -27,7 +27,7 @@ export function Wordmark() {
       >
         <ButterflyMark className="h-auto w-10 sm:w-14" />
         <p className="font-display text-balance text-[3.25rem] leading-none font-bold tracking-tight sm:text-[6rem] md:text-[9rem]">
-          murasaki
+          Murasaki
         </p>
       </motion.div>
     </section>

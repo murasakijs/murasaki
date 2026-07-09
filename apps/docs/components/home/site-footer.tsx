@@ -78,11 +78,11 @@ export function SiteFooter({
           <Link
             href={`/${lang}`}
             className="flex items-center gap-2"
-            aria-label="murasaki home"
+            aria-label="Murasaki home"
           >
             <ButterflyMark className="h-auto w-6" />
             <span className="font-display text-lg font-bold tracking-tight">
-              murasaki
+              Murasaki
             </span>
           </Link>
           <p className="text-xs text-muted-foreground">{license}</p>

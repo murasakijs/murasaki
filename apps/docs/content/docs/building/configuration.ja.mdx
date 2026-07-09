@@ -38,7 +38,7 @@ export default defineConfig({
 | `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
 | `updater` | `UpdaterConfig?` | 自動更新のソース — [下記](#updater)を参照。 |
-| `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
+| `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、Murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは Murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
 | `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
 | `targets` | `Target[]?` | ビルドターゲット。デフォルトはホストプラットフォーム。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` のうち1つ以上。 |
 | `icon` | `string?` | ソースとなる PNG(理想は 1024px)へのパス。`murasaki icon` / `murasaki bundle` がこれを `.icns` / `.ico` / PNG セットに展開します。 |
@@ -90,17 +90,17 @@ type UpdaterConfig =
 ## `installer`
 
 `murasaki installer` が生成する `.dmg` のスタイリングです。まったく省略すれば
-murasaki のデフォルトの背景が使われます。
+Murasaki のデフォルトの背景が使われます。
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `background` | `string?` | カスタム DMG 背景 PNG への(プロジェクトルートからの相対)パス。murasaki のデフォルトを上書きします。 |
+| `background` | `string?` | カスタム DMG 背景 PNG への(プロジェクトルートからの相対)パス。Murasaki のデフォルトを上書きします。 |
 | `window` | `{ width: number; height: number }?` | DMG ウィンドウのコンテンツサイズ(ポイント単位)。デフォルトは `{ width: 640, height: 420 }`(デフォルトの背景に合わせています)。 |
 | `iconSize` | `number?` | DMG ウィンドウ内のアイコンサイズ。デフォルトは `128`。 |
 
 ## `sign`
 
-macOS のコード署名です。murasaki は**あなた自身の**証明書で署名します — 独自の証明書
+macOS のコード署名です。Murasaki は**あなた自身の**証明書で署名します — 独自の証明書
 は一切同梱していません。公証の認証情報はこの設定からではなく、常に環境変数から読み取ら
 れます — 詳しくは
 [Distribution → Signing](/docs/building/distribution#signing--notarization)を参照

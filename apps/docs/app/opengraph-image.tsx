@@ -12,7 +12,7 @@ import { homeContent } from "@/lib/home-content";
 // under `output: 'export'` for a single top-level file convention) — see
 // app/[lang]/layout.tsx's generateMetadata for how `openGraph.locale` is
 // still set correctly per language while reusing this one image.
-export const alt = "murasaki — Next.js DX for desktop apps";
+export const alt = "Murasaki — Next.js DX for desktop apps";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 // Required for `output: 'export'` — this route has no dynamic params, so it
@@ -67,7 +67,7 @@ export default function OpengraphImage() {
             letterSpacing: "-3px",
           }}
         >
-          murasaki
+          Murasaki
         </p>
       </div>
 

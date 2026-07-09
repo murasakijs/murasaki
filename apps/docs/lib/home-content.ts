@@ -44,7 +44,7 @@ export interface HomeContent {
     title: string;
     description: string;
   }[];
-  /** "Why murasaki" comparison table + the "~1/5 memory" pull-stat. */
+  /** "Why Murasaki" comparison table + the "~1/5 memory" pull-stat. */
   whyMurasaki: {
     eyebrow: string;
     heading: string;
@@ -194,7 +194,7 @@ const en: HomeContent = {
     {
       title: "UI kit",
       description:
-        "@murasakijs/ui — a shadcn-style component library built for murasaki apps.",
+        "@murasakijs/ui — a shadcn-style component library built for Murasaki apps.",
     },
     {
       title: "Signed distribution",
@@ -203,13 +203,13 @@ const en: HomeContent = {
     },
   ],
   whyMurasaki: {
-    eyebrow: "Why murasaki",
-    heading: "Why murasaki",
+    eyebrow: "Why Murasaki",
+    heading: "Why Murasaki",
     paragraph:
-      "Choose murasaki if you know React/Next.js and want a small-footprint desktop app without learning Rust or hand-wiring IPC.",
+      "Choose Murasaki if you know React/Next.js and want a small-footprint desktop app without learning Rust or hand-wiring IPC.",
     tableHeadings: {
       feature: "Category",
-      murasaki: "murasaki",
+      murasaki: "Murasaki",
       electron: "Electron",
       tauri: "Tauri",
     },
@@ -254,7 +254,7 @@ const en: HomeContent = {
     eyebrow: "Real OS, not a browser tab",
     heading: "Not a browser tab. A real OS window.",
     paragraph:
-      "murasaki windows are native — a real title bar, a real menu bar, real OS chrome. Right-click anywhere and you get an actual native menu, not an HTML popup pretending to be one.",
+      "Murasaki windows are native — a real title bar, a real menu bar, real OS chrome. Right-click anywhere and you get an actual native menu, not an HTML popup pretending to be one.",
     bullets: [
       {
         title: "Native window",
@@ -291,7 +291,7 @@ const en: HomeContent = {
       {
         label: "Sign & notarize",
         command: "murasaki bundle --sign",
-        note: "optional — your own Apple Developer ID; murasaki ships no certificate",
+        note: "optional — your own Apple Developer ID; Murasaki ships no certificate",
       },
       {
         label: "Installer",
@@ -446,7 +446,7 @@ const ja: HomeContent = {
     {
       title: "UI キット",
       description:
-        "@murasakijs/ui — murasaki アプリのために作られた shadcn スタイルのコンポーネントライブラリです。",
+        "@murasakijs/ui — Murasaki アプリのために作られた shadcn スタイルのコンポーネントライブラリです。",
     },
     {
       title: "署名済み配布",
@@ -454,13 +454,13 @@ const ja: HomeContent = {
     },
   ],
   whyMurasaki: {
-    eyebrow: "murasaki を選ぶ理由",
-    heading: "murasaki を選ぶ理由",
+    eyebrow: "Murasaki を選ぶ理由",
+    heading: "Murasaki を選ぶ理由",
     paragraph:
-      "React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたいなら murasaki を選んでください。",
+      "React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたいなら Murasaki を選んでください。",
     tableHeadings: {
       feature: "項目",
-      murasaki: "murasaki",
+      murasaki: "Murasaki",
       electron: "Electron",
       tauri: "Tauri",
     },
@@ -505,7 +505,7 @@ const ja: HomeContent = {
     eyebrow: "本物の OS、ブラウザのタブではない",
     heading: "ブラウザのタブではない。本物の OS ウィンドウ。",
     paragraph:
-      "murasaki のウィンドウはネイティブです — 本物のタイトルバー、本物のメニューバー、本物の OS クロームを備えています。どこを右クリックしても、HTML のポップアップではない、本物のネイティブメニューが開きます。",
+      "Murasaki のウィンドウはネイティブです — 本物のタイトルバー、本物のメニューバー、本物の OS クロームを備えています。どこを右クリックしても、HTML のポップアップではない、本物のネイティブメニューが開きます。",
     bullets: [
       {
         title: "ネイティブウィンドウ",
@@ -545,7 +545,7 @@ const ja: HomeContent = {
       {
         label: "署名・公証する",
         command: "murasaki bundle --sign",
-        note: "任意 — 自分の Apple Developer ID を使用。murasaki は証明書を提供しません",
+        note: "任意 — 自分の Apple Developer ID を使用。Murasaki は証明書を提供しません",
       },
       {
         label: "インストーラーを作る",

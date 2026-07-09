@@ -1,9 +1,9 @@
 ---
 title: ネイティブ API
-description: 現時点で、murasaki のネイティブサーフェスからアプリに公開されているもの。
+description: 現時点で、Murasaki のネイティブサーフェスからアプリに公開されているもの。
 ---
 
-murasaki のネイティブウィンドウ、メニュー、OS 統合は
+Murasaki のネイティブウィンドウ、メニュー、OS 統合は
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
 自社製の Rust バインディング(tao/wry/muda)— によって支えられているため、Rust を書く
 ことは一切ありません。このページでは、**あなたの React アプリから**実際に到達可能なも
@@ -60,7 +60,7 @@ const { status, latest, check, download, install } = useUpdate()
 <Callout type="warn">
   **まだ公開されていません:** open/save/directory ダイアログ、クリップボードの読み書
   き、OS 通知、トレイアイコン、shell/「Finder で表示」はすべて `@murasakijs/native`
-  の内部に存在し、murasaki の CLI(ネイティブウィンドウ、`.app` の About パネルなど)
+  の内部に存在し、Murasaki の CLI(ネイティブウィンドウ、`.app` の About パネルなど)
   が内部的に使用していますが、アプリケーションコードにそれらを公開する React フックは
   まだありません。今日これらのどれかが必要な場合、存在しない API を推測で使おうとしな
   いでください。これは将来のリリースに向けて追跡されています。

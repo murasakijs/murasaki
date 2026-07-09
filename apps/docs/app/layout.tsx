@@ -25,11 +25,11 @@ const siteUrl =
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "murasaki — Next.js DX for desktop apps",
-    template: "%s · murasaki",
+    default: "Murasaki — Next.js DX for desktop apps",
+    template: "%s · Murasaki",
   },
   description: homeContent.en.subhead,
-  applicationName: "murasaki",
+  applicationName: "Murasaki",
   keywords: [
     "murasaki",
     "desktop apps",
@@ -45,7 +45,7 @@ export const metadata: Metadata = {
   ],
   openGraph: {
     type: "website",
-    siteName: "murasaki",
+    siteName: "Murasaki",
     // No `images` here — the static `app/opengraph-image.tsx` file
     // convention is auto-injected by Next.js's metadata resolver.
   },
