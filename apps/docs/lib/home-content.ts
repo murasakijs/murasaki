@@ -146,7 +146,7 @@ const en: HomeContent = {
   mockup: {
     heading: "This is what you ship.",
     caption:
-      "One command → a real native installer. macOS .dmg today — Windows & Linux next.",
+      "One command → a real native installer. macOS & Windows today — Linux next.",
     availableLabel: "Ships today",
     soonLabel: "Coming soon",
   },
@@ -309,10 +309,10 @@ const en: HomeContent = {
       },
       {
         name: "Windows",
-        status: "Roadmap",
-        available: false,
+        status: "Ships today",
+        available: true,
         description:
-          "murasaki dev runs today; @murasakijs/native ships prebuilt x64 binaries. App packaging is on the roadmap.",
+          "Portable .zip plus NSIS .exe and MSI .msi installers, cross-arch (arm64 & x64).",
       },
       {
         name: "Linux",
@@ -398,7 +398,7 @@ const ja: HomeContent = {
   mockup: {
     heading: "実際に届けるのは、これです。",
     caption:
-      "1コマンドで、本物のネイティブインストーラへ。macOS の .dmg は今すぐ、Windows・Linux は近日。",
+      "1コマンドで、本物のネイティブインストーラへ。macOS と Windows は今すぐ、Linux は近日。",
     availableLabel: "今すぐ",
     soonLabel: "近日",
   },
@@ -563,10 +563,10 @@ const ja: HomeContent = {
       },
       {
         name: "Windows",
-        status: "ロードマップ",
-        available: false,
+        status: "本日から利用可能",
+        available: true,
         description:
-          "murasaki dev は今すぐ動作します。@murasakijs/native は x64 のビルド済みバイナリを提供済み。アプリのパッケージングはロードマップ上にあります。",
+          ".zip ポータブル版に加え、NSIS .exe / MSI .msi インストーラ、クロスアーキテクチャ(arm64 / x64)。",
       },
       {
         name: "Linux",
