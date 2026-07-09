@@ -668,8 +668,13 @@ export interface LpExtra {
     /** Small hint that the menus are clickable. */
     tryHint: string;
   };
-  /** Word/character-illuminated manifesto (scroll-linked). */
+  /** Pinned converging headline — the two halves slide together while the
+   * viewport holds (the madewithgsap hero move). */
+  converge: { left: string; right: string };
+  /** Word/character-illuminated manifesto (scroll-linked, pinned). */
   manifesto: string;
+  /** Silkscreen progress counter shown while the manifesto is pinned. */
+  manifestoCounterLabel: string;
   /** Scroll cue label at the bottom of the hero. */
   scrollCue: string;
 }
@@ -720,8 +725,10 @@ const lpEn: LpExtra = {
       "This code becomes that menu. NSMenu on macOS, HMENU on Windows.",
     tryHint: "Try the menus — View → Reload works.",
   },
+  converge: { left: "Native apps.", right: "Web DX." },
   manifesto:
     "Build native desktop apps with file-based routing, server actions, and React 19 — in a Rust-native window, not Electron's Chromium. Without writing Rust.",
+  manifestoCounterLabel: "Lit",
   scrollCue: "Scroll",
 };
 
@@ -771,8 +778,10 @@ const lpJa: LpExtra = {
       "このコードが、このメニューになります。macOS では NSMenu、Windows では HMENU。",
     tryHint: "メニューを触ってみてください — 表示 → 再読み込みは動きます。",
   },
+  converge: { left: "ネイティブアプリ。", right: "Web の DX。" },
   manifesto:
     "ファイルベースルーティング、サーバーアクション、React 19 でネイティブなデスクトップアプリを構築 — Electron の Chromium ではなく、Rust ネイティブなウィンドウで。Rust を書く必要はありません。",
+  manifestoCounterLabel: "Lit",
   scrollCue: "Scroll",
 };
 

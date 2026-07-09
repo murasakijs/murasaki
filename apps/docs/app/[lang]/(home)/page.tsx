@@ -1,6 +1,7 @@
 import { codeToHtml } from "shiki";
 import { LpMotion } from "@/components/home/lp-motion";
 import { PxArtifacts } from "@/components/home/px-artifacts";
+import { PxConverge } from "@/components/home/px-converge";
 import { PxCta } from "@/components/home/px-cta";
 import { PxFeatures } from "@/components/home/px-features";
 import { PxHero } from "@/components/home/px-hero";
@@ -75,6 +76,8 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
         <PxMarquee phrases={x.marquee} />
         <DitherDivider from={PURPLE} to={INKFIELD} />
 
+        <PxConverge left={x.converge.left} right={x.converge.right} />
+
         <PxShowcase
           t={t.nativeDeepDive}
           demo={x.demo}
@@ -82,7 +85,10 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           codeLabel={t.nativeDeepDive.codeLabel}
         />
 
-        <PxManifesto text={x.manifesto} />
+        <PxManifesto
+          text={x.manifesto}
+          counterLabel={x.manifestoCounterLabel}
+        />
 
         <DitherDivider from={INKFIELD} to={PAPER} />
 
