@@ -709,6 +709,16 @@ export interface LpExtra {
     };
     caption: string;
   };
+  /** The 360° ASCII butterfly — the brand's Sasakia charonda voxelized from
+   * butterfly-rects and rendered as rotating text (three.js AsciiEffect),
+   * bridging the LP back to create-murasaki's ASCII banner. */
+  asciiButterfly: {
+    eyebrow: string;
+    heading: string;
+    /** Pinned inside the render — tells people it spins and is pure text. */
+    hint: string;
+    caption: string;
+  };
 }
 
 const lpEn: LpExtra = {
@@ -780,6 +790,13 @@ const lpEn: LpExtra = {
     caption:
       "In a real Murasaki app this pops a native NSMenu / HMENU. On a website? Still just HTML — we had to be honest somewhere.",
   },
+  asciiButterfly: {
+    eyebrow: "Say hi",
+    heading: "Meet the Great Purple Emperor.",
+    hint: "drag to spin · 100% text",
+    caption:
+      "Sasakia charonda — the great purple emperor, Japan's national butterfly, and this framework's namesake. Rendered in plain text, the same way the create-murasaki banner draws it in your terminal.",
+  },
 };
 
 const lpJa: LpExtra = {
@@ -850,6 +867,13 @@ const lpJa: LpExtra = {
     },
     caption:
       "本物の Murasaki アプリなら、ここでネイティブの NSMenu / HMENU が開きます。Web サイト上では……やっぱりただの HTML です。どこかで正直でいないと、ですね。",
+  },
+  asciiButterfly: {
+    eyebrow: "ごあいさつ",
+    heading: "オオムラサキ。",
+    hint: "ドラッグで回せます · すべて文字",
+    caption:
+      "国蝶オオムラサキ(Sasakia charonda)— murasaki の名前の由来です。create-murasaki がターミナルに描く起動バナーと同じように、すべてテキストで描画しています。",
   },
 };
 

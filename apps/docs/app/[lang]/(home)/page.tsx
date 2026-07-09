@@ -1,6 +1,7 @@
 import { codeToHtml } from "shiki";
 import { LpMotion } from "@/components/home/lp-motion";
 import { PxArtifacts } from "@/components/home/px-artifacts";
+import { PxAscii } from "@/components/home/px-ascii";
 import { PxConverge } from "@/components/home/px-converge";
 import { PxCta } from "@/components/home/px-cta";
 import { PxFeatures } from "@/components/home/px-features";
@@ -115,6 +116,8 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
         />
 
         <DitherDivider from={PAPER} to={INKFIELD} />
+
+        <PxAscii {...x.asciiButterfly} />
 
         <PxCta
           quickstart={t.quickStart}
