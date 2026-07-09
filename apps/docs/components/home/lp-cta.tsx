@@ -4,13 +4,12 @@ import { ArrowRight } from "lucide-react";
 import { m } from "motion/react";
 import Link from "next/link";
 import { CopyCommand } from "@/components/copy-command";
-import { LpMesh } from "./lp-backdrop";
 import { EASE } from "./lp-motion";
 
 /**
- * Closing scene: the CTA under a colossal ghost 「紫」, per-word mask reveal
- * on the heading, mesh field drifting behind. Ends the page on the same
- * kanji it opened with.
+ * Closing scene: the CTA under a colossal, near-invisible ghost 「紫」 —
+ * per-word mask reveal on the heading, flat near-black field. Ends the page
+ * on the same kanji it opened with.
  */
 export function LpCta({
   heading,
@@ -34,12 +33,10 @@ export function LpCta({
   const words = /\s/.test(heading) ? heading.split(/\s+/) : [heading];
 
   return (
-    <section className="relative overflow-hidden bg-[#0b0a12] py-32 text-purple-50 sm:py-44">
-      <LpMesh variant="cta" />
-
+    <section className="relative overflow-hidden bg-[#0e0e10] py-32 text-white sm:py-44">
       <span
         aria-hidden="true"
-        className="lp-kanji pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none text-[80vw] font-bold leading-none text-purple-500/[0.09] sm:text-[46vw]"
+        className="lp-kanji pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 select-none text-[80vw] font-bold leading-none text-white/[0.04] sm:text-[44vw]"
       >
         紫
       </span>
@@ -82,7 +79,7 @@ export function LpCta({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.6 }}
           transition={{ duration: 0.6, ease: EASE, delay: 0.25 }}
-          className="motion-reveal lp-sans mt-6 max-w-2xl text-base leading-relaxed text-purple-200/70 sm:text-lg"
+          className="motion-reveal lp-sans mt-6 max-w-2xl text-base leading-relaxed text-white/55 sm:text-lg"
         >
           {paragraph}
         </m.p>
@@ -98,7 +95,7 @@ export function LpCta({
           <div className="flex items-center gap-3">
             <Link
               href={getStartedHref}
-              className="lp-sans group inline-flex h-12 items-center gap-2 rounded-full bg-purple-600 px-7 font-semibold text-white shadow-[0_0_32px_-6px_rgba(168,85,247,0.7)] transition-colors hover:bg-purple-500"
+              className="lp-sans group inline-flex h-12 items-center gap-2 rounded-full bg-[#7c3aed] px-7 font-semibold text-white transition-colors hover:bg-[#6d28d9]"
             >
               {getStartedLabel}
               <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -107,7 +104,7 @@ export function LpCta({
               href={githubHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="lp-sans inline-flex h-12 items-center rounded-full border border-purple-300/30 px-7 font-semibold text-purple-100 transition-colors hover:border-purple-300/60 hover:bg-purple-400/10"
+              className="lp-sans inline-flex h-12 items-center rounded-full border border-white/25 px-7 font-semibold text-white/90 transition-colors hover:border-white/55"
             >
               {githubLabel}
             </a>

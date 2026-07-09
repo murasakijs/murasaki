@@ -19,7 +19,7 @@ export function LpQuickstart({
   steps: HomeContent["quickStart"]["steps"];
 }) {
   return (
-    <section className="relative bg-[#0b0a12] py-24 text-purple-50 sm:py-32">
+    <section className="relative bg-[#0e0e10] py-24 text-white sm:py-32">
       <div className="mx-auto w-full max-w-6xl px-6">
         <SceneLabel index="06" code={eyebrow} />
 
@@ -30,7 +30,7 @@ export function LpQuickstart({
           {heading}
         </MaskReveal>
 
-        <div className="mt-14 border-t border-white/10">
+        <div className="mt-14 border-t border-white/12">
           {steps.map((step, i) => (
             <m.div
               key={step.command}
@@ -38,10 +38,10 @@ export function LpQuickstart({
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true, amount: 0.5 }}
               transition={{ duration: 0.6, ease: EASE, delay: i * 0.08 }}
-              className="motion-reveal flex flex-col gap-2 border-b border-white/10 py-8 sm:flex-row sm:items-baseline sm:gap-8"
+              className="motion-reveal flex flex-col gap-2 border-b border-white/12 py-8 sm:flex-row sm:items-baseline sm:gap-8"
             >
-              <span className="lp-mono flex items-baseline gap-3 text-[11px] uppercase tracking-[0.3em] text-purple-300/60 sm:w-40 sm:shrink-0">
-                <span aria-hidden="true" className="text-purple-400">
+              <span className="lp-mono flex items-baseline gap-3 text-[11px] uppercase tracking-[0.3em] text-white/45 sm:w-40 sm:shrink-0">
+                <span aria-hidden="true" className="text-[#a78bfa]">
                   {String(i + 1).padStart(2, "0")}
                 </span>
                 {step.label}

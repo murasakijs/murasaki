@@ -51,7 +51,7 @@ export function LpManifesto({ text }: { text: string }) {
   }, [text]);
 
   return (
-    <section className="relative bg-[#0e0b18] py-28 text-purple-50 sm:py-40">
+    <section className="relative bg-[#0e0e10] py-28 text-white sm:py-40">
       <div className="mx-auto w-full max-w-5xl px-6">
         <SceneLabel index="02" code="WHY IT EXISTS" />
         <p

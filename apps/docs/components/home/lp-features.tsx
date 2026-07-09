@@ -21,7 +21,7 @@ export function LpFeatures({
   features: HomeContent["features"];
 }) {
   return (
-    <section className="relative bg-[#0b0a12] py-24 text-purple-50 sm:py-32">
+    <section className="relative bg-[#f4f2ed] py-24 text-[#111014] sm:py-32">
       <div className="mx-auto w-full max-w-6xl px-6">
         <SceneLabel index="03" code={eyebrow} />
 
@@ -37,12 +37,12 @@ export function LpFeatures({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
           transition={{ duration: 0.6, ease: EASE, delay: 0.15 }}
-          className="motion-reveal lp-sans mt-5 max-w-2xl text-base leading-relaxed text-purple-200/70 sm:text-lg"
+          className="motion-reveal lp-sans mt-5 max-w-2xl text-base leading-relaxed text-[#111014]/55 sm:text-lg"
         >
           {intro}
         </m.p>
 
-        <div className="mt-16 border-t border-white/10">
+        <div className="mt-16 border-t border-[#111014]/15">
           {features.map((f, i) => (
             <m.div
               key={f.title}
@@ -50,18 +50,18 @@ export function LpFeatures({
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.35 }}
               transition={{ duration: 0.6, ease: EASE, delay: (i % 2) * 0.06 }}
-              className="lp-row motion-reveal group grid grid-cols-[auto_1fr] items-baseline gap-x-6 gap-y-2 border-b border-white/10 py-8 transition-colors hover:bg-white/[0.03] sm:grid-cols-[7rem_1fr_1.2fr] sm:gap-x-10 sm:py-10"
+              className="motion-reveal grid grid-cols-[auto_1fr] items-baseline gap-x-6 gap-y-2 border-b border-[#111014]/15 py-8 sm:grid-cols-[6rem_1fr_1.2fr] sm:gap-x-10 sm:py-10"
             >
               <span
                 aria-hidden="true"
-                className="lp-display lp-outline-number text-[clamp(2.6rem,6vw,5rem)] font-extrabold leading-none"
+                className="lp-mono self-start text-[11px] uppercase tracking-[0.3em] text-[#7c3aed]"
               >
                 {String(i + 1).padStart(2, "0")}
               </span>
               <h3 className="lp-display text-xl font-bold leading-tight sm:text-2xl lg:text-3xl">
                 {f.title}
               </h3>
-              <p className="lp-sans col-span-2 text-sm leading-relaxed text-purple-200/60 sm:col-span-1 sm:text-base">
+              <p className="lp-sans col-span-2 text-sm leading-relaxed text-[#111014]/55 sm:col-span-1 sm:text-base">
                 {f.description}
               </p>
             </m.div>

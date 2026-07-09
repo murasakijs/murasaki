@@ -1,9 +1,8 @@
 import { codeToHtml } from "shiki";
-import { LpGrain } from "@/components/home/lp-backdrop";
-import { LpButterfly } from "@/components/home/lp-butterfly";
 import { LpCta } from "@/components/home/lp-cta";
 import { LpFeatures } from "@/components/home/lp-features";
 import { LpHero } from "@/components/home/lp-hero";
+import { LpLenis } from "@/components/home/lp-lenis";
 import { LpManifesto } from "@/components/home/lp-manifesto";
 import { LpMarquee } from "@/components/home/lp-marquee";
 import { LpMotion } from "@/components/home/lp-motion";
@@ -46,11 +45,10 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
   return (
     <div
       lang={lang}
-      className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#0b0a12]`}
+      className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#0e0e10]`}
     >
       <LpMotion>
-        <LpGrain />
-        <LpButterfly />
+        <LpLenis />
 
         <LpHero
           eyebrow={t.eyebrow}

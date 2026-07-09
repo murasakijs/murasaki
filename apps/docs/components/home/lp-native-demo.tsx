@@ -55,8 +55,8 @@ function MenuBar({
             }}
             className={`lp-sans rounded px-2.5 py-0.5 text-[13px] transition-colors ${
               open === i
-                ? "bg-purple-600 text-white"
-                : "text-purple-100/90 hover:bg-white/10"
+                ? "bg-[#7c3aed] text-white"
+                : "text-white/80 hover:bg-white/10"
             }`}
           >
             {menu.label}
@@ -69,7 +69,7 @@ function MenuBar({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.98, y: -2 }}
                 transition={{ duration: 0.14, ease: "easeOut" }}
-                className="absolute left-0 top-full z-30 mt-1 w-56 origin-top-left rounded-lg border border-white/10 bg-[#1c1728]/95 py-1.5 shadow-2xl shadow-black/50 backdrop-blur-md"
+                className="absolute left-0 top-full z-30 mt-1 w-56 origin-top-left rounded-lg border border-white/10 bg-[#232327]/95 py-1.5 shadow-2xl shadow-black/50 backdrop-blur-md"
               >
                 {menu.items.map((item, j) =>
                   item.divider ? (
@@ -87,11 +87,11 @@ function MenuBar({
                           setOpen(null);
                           if (item.shortcut === "⌘R") onReload();
                         }}
-                        className="lp-sans group flex w-full items-center justify-between px-3 py-1 text-left text-[13px] text-purple-50 hover:bg-purple-600"
+                        className="lp-sans group flex w-full items-center justify-between px-3 py-1 text-left text-[13px] text-white/90 hover:bg-[#7c3aed]"
                       >
                         {item.label}
                         {item.shortcut && (
-                          <span className="lp-mono text-[11px] text-purple-200/50 group-hover:text-white/80">
+                          <span className="lp-mono text-[11px] text-white/40 group-hover:text-white/80">
                             {item.shortcut}
                           </span>
                         )}
@@ -121,13 +121,13 @@ function NativeWindow({ demo }: { demo: LpExtra["demo"] }) {
   const [reloadKey, setReloadKey] = useState(0);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-white/12 bg-[#151020] shadow-[0_24px_80px_-24px_rgba(88,28,135,0.55)]">
+    <div className="overflow-hidden rounded-xl border border-white/10 bg-[#1a1a1e]">
       {/* Titlebar. */}
       <div className="relative flex items-center gap-1.5 border-b border-white/10 px-4 py-2.5">
         <span aria-hidden="true" className="size-3 rounded-full bg-[#ff5f57]" />
         <span aria-hidden="true" className="size-3 rounded-full bg-[#febc2e]" />
         <span aria-hidden="true" className="size-3 rounded-full bg-[#28c840]" />
-        <span className="lp-mono absolute inset-x-0 text-center text-xs text-purple-200/60">
+        <span className="lp-mono absolute inset-x-0 text-center text-xs text-white/45">
           {demo.windowTitle}
         </span>
       </div>
@@ -144,17 +144,17 @@ function NativeWindow({ demo }: { demo: LpExtra["demo"] }) {
           transition={{ duration: 0.18, ease: "easeOut" }}
           className="flex min-h-56 flex-col items-center justify-center gap-4 px-6 py-10 text-center"
         >
-          <p className="lp-display text-2xl font-bold text-purple-50">
+          <p className="lp-display text-2xl font-bold text-white">
             {demo.contentTitle}
           </p>
           <button
             type="button"
             onClick={() => setCount((c) => c + 1)}
-            className="lp-sans rounded-lg border border-purple-300/30 px-4 py-1.5 text-sm text-purple-100 transition-colors hover:border-purple-300/60 hover:bg-purple-400/10"
+            className="lp-sans rounded-lg border border-white/20 px-4 py-1.5 text-sm text-white/85 transition-colors hover:border-white/45"
           >
             {demo.counterLabel} × {count}
           </button>
-          <p className="lp-sans max-w-64 text-xs leading-relaxed text-purple-200/50">
+          <p className="lp-sans max-w-64 text-xs leading-relaxed text-white/40">
             {demo.contentHint}
           </p>
         </m.div>
@@ -170,7 +170,7 @@ export function LpNativeDemo({
   codeLabel,
 }: LpNativeDemoProps) {
   return (
-    <section className="relative bg-[#0b0a12] py-24 text-purple-50 sm:py-32">
+    <section className="relative bg-[#0e0e10] py-24 text-white sm:py-32">
       <div className="mx-auto w-full max-w-6xl px-6">
         <SceneLabel index="01" code="NATIVE PROOF" />
 
@@ -186,7 +186,7 @@ export function LpNativeDemo({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.5 }}
           transition={{ duration: 0.6, ease: EASE, delay: 0.15 }}
-          className="motion-reveal lp-sans mt-5 max-w-2xl text-base leading-relaxed text-purple-200/70 sm:text-lg"
+          className="motion-reveal lp-sans mt-5 max-w-2xl text-base leading-relaxed text-white/55 sm:text-lg"
         >
           {t.paragraph}
         </m.p>
@@ -200,7 +200,7 @@ export function LpNativeDemo({
             transition={{ duration: 0.7, ease: EASE }}
             className="motion-reveal min-w-0"
           >
-            <div className="overflow-hidden rounded-xl border border-white/10 shadow-2xl shadow-purple-950/30">
+            <div className="overflow-hidden rounded-xl border border-white/10">
               <div
                 className="lp-mono flex items-center border-b border-white/10 px-4 py-2.5 text-xs text-neutral-400"
                 style={{ backgroundColor: CODE_CARD_BG }}
@@ -215,7 +215,7 @@ export function LpNativeDemo({
                 dangerouslySetInnerHTML={{ __html: codeHtml }}
               />
             </div>
-            <p className="lp-mono mt-3 text-xs leading-relaxed text-purple-300/60">
+            <p className="lp-mono mt-3 text-xs leading-relaxed text-white/40">
               {demo.codeCaption}
             </p>
           </m.div>
@@ -228,33 +228,31 @@ export function LpNativeDemo({
             transition={{ duration: 0.7, ease: EASE, delay: 0.12 }}
             className="motion-reveal relative min-w-0"
           >
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-6 -z-10 rounded-[2rem] bg-purple-500/20 blur-[70px]"
-            />
             <NativeWindow demo={demo} />
-            <p className="lp-mono mt-3 text-right text-xs text-purple-300/60">
+            <p className="lp-mono mt-3 text-right text-xs text-white/40">
               {demo.tryHint}
             </p>
           </m.div>
         </div>
 
-        {/* Spec rows — the three native facts. */}
-        <div className="mt-16 grid gap-px overflow-hidden rounded-xl border border-white/10 bg-white/10 sm:grid-cols-3">
+        {/* The three native facts — hairline editorial rows, no boxes. */}
+        <div className="mt-20 border-t border-white/12">
           {t.bullets.map((b, i) => (
             <m.div
               key={b.title}
-              initial={{ opacity: 0, y: 20 }}
+              initial={{ opacity: 0, y: 18 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, amount: 0.4 }}
-              transition={{ duration: 0.55, ease: EASE, delay: i * 0.08 }}
-              className="motion-reveal bg-[#0e0b18] p-6"
+              transition={{ duration: 0.55, ease: EASE, delay: i * 0.07 }}
+              className="motion-reveal grid gap-2 border-b border-white/12 py-7 sm:grid-cols-[7rem_1fr_1.4fr] sm:items-baseline sm:gap-8"
             >
-              <p className="lp-mono text-[10px] uppercase tracking-[0.3em] text-purple-400">
+              <p className="lp-mono text-[11px] uppercase tracking-[0.3em] text-[#a78bfa]">
                 {String(i + 1).padStart(2, "0")}
               </p>
-              <h3 className="lp-display mt-3 text-lg font-bold">{b.title}</h3>
-              <p className="lp-sans mt-2 text-sm leading-relaxed text-purple-200/60">
+              <h3 className="lp-display text-lg font-bold sm:text-xl">
+                {b.title}
+              </h3>
+              <p className="lp-sans text-sm leading-relaxed text-white/50">
                 {b.description}
               </p>
             </m.div>

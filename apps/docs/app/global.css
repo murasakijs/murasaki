@@ -336,14 +336,3 @@ html > body[data-scroll-locked] {
     animation-play-state: paused;
   }
 }
-
-/* Outlined display numerals (features index) — stroke-only until hover. */
-.lp-outline-number {
-  -webkit-text-stroke: 1.5px
-    color-mix(in oklch, var(--color-purple-300) 55%, transparent);
-  color: transparent;
-  transition: color 0.35s ease;
-}
-.lp-row:hover .lp-outline-number {
-  color: var(--color-purple-400);
-}

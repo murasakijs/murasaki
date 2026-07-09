@@ -48,13 +48,15 @@ export function SceneLabel({
       viewport={{ once: true, amount: 0.6 }}
       transition={{ duration: 0.5, ease: EASE }}
       className={`motion-reveal lp-mono flex items-center gap-3 text-[11px] tracking-[0.3em] uppercase ${
-        tone === "dark" ? "text-purple-300/70" : "text-purple-700/70"
+        tone === "dark" ? "text-white/45" : "text-[#111014]/45"
       }`}
     >
-      <span aria-hidden="true">{index}</span>
+      <span aria-hidden="true" className="text-[#7c3aed]">
+        {index}
+      </span>
       <span
         aria-hidden="true"
-        className={`h-px w-10 ${tone === "dark" ? "bg-purple-300/40" : "bg-purple-700/40"}`}
+        className={`h-px w-10 ${tone === "dark" ? "bg-white/25" : "bg-[#111014]/25"}`}
       />
       <span>{code}</span>
     </m.p>
