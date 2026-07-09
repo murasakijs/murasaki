@@ -91,7 +91,7 @@ export function PxVersus({
         {/* Sticky rail. */}
         <div className="lg:sticky lg:top-28 lg:self-start">
           <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-[#111014]/50">
-            <span className="text-[#7c3aed]">04</span> · vs Electron / Tauri
+            <span className="text-[#7c3aed]">05</span> · vs Electron / Tauri
           </p>
 
           <div className="mt-6 overflow-hidden">

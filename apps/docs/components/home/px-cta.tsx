@@ -218,7 +218,7 @@ export function PxCta({
       <div className="relative z-10 mx-auto w-full max-w-6xl px-6">
         {/* Three commands. */}
         <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
-          <span className="text-[#a78bfa]">06</span> · {quickstart.eyebrow}
+          <span className="text-[#a78bfa]">07</span> · {quickstart.eyebrow}
         </p>
         <div data-cta-steps className="mt-8 border-t border-white/12">
           {quickstart.steps.map((step, i) => (

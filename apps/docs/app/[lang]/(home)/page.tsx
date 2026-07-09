@@ -8,6 +8,7 @@ import { PxHero } from "@/components/home/px-hero";
 import { PxManifesto } from "@/components/home/px-manifesto";
 import { PxMarquee } from "@/components/home/px-marquee";
 import { DitherDivider } from "@/components/home/px-pixel";
+import { PxPlayground } from "@/components/home/px-playground";
 import { PxScroll } from "@/components/home/px-scroll";
 import { PxShowcase } from "@/components/home/px-showcase";
 import { PxVersus } from "@/components/home/px-versus";
@@ -98,6 +99,8 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           intro={t.featuresIntro}
           features={t.features}
         />
+
+        <PxPlayground {...x.playground} />
 
         <PxVersus
           t={t.whyMurasaki}

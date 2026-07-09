@@ -67,7 +67,7 @@ export function PxArtifacts({
 
       <div className="relative mx-auto w-full max-w-6xl px-6">
         <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-[#111014]/50">
-          <span className="text-[#7c3aed]">05</span> · Artifacts
+          <span className="text-[#7c3aed]">06</span> · Artifacts
         </p>
 
         <div className="mt-6 overflow-hidden">
