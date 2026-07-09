@@ -14,6 +14,15 @@ export function baseOptions(lang: string): BaseLayoutProps {
       ),
       url: `/${lang}`,
     },
+    // Rendered in the navbar next to (left of) the search box — the way from
+    // the landing into the documentation.
+    links: [
+      {
+        text: "Docs",
+        url: `/${lang}/docs`,
+        active: "nested-url",
+      },
+    ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
 }

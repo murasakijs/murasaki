@@ -653,7 +653,11 @@ export interface LpExtra {
   /** Vertical Japanese rail on the hero's right edge (pure art direction —
    * shown in both locales, like a hanko/colophon). */
   tategaki: string;
-  /** The live native-window demo (proof-by-demo section). */
+  /** The live native-window demo (proof-by-demo section). The window's
+   * CONTENT is a faithful miniature of the real `create-murasaki` scaffold
+   * home — so it stays English in every locale (it's a screenshot of the
+   * product, and the menu labels must match the code panel beside it).
+   * Only the captions around the window localize. */
   demo: {
     windowTitle: string;
     menus: {
@@ -661,8 +665,14 @@ export interface LpExtra {
       items: { label: string; shortcut?: string; divider?: boolean }[];
     }[];
     contentTitle: string;
-    contentHint: string;
-    counterLabel: string;
+    /** The scaffold home's tagline, verbatim. */
+    tagline: string;
+    /** The scaffold home's "Edit … and save to reload." hint, verbatim. */
+    editHint: { before: string; code: string; after: string };
+    /** The scaffold home's three resource cards. */
+    cards: string[];
+    /** The scaffold home's CTA button label, verbatim. */
+    demoCta: string;
     /** Caption under the code panel — "this code → that menu". */
     codeCaption: string;
     /** Small hint that the menus are clickable. */
@@ -697,10 +707,7 @@ const lpEn: LpExtra = {
     menus: [
       {
         label: "File",
-        items: [
-          { label: "New Window", shortcut: "⌘N" },
-          { label: "Close Window", shortcut: "⌘W" },
-        ],
+        items: [{ label: "Close Window", shortcut: "⌘W" }],
       },
       {
         label: "Edit",
@@ -711,6 +718,7 @@ const lpEn: LpExtra = {
           { label: "Cut", shortcut: "⌘X" },
           { label: "Copy", shortcut: "⌘C" },
           { label: "Paste", shortcut: "⌘V" },
+          { label: "Select All", shortcut: "⌘A" },
         ],
       },
       {
@@ -719,8 +727,15 @@ const lpEn: LpExtra = {
       },
     ],
     contentTitle: "Hello, Murasaki 🦋",
-    contentHint: "This menu bar is declared in React — rendered by the OS.",
-    counterLabel: "Clicked",
+    tagline:
+      "The Next.js developer experience — file-based routing, server actions and native menus — in a lightweight Rust shell.",
+    editHint: {
+      before: "Edit ",
+      code: "src/app/page.tsx",
+      after: " and save to reload.",
+    },
+    cards: ["Docs", "GitHub", "murasaki_js"],
+    demoCta: "Try the interactive demo",
     codeCaption:
       "This code becomes that menu. NSMenu on macOS, HMENU on Windows.",
     tryHint: "Try the menus — View → Reload works.",
@@ -749,31 +764,36 @@ const lpJa: LpExtra = {
     windowTitle: "Murasaki App",
     menus: [
       {
-        label: "ファイル",
-        items: [
-          { label: "新規ウィンドウ", shortcut: "⌘N" },
-          { label: "ウィンドウを閉じる", shortcut: "⌘W" },
-        ],
+        label: "File",
+        items: [{ label: "Close Window", shortcut: "⌘W" }],
       },
       {
-        label: "編集",
+        label: "Edit",
         items: [
-          { label: "取り消す", shortcut: "⌘Z" },
-          { label: "やり直す", shortcut: "⇧⌘Z" },
+          { label: "Undo", shortcut: "⌘Z" },
+          { label: "Redo", shortcut: "⇧⌘Z" },
           { label: "", divider: true },
-          { label: "カット", shortcut: "⌘X" },
-          { label: "コピー", shortcut: "⌘C" },
-          { label: "ペースト", shortcut: "⌘V" },
+          { label: "Cut", shortcut: "⌘X" },
+          { label: "Copy", shortcut: "⌘C" },
+          { label: "Paste", shortcut: "⌘V" },
+          { label: "Select All", shortcut: "⌘A" },
         ],
       },
       {
-        label: "表示",
-        items: [{ label: "再読み込み", shortcut: "⌘R" }],
+        label: "View",
+        items: [{ label: "Reload", shortcut: "⌘R" }],
       },
     ],
     contentTitle: "Hello, Murasaki 🦋",
-    contentHint: "このメニューバーは React で宣言され、OS が描画しています。",
-    counterLabel: "クリック",
+    tagline:
+      "The Next.js developer experience — file-based routing, server actions and native menus — in a lightweight Rust shell.",
+    editHint: {
+      before: "Edit ",
+      code: "src/app/page.tsx",
+      after: " and save to reload.",
+    },
+    cards: ["Docs", "GitHub", "murasaki_js"],
+    demoCta: "Try the interactive demo",
     codeCaption:
       "このコードが、このメニューになります。macOS では NSMenu、Windows では HMENU。",
     tryHint: "メニューを触ってみてください — 表示 → 再読み込みは動きます。",

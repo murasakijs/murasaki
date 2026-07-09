@@ -21,6 +21,20 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
       "(min-width: 1024px) and (prefers-reduced-motion: no-preference)",
       () => {
         const ctx = gsap.context(() => {
+          // Pin styling lives HERE, not in CSS: it only exists when this
+          // animation actually runs (JS + desktop + motion allowed), so
+          // no-JS/reduced-motion/mobile all get normal document flow.
+          gsap.set(wrap, { height: "220vh" });
+          // Pin below the fixed site header, not under it — measured live
+          // so the scene's first line (the index label) stays visible.
+          const navH = document.querySelector("header")?.offsetHeight ?? 56;
+          gsap.set("[data-px-sticky]", {
+            position: "sticky",
+            top: navH,
+            height: `calc(100vh - ${navH}px)`,
+            paddingTop: 0,
+            paddingBottom: 0,
+          });
           const tl = gsap.timeline({
             scrollTrigger: {
               trigger: wrap,
@@ -48,8 +62,11 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
 
   return (
     <section className="bg-[#0e0e10] text-white">
-      <div ref={wrapRef} className="relative motion-safe:lg:h-[220vh]">
-        <div className="flex items-center justify-center overflow-hidden py-24 motion-safe:lg:sticky motion-safe:lg:top-0 motion-safe:lg:h-screen motion-safe:lg:py-0">
+      <div ref={wrapRef} className="relative">
+        <div
+          data-px-sticky
+          className="flex items-center justify-center overflow-hidden py-24"
+        >
           <h2 className="lp-display flex flex-col items-center gap-3 px-6 text-center text-[clamp(2.4rem,7.5vw,7rem)] font-extrabold leading-[0.95] tracking-tight lg:flex-row lg:gap-[0.35em] lg:whitespace-nowrap">
             <span data-cv-left className="inline-block will-change-transform">
               {left}

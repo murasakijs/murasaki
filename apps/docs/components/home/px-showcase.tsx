@@ -122,9 +122,9 @@ function MenuBar({
 }
 
 export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
+  const sectionRef = useRef<HTMLElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<number | null>(null);
-  const [count, setCount] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   // Which menu the scripted timeline opens (View = last).
   const viewIndex = demo.menus.length - 1;
@@ -139,6 +139,19 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
       "(min-width: 1024px) and (prefers-reduced-motion: no-preference)",
       () => {
         const ctx = gsap.context(() => {
+          // Pin styling lives HERE, not in CSS — see px-converge.tsx.
+          gsap.set(wrap, { height: "240vh" });
+          // Pin below the fixed site header, not under it — measured live
+          // so the scene's first line (the index label) stays visible.
+          const navH = document.querySelector("header")?.offsetHeight ?? 56;
+          gsap.set("[data-px-sticky]", {
+            position: "sticky",
+            top: navH,
+            height: `calc(100vh - ${navH}px)`,
+            display: "flex",
+            alignItems: "center",
+          });
+          gsap.set("[data-px-content]", { paddingTop: 0, paddingBottom: 0 });
           const tl = gsap.timeline({
             scrollTrigger: {
               trigger: wrap,
@@ -167,13 +180,8 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
             )
             .call(() => setOpen(null), [], 0.55)
             .call(() => setOpen(viewIndex), [], 0.6)
-            .from(
-              "[data-sc-fact]",
-              { opacity: 0, y: 18, stagger: 0.04, duration: 0.1 },
-              0.74,
-            )
             // Padding so the pin doesn't release right on the last beat.
-            .to({}, { duration: 0.12 });
+            .to({}, { duration: 0.24 });
         }, wrap);
         return () => ctx.revert();
       },
@@ -189,7 +197,6 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
             "[data-sc-para]",
             "[data-sc-code]",
             "[data-sc-window]",
-            "[data-sc-facts]",
           ]) {
             gsap.from(sel, {
               opacity: 0,
@@ -204,14 +211,30 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
       },
     );
 
+    // The facts live outside the pin (normal flow) so the pinned content
+    // always fits its sticky box — they reveal on their own trigger.
+    mm.add("(prefers-reduced-motion: no-preference)", () => {
+      const ctx = gsap.context(() => {
+        gsap.from("[data-sc-fact]", {
+          opacity: 0,
+          y: 18,
+          stagger: 0.08,
+          duration: 0.55,
+          ease: "power2.out",
+          scrollTrigger: { trigger: "[data-sc-facts]", start: "top 85%" },
+        });
+      }, sectionRef);
+      return () => ctx.revert();
+    });
+
     return () => mm.revert();
   }, [viewIndex]);
 
   return (
-    <section className="bg-[#0e0e10] text-white">
-      <div ref={wrapRef} className="relative motion-safe:lg:h-[280vh]">
-        <div className="motion-safe:lg:sticky motion-safe:lg:top-0 motion-safe:lg:flex motion-safe:lg:h-screen motion-safe:lg:items-center">
-          <div className="mx-auto w-full max-w-6xl px-6 py-20 motion-safe:lg:py-0">
+    <section ref={sectionRef} className="bg-[#0e0e10] text-white">
+      <div ref={wrapRef} className="relative">
+        <div data-px-sticky>
+          <div data-px-content className="mx-auto w-full max-w-6xl px-6 py-20">
             <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
               <span className="text-[#a78bfa]">01</span> · Native proof
             </p>
@@ -302,21 +325,34 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
                       animate={{ opacity: 1, scale: 1 }}
                       exit={{ opacity: 0 }}
                       transition={{ duration: 0.18, ease: "easeOut" }}
-                      className="flex min-h-52 flex-col items-center justify-center gap-4 px-6 py-9 text-center"
+                      className="flex min-h-56 flex-col items-center justify-center gap-3 px-6 py-8 text-center"
                     >
-                      <p className="lp-display text-2xl font-bold text-white">
+                      <p className="lp-display text-xl font-bold text-white">
                         {demo.contentTitle}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => setCount((c) => c + 1)}
-                        className="lp-sans border border-white/20 px-4 py-1.5 text-sm text-white/85 transition-colors hover:border-white/45"
-                      >
-                        {demo.counterLabel} × {count}
-                      </button>
-                      <p className="lp-sans max-w-64 text-xs leading-relaxed text-white/40">
-                        {demo.contentHint}
+                      <p className="lp-sans max-w-sm text-[11px] leading-relaxed text-white/55">
+                        {demo.tagline}
                       </p>
+                      <p className="lp-sans text-[10px] text-white/40">
+                        {demo.editHint.before}
+                        <code className="rounded bg-white/10 px-1 py-0.5 font-mono">
+                          {demo.editHint.code}
+                        </code>
+                        {demo.editHint.after}
+                      </p>
+                      <div className="mt-1 flex items-center gap-2">
+                        {demo.cards.map((card) => (
+                          <span
+                            key={card}
+                            className="lp-sans rounded border border-white/15 px-2.5 py-1 text-[10px] text-white/70"
+                          >
+                            {card}
+                          </span>
+                        ))}
+                      </div>
+                      <span className="lp-sans mt-1 inline-flex items-center gap-1 rounded bg-[#7c3aed] px-3 py-1.5 text-[11px] font-semibold text-white">
+                        {demo.demoCta} →
+                      </span>
                     </m.div>
                   </AnimatePresence>
                 </div>
@@ -325,28 +361,31 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
                 </p>
               </div>
             </div>
-
-            {/* The three native facts. */}
-            <div data-sc-facts className="mt-12 border-t border-white/12">
-              {t.bullets.map((b, i) => (
-                <div
-                  key={b.title}
-                  data-sc-fact
-                  className="grid gap-1.5 border-b border-white/12 py-4 sm:grid-cols-[6rem_1fr_1.5fr] sm:items-baseline sm:gap-8"
-                >
-                  <p className="lp-pixel text-[10px] uppercase tracking-[0.25em] text-[#a78bfa]">
-                    {String(i + 1).padStart(2, "0")}
-                  </p>
-                  <h3 className="lp-display text-base font-bold sm:text-lg">
-                    {b.title}
-                  </h3>
-                  <p className="lp-sans text-sm leading-relaxed text-white/50">
-                    {b.description}
-                  </p>
-                </div>
-              ))}
-            </div>
           </div>
+        </div>
+      </div>
+
+      {/* The three native facts — outside the pin, normal flow. */}
+      <div className="mx-auto w-full max-w-6xl px-6 pb-20 lg:pb-24">
+        {/* The three native facts. */}
+        <div data-sc-facts className="border-t border-white/12">
+          {t.bullets.map((b, i) => (
+            <div
+              key={b.title}
+              data-sc-fact
+              className="grid gap-1.5 border-b border-white/12 py-4 sm:grid-cols-[6rem_1fr_1.5fr] sm:items-baseline sm:gap-8"
+            >
+              <p className="lp-pixel text-[10px] uppercase tracking-[0.25em] text-[#a78bfa]">
+                {String(i + 1).padStart(2, "0")}
+              </p>
+              <h3 className="lp-display text-base font-bold sm:text-lg">
+                {b.title}
+              </h3>
+              <p className="lp-sans text-sm leading-relaxed text-white/50">
+                {b.description}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
     </section>
