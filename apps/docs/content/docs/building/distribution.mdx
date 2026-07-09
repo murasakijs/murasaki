@@ -1,13 +1,12 @@
 ---
 title: Distribution
-description: Shipping a real .app / .dmg — cross-arch builds, signing, notarization, and CI.
+description: Shipping real native installers — cross-arch builds, signing, notarization, and CI.
 ---
 
-`murasaki bundle` / `murasaki installer` are implemented and verified on
-**macOS** today (`.app` / `.dmg`); other platforms currently print a "not
-supported yet" message. `@murasakijs/native` itself already ships prebuilt
-binaries for macOS (arm64/x64), Windows (x64), and Linux (x64/arm64) — app
-packaging for Windows/Linux is on the roadmap.
+`murasaki bundle` / `murasaki installer` ship real installers on **macOS**
+(`.app` / `.dmg`) and **Windows** (a portable `.zip`, an NSIS `.exe`, and an
+MSI `.msi`), cross-arch (arm64 / x64) on both. `@murasakijs/native` also ships
+prebuilt binaries for Linux (x64/arm64); Linux app packaging is on the roadmap.
 
 ## Cross-arch builds
 

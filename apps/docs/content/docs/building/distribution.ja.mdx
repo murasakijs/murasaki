@@ -1,14 +1,13 @@
 ---
 title: 配布
-description: 本物の .app / .dmg を出荷する — クロスアーキテクチャビルド、署名、公証、CI。
+description: 本物のネイティブインストーラを出荷する — クロスアーキテクチャビルド、署名、公証、CI。
 ---
 
-`murasaki bundle` / `murasaki installer` は、現在のところ **macOS**(`.app` /
-`.dmg`)で実装・検証済みです。他のプラットフォームでは現時点で「まだサポートされてい
-ません」というメッセージが表示されます。`@murasakijs/native` 自体は、macOS
-(arm64/x64)、Windows(x64)、Linux(x64/arm64)向けにビルド済みバイナリをすでに提供
-しています — Windows/Linux 向けのアプリパッケージングはロードマップに含まれていま
-す。
+`murasaki bundle` / `murasaki installer` は、**macOS**(`.app` / `.dmg`)と
+**Windows**(ポータブル `.zip`、NSIS `.exe`、MSI `.msi`)で本物のインストーラを
+出力します。いずれもクロスアーキテクチャ(arm64 / x64)対応です。`@murasakijs/native`
+は Linux(x64/arm64)向けのビルド済みバイナリも提供しています — Linux 向けのアプリ
+パッケージングはロードマップに含まれています。
 
 ## クロスアーキテクチャビルド
 

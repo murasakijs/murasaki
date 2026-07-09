@@ -379,7 +379,7 @@ const en: HomeContent = {
         { label: "X", href: "https://x.com/murasaki_js" },
       ],
     },
-    license: "MIT licensed",
+    license: "© 2026 ichi · MIT licensed",
   },
 };
 
@@ -636,7 +636,7 @@ const ja: HomeContent = {
         { label: "X", href: "https://x.com/murasaki_js" },
       ],
     },
-    license: "MIT ライセンス",
+    license: "© 2026 ichi · MIT ライセンス",
   },
 };
 
