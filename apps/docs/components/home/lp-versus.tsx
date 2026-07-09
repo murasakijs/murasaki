@@ -18,7 +18,11 @@ export function LpVersus({
   rows: HomeContent["comparisonRows"];
   footnote: string;
 }) {
-  const heads = [t.tableHeadings.murasaki, t.tableHeadings.electron, t.tableHeadings.tauri];
+  const heads = [
+    t.tableHeadings.murasaki,
+    t.tableHeadings.electron,
+    t.tableHeadings.tauri,
+  ];
 
   return (
     <section className="relative bg-[#0e0b18] py-24 text-purple-50 sm:py-32">

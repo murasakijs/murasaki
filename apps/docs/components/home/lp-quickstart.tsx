@@ -47,7 +47,10 @@ export function LpQuickstart({
                 {step.label}
               </span>
               <code className="lp-mono block overflow-x-auto text-[clamp(1rem,2.6vw,1.7rem)] font-medium tracking-tight whitespace-pre">
-                <span aria-hidden="true" className="select-none text-purple-400">
+                <span
+                  aria-hidden="true"
+                  className="select-none text-purple-400"
+                >
                   ${" "}
                 </span>
                 {step.command}

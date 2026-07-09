@@ -134,7 +134,10 @@ export function LpHero({
                   key={i}
                   className="inline-block overflow-hidden align-bottom"
                 >
-                  <m.span variants={char} className="inline-block will-change-transform">
+                  <m.span
+                    variants={char}
+                    className="inline-block will-change-transform"
+                  >
                     {c}
                   </m.span>
                 </span>

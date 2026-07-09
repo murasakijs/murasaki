@@ -132,9 +132,7 @@ export function LpMesh({ variant }: { variant: "hero" | "cta" }) {
             background: `radial-gradient(circle at 35% 35%, ${b.color}, transparent 70%)`,
           }}
           animate={
-            reduce
-              ? undefined
-              : { x: b.dx, y: b.dy, scale: [1, 1.1, 0.96, 1] }
+            reduce ? undefined : { x: b.dx, y: b.dy, scale: [1, 1.1, 0.96, 1] }
           }
           transition={{
             duration: b.duration,

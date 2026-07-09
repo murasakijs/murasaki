@@ -104,9 +104,8 @@ function MenuBar({
           </AnimatePresence>
         </div>
       ))}
-      {/* Click-away layer while a menu is open. */}
+      {/* Click-away layer while a menu is open (Escape also closes). */}
       {open !== null && (
-        // biome-ignore lint/a11y/noStaticElementInteractions: invisible click-away helper, Escape also closes.
         <div
           className="fixed inset-0 z-20"
           onClick={() => setOpen(null)}
@@ -164,7 +163,12 @@ function NativeWindow({ demo }: { demo: LpExtra["demo"] }) {
   );
 }
 
-export function LpNativeDemo({ t, demo, codeHtml, codeLabel }: LpNativeDemoProps) {
+export function LpNativeDemo({
+  t,
+  demo,
+  codeHtml,
+  codeLabel,
+}: LpNativeDemoProps) {
   return (
     <section className="relative bg-[#0b0a12] py-24 text-purple-50 sm:py-32">
       <div className="mx-auto w-full max-w-6xl px-6">

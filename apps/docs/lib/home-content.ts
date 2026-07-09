@@ -716,7 +716,8 @@ const lpEn: LpExtra = {
     contentTitle: "Hello, Murasaki 🦋",
     contentHint: "This menu bar is declared in React — rendered by the OS.",
     counterLabel: "Clicked",
-    codeCaption: "This code becomes that menu. NSMenu on macOS, HMENU on Windows.",
+    codeCaption:
+      "This code becomes that menu. NSMenu on macOS, HMENU on Windows.",
     tryHint: "Try the menus — View → Reload works.",
   },
   manifesto:
