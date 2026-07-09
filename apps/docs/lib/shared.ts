@@ -1,4 +1,4 @@
-export const appName = "murasaki";
+export const appName = "Murasaki";
 export const docsRoute = "/docs";
 export const docsImageRoute = "/og/docs";
 export const docsContentRoute = "/llms.mdx/docs";

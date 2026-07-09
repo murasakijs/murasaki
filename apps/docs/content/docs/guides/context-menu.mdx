@@ -3,7 +3,7 @@ title: Context Menu
 description: Declare a real OS context menu with useContextMenu — no HTML popup involved.
 ---
 
-murasaki's context menu is declared with a hook, not markup, so it lives right
+Murasaki's context menu is declared with a hook, not markup, so it lives right
 next to your state — its `action`s can close over `useState` setters. None of
 it renders HTML: items are posted to the Rust side, which pops a real OS menu
 (`NSMenu` on macOS, `HMENU` on Windows, `GtkMenu` on Linux).
@@ -115,6 +115,6 @@ The object `createActions` returns also includes the built-ins (`Action.Copy`,
 ## Next
 
 <Cards>
-  <Card title="Native APIs" href="/docs/guides/native-apis" description="The rest of murasaki's native surface." />
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="The rest of Murasaki's native surface." />
   <Card title="Styling" href="/docs/guides/styling" description="Tailwind + @murasakijs/ui." />
 </Cards>

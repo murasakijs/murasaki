@@ -7,7 +7,7 @@ export function AvatarDemo() {
     <Avatar>
       <AvatarImage
         src="https://avatars.githubusercontent.com/u/297658745?s=400"
-        alt="murasaki"
+        alt="Murasaki"
       />
       <AvatarFallback>MU</AvatarFallback>
     </Avatar>

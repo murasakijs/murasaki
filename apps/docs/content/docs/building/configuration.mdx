@@ -38,7 +38,7 @@ nothing to await or configure beyond the object you pass it.
 | `authors` | `string[]?` | Author names shown in the About panel (Windows/Linux only). |
 | `window` | `WindowConfig?` | Window shape — see [below](#window). |
 | `updater` | `UpdaterConfig?` | Auto-update source — see [below](#updater). |
-| `locales` | `string[]?` | BCP-47 UI languages your app supports (e.g. `['en', 'ja']`). Feeds the macOS bundle's `CFBundleLocalizations` and constrains murasaki's default native menu translations. Defaults to every language murasaki ships menu translations for: `en`, `ja`, `zh-Hans`, `ko`, `es`, `fr`, `de`. |
+| `locales` | `string[]?` | BCP-47 UI languages your app supports (e.g. `['en', 'ja']`). Feeds the macOS bundle's `CFBundleLocalizations` and constrains Murasaki's default native menu translations. Defaults to every language Murasaki ships menu translations for: `en`, `ja`, `zh-Hans`, `ko`, `es`, `fr`, `de`. |
 | `devPort` | `number?` | Vite dev server port during `murasaki dev`. Defaults to `5178` (auto-increments if taken). |
 | `targets` | `Target[]?` | Build targets. Defaults to the host platform. One or more of `darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, `linux-arm64`. |
 | `icon` | `string?` | Path to a source PNG (ideally 1024px). `murasaki icon` / `murasaki bundle` fan it out to `.icns` / `.ico` / a PNG set. |
@@ -89,17 +89,17 @@ Consumed by `useUpdate()` / `<UpdateButton />` — see
 ## `installer`
 
 Styling for the `.dmg` produced by `murasaki installer`. Omit entirely to use
-murasaki's default background.
+Murasaki's default background.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `background` | `string?` | Path (relative to the project root) to a custom DMG background PNG. Overrides murasaki's default. |
+| `background` | `string?` | Path (relative to the project root) to a custom DMG background PNG. Overrides Murasaki's default. |
 | `window` | `{ width: number; height: number }?` | DMG window content size in points. Default `{ width: 640, height: 420 }` (matches the default background). |
 | `iconSize` | `number?` | Icon size in the DMG window. Default `128`. |
 
 ## `sign`
 
-macOS code-signing. murasaki signs with **your** certificate — it ships none
+macOS code-signing. Murasaki signs with **your** certificate — it ships none
 of its own. Notarization credentials are read from environment variables,
 never from this config — see
 [Distribution → Signing](/docs/building/distribution#signing--notarization).

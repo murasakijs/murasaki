@@ -6,10 +6,10 @@ description: Define the native application menu bar with useAppMenu — NSMenu o
 `useAppMenu` declares your app's menu bar — the menu at the top of the screen
 on macOS, and the window's menu bar on Windows. Like [`useContextMenu`](/docs/guides/context-menu),
 it's a hook, not markup: items are posted to the Rust side, which builds a real
-OS menu (`NSMenu` / `HMENU`). It's the murasaki equivalent of Electron's
+OS menu (`NSMenu` / `HMENU`). It's the Murasaki equivalent of Electron's
 `Menu.setApplicationMenu` or Tauri's menu API.
 
-It's **opt-in**. Without it, your app still gets murasaki's standard menu (an
+It's **opt-in**. Without it, your app still gets Murasaki's standard menu (an
 app menu with About/Quit, plus Edit and Window). Call `useAppMenu` only when
 you want your own.
 
@@ -83,7 +83,7 @@ the native accelerator label. Reuse your app's actions with
 
 <Callout type="info">
   Mount `useAppMenu` once — the last call wins, replacing whatever menu is
-  installed. Not calling it keeps murasaki's default menu.
+  installed. Not calling it keeps Murasaki's default menu.
 </Callout>
 
 ## Platform notes
@@ -91,12 +91,12 @@ the native accelerator label. Reuse your app's actions with
 - **macOS** — a top-of-screen `NSMenu`; the app-name menu is always prepended.
 - **Windows** — an in-window `HMENU` bar; it inherits the OS's classic styling
   and doesn't follow dark mode. `close` and `quit` currently do the same thing
-  (murasaki apps are single-window today).
+  (Murasaki apps are single-window today).
 - **Linux** — no default menu bar yet.
 
 ## Next
 
 <Cards>
   <Card title="Context Menu" href="/docs/guides/context-menu" description="Right-click menus with useContextMenu." />
-  <Card title="Native APIs" href="/docs/guides/native-apis" description="The rest of murasaki's native surface." />
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="The rest of Murasaki's native surface." />
 </Cards>

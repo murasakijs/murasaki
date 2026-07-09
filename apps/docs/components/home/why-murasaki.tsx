@@ -28,8 +28,8 @@ interface WhyMurasakiProps {
 const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 
 /**
- * "Why murasaki": the existing comparison table against Electron/Tauri
- * (murasaki's column visually highlighted in purple), followed by the
+ * "Why Murasaki": the existing comparison table against Electron/Tauri
+ * (Murasaki's column visually highlighted in purple), followed by the
  * "~1/5 the memory of Electron" pull-stat — always paired with its
  * `comparisonFootnote` caveat, never shown alone.
  */
