@@ -8,6 +8,7 @@
     "middleware",
     "native-apis",
     "context-menu",
+    "app-menu",
     "styling"
   ]
 }

@@ -66,7 +66,7 @@ export function NativeDeepDive({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.3 }}
           transition={{ duration: 0.6, ease: EASE_OUT_EXPO }}
-          className="motion-reveal flex flex-col gap-8"
+          className="motion-reveal flex min-w-0 flex-col gap-8"
         >
           {bullets.map((bullet) => (
             <div key={bullet.title} className="flex gap-4">
@@ -108,7 +108,7 @@ export function NativeDeepDive({
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.3 }}
           transition={{ duration: 0.6, ease: EASE_OUT_EXPO, delay: 0.1 }}
-          className="motion-reveal relative"
+          className="motion-reveal relative min-w-0"
         >
           <div
             aria-hidden="true"

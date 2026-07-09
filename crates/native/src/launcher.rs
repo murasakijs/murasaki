@@ -1,36 +1,331 @@
 //! Production launcher — the Rust binary that becomes the packaged app's
-//! `CFBundleExecutable` (see `src/bin/murasaki-launcher.rs`), replacing the
-//! bash-script + `node` prod launcher. Being a *real* executable (rather than
-//! a renamed copy of `node`) is what lets macOS show the product name and
-//! icon for the running process — see `Application::set_icon_path`'s doc
-//! comment for why the previous approach couldn't do that reliably.
+//! `CFBundleExecutable` on macOS or `<productName>.exe` on Windows (see
+//! `src/bin/murasaki-launcher.rs`), replacing the bash-script + `node` prod
+//! launcher. Being a *real* executable (rather than a renamed copy of
+//! `node`) is what lets macOS show the product name and icon for the running
+//! process — see `Application::set_icon_path`'s doc comment for why the
+//! previous approach couldn't do that reliably. On Windows it's what makes
+//! the taskbar/Alt-Tab title read the product name instead of `node.exe`.
 //!
 //! Mirrors `packages/murasaki/assets/prod-launcher.mjs` closely: spawns
 //! `prod-server.mjs` as a child process, reads the assigned port off a
 //! `MURASAKI_PORT=<n>` stdout line, then opens a webview pointed at
-//! `http://127.0.0.1:<port>/`. The default-menu locale resolution mirrors
-//! `packages/murasaki/src/menu-i18n.ts`.
+//! `http://127.0.0.1:<port>/`. macOS and Windows share that
+//! resources-dir → spawn-node → read-port sequence (the `shared` module
+//! below, identical pure `std::process`/IO on both); everything past that —
+//! building the window/webview and any native chrome (Dock, app menu, About
+//! panel) — is per-OS in `imp_macos`/`imp_win`, since only macOS currently
+//! wires up a native menu bar / About panel. (The right-click context menu is
+//! a separate story — `webview::show_context_menu` — and is implemented on
+//! both macOS and Windows; both `imp_macos`/`imp_win` build their webview via
+//! the same `crate::webview::Webview::new`, so this launcher gets it for
+//! free.) The default-menu locale resolution mirrors
+//! `packages/murasaki/src/menu-i18n.ts` — also macOS-only for now, see
+//! `imp_win`'s doc comment for what's deferred.
 //!
-//! macOS-only (packaging only supports macOS right now — see `cli/bundle.ts`);
-//! `run_launcher` is a no-op stub elsewhere so the crate still builds
-//! everywhere the GUI stack does.
+//! Linux packaging is Phase 3; `run_launcher` is a no-op stub there (and
+//! everywhere else) so the crate still builds wherever the GUI stack does.
 
-#[cfg(target_os = "macos")]
-mod imp {
+/// Cross-platform core shared by `imp_macos` and `imp_win`: reading
+/// `murasaki-meta.json` and spawning `prod-server.mjs`. Pure
+/// `std::process`/IO with no OS-specific API calls, so unlike the window/menu
+/// code below it needs no per-OS duplicate — only the resources-dir
+/// resolution and the node binary's filename (`"node"` vs `"node.exe"`)
+/// differ, and callers pass those in.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod shared {
   use std::{
-    cell::RefCell,
     collections::HashMap,
     fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Write},
     path::Path,
     process::{Child, Command, Stdio},
-    rc::Rc,
     sync::mpsc,
     thread,
     time::Duration,
   };
 
   use serde::Deserialize;
+
+  use crate::types::MenuLabels;
+
+  /// Subset of the packaged resources dir's `murasaki-meta.json` (written by
+  /// `cli/bundle.ts`; `Contents/Resources/` on macOS, `resources/` on
+  /// Windows) this launcher needs. Fields the packager may omit
+  /// (`config.window` / `config.description` etc. are all optional in
+  /// `MurasakiConfig`) are `#[serde(default)]` so a missing JSON key becomes
+  /// `None` instead of a parse error.
+  #[derive(Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  pub(super) struct Meta {
+    pub(super) product_name: String,
+    #[serde(default)]
+    pub(super) version: Option<String>,
+    #[serde(default)]
+    pub(super) description: Option<String>,
+    #[serde(default)]
+    pub(super) copyright: Option<String>,
+    #[serde(default)]
+    pub(super) homepage: Option<String>,
+    #[serde(default)]
+    pub(super) authors: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) locales: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) width: Option<i32>,
+    #[serde(default)]
+    pub(super) height: Option<i32>,
+    #[serde(default)]
+    pub(super) vibrancy: Option<String>,
+    #[serde(default)]
+    pub(super) icon: Option<String>,
+    /// Windows only — show the backend `node.exe` console window instead of
+    /// hiding it (see `spawn_prod_server`'s `CREATE_NO_WINDOW` handling
+    /// below). Missing key ⇒ `false` (the default: no console), matching
+    /// `WindowConfig.console` in `packages/murasaki/src/config.ts`. Ignored
+    /// on macOS, where the spawned `node` was never given a console to begin
+    /// with.
+    #[serde(default)]
+    pub(super) console: bool,
+  }
+
+  /// Reads and parses `<resources_dir>/murasaki-meta.json`.
+  pub(super) fn read_meta(resources_dir: &Path) -> Result<Meta, String> {
+    let meta_path = resources_dir.join("murasaki-meta.json");
+    let meta_raw = fs::read_to_string(&meta_path)
+      .map_err(|e| format!("read {}: {e}", meta_path.display()))?;
+    serde_json::from_str(&meta_raw).map_err(|e| format!("parse {}: {e}", meta_path.display()))
+  }
+
+  /// Spawns `<resources_dir>/<node_binary_name> prod-server.mjs` the same way
+  /// `prod-launcher.mjs` did (see that file's header comment for why
+  /// `--port 0` + reading back the assigned port is needed instead of picking
+  /// one ourselves), and blocks until it reports its port or 15s elapses —
+  /// killing the child and returning an error on timeout/failure.
+  /// `node_binary_name` (`"node"` on macOS, `"node.exe"` on Windows) is the
+  /// only per-OS difference in the command line; `console` (Windows-only,
+  /// see the `CREATE_NO_WINDOW` block below) is the only other per-OS
+  /// difference in this whole sequence.
+  pub(super) fn spawn_prod_server(
+    resources_dir: &Path,
+    node_binary_name: &str,
+    console: bool,
+  ) -> Result<(Child, u16), String> {
+    let node_path = resources_dir.join(node_binary_name);
+    let mut cmd = Command::new(&node_path);
+    cmd
+      .arg("prod-server.mjs")
+      .arg("--client")
+      .arg(resources_dir.join("client"))
+      .arg("--registry")
+      .arg(resources_dir.join("server").join("actions.mjs"))
+      .arg("--routes")
+      .arg(resources_dir.join("server").join("routes.mjs"))
+      .arg("--port")
+      .arg("0")
+      .current_dir(resources_dir)
+      .stdin(Stdio::null())
+      .stdout(Stdio::piped());
+
+    // Windows only: `node.exe` is a console-subsystem binary, so with no
+    // creation flag Windows allocates a console window for it as soon as
+    // it's spawned — even though this launcher itself is windowless
+    // (`#![windows_subsystem = "windows"]`, see bin/murasaki-launcher.rs).
+    // `CREATE_NO_WINDOW` suppresses that. stdout is still piped either way
+    // (see above) for the `MURASAKI_PORT` handshake, so hiding the console
+    // loses nothing — unless the app opts in via `window.console: true` in
+    // murasaki.config.ts (e.g. to see CLI/debug logs), in which case we
+    // leave the default (visible) console behavior alone.
+    #[cfg(target_os = "windows")]
+    if !console {
+      use std::os::windows::process::CommandExt;
+      const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+      cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = console;
+
+    let mut child = cmd
+      .spawn()
+      .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
+
+    match wait_for_port(&mut child, Duration::from_secs(15)) {
+      Ok(port) => Ok((child, port)),
+      Err(err) => {
+        let _ = child.kill();
+        Err(err)
+      }
+    }
+  }
+
+  /// Reads `prod-server.mjs`'s stdout line-by-line looking for
+  /// `MURASAKI_PORT=<n>` (see that file's `server.listen` callback), on a
+  /// background thread so the child's pipe never fills up and blocks it.
+  /// Forwards every line to our own stdout as it goes (line-buffered, so
+  /// exact byte-for-byte interleaving with our own output isn't guaranteed —
+  /// good enough for what is essentially debug output).
+  fn wait_for_port(child: &mut Child, timeout: Duration) -> Result<u16, String> {
+    let stdout = child
+      .stdout
+      .take()
+      .ok_or_else(|| "prod-server: missing stdout pipe".to_string())?;
+    let (tx, rx) = mpsc::channel::<u16>();
+
+    thread::spawn(move || {
+      let reader = BufReader::new(stdout);
+      let mut found = false;
+      for line in reader.lines() {
+        let Ok(line) = line else { break };
+        if !found {
+          if let Some(port) = line
+            .strip_prefix("MURASAKI_PORT=")
+            .and_then(|p| p.trim().parse::<u16>().ok())
+          {
+            found = true;
+            let _ = tx.send(port);
+          }
+        }
+        // `println!` panics if the write fails — which it does on Windows
+        // when the launcher is built with `windows_subsystem = "windows"`
+        // (see bin/murasaki-launcher.rs) and launched without an attached
+        // console (e.g. double-clicked from Explorer): there's no valid
+        // stdout handle in that case. This forwarding is debug-output-only,
+        // so best-effort-and-ignore is correct here, unlike a real error.
+        let _ = writeln!(std::io::stdout(), "{line}");
+      }
+    });
+
+    rx.recv_timeout(timeout)
+      .map_err(|_| "prod server did not report a port in time".to_string())
+  }
+
+  /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
+  /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
+  /// `menu-locales.json` (`Contents/Resources/` on macOS, `resources/` on
+  /// Windows). Shared by both launchers: only the raw "read the OS UI
+  /// language" step differs between them (`imp_macos::macos_ui_language` vs
+  /// `imp_win::windows_ui_language`) — everything below is plain string/table
+  /// logic with nothing macOS- or Windows-specific about it.
+  #[derive(Deserialize, Clone)]
+  #[serde(rename_all = "camelCase")]
+  pub(super) struct LocaleLabels {
+    pub(super) about: String,
+    pub(super) services: String,
+    pub(super) hide: String,
+    pub(super) hide_others: String,
+    pub(super) show_all: String,
+    pub(super) quit: String,
+    pub(super) edit: String,
+    pub(super) undo: String,
+    pub(super) redo: String,
+    pub(super) cut: String,
+    pub(super) copy: String,
+    pub(super) paste: String,
+    pub(super) select_all: String,
+    pub(super) window: String,
+    pub(super) minimize: String,
+    pub(super) zoom: String,
+  }
+
+  /// Reads `<resources_dir>/menu-locales.json`. Missing or unparsable ⇒ empty
+  /// map, which makes `resolve_menu_labels` fall through to muda's English
+  /// defaults (see `MenuLabels`'s doc comment in types.rs).
+  pub(super) fn load_menu_locales(resources_dir: &Path) -> HashMap<String, LocaleLabels> {
+    let path = resources_dir.join("menu-locales.json");
+    fs::read_to_string(&path)
+      .ok()
+      .and_then(|raw| serde_json::from_str(&raw).ok())
+      .unwrap_or_default()
+  }
+
+  /// Mirrors `menu-i18n.ts`'s `normalizeLocale()`.
+  pub(super) fn normalize_locale(raw: &str) -> String {
+    let lc = raw.to_lowercase().replace('_', "-");
+    if lc.starts_with("ja") {
+      "ja".to_string()
+    } else if lc.starts_with("zh") {
+      "zh-CN".to_string()
+    } else if lc.starts_with("ko") {
+      "ko".to_string()
+    } else if lc.starts_with("es") {
+      "es".to_string()
+    } else if lc.starts_with("fr") {
+      "fr".to_string()
+    } else if lc.starts_with("de") {
+      "de".to_string()
+    } else {
+      "en".to_string()
+    }
+  }
+
+  /// Mirrors `menu-i18n.ts`'s `resolveMenuLabels()`: resolves the default-menu
+  /// labels for `locale`, constrained to `allowed` (the app's configured
+  /// `locales`) when given, falling back to `allowed[0]` (normalized) if the
+  /// detected locale isn't one of them, and to muda's English defaults
+  /// (`None` fields) if the locale table has neither key nor `"en"`.
+  pub(super) fn resolve_menu_labels(
+    product_name: &str,
+    locale: &str,
+    allowed: Option<&[String]>,
+    table: &HashMap<String, LocaleLabels>,
+  ) -> MenuLabels {
+    let mut key = locale.to_string();
+    if let Some(allowed) = allowed {
+      if !allowed.is_empty() {
+        let normalized_allowed: Vec<String> = allowed.iter().map(|a| normalize_locale(a)).collect();
+        if !normalized_allowed.iter().any(|a| a == &key) {
+          key = normalize_locale(&allowed[0]);
+        }
+      }
+    }
+
+    let Some(t) = table.get(&key).or_else(|| table.get("en")) else {
+      return MenuLabels {
+        about: None,
+        services: None,
+        hide: None,
+        hide_others: None,
+        show_all: None,
+        quit: None,
+        edit: None,
+        undo: None,
+        redo: None,
+        cut: None,
+        copy: None,
+        paste: None,
+        select_all: None,
+        window: None,
+        minimize: None,
+        zoom: None,
+      };
+    };
+
+    let fill = |s: &str| s.replace("{app}", product_name);
+    MenuLabels {
+      about: Some(fill(&t.about)),
+      services: Some(t.services.clone()),
+      hide: Some(fill(&t.hide)),
+      hide_others: Some(t.hide_others.clone()),
+      show_all: Some(t.show_all.clone()),
+      quit: Some(fill(&t.quit)),
+      edit: Some(t.edit.clone()),
+      undo: Some(t.undo.clone()),
+      redo: Some(t.redo.clone()),
+      cut: Some(t.cut.clone()),
+      copy: Some(t.copy.clone()),
+      paste: Some(t.paste.clone()),
+      select_all: Some(t.select_all.clone()),
+      window: Some(t.window.clone()),
+      minimize: Some(t.minimize.clone()),
+      zoom: Some(t.zoom.clone()),
+    }
+  }
+}
+
+#[cfg(target_os = "macos")]
+mod imp_macos {
+  use std::{cell::RefCell, path::Path, process::Command, rc::Rc};
+
   use tao::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
@@ -39,66 +334,13 @@ mod imp {
   };
 
   use crate::{
-    menu::{build_default_app_menu, AboutInfo},
-    types::{MenuLabels, WebviewOptions},
-    webview::Webview,
+    menu::{build_default_app_menu, AboutInfo, AboutInfoOwned, SharedMenu},
+    types::WebviewOptions,
+    webview::{AppMenuContext, Webview},
     window::{center_on_primary_monitor, SharedWindow},
   };
 
-  /// Subset of `Contents/Resources/murasaki-meta.json` (written by
-  /// `cli/bundle.ts`) this launcher needs. Fields the packager may omit
-  /// (`config.window` / `config.description` etc. are all optional in
-  /// `MurasakiConfig`) are `#[serde(default)]` so a missing JSON key becomes
-  /// `None` instead of a parse error.
-  #[derive(Deserialize)]
-  #[serde(rename_all = "camelCase")]
-  struct Meta {
-    product_name: String,
-    #[serde(default)]
-    version: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    copyright: Option<String>,
-    #[serde(default)]
-    homepage: Option<String>,
-    #[serde(default)]
-    authors: Option<Vec<String>>,
-    #[serde(default)]
-    locales: Option<Vec<String>>,
-    #[serde(default)]
-    width: Option<i32>,
-    #[serde(default)]
-    height: Option<i32>,
-    #[serde(default)]
-    vibrancy: Option<String>,
-    #[serde(default)]
-    icon: Option<String>,
-  }
-
-  /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
-  /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
-  /// `Contents/Resources/menu-locales.json`.
-  #[derive(Deserialize, Clone)]
-  #[serde(rename_all = "camelCase")]
-  struct LocaleLabels {
-    about: String,
-    services: String,
-    hide: String,
-    hide_others: String,
-    show_all: String,
-    quit: String,
-    edit: String,
-    undo: String,
-    redo: String,
-    cut: String,
-    copy: String,
-    paste: String,
-    select_all: String,
-    window: String,
-    minimize: String,
-    zoom: String,
-  }
+  use super::shared::{load_menu_locales, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server};
 
   pub fn run() {
     if let Err(err) = run_inner() {
@@ -122,39 +364,11 @@ mod imp {
       .canonicalize()
       .map_err(|e| format!("resolve Resources dir: {e}"))?;
 
-    let meta_path = resources_dir.join("murasaki-meta.json");
-    let meta_raw = fs::read_to_string(&meta_path)
-      .map_err(|e| format!("read {}: {e}", meta_path.display()))?;
-    let meta: Meta = serde_json::from_str(&meta_raw)
-      .map_err(|e| format!("parse {}: {e}", meta_path.display()))?;
-
-    // Spawn prod-server.mjs the same way prod-launcher.mjs did (see that
-    // file's header comment for why `--port 0` + reading back the assigned
-    // port is needed instead of picking one ourselves).
-    let node_path = resources_dir.join("node");
-    let mut child = Command::new(&node_path)
-      .arg("prod-server.mjs")
-      .arg("--client")
-      .arg(resources_dir.join("client"))
-      .arg("--registry")
-      .arg(resources_dir.join("server").join("actions.mjs"))
-      .arg("--routes")
-      .arg(resources_dir.join("server").join("routes.mjs"))
-      .arg("--port")
-      .arg("0")
-      .current_dir(&resources_dir)
-      .stdin(Stdio::null())
-      .stdout(Stdio::piped())
-      .spawn()
-      .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
-
-    let port = match wait_for_port(&mut child, Duration::from_secs(15)) {
-      Ok(port) => port,
-      Err(err) => {
-        let _ = child.kill();
-        return Err(err);
-      }
-    };
+    let meta = read_meta(&resources_dir)?;
+    // `meta.console` is Windows-only (see that field's doc comment) — ignored
+    // here, `spawn_prod_server` only acts on it under `#[cfg(target_os =
+    // "windows")]`.
+    let (mut child, port) = spawn_prod_server(&resources_dir, "node", meta.console)?;
 
     set_activation_policy_regular();
 
@@ -203,13 +417,31 @@ mod imp {
     let menu = build_default_app_menu(&about, Some(&menu_labels))
       .map_err(|e| format!("build menu: {e}"))?;
     menu.init_for_nsapp();
+    // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
+    // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
+    let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu)));
+
+    let about_owned = AboutInfoOwned {
+      name: meta.product_name.clone(),
+      icon_path: icon_path.as_ref().and_then(|p| p.to_str()).map(String::from),
+      version: meta.version.clone(),
+      description: meta.description.clone(),
+      copyright: meta.copyright.clone(),
+      homepage: meta.homepage.clone(),
+      authors: meta.authors.clone(),
+    };
+    let app_menu_context = AppMenuContext {
+      menu_slot: app_menu_slot.clone(),
+      menu_labels: Some(menu_labels.clone()),
+      about_info: about_owned,
+    };
 
     let url = format!("http://127.0.0.1:{port}/");
     // `Webview::new` gives us the external-link navigation handler for free
     // (see webview.rs) — kept alive for the app's lifetime, see the comment
     // on `event_loop.run` below for why it's fine that it's never touched
     // again after this.
-    let _webview = Webview::new(
+    let webview = Webview::new(
       shared_window.clone(),
       WebviewOptions {
         url: Some(url),
@@ -218,8 +450,12 @@ mod imp {
         transparent: None,
         serve_dir: None,
       },
+      app_menu_context,
     )
     .map_err(|e| format!("build webview: {e}"))?;
+    // Handle the app-menu poll below dispatches clicks into — see
+    // `poll_app_menu_events`'s doc comment in webview.rs.
+    let webview_handle = webview.handle();
 
     // Dock/About-panel icon — mirrors Application::set_icon_path. As the real
     // CFBundleExecutable, CFBundleIconFile (see cli/bundle.ts's Info.plist)
@@ -231,12 +467,18 @@ mod imp {
 
     // tao's `EventLoop::run` never returns (`-> !`) and explicitly documents
     // that "values not passed to this function will *not* be dropped" — so
-    // `menu`/`_webview`/`shared_window`, though never referenced again after
-    // this point, simply stay alive on this stack frame for as long as the
-    // app runs. Only `child` needs to move into the closure, to be killed on
-    // window close.
+    // `webview`/`app_menu_slot`/`shared_window`, though never referenced
+    // again after this point, simply stay alive on this stack frame for as
+    // long as the app runs. `webview_handle` and `child` move into the
+    // closure below — the former so the app-menu poll can reach the webview
+    // every tick, the latter to be killed on window close.
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
+
+      // Drain clicks on `useAppMenu`'s custom (non-role) items every tick —
+      // see `poll_app_menu_events`'s doc comment in webview.rs.
+      crate::webview::poll_app_menu_events(&webview_handle);
+
       if let Event::WindowEvent {
         event: WindowEvent::CloseRequested,
         ..
@@ -249,52 +491,6 @@ mod imp {
         std::process::exit(0);
       }
     });
-  }
-
-  /// Reads `prod-server.mjs`'s stdout line-by-line looking for
-  /// `MURASAKI_PORT=<n>` (see that file's `server.listen` callback), on a
-  /// background thread so the child's pipe never fills up and blocks it.
-  /// Forwards every line to our own stdout as it goes (line-buffered, so
-  /// exact byte-for-byte interleaving with our own output isn't guaranteed —
-  /// good enough for what is essentially debug output).
-  fn wait_for_port(child: &mut Child, timeout: Duration) -> Result<u16, String> {
-    let stdout = child
-      .stdout
-      .take()
-      .ok_or_else(|| "prod-server: missing stdout pipe".to_string())?;
-    let (tx, rx) = mpsc::channel::<u16>();
-
-    thread::spawn(move || {
-      let reader = BufReader::new(stdout);
-      let mut found = false;
-      for line in reader.lines() {
-        let Ok(line) = line else { break };
-        if !found {
-          if let Some(port) = line
-            .strip_prefix("MURASAKI_PORT=")
-            .and_then(|p| p.trim().parse::<u16>().ok())
-          {
-            found = true;
-            let _ = tx.send(port);
-          }
-        }
-        println!("{line}");
-      }
-    });
-
-    rx.recv_timeout(timeout)
-      .map_err(|_| "prod server did not report a port in time".to_string())
-  }
-
-  /// Reads `Contents/Resources/menu-locales.json`. Missing or unparsable ⇒
-  /// empty map, which makes `resolve_menu_labels` fall through to muda's
-  /// English defaults (see `MenuLabels`'s doc comment in types.rs).
-  fn load_menu_locales(resources_dir: &Path) -> HashMap<String, LocaleLabels> {
-    let path = resources_dir.join("menu-locales.json");
-    fs::read_to_string(&path)
-      .ok()
-      .and_then(|raw| serde_json::from_str(&raw).ok())
-      .unwrap_or_default()
   }
 
   /// Best-effort system UI language, normalized to a shipped locale key.
@@ -360,89 +556,6 @@ mod imp {
     None
   }
 
-  /// Mirrors `menu-i18n.ts`'s `normalizeLocale()`.
-  fn normalize_locale(raw: &str) -> String {
-    let lc = raw.to_lowercase().replace('_', "-");
-    if lc.starts_with("ja") {
-      "ja".to_string()
-    } else if lc.starts_with("zh") {
-      "zh-CN".to_string()
-    } else if lc.starts_with("ko") {
-      "ko".to_string()
-    } else if lc.starts_with("es") {
-      "es".to_string()
-    } else if lc.starts_with("fr") {
-      "fr".to_string()
-    } else if lc.starts_with("de") {
-      "de".to_string()
-    } else {
-      "en".to_string()
-    }
-  }
-
-  /// Mirrors `menu-i18n.ts`'s `resolveMenuLabels()`: resolves the default-menu
-  /// labels for `locale`, constrained to `allowed` (the app's configured
-  /// `locales`) when given, falling back to `allowed[0]` (normalized) if the
-  /// detected locale isn't one of them, and to muda's English defaults
-  /// (`None` fields) if the locale table has neither key nor `"en"`.
-  fn resolve_menu_labels(
-    product_name: &str,
-    locale: &str,
-    allowed: Option<&[String]>,
-    table: &HashMap<String, LocaleLabels>,
-  ) -> MenuLabels {
-    let mut key = locale.to_string();
-    if let Some(allowed) = allowed {
-      if !allowed.is_empty() {
-        let normalized_allowed: Vec<String> = allowed.iter().map(|a| normalize_locale(a)).collect();
-        if !normalized_allowed.iter().any(|a| a == &key) {
-          key = normalize_locale(&allowed[0]);
-        }
-      }
-    }
-
-    let Some(t) = table.get(&key).or_else(|| table.get("en")) else {
-      return MenuLabels {
-        about: None,
-        services: None,
-        hide: None,
-        hide_others: None,
-        show_all: None,
-        quit: None,
-        edit: None,
-        undo: None,
-        redo: None,
-        cut: None,
-        copy: None,
-        paste: None,
-        select_all: None,
-        window: None,
-        minimize: None,
-        zoom: None,
-      };
-    };
-
-    let fill = |s: &str| s.replace("{app}", product_name);
-    MenuLabels {
-      about: Some(fill(&t.about)),
-      services: Some(t.services.clone()),
-      hide: Some(fill(&t.hide)),
-      hide_others: Some(t.hide_others.clone()),
-      show_all: Some(t.show_all.clone()),
-      quit: Some(fill(&t.quit)),
-      edit: Some(t.edit.clone()),
-      undo: Some(t.undo.clone()),
-      redo: Some(t.redo.clone()),
-      cut: Some(t.cut.clone()),
-      copy: Some(t.copy.clone()),
-      paste: Some(t.paste.clone()),
-      select_all: Some(t.select_all.clone()),
-      window: Some(t.window.clone()),
-      minimize: Some(t.minimize.clone()),
-      zoom: Some(t.zoom.clone()),
-    }
-  }
-
   /// Sets `NSApp.applicationIconImage` — mirrors `Application::set_icon_path`
   /// exactly (see that method's doc comment for why this is needed alongside
   /// `CFBundleIconFile`). No-op if `path` doesn't point at a readable image.
@@ -476,12 +589,376 @@ mod imp {
   }
 }
 
-#[cfg(target_os = "macos")]
-pub fn run_launcher() {
-  imp::run();
+/// Windows Job Object wrapping the spawned `node.exe` child so the OS kills
+/// it as soon as this launcher process's handle to the job closes — which
+/// happens automatically on process exit, *any* way it exits (clean
+/// shutdown, force-kill from Task Manager, or a crash). Unlike macOS/Linux,
+/// Windows doesn't reparent an orphaned child to a pid the child could
+/// detect (`prod-server.mjs`'s `ppid === 1` check — see its comment — is a
+/// no-op there), so without this a killed/crashed launcher would leave
+/// `node.exe` running indefinitely. Kept as its own small module so the
+/// win32-specific Win32 API calls stay out of `imp_win::run_inner`.
+#[cfg(target_os = "windows")]
+mod win_job {
+  use windows::{
+    core::PCWSTR,
+    Win32::{
+      Foundation::{CloseHandle, HANDLE},
+      System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+      },
+    },
+  };
+
+  pub(super) struct KillOnCloseJob(HANDLE);
+
+  impl KillOnCloseJob {
+    /// Creates the job object and sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+    /// on it. Best-effort: returns `None` on any failure rather than
+    /// erroring the launcher out — the app still runs, just without this
+    /// orphan-kill safety net.
+    pub(super) fn new() -> Option<Self> {
+      let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.ok()?;
+
+      let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+      info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      let configured = unsafe {
+        SetInformationJobObject(
+          job,
+          JobObjectExtendedLimitInformation,
+          &info as *const _ as *const core::ffi::c_void,
+          std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        )
+      };
+      if configured.is_err() {
+        let _ = unsafe { CloseHandle(job) };
+        return None;
+      }
+      Some(Self(job))
+    }
+
+    /// Assigns `child` to this job — from this point on, Windows kills it
+    /// (and anything it spawns, which inherits into the same job) once the
+    /// job handle closes. Best-effort: a `false` return just means this
+    /// child didn't get the orphan-kill protection, not a fatal error.
+    pub(super) fn assign(&self, child: &std::process::Child) -> bool {
+      use std::os::windows::io::AsRawHandle;
+      let process = HANDLE(child.as_raw_handle());
+      unsafe { AssignProcessToJobObject(self.0, process) }.is_ok()
+    }
+  }
+
+  impl Drop for KillOnCloseJob {
+    fn drop(&mut self) {
+      let _ = unsafe { CloseHandle(self.0) };
+    }
+  }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows launcher — window + webview + native menu bar (File/Edit/Window),
+/// attached via `Menu::init_for_hwnd` and localized the same way macOS's app
+/// menu is: `menu-locales.json` + the locale resolver in `shared` (this
+/// launcher can't call into Node's `menu-i18n.ts` either — see `imp_macos`'s
+/// module for that same constraint). See `menu::build_windows_menu_bar` for
+/// why its items are custom `MenuItem`s (not muda `PredefinedMenuItem`s like
+/// macOS uses) and `webview::poll_menu_bar_events` for how their clicks are
+/// picked up in the event loop below and dispatched into the webview.
+///
+/// Deferred macOS-parity items, left for a later packaging phase:
+///  - The "About <app>" panel — mirrors `webview::show_context_menu`'s
+///    Windows stub for the same story on context menus. Windows conventionally
+///    surfaces this under a Help menu, which isn't part of this bar yet.
+///  - Menu-bar keyboard accelerators (Ctrl+Z etc.) — see
+///    `menu::build_windows_menu_bar`'s doc comment for why they're
+///    intentionally left unset rather than shipped as inert decoration.
+///
+/// The window's own icon (title bar / Alt-Tab thumbnail) *is* handled here
+/// (`load_window_icon` below): `cli/bundle.ts`'s `embedWin32ExeResources`
+/// already embeds `resources/icon.ico` into the `.exe`'s PE resources, which
+/// covers Explorer/taskbar/Start menu — but tao's own `WindowBuilder` sets no
+/// `hIcon` on its `WNDCLASSEX`, so without this the window chrome itself
+/// (top-left corner, Alt-Tab) falls back to Windows' generic default even on
+/// a properly icon-embedded `.exe`. Decoding `resources/icon.png` (the same
+/// file `meta.icon` already points at for macOS's About panel) and setting
+/// it via `WindowBuilder::with_window_icon` fixes that; tao's Windows backend
+/// sets both `ICON_SMALL` and `ICON_BIG` (`WM_SETICON`) from the one image,
+/// so there's no separate small/big asset to manage.
+#[cfg(target_os = "windows")]
+mod imp_win {
+  use std::{cell::RefCell, io::Write, path::Path, rc::Rc};
+
+  use tao::{
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    platform::windows::WindowExtWindows,
+    window::{Icon, WindowBuilder},
+  };
+
+  use crate::{
+    menu::{build_windows_menu_bar, SharedMenu},
+    types::WebviewOptions,
+    webview::{poll_menu_bar_events, AppMenuContext, Webview},
+    window::{center_on_primary_monitor, SharedWindow},
+  };
+
+  use super::shared::{load_menu_locales, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server};
+  use super::win_job::KillOnCloseJob;
+
+  pub fn run() {
+    if let Err(err) = run_inner() {
+      // `eprintln!` panics if the write fails — which it can here since
+      // there may be no console attached (this binary is built with
+      // `windows_subsystem = "windows"`, see bin/murasaki-launcher.rs, and
+      // can be launched without a console, e.g. from Explorer). Best-effort:
+      // still exit non-zero either way.
+      let _ = writeln!(std::io::stderr(), "murasaki-launcher: {err}");
+      std::process::exit(1);
+    }
+  }
+
+  fn run_inner() -> Result<(), String> {
+    // The bundle layout is `<productName>.exe` + a sibling `resources/`
+    // directory (see cli/bundle.ts's bundleWin32 — unlike macOS's
+    // `Contents/MacOS/<exe>` + `Contents/Resources/`, there's no `..` hop)
+    // — resolve it from our own binary's location rather than the current
+    // directory, since the packaged executable can be launched from anywhere
+    // (a shortcut, the Start menu, …).
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let exe_dir = exe
+      .parent()
+      .ok_or_else(|| "murasaki-launcher: executable has no parent directory".to_string())?;
+    let resources_dir = exe_dir
+      .join("resources")
+      .canonicalize()
+      .map_err(|e| format!("resolve resources dir: {e}"))?;
+
+    let meta = read_meta(&resources_dir)?;
+    // Spawns resources/node.exe prod-server.mjs — same handshake as macOS,
+    // see `shared::spawn_prod_server`. `meta.console` (default `false`) hides
+    // the console window `node.exe` would otherwise get, via
+    // `CREATE_NO_WINDOW` — see that function's doc comment.
+    let (mut child, port) = spawn_prod_server(&resources_dir, "node.exe", meta.console)?;
+
+    // Orphan protection (see `win_job`'s module doc comment) — assign the
+    // freshly spawned node.exe to a KILL_ON_JOB_CLOSE job so it can't outlive
+    // this launcher process, even if that's a crash rather than a clean exit.
+    // `job` is intentionally kept alive on this stack frame for the rest of
+    // `run_inner` (see the `event_loop.run` comment near the bottom of this
+    // function for why nothing here needs an explicit lifetime beyond that).
+    let job = KillOnCloseJob::new();
+    if let Some(job) = &job {
+      job.assign(&child);
+    }
+
+    let event_loop = EventLoop::<()>::new();
+
+    // Matches prod-launcher.mjs's / the macOS launcher's `meta.width ?? 1000`
+    // / `meta.height ?? 700`.
+    let width = meta.width.unwrap_or(1000);
+    let height = meta.height.unwrap_or(700);
+    // Vibrancy is macOS-only (see window.rs) — a no-op here too.
+    let _ = &meta.vibrancy;
+    // Deferred — see the module doc comment above (no "About" panel/Help menu
+    // yet, so these have nowhere to surface).
+    let _ = &meta.version;
+    let _ = &meta.description;
+    let _ = &meta.copyright;
+    let _ = &meta.homepage;
+    let _ = &meta.authors;
+
+    // Title-bar/Alt-Tab window icon — see the module doc comment above for
+    // why this is needed in addition to the .exe's already-embedded PE icon.
+    // `None` (no `config.icon`, or a decode failure) just means
+    // `with_window_icon` leaves tao's default in place, same as before this.
+    let window_icon = meta
+      .icon
+      .as_ref()
+      .map(|icon| resources_dir.join(icon))
+      .and_then(|path| load_window_icon(&path));
+
+    let window = WindowBuilder::new()
+      .with_title(&meta.product_name)
+      .with_inner_size(LogicalSize::new(width as f64, height as f64))
+      .with_resizable(true)
+      .with_window_icon(window_icon)
+      .build(&event_loop)
+      .map_err(|e| format!("build window: {e}"))?;
+    center_on_primary_monitor(&window);
+
+    // Read the HWND before `window` moves into `shared_window` below —
+    // `init_for_hwnd` just needs the raw handle, not the tao `Window` itself.
+    let hwnd = window.hwnd();
+
+    let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
+
+    // Native menu bar (File/Edit/Window) — localized the same way as macOS's
+    // app menu (see the module doc comment above for why this launcher has
+    // its own locale resolution instead of calling into `menu-i18n.ts`).
+    let locale_table = load_menu_locales(&resources_dir);
+    let locale = detect_locale();
+    let menu_labels = resolve_menu_labels(
+      &meta.product_name,
+      &locale,
+      meta.locales.as_deref(),
+      &locale_table,
+    );
+    let menu_bar = build_windows_menu_bar(Some(&menu_labels))
+      .map_err(|e| format!("build menu bar: {e}"))?;
+    // SAFETY: `hwnd` names the window built above, which is still open (its
+    // event loop hasn't run yet). A failure here is cosmetic (missing menu
+    // bar) — log and keep going rather than error the launcher out over it.
+    if let Err(e) = unsafe { menu_bar.init_for_hwnd(hwnd) } {
+      let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to attach the menu bar: {e}");
+    }
+    // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
+    // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
+    let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu_bar)));
+    let app_menu_context = AppMenuContext {
+      menu_slot: app_menu_slot.clone(),
+      menu_labels: Some(menu_labels.clone()),
+    };
+
+    let url = format!("http://127.0.0.1:{port}/");
+    // `Webview::new` pins the WebView2 user-data directory under
+    // %LOCALAPPDATA% itself (see `webview::webview2_data_dir`'s doc comment)
+    // — no extra wiring needed here since this goes through the same
+    // constructor `murasaki dev` / `BrowserWindow::createWebview` use.
+    let webview = Webview::new(
+      shared_window.clone(),
+      WebviewOptions {
+        url: Some(url),
+        html: None,
+        devtools: Some(false),
+        transparent: None,
+        serve_dir: None,
+      },
+      app_menu_context,
+    )
+    .map_err(|e| format!("build webview: {e}"))?;
+    // Handle the menu bar's event loop poll dispatches into — see
+    // `poll_menu_bar_events` below and its doc comment in webview.rs.
+    let webview_handle = webview.handle();
+
+    // Same shutdown story as the macOS launcher (see that module's
+    // `event_loop.run` comment): tao's `EventLoop::run` never returns and
+    // explicitly documents that values not passed into it aren't dropped, so
+    // `webview`/`app_menu_slot`/`job` simply stay alive on this stack frame
+    // for the app's lifetime (`shared_window` and `webview_handle` move into
+    // the closure below, since the menu-bar poll needs them every tick). Only
+    // `child` needs to move into the closure too, to be killed on window
+    // close/Exit.
+    event_loop.run(move |event, _target, control_flow| {
+      *control_flow = ControlFlow::Wait;
+
+      // Native menu-bar clicks (Edit commands + Minimize) arrive
+      // asynchronously — see `poll_menu_bar_events`'s doc comment — so this
+      // is checked every tick rather than read synchronously like the
+      // context-menu popup in webview.rs. Exit is handled the same way as
+      // the window's own close button, just below.
+      if poll_menu_bar_events(&shared_window, &webview_handle) {
+        *control_flow = ControlFlow::Exit;
+        let _ = child.kill();
+        std::process::exit(0);
+      }
+
+      if let Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        ..
+      } = event
+      {
+        *control_flow = ControlFlow::Exit;
+        // Best-effort direct kill on the clean-shutdown path. If we instead
+        // get killed before this ever runs (force-quit, crash), it's the
+        // `job` assigned above — not this — that reaps `child`: Windows has
+        // no ppid-reparenting signal for `prod-server.mjs` to detect itself
+        // (unlike macOS/Linux's `ppid === 1` check), so the Job Object is
+        // what actually guarantees no orphaned `node.exe` here.
+        let _ = child.kill();
+        std::process::exit(0);
+      }
+    });
+  }
+
+  /// Best-effort system UI language, normalized to a shipped locale key.
+  /// Mirrors `menu-i18n.ts`'s `detectLocale()` and `imp_macos::detect_locale`
+  /// — Windows locale names are already a clean BCP-47-ish tag (e.g. "ja-JP"),
+  /// unlike macOS's `AppleLanguages`, so there's no property-list parsing
+  /// step to mirror here.
+  fn detect_locale() -> String {
+    let raw = windows_ui_language().unwrap_or_else(|| "en".to_string());
+    normalize_locale(&raw)
+  }
+
+  /// The user's default Windows locale name (e.g. "en-US"), or `None` if the
+  /// call fails. `GetUserDefaultLocaleName` reflects the regional format
+  /// setting rather than strictly the UI display language, but for our
+  /// coarse `normalize_locale` bucketing (just the language prefix) the two
+  /// agree closely enough in practice.
+  fn windows_ui_language() -> Option<String> {
+    use windows::Win32::Globalization::GetUserDefaultLocaleName;
+
+    // LOCALE_NAME_MAX_LENGTH (85, per the Win32 docs) — `buf` must be at
+    // least this long or the call fails.
+    let mut buf = [0u16; 85];
+    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
+    if len <= 0 {
+      return None;
+    }
+    // `len` includes the null terminator; trim it before decoding.
+    let end = usize::try_from(len - 1).ok()?;
+    Some(String::from_utf16_lossy(&buf[..end]))
+  }
+
+  /// Decodes a PNG at `path` into a `tao::window::Icon` for the window's
+  /// title-bar/Alt-Tab icon — same decode logic as `menu::load_icon_rgba`
+  /// (macOS's About-panel icon), just producing tao's `Icon` type instead of
+  /// muda's; `png` (already a dependency for that macOS path) is reused
+  /// as-is rather than pulling in a second decoder. Returns `None` on any
+  /// decode failure (unreadable file, unsupported color type, etc.) — the
+  /// caller falls back to no icon (tao's default) rather than erroring the
+  /// launcher out over a cosmetic issue.
+  fn load_window_icon(path: &Path) -> Option<Icon> {
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = png::Decoder::new(file);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(frame.buffer_size());
+
+    let info = reader.info();
+    let (width, height) = (info.width, info.height);
+
+    let rgba = match (info.color_type, info.bit_depth) {
+      (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
+      (png::ColorType::Rgb, png::BitDepth::Eight) => {
+        let mut out = Vec::with_capacity(buf.len() / 3 * 4);
+        for chunk in buf.chunks_exact(3) {
+          out.extend_from_slice(chunk);
+          out.push(255);
+        }
+        out
+      }
+      _ => return None,
+    };
+
+    Icon::from_rgba(rgba, width, height).ok()
+  }
+}
+
+#[cfg(target_os = "macos")]
 pub fn run_launcher() {
-  eprintln!("murasaki-launcher: unsupported platform (macOS only)");
+  imp_macos::run();
+}
+
+#[cfg(target_os = "windows")]
+pub fn run_launcher() {
+  imp_win::run();
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn run_launcher() {
+  eprintln!("murasaki-launcher: unsupported platform (macOS/Windows only)");
 }

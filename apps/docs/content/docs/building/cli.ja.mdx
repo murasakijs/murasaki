@@ -15,10 +15,10 @@ murasaki help        このヘルプを表示する
 ```
 
 <Callout type="warn">
-  `murasaki bundle` と `murasaki installer` は、現在のところ **macOS** で実装・検証済み
-  です。他のプラットフォームでは、現時点ではインストーラーを生成する代わりに「まだサポ
-  ートされていません」というメッセージが表示されます — `murasaki dev` 自体は macOS、
-  Windows、Linux で動作します。
+  `murasaki bundle` と `murasaki installer` は、**macOS** と **Windows** で本物の
+  インストーラを生成します。Linux のパッケージングはロードマップに含まれています(現在は
+  「まだサポートされていません」というメッセージが表示されます)。`murasaki dev` 自体は
+  macOS、Windows、Linux で動作します。
 </Callout>
 
 ## `murasaki dev`
@@ -35,39 +35,41 @@ murasaki help        このヘルプを表示する
 ## `murasaki bundle`
 
 `dist/client` + コンパイル済みのサーバーアクションレジストリ + ポータブルな Node ラン
-タイム + ネイティブランチャーバイナリを、`dist/bundle/` の `<productName>.app` にパッ
-ケージングします。
+タイム + ネイティブランチャーバイナリを `dist/bundle/` にパッケージングします —
+macOS では `<productName>.app`、Windows では `<productName>.exe` を含む
+`<productName>/` フォルダになります。
 
 ```bash
-murasaki bundle              # ホストアーキテクチャ、アドホック署名(未署名配布)
-murasaki bundle --arch x64   # クロスアーキテクチャ: Apple Silicon 上で x64 の .app をビルド
-murasaki bundle --sign       # Developer ID で署名する
-murasaki bundle --no-build   # 再ビルドせず既存の dist/client を再利用する
+murasaki bundle                       # ホストのプラットフォーム + アーキテクチャ、未署名
+murasaki bundle --arch x64            # クロスアーキテクチャ(macOS): Apple Silicon 上で x64 の .app
+murasaki bundle --target win32-arm64  # クロスターゲット: arm64 の Windows バンドル
+murasaki bundle --sign                # macOS: .app を Developer ID で署名
+murasaki bundle --no-build            # 既存の dist/client を再利用する
 ```
 
-- **`--arch arm64|x64`** — 対象アーキテクチャ(デフォルトはホストのアーキテクチャ)。
-- **`--sign`** — `.app` を Developer ID で署名する(詳しくは
+- **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — 対象アーキテクチャ /
+  プラットフォーム(デフォルトはホスト)。Windows は `win32-x64` / `win32-arm64`。
+- **`--sign`** — macOS で `.app` を Developer ID 署名する(詳しくは
   [Distribution](/docs/building/distribution#signing--notarization)を参照)。
-- **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップす
-  る。
+- **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップする。
 
 ## `murasaki installer`
 
-`bundle` で生成した `.app` を、`dist/<productName>-<version>.dmg` にあるドラッグイン
-ストール用の `.dmg` にラップします。背景画像と配置されたアイコンでスタイリングされます
-(Finder のスタイリングに失敗した場合、例えば Automation の権限が不足している場合は、
-プレーンな DMG にフォールバックします)。
+`bundle` の出力を、対象プラットフォーム向けの配布可能なインストーラに変換します:
+macOS ではドラッグインストール用のスタイル付き `.dmg`
+(`dist/<productName>-<version>.dmg`、Finder のスタイリングに失敗した場合はプレーンな
+DMG にフォールバック)、Windows ではポータブル `.zip`、NSIS `.exe`、MSI `.msi`。
 
 ```bash
-murasaki installer                     # 未署名の .dmg(最初に再バンドルする)
-murasaki installer --sign --notarize   # Developer ID 署名 + Apple への提出 + ステープル
-murasaki installer --no-build          # 既存の dist/bundle/<App>.app を再利用する
+murasaki installer                     # ホストプラットフォーム向けインストーラ(最初に再バンドル)
+murasaki installer --target win32-x64  # Windows x64 のインストーラ
+murasaki installer --sign --notarize   # macOS: Developer ID 署名 + 公証 + ステープル
+murasaki installer --no-build          # 既存の dist/bundle を再利用する
 ```
 
-- **`--sign`** — `bundle` に転送されます。
-- **`--notarize`** — 署名済みの `.dmg` を Apple の notary サービスに提出し、チケットを
-  ステープルします。`--sign` が必須です。
-- **`--arch arm64|x64`** — `bundle` に転送されます。
+- **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — `bundle` に転送されます。
+- **`--sign`** / **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary
+  サービスに提出し、チケットをステープルします(`--notarize` は `--sign` が必須)。
 
 ## `murasaki init`
 
@@ -82,8 +84,9 @@ murasaki icon assets/logo.png
 ```
 
 1つの 1024px の PNG から、`dist/icons/icon.icns`(macOS、`sips` + `iconutil` 経由)を
-生成します。macOS 以外のプラットフォームでは、現時点では「PNG のみ」という通知が表示さ
-れます — `.ico` / Linux のアイコンセットはロードマップに含まれています。
+生成します。このスタンドアロンコマンドは現時点では macOS 以外で PNG のみです。ただし
+通常は不要です — `murasaki bundle` が `config.icon` からプラットフォームのアイコンを
+自動生成・埋め込みします: macOS では `.icns`、Windows では `.ico`(`.exe` に埋め込み)。
 
 ## `murasaki release`
 

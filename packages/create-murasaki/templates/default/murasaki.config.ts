@@ -7,6 +7,9 @@ export default defineConfig({
   description: 'A desktop app built with murasaki',
   copyright: '© 2026 Murasaki App',
   icon: 'src/assets/icon.png',
+  // Locales the app ships: localizes the native menu bar and shows a language
+  // picker in the Windows installer. Trim to `['en']` for English-only.
+  locales: ['en', 'ja'],
   window: {
     title: 'Murasaki App',
     width: 1000,

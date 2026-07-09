@@ -26,10 +26,10 @@ interface Artifact {
   available: boolean;
 }
 
-// Real distributable files, not the running app: macOS is the only platform
-// that ships an installer today (.dmg/.app, ~43 MB measured). Windows/Linux
-// packaging is on the roadmap — kept honest here to match the `distribution`
-// section's platform cards further down the page.
+// Real distributable files, not the running app: macOS (.dmg/.app, ~43 MB) and
+// Windows (.msi/.exe + portable .zip) both ship installers today; Linux
+// (.AppImage) packaging is still on the roadmap — kept honest here to match the
+// `distribution` section's platform cards further down the page.
 const ARTIFACTS: Artifact[] = [
   {
     os: "macOS",
@@ -38,7 +38,13 @@ const ARTIFACTS: Artifact[] = [
     note: "~43 MB",
     available: true,
   },
-  { os: "Windows", glyph: "windows", ext: ".msi / .exe", available: false },
+  {
+    os: "Windows",
+    glyph: "windows",
+    ext: ".msi / .exe",
+    note: "arm64 / x64",
+    available: true,
+  },
   { os: "Linux", glyph: "linux", ext: ".AppImage", available: false },
 ];
 
@@ -74,9 +80,8 @@ function OsGlyph({ glyph }: { glyph: Artifact["glyph"] }) {
 /**
  * The "what you actually ship" section: three installer-artifact cards for
  * the real files `pnpm bundle` / `murasaki installer` produce, replacing the
- * old fake running-app window mock. macOS is the star (available today);
- * Windows and Linux are dimmed "coming soon" cards — never implied as
- * shipping.
+ * old fake running-app window mock. macOS and Windows ship today; Linux is a
+ * dimmed "coming soon" card — never implied as shipping.
  */
 export function ShipArtifacts({
   heading,

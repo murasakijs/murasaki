@@ -291,11 +291,16 @@ server.listen(port, '127.0.0.1', () => {
 process.on('SIGINT', () => process.exit(0))
 process.on('SIGTERM', () => process.exit(0))
 
-// Safety net against orphaned servers: if the launcher (our parent) dies
-// without running its shutdown handler — a force-quit or a crash — the OS
-// reparents us to init (ppid 1). Detect that and exit so we don't linger as a
-// stray process (which also shows up as an extra icon in the Dock). `.unref()`
-// keeps this timer from holding the event loop open on its own.
+// Safety net against orphaned servers on macOS/Linux: if the launcher (our
+// parent) dies without running its shutdown handler — a force-quit or a
+// crash — the OS reparents us to init (ppid 1). Detect that and exit so we
+// don't linger as a stray process (which also shows up as an extra icon in
+// the Dock). `.unref()` keeps this timer from holding the event loop open on
+// its own. Windows has no equivalent reparenting-to-init signal (a dead
+// parent's pid just stays stale in our ppid), so this check is a no-op
+// there — the Windows launcher instead assigns this process to a Job Object
+// with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, which the OS itself enforces on
+// launcher exit (see crates/native/src/launcher.rs's `win_job` module).
 setInterval(() => {
   if (process.ppid === 1) process.exit(0)
 }, 2000).unref()

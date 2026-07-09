@@ -1,18 +1,9 @@
-import { useState } from 'react'
-import { Link, ContextMenuTrigger, useContextMenu } from 'murasaki'
+import { Link } from 'murasaki'
 import type { Metadata } from 'murasaki'
-import {
-  Button,
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@murasakijs/ui'
-import { Plus, Zap } from 'lucide-react'
-import { Action } from '@/lib/action'
-import { useCounter } from '@/lib/counter'
+import { Card, buttonVariants } from '@murasakijs/ui'
+import { BookOpen, ArrowRight } from 'lucide-react'
 import XLogo from '@/assets/x-logo.svg?react'
+import GithubLogo from '@/assets/github-logo.svg?react'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',
@@ -22,91 +13,56 @@ export const metadata: Metadata = {
 /**
  * "Hello, Murasaki 🦋" — the greeting stays.
  *
- * Two native context menus (NSMenu / HMENU / GtkMenu, never an HTML popup):
- *  - the app-wide menu in src/app/layout.tsx
- *  - the card-scoped menu below — its reusable actions come from
- *    src/lib/action.ts as <Action.increment /> (the counter lives in a store so
- *    the action is shareable); "Call API route" posts to the API route at
- *    src/api/action-demo/route.ts.
+ * This is the informational landing page. The interactive demos (counter,
+ * native context menus, API routes) live at /demo — see src/app/demo/page.tsx.
  *
- * The top bar's X link is a plain <a href>: murasaki opens off-origin links in
- * the user's default browser instead of loading them inside the app window.
+ * The resource cards below are plain <a href>: murasaki opens off-origin links
+ * in the user's default browser instead of loading them inside the app window.
  */
 export default function Page() {
-  const count = useCounter((s) => s.count)
-  const increment = useCounter((s) => s.increment)
-  const [greeting, setGreeting] = useState<string | null>(null)
-
-  // Calls the API route at src/api/action-demo/route.ts (runs on the server).
-  const callApi = async () => {
-    const res = await fetch('/api/action-demo', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Murasaki' }),
-    })
-    const data = (await res.json()) as { greeting: string }
-    setGreeting(data.greeting)
-  }
-
-  useContextMenu('card', [
-    { label: 'Increment', shortcut: 'command,I', action: <Action.increment /> },
-    { label: 'Reset counter', action: <Action.reset /> },
-    { separator: true },
-    { label: 'Call API route', action: callApi },
-  ])
-
   return (
-    <>
-      <header className="fixed inset-x-0 top-0 flex items-center justify-between px-6 py-4 text-sm">
-        <span className="font-medium tracking-tight text-muted-foreground">murasaki</span>
-        <nav className="flex items-center gap-5">
-          <span className="text-muted-foreground/60">Web (coming soon)</span>
-          <a
-            href="https://x.com/murasaki_js"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 text-foreground/80 transition-colors hover:text-murasaki-bright"
-          >
-            <XLogo className="h-3.5 w-3.5 fill-current" />
-            <span>murasaki_js</span>
-          </a>
-        </nav>
-      </header>
+    <main className="mx-auto max-w-2xl text-center">
+      <h1 className="text-4xl font-semibold tracking-tight text-foreground">
+        Hello, Murasaki <span aria-hidden>🦋</span>
+      </h1>
+      <p className="mt-3 text-muted-foreground">
+        The Next.js developer experience — file-based routing, server actions and
+        native menus — in a lightweight Rust shell.
+      </p>
+      <p className="mt-1 text-sm text-muted-foreground/60">
+        Edit <code className="rounded bg-muted px-1.5 py-0.5">src/app/page.tsx</code> and save to
+        reload.
+      </p>
 
-      <main className="mx-auto max-w-md text-center">
-        <h1 className="text-4xl font-semibold tracking-tight text-foreground">
-          Hello, Murasaki <span aria-hidden>🦋</span>
-        </h1>
-        <p className="mt-3 text-muted-foreground">
-          Right-click the card for its own menu — or anywhere else for the app menu.
-        </p>
-
-        <ContextMenuTrigger id="card">
-          <Card className="mt-8 text-center">
-            <CardHeader>
-              <CardTitle>Try it out</CardTitle>
-              <CardDescription>
-                Right-click this card, or edit{' '}
-                <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/app/page.tsx</code>.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col items-center gap-4 text-center">
-              <Button onClick={increment}>
-                <Plus className="h-4 w-4" /> Clicked {count} times
-              </Button>
-              <Button variant="outline" onClick={callApi}>
-                <Zap className="h-4 w-4" /> Call API route
-              </Button>
-              {greeting && <p className="text-sm text-muted-foreground">{greeting}</p>}
-            </CardContent>
+      <div className="mt-10 grid grid-cols-3 gap-4">
+        <a href="https://murasaki.dev" rel="noreferrer" className="group">
+          <Card className="flex h-full flex-col items-center gap-2 p-5 text-center transition-colors group-hover:border-murasaki-bright">
+            <BookOpen className="h-5 w-5 text-murasaki-bright" />
+            <span className="text-sm font-medium text-foreground">Docs</span>
+            <span className="text-xs text-muted-foreground">Guides &amp; API reference</span>
           </Card>
-        </ContextMenuTrigger>
+        </a>
+        <a href="https://github.com/murasakijs/murasaki" rel="noreferrer" className="group">
+          <Card className="flex h-full flex-col items-center gap-2 p-5 text-center transition-colors group-hover:border-murasaki-bright">
+            <GithubLogo className="h-5 w-5 fill-murasaki-bright" />
+            <span className="text-sm font-medium text-foreground">GitHub</span>
+            <span className="text-xs text-muted-foreground">Star &amp; contribute</span>
+          </Card>
+        </a>
+        <a href="https://x.com/murasaki_js" rel="noreferrer" className="group">
+          <Card className="flex h-full flex-col items-center gap-2 p-5 text-center transition-colors group-hover:border-murasaki-bright">
+            <XLogo className="h-5 w-5 fill-murasaki-bright" />
+            <span className="text-sm font-medium text-foreground">murasaki_js</span>
+            <span className="text-xs text-muted-foreground">Follow along on X</span>
+          </Card>
+        </a>
+      </div>
 
-        <p className="mt-6">
-          <Link href="/about" className="text-murasaki-bright hover:underline">
-            About this app
-          </Link>
-        </p>
-      </main>
-    </>
+      <div className="mt-10">
+        <Link href="/demo" className={buttonVariants({ size: 'lg' })}>
+          Try the interactive demo <ArrowRight className="h-4 w-4" />
+        </Link>
+      </div>
+    </main>
   )
 }

@@ -1,18 +1,25 @@
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, relative, sep } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import pngToIco from 'png-to-ico'
+import { PNG } from 'pngjs'
+import { NtExecutable, NtExecutableResource, Data, Resource } from 'resedit'
 import build from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote } from './brand.js'
-import { ensureNodeBinary } from './node-runtime.js'
+import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import type { MurasakiConfig } from '../config.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 
-type Arch = 'arm64' | 'x64'
+export type Arch = 'arm64' | 'x64'
+export type Platform = NodePlatform
+
+/** `--target <platform>-<arch>` (or `config.targets[0]`, or the host). */
+export type BundleTarget = { platform: Platform; arch: Arch }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -32,11 +39,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 export default async function bundle(argv: string[]) {
   const cwd = process.cwd()
   const config = await loadUserConfig(cwd)
-  // Target arch for the produced .app — defaults to the host arch, but
-  // `--arch arm64`/`--arch x64` lets a single arm64 dev machine also produce
-  // an Intel build (and vice versa). Drives both the fetched Node runtime and
-  // the `murasaki-launcher` binary selection below.
-  const arch = parseArch(argv)
+  // Target platform+arch for the produced bundle — defaults to the host
+  // platform/arch, but `--target win32-x64` (etc.) or `config.targets[0]`
+  // cross-bundles a different platform from this machine. `--arch
+  // arm64`/`--arch x64` (no `--target`) keeps working exactly as before for
+  // the host platform, e.g. letting a single arm64 Mac also produce an Intel
+  // `.app`. Drives both the fetched Node runtime and the `murasaki-launcher`
+  // binary selection below.
+  const target = parseTarget(argv, config)
   // Rebuild the client every time by default — bundling is a release step, so
   // silently packaging a stale `dist/client` from an earlier run is a footgun.
   // `--no-build` opts back into reuse (but still builds if it's missing).
@@ -51,11 +61,28 @@ export default async function bundle(argv: string[]) {
   // before packaging even if dist/client was already up to date.
   await buildServer(cwd, resolve(cwd, 'src'))
 
-  if (process.platform !== 'darwin') {
-    process.stdout.write(`\n${warn('bundle: only macOS is supported right now.')}\n\n`)
+  // The win32 folder layout below has no macOS-only dependency (no
+  // codesign/sips/iconutil/plist), so unlike the darwin path it can be
+  // produced from any host — including this one, for cross-bundling / CI
+  // verification off a Mac.
+  if (target.platform === 'win32') {
+    await bundleWin32(cwd, config, target.arch)
     return
   }
 
+  if (target.platform !== 'darwin') {
+    process.stdout.write(`\n${warn(`bundle: ${target.platform} is not supported yet.`)}\n\n`)
+    return
+  }
+
+  if (process.platform !== 'darwin') {
+    process.stdout.write(
+      `\n${warn('bundle: a darwin .app can only be built while running on macOS (win32 targets can be cross-bundled from anywhere).')}\n\n`,
+    )
+    return
+  }
+
+  const arch = target.arch
   const productName = config.productName
   const appDir = resolve(cwd, 'dist/bundle', `${productName}.app`)
   await rm(appDir, { recursive: true, force: true })
@@ -78,7 +105,7 @@ export default async function bundle(argv: string[]) {
   // `Resources/node prod-server.mjs` as a child process and drives the
   // webview itself (see crates/native/src/launcher.rs); `prod-launcher.mjs`
   // is no longer used at runtime.
-  const launcherBinary = await resolveLauncherBinary(nativeDir, arch)
+  const launcherBinary = await resolveLauncherBinary(nativeDir, 'darwin', arch)
   const launcherDest = join(macosDir, productName)
   await copyFile(launcherBinary, launcherDest)
   await chmod(launcherDest, 0o755)
@@ -104,7 +131,7 @@ export default async function bundle(argv: string[]) {
   // launcher binary above rather than the app's main executable, so its
   // filename no longer affects the Dock/menu-bar label (that used to require
   // renaming it to the product name).
-  const nodeSrc = await ensureNodeBinary(arch, process.versions.node)
+  const nodeSrc = await ensureNodeBinary('darwin', arch, process.versions.node)
   const nodeDest = join(resourcesDir, 'node')
   await copyFile(nodeSrc, nodeDest)
   await chmod(nodeDest, 0o755)
@@ -129,24 +156,7 @@ export default async function bundle(argv: string[]) {
   // Contents/Resources/murasaki-meta.json
   await writeFile(
     join(resourcesDir, 'murasaki-meta.json'),
-    JSON.stringify(
-      {
-        appId: config.appId,
-        productName,
-        version: config.version ?? '0.0.0',
-        description: config.description,
-        copyright: config.copyright,
-        homepage: config.homepage,
-        authors: config.authors,
-        locales: config.locales,
-        width: config.window?.width,
-        height: config.window?.height,
-        vibrancy: config.window?.vibrancy,
-        icon: iconResource ?? undefined,
-      },
-      null,
-      2,
-    ),
+    metaJson(config, productName, iconResource),
   )
 
   // Contents/Resources/client — the Vite build output.
@@ -169,7 +179,7 @@ export default async function bundle(argv: string[]) {
   // currently requires this package. Kept for now to minimize risk.
   const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
   await mkdir(dirname(nativeDest), { recursive: true })
-  await cp(nativeDir, nativeDest, { recursive: true })
+  await copyNativeModule(nativeDir, nativeDest)
 
   // Contents/Info.plist
   await writeFile(
@@ -184,6 +194,176 @@ export default async function bundle(argv: string[]) {
   process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
 
   if (!shouldSign) process.stdout.write(unsignedNote(appDir))
+}
+
+/**
+ * Stage a Windows app FOLDER at `dist/bundle/<productName>/` — VS Code-style:
+ * `<productName>.exe` at the folder root, with a sibling `resources/`
+ * directory the launcher resolves as `<dir-of-exe>/resources/`. This is the
+ * win32 counterpart of the `.app` staged above, minus everything macOS-only
+ * (no codesign, Info.plist, or .icns — Windows has no equivalent bundle
+ * manifest at this layer; product name/icon are read from the .exe's PE
+ * resources, set by the launcher build in crates/native, not here).
+ *
+ * Has no macOS-only dependency, so — unlike the `.app` path above — this can
+ * run on any host, including this one for cross-bundling off a Mac.
+ */
+async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Promise<void> {
+  const productName = config.productName
+  const outDir = resolve(cwd, 'dist/bundle', productName)
+  await rm(outDir, { recursive: true, force: true })
+
+  const resourcesDir = join(outDir, 'resources')
+  await mkdir(outDir, { recursive: true })
+  await mkdir(resourcesDir, { recursive: true })
+
+  // resources/node_modules/@murasakijs/native — resolved once, used both to
+  // locate the compiled launcher binary below and to vendor the native
+  // binding itself, same as the macOS path.
+  const nativeDir = resolveNativeModuleDir(cwd)
+
+  // <productName>.exe — the compiled `murasaki-launcher` Rust binary for
+  // win32-<arch> (crates/native/src/bin/murasaki-launcher.rs, Phase 1b).
+  const launcherBinary = await resolveLauncherBinary(nativeDir, 'win32', arch)
+  await copyFile(launcherBinary, join(outDir, `${productName}.exe`))
+
+  // resources/node.exe — a downloaded, target-specific Node runtime
+  // (official nodejs.org win32 build, checksum-verified and cached under
+  // ~/.murasaki/node/, see node-runtime.ts), fetched even when bundling from
+  // a non-Windows host.
+  const nodeSrc = await ensureNodeBinary('win32', arch, process.versions.node)
+  await copyFile(nodeSrc, join(resourcesDir, 'node.exe'))
+
+  // resources/prod-server.mjs — spawned by the launcher binary.
+  const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
+  await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
+
+  // resources/menu-locales.json — read by the launcher binary at runtime to
+  // localize the default app menu for the end user's locale.
+  const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
+  await copyFile(menuLocalesSrc, join(resourcesDir, 'menu-locales.json'))
+
+  // resources/icon.ico + icon.png — the .ico is what actually makes
+  // Explorer/taskbar/title bar show the app's icon (see
+  // embedWin32ExeResources below); the plain PNG is kept alongside it for
+  // parity with the macOS bundle's runtime-readable icon.png (currently
+  // unused at win32 runtime — see imp_win's doc comment in launcher.rs).
+  const iconResource = config.icon ? await buildWin32Icon(cwd, config.icon, resourcesDir) : null
+
+  // Embed resources/icon.ico + version-info (ProductName, FileVersion,
+  // CompanyName, …) into <productName>.exe's PE resources — this is what
+  // Explorer/taskbar/title bar/Start menu actually read; without it the
+  // prebuilt launcher binary shows Windows' generic default icon. No-op if
+  // iconResource is null (icon generation itself was skipped above).
+  await embedWin32ExeResources(
+    join(outDir, `${productName}.exe`),
+    config,
+    iconResource ? join(resourcesDir, 'icon.ico') : null,
+  )
+
+  // resources/murasaki-meta.json — same shape the macOS path writes, read by
+  // the launcher binary at runtime.
+  await writeFile(
+    join(resourcesDir, 'murasaki-meta.json'),
+    metaJson(config, productName, iconResource),
+  )
+
+  // resources/client — the Vite build output.
+  await cp(resolve(cwd, 'dist/client'), join(resourcesDir, 'client'), { recursive: true })
+
+  // resources/server — the 'use server' action registry bundle
+  // (dist/server/actions.mjs), built self-contained (see build-server.ts) so
+  // no project node_modules need to ship alongside it.
+  await cp(resolve(cwd, 'dist/server'), join(resourcesDir, 'server'), { recursive: true })
+
+  // resources/node_modules/@murasakijs/native — external native binding,
+  // copied as-is since its .node binary is arch-specific and can't go
+  // through esbuild/tsc (dev-only Rust artifacts filtered out).
+  const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
+  await mkdir(dirname(nativeDest), { recursive: true })
+  await copyNativeModule(nativeDir, nativeDest)
+
+  process.stdout.write(`\n${success(`bundle written  ${dim(outDir)}`)}\n\n`)
+
+  // dist/bundle/<productName>-win32-<arch>.zip — a no-install "portable"
+  // deliverable alongside the installers (murasaki installer --target
+  // win32-*, cli/installer.ts): unzip anywhere and run <productName>.exe.
+  const zipPath = await zipWin32Bundle(resolve(cwd, 'dist/bundle'), productName, arch)
+  process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
+}
+
+/**
+ * Zips the just-staged `<bundleRoot>/<productName>/` folder into
+ * `<bundleRoot>/<productName>-win32-<arch>.zip`, preserving the folder name
+ * as the archive's top-level entry (so extracting it drops a
+ * `<productName>/` folder containing `<productName>.exe` + `resources/`,
+ * same shape as the unzipped bundle). Shells out rather than adding a zip
+ * dependency: the posix `zip` CLI ships on every GitHub Actions macOS/Linux
+ * runner (and this repo's dev machines), and PowerShell's `Compress-Archive`
+ * ships with every Windows runner/install — between the two, this covers
+ * both cross-bundling off macOS and running natively on the win32 CI runner.
+ */
+async function zipWin32Bundle(bundleRoot: string, productName: string, arch: Arch): Promise<string> {
+  const zipPath = join(bundleRoot, `${productName}-win32-${arch}.zip`)
+  await rm(zipPath, { force: true })
+
+  // `-q` (zip) keeps stdout from growing an "adding: <file>" line per file —
+  // bundles can have thousands of entries, which both spams the terminal and
+  // risks overrunning spawnSync's buffered stdout; maxBuffer is also raised
+  // defensively for the same reason (Compress-Archive is quiet by default,
+  // no flag needed there).
+  const result =
+    process.platform === 'win32'
+      ? spawnSync(
+          'powershell',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `Compress-Archive -Path '${productName}' -DestinationPath '${zipPath}' -Force`,
+          ],
+          { cwd: bundleRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+        )
+      : spawnSync('zip', ['-rq', zipPath, productName], {
+          cwd: bundleRoot,
+          encoding: 'utf8',
+          maxBuffer: 256 * 1024 * 1024,
+        })
+
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `murasaki: failed to create ${zipPath}: ${(result.stderr || result.stdout || result.error?.message || '').trim()}`,
+    )
+  }
+  return zipPath
+}
+
+/**
+ * The `murasaki-meta.json` object written into both the `.app`'s
+ * `Contents/Resources/` and the win32 folder's `resources/` — read by
+ * `murasaki-launcher` at runtime for window title/size, About panel fields,
+ * etc. Kept as one function so the two bundle targets can't drift apart.
+ */
+function metaJson(config: MurasakiConfig, productName: string, iconResource: string | null): string {
+  return JSON.stringify(
+    {
+      appId: config.appId,
+      productName,
+      version: config.version ?? '0.0.0',
+      description: config.description,
+      copyright: config.copyright,
+      homepage: config.homepage,
+      authors: config.authors,
+      locales: config.locales,
+      width: config.window?.width,
+      height: config.window?.height,
+      vibrancy: config.window?.vibrancy,
+      console: config.window?.console,
+      icon: iconResource ?? undefined,
+    },
+    null,
+    2,
+  )
 }
 
 /**
@@ -335,6 +515,35 @@ function parseArch(argv: string[]): Arch {
 }
 
 /**
+ * `--target <platform>-<arch>` (e.g. `win32-x64`), for cross-bundling a
+ * platform other than the host. Falls back to `config.targets[0]` when
+ * `--target` isn't passed, then to the host platform + `--arch`/host arch —
+ * which is exactly the pre-`--target` behavior, so plain `murasaki bundle`
+ * and `murasaki bundle --arch x64` on macOS are unaffected.
+ *
+ * Only a single target is resolved per invocation even when `config.targets`
+ * lists several — building every configured target in one run is left to a
+ * later pass (e.g. a loop in the `release` command); pass `--target`
+ * explicitly to pick a specific one.
+ */
+export function parseTarget(argv: string[], config: MurasakiConfig): BundleTarget {
+  const i = argv.indexOf('--target')
+  if (i >= 0) return parseTargetId(argv[i + 1])
+  if (config.targets && config.targets.length > 0) return parseTargetId(config.targets[0])
+  return { platform: process.platform as Platform, arch: parseArch(argv) }
+}
+
+function parseTargetId(id: string | undefined): BundleTarget {
+  const match = /^(darwin|win32|linux)-(arm64|x64)$/.exec(id ?? '')
+  if (!match) {
+    throw new Error(
+      `murasaki: --target must be like "darwin-arm64", "win32-x64", or "linux-x64", got ${JSON.stringify(id)}`,
+    )
+  }
+  return { platform: match[1] as Platform, arch: match[2] as Arch }
+}
+
+/**
  * Locate the installed `@murasakijs/native` package dir. Resolve from the user
  * project first (the normal, hoisted case), then fall back to resolving from
  * murasaki's own location — `@murasakijs/native` is murasaki's dependency, so
@@ -342,6 +551,33 @@ function parseArch(argv: string[]): Arch {
  * `node_modules/murasaki/node_modules/` (e.g. `file:`/link installs) rather
  * than hoisting it to the project root.
  */
+/**
+ * Vendor `@murasakijs/native` into the bundle, EXCLUDING dev-only artifacts.
+ * A published tarball ships only the `.node` binaries + launcher + JS shim, but
+ * when the package is workspace-linked to `crates/native` (dev tree, or CI that
+ * scaffolds the app inside the workspace) a naive recursive copy drags in the
+ * Rust `target/` dir (multi-GB) and the crate source — which would then get
+ * zipped/wrapped into every installer. This filter keeps the bundle small in
+ * both cases (the excluded dirs simply don't exist in a real npm install).
+ */
+async function copyNativeModule(nativeDir: string, dest: string): Promise<void> {
+  const EXCLUDE_DIRS = new Set(['target', 'src', 'npm', 'node_modules', '.git'])
+  await cp(nativeDir, dest, {
+    recursive: true,
+    filter: (src) => {
+      const rel = relative(nativeDir, src)
+      if (rel === '') return true
+      const top = rel.split(sep)[0]
+      if (EXCLUDE_DIRS.has(top)) return false
+      // dev-only files at the package root (Rust/build config, not shipped)
+      if (!rel.includes(sep) && /^(Cargo\.(toml|lock)|build\.rs|\.gitignore)$/.test(rel)) {
+        return false
+      }
+      return true
+    },
+  })
+}
+
 function resolveNativeModuleDir(cwd: string): string {
   const bases = [resolve(cwd, 'package.json'), fileURLToPath(import.meta.url)]
   for (const base of bases) {
@@ -357,32 +593,59 @@ function resolveNativeModuleDir(cwd: string): string {
 }
 
 /**
- * Locate the compiled `murasaki-launcher` binary for the target arch.
- * Published `@murasakijs/native` ships prebuilt binaries named
- * `murasaki-launcher.<napi-triple>` (see .github/workflows/native-release.yml
- * and crates/native/package.json's `files`), matching the `.node` bindings'
- * `murasaki-native.<napi-triple>.node` naming — this resolves correctly for
- * cross-arch builds too, since both triples ship in the package. Falls back
- * to a local `cargo build --release --bin murasaki-launcher` output for
- * development, where `@murasakijs/native` resolves to a workspace link to
- * crates/native itself rather than a published package — but only when
- * `arch` matches the host, since that output is never cross-compiled.
+ * Locate the compiled `murasaki-launcher` binary for the target
+ * platform/arch. Published `@murasakijs/native` ships prebuilt binaries
+ * named `murasaki-launcher.<napi-triple>` (see
+ * .github/workflows/native-release.yml and crates/native/package.json's
+ * `files`), matching the `.node` bindings' `murasaki-native.<napi-triple>.node`
+ * naming — this resolves correctly for cross-platform/cross-arch builds too,
+ * since every triple ships in the package (confirmed against the published
+ * @murasakijs/native@0.31.0 tarball, which includes
+ * murasaki-launcher.win32-x64-msvc.exe alongside the darwin/linux ones).
+ * Falls back to a local `cargo build --release --bin murasaki-launcher`
+ * output for development, where `@murasakijs/native` resolves to a workspace
+ * link to crates/native itself rather than a published package — but only
+ * when platform+arch matches the host, since that output is never
+ * cross-compiled.
  */
-async function resolveLauncherBinary(nativeDir: string, arch: Arch): Promise<string> {
-  const triple = `darwin-${arch}`
-  const candidates = [join(nativeDir, `murasaki-launcher.${triple}`)]
-  if (arch === process.arch) {
+async function resolveLauncherBinary(
+  nativeDir: string,
+  platform: Platform,
+  arch: Arch,
+): Promise<string> {
+  const filename = launcherFilename(platform, arch)
+  const candidates = [join(nativeDir, filename)]
+  if (platform === process.platform && arch === process.arch) {
+    const hostExe = platform === 'win32' ? '.exe' : ''
     candidates.push(
-      join(nativeDir, 'target/release/murasaki-launcher'),
-      resolve(__dirname, '../../../../crates/native/target/release/murasaki-launcher'),
+      join(nativeDir, `target/release/murasaki-launcher${hostExe}`),
+      resolve(__dirname, `../../../../crates/native/target/release/murasaki-launcher${hostExe}`),
     )
   }
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
   }
   throw new Error(
-    `murasaki: launcher binary not found — @murasakijs/native must ship murasaki-launcher.${triple}; rebuild native or update @murasakijs/native.`,
+    `murasaki: launcher binary not found — @murasakijs/native must ship ${filename}; rebuild native or update @murasakijs/native.`,
   )
+}
+
+/**
+ * `murasaki-launcher.<napi-triple>[.exe]` — matches how
+ * .github/workflows/native-release.yml names the launcher binary it uploads
+ * for each build matrix target, reading the triple straight off napi's own
+ * `.node` filename (win32 triples get `-msvc`, linux `-gnu`; only win32
+ * binaries get a `.exe` suffix).
+ */
+function launcherFilename(platform: Platform, arch: Arch): string {
+  switch (platform) {
+    case 'darwin':
+      return `murasaki-launcher.darwin-${arch}`
+    case 'win32':
+      return `murasaki-launcher.win32-${arch}-msvc.exe`
+    case 'linux':
+      return `murasaki-launcher.linux-${arch}-gnu`
+  }
 }
 
 /**
@@ -437,6 +700,161 @@ async function buildIcon(
   await copyFile(src, join(resourcesDir, 'icon.png'))
 
   return 'icon.png'
+}
+
+/**
+ * `config.icon` (a PNG) → `<resourcesDir>/icon.png` + `icon.ico`, for the
+ * win32 bundle. The `.ico` fan-out (16/24/32/48/64/256 — the standard
+ * Windows icon sizes: 16/32/48/256 cover Explorer's small/medium/large/
+ * extra-large views, 24/64 the odd sizes some Windows UI still asks for) is
+ * done with `pngjs` (decode + our own `resizePng` below) and `png-to-ico`
+ * (re-encode as `.ico`) — both pure JS, so unlike sips/iconutil this runs
+ * the same way on any host, including the Windows CI runner itself. Same
+ * return contract as `buildIcon` (the macOS counterpart): the
+ * meta.json-relative icon path, or `null` if `iconPath` doesn't resolve to
+ * a file.
+ */
+async function buildWin32Icon(
+  cwd: string,
+  iconPath: string,
+  resourcesDir: string,
+): Promise<string | null> {
+  const src = resolve(cwd, iconPath)
+  if (!existsSync(src)) {
+    process.stdout.write(`\n${warn(`icon: ${iconPath} not found, skipping`)}\n\n`)
+    return null
+  }
+  await copyFile(src, join(resourcesDir, 'icon.png'))
+
+  const source = PNG.sync.read(await readFile(src))
+  const sizes = [16, 24, 32, 48, 64, 256]
+  const ico = await pngToIco(sizes.map((size) => resizePng(source, size)))
+  await writeFile(join(resourcesDir, 'icon.ico'), ico)
+
+  return 'icon.png'
+}
+
+/**
+ * Resizes a decoded RGBA `pngjs` image to `size`x`size` via bilinear
+ * sampling, returning a re-encoded PNG buffer — the resize step
+ * `buildWin32Icon` needs (pngjs itself only encodes/decodes, it doesn't
+ * resize) to fan a single source PNG out to every `.ico` size.
+ */
+function resizePng(src: PNG, size: number): Buffer {
+  const dst = new PNG({ width: size, height: size })
+  for (let y = 0; y < size; y++) {
+    const sy = Math.min(Math.max(((y + 0.5) * src.height) / size - 0.5, 0), src.height - 1)
+    const y0 = Math.floor(sy)
+    const y1 = Math.min(y0 + 1, src.height - 1)
+    const ty = sy - y0
+    for (let x = 0; x < size; x++) {
+      const sx = Math.min(Math.max(((x + 0.5) * src.width) / size - 0.5, 0), src.width - 1)
+      const x0 = Math.floor(sx)
+      const x1 = Math.min(x0 + 1, src.width - 1)
+      const tx = sx - x0
+      const dstIdx = (y * size + x) * 4
+      for (let c = 0; c < 4; c++) {
+        const p00 = src.data[(y0 * src.width + x0) * 4 + c]
+        const p10 = src.data[(y0 * src.width + x1) * 4 + c]
+        const p01 = src.data[(y1 * src.width + x0) * 4 + c]
+        const p11 = src.data[(y1 * src.width + x1) * 4 + c]
+        const top = p00 + (p10 - p00) * tx
+        const bottom = p01 + (p11 - p01) * tx
+        dst.data[dstIdx + c] = Math.round(top + (bottom - top) * ty)
+      }
+    }
+  }
+  return PNG.sync.write(dst)
+}
+
+/**
+ * Embeds `resources/icon.ico` + a version-info resource into the just-copied
+ * `<productName>.exe`'s PE resources, using `resedit` — a pure-JS PE
+ * resource editor (built on `pe-library`), so like the rest of this file's
+ * win32 path it runs unmodified on macOS/Linux (cross-bundling/CI) as well
+ * as a Windows runner, no rcedit/Wine needed. This is what makes Explorer,
+ * the taskbar, the title bar, and the Start menu show the app's icon instead
+ * of Windows' generic default — the prebuilt `murasaki-launcher.exe` ships
+ * with no icon resource of its own (see `buildWin32Icon`'s doc comment).
+ * No-op if `iconIcoPath` is `null` (icon generation was itself skipped, see
+ * `bundleWin32`).
+ */
+async function embedWin32ExeResources(
+  exePath: string,
+  config: MurasakiConfig,
+  iconIcoPath: string | null,
+): Promise<void> {
+  if (!iconIcoPath) return
+
+  const exe = NtExecutable.from(await readFile(exePath))
+  const res = NtExecutableResource.from(exe)
+
+  // Icon group — language-neutral (lang 0) so it shows regardless of the end
+  // user's system locale, same as most Windows resource-generation tools'
+  // (rcedit, winres, Visual Studio's default .rc) default. ID 1 mirrors
+  // those same tools' conventional "main icon" resource ID; the prebuilt
+  // launcher has no pre-existing icon-group entry, so this is added rather
+  // than replaced.
+  const iconFile = Data.IconFile.from(await readFile(iconIcoPath))
+  Resource.IconGroupEntry.replaceIconsForResource(
+    res.entries,
+    1,
+    0,
+    iconFile.icons.map((item) => item.data),
+  )
+
+  // Version info — the fields Explorer's file-Properties "Details" tab (and
+  // the taskbar/Alt-Tab tooltip) read. lang 1033 / codepage 1200 (en-US,
+  // Unicode) is the conventional default most single-language Windows apps
+  // use.
+  const LANG = 1033
+  const CODEPAGE = 1200
+  const [major, minor, patch, rev] = parseVersionParts(config.version)
+  const vi = Resource.VersionInfo.fromEntries(res.entries)[0] ?? Resource.VersionInfo.createEmpty()
+  vi.setFileVersion(major, minor, patch, rev, LANG)
+  vi.setProductVersion(major, minor, patch, rev, LANG)
+  vi.setStringValues(
+    { lang: LANG, codepage: CODEPAGE },
+    {
+      ProductName: config.productName,
+      FileDescription: config.description ?? config.productName,
+      CompanyName: resolveWindowsPublisher(config),
+      OriginalFilename: `${config.productName}.exe`,
+    },
+  )
+  vi.outputToResourceEntries(res.entries)
+
+  res.outputResource(exe)
+  await writeFile(exePath, Buffer.from(exe.generate()))
+}
+
+/**
+ * `config.version` (e.g. `"1.2.3"` or `"1.2.3-beta.1"`) → the 4-part
+ * `major.minor.patch.build` tuple `resedit`'s `VersionInfo.setFileVersion`/
+ * `setProductVersion` want. Non-numeric trailing text (pre-release tags, …)
+ * is dropped by `parseInt`; missing/unparsable parts default to 0.
+ */
+function parseVersionParts(version: string | undefined): [number, number, number, number] {
+  const parts = (version ?? '0.0.0').split('.').map((p) => parseInt(p, 10) || 0)
+  return [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0, parts[3] ?? 0]
+}
+
+/**
+ * CompanyName for the exe's version-info resource above — mirrors
+ * installer.ts's `resolveWindowsPublisher` (same priority chain: `config
+ * .installer.windows.publisher`, else `authors`, else `copyright`, else
+ * `productName`). Kept as its own copy here rather than a shared import so
+ * this file has no dependency on installer.ts, matching the existing
+ * direction of that dependency (installer.ts imports from bundle.ts, not the
+ * reverse).
+ */
+function resolveWindowsPublisher(config: MurasakiConfig): string {
+  return (
+    config.installer?.windows?.publisher ??
+    (config.authors && config.authors.length > 0 ? config.authors.join(', ') : undefined) ??
+    config.copyright ??
+    config.productName
+  )
 }
 
 function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean): string {

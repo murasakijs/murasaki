@@ -24,6 +24,12 @@ jobs:
             target: x86_64-apple-darwin
           - host: windows-2022
             target: x86_64-pc-windows-msvc
+          # Native arm64 build — windows-11-arm is a GitHub-hosted runner
+          # (free for public repos), so this builds natively rather than
+          # cross-compiling (unlike the macos-14 Intel entry above, whose
+          # host is a different arch than its target).
+          - host: windows-11-arm
+            target: aarch64-pc-windows-msvc
           - host: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
           - host: ubuntu-22.04-arm
@@ -134,24 +140,24 @@ jobs:
           path: crates/native
           merge-multiple: true
 
-      - name: Verify all 5 target binaries are present
+      - name: Verify all 6 target binaries are present
         run: |
           NODE_COUNT=$(find . -maxdepth 1 -name '*.node' | wc -l | tr -d ' ')
-          if [ "$NODE_COUNT" != "5" ]; then
-            echo "::error::Expected 5 .node binaries (one per build matrix target), found $NODE_COUNT"
+          if [ "$NODE_COUNT" != "6" ]; then
+            echo "::error::Expected 6 .node binaries (one per build matrix target), found $NODE_COUNT"
             ls -la ./*.node 2>/dev/null || true
             exit 1
           fi
-          echo "Found 5 .node binaries:"
+          echo "Found 6 .node binaries:"
           ls -la ./*.node
 
           LAUNCHER_COUNT=$(find . -maxdepth 1 -name 'murasaki-launcher.*' | wc -l | tr -d ' ')
-          if [ "$LAUNCHER_COUNT" != "5" ]; then
-            echo "::error::Expected 5 murasaki-launcher binaries (one per build matrix target), found $LAUNCHER_COUNT"
+          if [ "$LAUNCHER_COUNT" != "6" ]; then
+            echo "::error::Expected 6 murasaki-launcher binaries (one per build matrix target), found $LAUNCHER_COUNT"
             ls -la ./murasaki-launcher.* 2>/dev/null || true
             exit 1
           fi
-          echo "Found 5 murasaki-launcher binaries:"
+          echo "Found 6 murasaki-launcher binaries:"
           ls -la ./murasaki-launcher.*
 
       - name: Publish @murasakijs/native

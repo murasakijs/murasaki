@@ -6,8 +6,12 @@ import { Action } from '@/lib/action'
 
 /**
  * Root layout — wraps every route. It declares the app-wide right-click menu
- * (no id = the whole window) and renders children inside the <App> frame.
+ * (no id = the whole window), then renders children inside the <App> frame.
  * Actions come from src/lib/action.ts (built-ins + your own).
+ *
+ * The app gets murasaki's standard native menu bar by default (top of screen
+ * on macOS, a window menu bar on Windows). To define your own, add a
+ * `useAppMenu([...])` call here — see the "App menu" guide in the docs.
  */
 export default function Layout({ children }: { children: ReactNode }) {
   useContextMenu([

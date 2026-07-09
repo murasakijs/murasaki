@@ -9,7 +9,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use tao::{dpi::LogicalSize, window::Window};
 
-use crate::{types::WebviewOptions, webview::Webview};
+use crate::{
+  types::WebviewOptions,
+  webview::{AppMenuContext, Webview},
+};
 
 pub(crate) type SharedWindow = Rc<RefCell<Option<Window>>>;
 
@@ -32,15 +35,28 @@ pub(crate) fn center_on_primary_monitor(window: &Window) {
 #[napi]
 pub struct BrowserWindow {
   window: SharedWindow,
+  /// Retained so `create_webview` below can hand a clone to every `Webview`
+  /// it builds (`&self`, so in principle more than once) — see
+  /// `AppMenuContext`'s doc comment for what this is for.
+  app_menu: AppMenuContext,
 }
 
 impl BrowserWindow {
-  pub(crate) fn from_window(window: Window) -> Self {
+  pub(crate) fn from_window(window: Window, app_menu: AppMenuContext) -> Self {
     #[cfg(target_os = "macos")]
     let _ = &window; // vibrancy hook lands in the follow-up commit
     Self {
       window: Rc::new(RefCell::new(Some(window))),
+      app_menu,
     }
+  }
+
+  /// Windows only: a clone-able handle to the underlying window, so
+  /// `Application` can act on it from the tao event loop (see
+  /// `webview::poll_menu_bar_events`'s Minimize handling).
+  #[cfg(target_os = "windows")]
+  pub(crate) fn handle(&self) -> SharedWindow {
+    self.window.clone()
   }
 }
 
@@ -60,7 +76,7 @@ impl BrowserWindow {
         "window disposed",
       ));
     }
-    Webview::new(self.window.clone(), opts)
+    Webview::new(self.window.clone(), opts, self.app_menu.clone())
   }
 
   #[napi(js_name = "setTitle")]

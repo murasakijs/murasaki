@@ -20,6 +20,8 @@ use tao::{
 
 #[cfg(target_os = "macos")]
 use crate::menu::build_default_app_menu;
+#[cfg(target_os = "windows")]
+use crate::menu::build_windows_menu_bar;
 use crate::{
   types::{WebviewOptions, WindowOptions},
   webview::Webview,
@@ -41,6 +43,22 @@ pub struct Application {
   /// `create_window()` call that installs it. `None` until the first window
   /// is created; also doubles as the "already installed" guard.
   app_menu: Rc<RefCell<Option<muda::Menu>>>,
+  /// Windows only: same reasoning as `app_menu` above, just for the native
+  /// Win32 menu bar (`Menu::init_for_hwnd`) instead of `init_for_nsapp`.
+  /// `None` until the first window is created.
+  #[cfg(target_os = "windows")]
+  windows_menu_bar: Rc<RefCell<Option<muda::Menu>>>,
+  /// A handle to the most recently created webview, so `run()` can dispatch
+  /// native menu clicks into it (see `webview::poll_menu_bar_events`/
+  /// `webview::poll_app_menu_events`). `None` before a webview exists.
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  webview_handle: Rc<RefCell<Option<crate::webview::SharedWebview>>>,
+  /// Windows only: a handle to the most recently created window, so `run()`
+  /// can act on menu-bar clicks that operate on the window itself (currently
+  /// just Minimize — see `webview::poll_menu_bar_events`). `None` before a
+  /// window exists.
+  #[cfg(target_os = "windows")]
+  window_handle: Rc<RefCell<Option<crate::window::SharedWindow>>>,
 }
 
 #[napi]
@@ -68,6 +86,12 @@ impl Application {
       event_loop: Rc::new(RefCell::new(Some(event_loop))),
       on_quit: Rc::new(RefCell::new(None)),
       app_menu: Rc::new(RefCell::new(None)),
+      #[cfg(target_os = "windows")]
+      windows_menu_bar: Rc::new(RefCell::new(None)),
+      #[cfg(any(target_os = "macos", target_os = "windows"))]
+      webview_handle: Rc::new(RefCell::new(None)),
+      #[cfg(target_os = "windows")]
+      window_handle: Rc::new(RefCell::new(None)),
     })
   }
 
@@ -138,7 +162,70 @@ impl Application {
 
     crate::window::center_on_primary_monitor(&window);
 
-    Ok(BrowserWindow::from_window(window))
+    // Install the native Win32 menu bar (File/Edit/Window) once, on the first
+    // window created — same "install once" semantics as the macOS app menu
+    // above, since (for now) murasaki only ever drives one window per
+    // process. Attaching requires the window's HWND, so unlike the macOS
+    // block above this has to happen after `build()` rather than before it.
+    #[cfg(target_os = "windows")]
+    if self.windows_menu_bar.borrow().is_none() {
+      match build_windows_menu_bar(opts.menu_labels.as_ref()) {
+        Ok(menu) => {
+          use tao::platform::windows::WindowExtWindows;
+          // SAFETY: `hwnd` was just read from the `window` built above, which
+          // is still alive on this stack frame.
+          match unsafe { menu.init_for_hwnd(window.hwnd()) } {
+            Ok(()) => *self.windows_menu_bar.borrow_mut() = Some(menu),
+            // Cosmetic: a missing menu bar shouldn't crash the app.
+            Err(e) => eprintln!("murasaki: failed to attach the Windows menu bar: {e}"),
+          }
+        }
+        Err(e) => eprintln!("murasaki: failed to build the Windows menu bar: {e}"),
+      }
+    }
+
+    let browser_window = BrowserWindow::from_window(window, self.app_menu_context(&opts));
+
+    // Windows only: keep a handle so `run()`'s event loop can act on
+    // menu-bar clicks that operate on the window itself — see
+    // `window_handle`'s doc comment.
+    #[cfg(target_os = "windows")]
+    {
+      *self.window_handle.borrow_mut() = Some(browser_window.handle());
+    }
+
+    Ok(browser_window)
+  }
+
+  /// Builds the `AppMenuContext` a `BrowserWindow`'s `Webview`(s) need to
+  /// install/replace the application menu on demand (see that struct's doc
+  /// comment and the `{ kind: "appMenu" }` IPC branch in `webview.rs`).
+  /// `menu_slot` is a clone of whichever field above (`app_menu` on macOS,
+  /// `windows_menu_bar` on Windows) already holds the startup default menu
+  /// installed just above — so a `useAppMenu` replacement and `Application`'s
+  /// own bookkeeping always agree on what's currently installed.
+  fn app_menu_context(&self, opts: &WindowOptions) -> crate::webview::AppMenuContext {
+    #[cfg(target_os = "macos")]
+    let menu_slot = self.app_menu.clone();
+    #[cfg(target_os = "windows")]
+    let menu_slot = self.windows_menu_bar.clone();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let menu_slot = Rc::new(RefCell::new(None));
+
+    crate::webview::AppMenuContext {
+      menu_slot,
+      menu_labels: opts.menu_labels.clone(),
+      #[cfg(target_os = "macos")]
+      about_info: crate::menu::AboutInfoOwned {
+        name: opts.title.clone().unwrap_or_else(|| "Murasaki".to_string()),
+        icon_path: opts.icon.clone(),
+        version: opts.version.clone(),
+        description: opts.description.clone(),
+        copyright: opts.copyright.clone(),
+        homepage: opts.homepage.clone(),
+        authors: opts.authors.clone(),
+      },
+    }
   }
 
   /// Sugar: create a window + attach a webview in one call.
@@ -149,7 +236,14 @@ impl Application {
     webview_opts: WebviewOptions,
   ) -> Result<Webview> {
     let win = self.create_window(window_opts)?;
-    win.create_webview(webview_opts)
+    let webview = win.create_webview(webview_opts)?;
+    // Keep a handle so `run()`'s event loop can dispatch native menu clicks
+    // into it — see `webview_handle`'s doc comment.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+      *self.webview_handle.borrow_mut() = Some(webview.handle());
+    }
+    Ok(webview)
   }
 
   /// Run the tao event loop. Blocks the calling thread until quit.
@@ -162,9 +256,45 @@ impl Application {
       .ok_or_else(|| Error::new(Status::GenericFailure, "event loop already consumed"))?;
 
     let on_quit = self.on_quit.clone();
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let webview_handle = self.webview_handle.clone();
+    #[cfg(target_os = "windows")]
+    let window_handle = self.window_handle.clone();
 
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
+
+      // Windows: drain native menu clicks every tick (both the startup
+      // default bar and any `useAppMenu` replacement — the menu bar is
+      // persistent, unlike the context-menu popup in webview.rs, which reads
+      // its one expected event synchronously right where it's shown instead)
+      // — see `poll_menu_bar_events`'s doc comment. Exit is handled the same
+      // way as the window's own close button, just below.
+      #[cfg(target_os = "windows")]
+      {
+        let window_handle_ref = window_handle.borrow();
+        let webview_handle_ref = webview_handle.borrow();
+        if let (Some(window_slot), Some(webview_slot)) =
+          (window_handle_ref.as_ref(), webview_handle_ref.as_ref())
+        {
+          if crate::webview::poll_menu_bar_events(window_slot, webview_slot) {
+            *control_flow = ControlFlow::Exit;
+            if let Some(tsf) = on_quit.borrow().as_ref() {
+              let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+            }
+          }
+        }
+      }
+
+      // macOS: drain clicks on `useAppMenu`'s custom (non-role) items —
+      // see `poll_app_menu_events`'s doc comment for why macOS never needed
+      // this before `useAppMenu` existed.
+      #[cfg(target_os = "macos")]
+      {
+        if let Some(webview_slot) = webview_handle.borrow().as_ref() {
+          crate::webview::poll_app_menu_events(webview_slot);
+        }
+      }
 
       match event {
         Event::WindowEvent {

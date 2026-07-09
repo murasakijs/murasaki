@@ -15,10 +15,10 @@ murasaki help        Show this help
 ```
 
 <Callout type="warn">
-  `murasaki bundle` and `murasaki installer` are implemented and verified on
-  **macOS** today. On other platforms they currently print a "not supported
-  yet" message instead of producing an installer — `murasaki dev` itself works
-  on macOS, Windows, and Linux.
+  `murasaki bundle` and `murasaki installer` produce real installers on
+  **macOS** and **Windows** today; Linux packaging is on the roadmap (it still
+  prints a "not supported yet" message). `murasaki dev` works on macOS,
+  Windows, and Linux.
 </Callout>
 
 ## `murasaki dev`
@@ -35,37 +35,41 @@ A production Vite build → `dist/client`.
 ## `murasaki bundle`
 
 Packages `dist/client` + the compiled server-actions registry + a portable
-Node runtime + the native launcher binary into a `<productName>.app` at
-`dist/bundle/`.
+Node runtime + the native launcher binary into `dist/bundle/` — a
+`<productName>.app` on macOS, a `<productName>/` folder with
+`<productName>.exe` on Windows.
 
 ```bash
-murasaki bundle              # host arch, ad-hoc signed (unsigned distribution)
-murasaki bundle --arch x64   # cross-arch: build an x64 .app on Apple Silicon
-murasaki bundle --sign       # sign with your Developer ID
-murasaki bundle --no-build   # reuse an existing dist/client instead of rebuilding
+murasaki bundle                       # host platform + arch, unsigned
+murasaki bundle --arch x64            # cross-arch (macOS): x64 .app on Apple Silicon
+murasaki bundle --target win32-arm64  # cross-target: an arm64 Windows bundle
+murasaki bundle --sign                # macOS: Developer ID-sign the .app
+murasaki bundle --no-build            # reuse an existing dist/client
 ```
 
-- **`--arch arm64|x64`** — target architecture (defaults to the host arch).
-- **`--sign`** — Developer ID-sign the `.app` (see [Distribution](/docs/building/distribution#signing--notarization)).
+- **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — target arch /
+  platform (defaults to the host). Windows targets are `win32-x64` / `win32-arm64`.
+- **`--sign`** — Developer ID-sign the `.app` on macOS (see [Distribution](/docs/building/distribution#signing--notarization)).
 - **`--no-build`** — skip the Vite rebuild if `dist/client` already exists.
 
 ## `murasaki installer`
 
-Wraps the `.app` from `bundle` into a drag-to-install `.dmg` at
-`dist/<productName>-<version>.dmg`, styled with a background image and
-positioned icons (falls back to a plain DMG if Finder-styling fails, e.g.
-missing Automation permission).
+Turns the `bundle` output into a distributable installer for the target
+platform: a drag-to-install, styled `.dmg` on macOS
+(`dist/<productName>-<version>.dmg`, falling back to a plain DMG if
+Finder-styling fails); a portable `.zip`, an NSIS `.exe`, and an MSI `.msi`
+on Windows.
 
 ```bash
-murasaki installer                     # unsigned .dmg (re-bundles first)
-murasaki installer --sign --notarize   # Developer ID sign + submit to Apple + staple
-murasaki installer --no-build          # reuse an existing dist/bundle/<App>.app
+murasaki installer                     # installer(s) for the host platform (re-bundles first)
+murasaki installer --target win32-x64  # Windows x64 installers
+murasaki installer --sign --notarize   # macOS: Developer ID sign + notarize + staple
+murasaki installer --no-build          # reuse an existing dist/bundle
 ```
 
-- **`--sign`** — forwarded to `bundle`.
-- **`--notarize`** — submit the signed `.dmg` to Apple's notary service and
-  staple the ticket; requires `--sign`.
-- **`--arch arm64|x64`** — forwarded to `bundle`.
+- **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — forwarded to `bundle`.
+- **`--sign`** / **`--notarize`** — macOS only; submit the signed `.dmg` to
+  Apple's notary service and staple the ticket (`--notarize` requires `--sign`).
 
 ## `murasaki init`
 
@@ -80,8 +84,10 @@ murasaki icon assets/logo.png
 ```
 
 Generates `dist/icons/icon.icns` (macOS, via `sips` + `iconutil`) from a
-single 1024px PNG. On non-macOS platforms it currently prints a "PNG-only"
-notice — `.ico` / Linux icon sets are on the roadmap.
+single 1024px PNG; this standalone command is PNG-only off macOS for now. You
+rarely need it, though — `murasaki bundle` already generates and embeds the
+platform icon from `config.icon` automatically: the `.icns` on macOS, and the
+Windows `.ico` (embedded into the `.exe`).
 
 ## `murasaki release`
 

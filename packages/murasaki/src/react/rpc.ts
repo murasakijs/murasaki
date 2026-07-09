@@ -58,6 +58,9 @@ export interface ContextMenuItem {
     | 'redo'
     | 'about'
     | 'quit'
+    | 'close'
+    | 'minimize'
+    | 'zoom'
     | 'separator'
   accelerator?: string
   enabled?: boolean
