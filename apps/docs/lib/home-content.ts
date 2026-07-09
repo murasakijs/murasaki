@@ -687,18 +687,23 @@ export interface LpExtra {
   manifestoCounterLabel: string;
   /** Scroll cue label at the bottom of the hero. */
   scrollCue: string;
-  /** The right-click easter egg — a different register of playful than the
-   * CTA's drag/physics toy: discovery-based (right-click), and a
-   * self-aware joke about the one context menu on this page that ISN'T
-   * real (unlike the native one in nativeDeepDive/PxShowcase). */
+  /** The pixel-canvas easter egg — a different register of playful than the
+   * CTA's drag/physics toy: creation (draw brand-purple pixels on a 16px
+   * grid) plus discovery (a right-click menu that can stamp the logo
+   * butterfly), capped by a self-aware joke about the one context menu on
+   * this page that ISN'T real (unlike the native one in nativeDeepDive/
+   * PxShowcase). */
   playground: {
     eyebrow: string;
     heading: string;
-    /** Hint pinned inside the mockup, telling people to right-click it. */
+    /** Hint pinned inside the canvas — right-click AND drawing both work. */
     hint: string;
     items: {
-      spawn: string;
+      /** Paints the pixel-butterfly onto the canvas at the click point. */
+      stamp: string;
+      /** Recolors every painted cell to a random brand color. */
       shuffle: string;
+      clear: string;
       /** The joke — deliberately not a real menu action. */
       confession: string;
     };
@@ -765,10 +770,11 @@ const lpEn: LpExtra = {
   playground: {
     eyebrow: "Try it",
     heading: "Right-click this.",
-    hint: "psst — right-click the screen",
+    hint: "psst — right-click. drawing works too",
     items: {
-      spawn: "Spawn a butterfly 🦋",
+      stamp: "Stamp a butterfly 🦋",
       shuffle: "Shuffle the palette 🎨",
+      clear: "Clear the canvas 🧹",
       confession: "(okay, THIS menu is just HTML)",
     },
     caption:
@@ -835,10 +841,11 @@ const lpJa: LpExtra = {
   playground: {
     eyebrow: "試してみる",
     heading: "右クリックしてみて。",
-    hint: "こっそり右クリックしてみてください",
+    hint: "こっそり右クリック。お絵かきもできます",
     items: {
-      spawn: "蝶を1匹増やす 🦋",
+      stamp: "蝶をスタンプ 🦋",
       shuffle: "配色をシャッフル 🎨",
+      clear: "キャンバスを消す 🧹",
       confession: "(このメニューだけは、ただの HTML です)",
     },
     caption:
