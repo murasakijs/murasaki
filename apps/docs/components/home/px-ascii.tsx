@@ -62,6 +62,10 @@ const COMPANIONS: {
   ay: number;
   rz: number;
 }[] = [
+  // z bands are strictly separated from the hero's (±6) so nobody ever
+  // crosses in FRONT of it and scrambles the tableau, and x amplitudes are
+  // kept to each one's own half of the frame (c3 may cross, but only deep
+  // in the background where it reads as parallax).
   {
     wardrobe: { upper: 0xd946ef, lower: 0xa21caf, accent: 0xfaf5e8 },
     scale: 0.42,
@@ -74,10 +78,10 @@ const COMPANIONS: {
     pz0: 3.4,
     ox: 0.75,
     oy: -0.3,
-    oz: -3,
-    ax: 0.9,
-    ay: 0.7,
-    rz: 4,
+    oz: -9,
+    ax: 0.4,
+    ay: 0.5,
+    rz: 2.5,
   },
   {
     wardrobe: { upper: 0x8b5cf6, lower: 0x4c1d95, accent: 0xfaf5e8 },
@@ -91,10 +95,10 @@ const COMPANIONS: {
     pz0: 1.2,
     ox: -0.7,
     oy: 0.5,
-    oz: -6,
-    ax: 1.0,
-    ay: 0.8,
-    rz: 4,
+    oz: -11,
+    ax: 0.45,
+    ay: 0.6,
+    rz: 2.5,
   },
   {
     wardrobe: { upper: 0xfaf5e8, lower: 0xc4b5fd, accent: 0x7c3aed },
@@ -108,10 +112,10 @@ const COMPANIONS: {
     pz0: 5.1,
     ox: 0.2,
     oy: 0.75,
-    oz: -9,
-    ax: 1.3,
-    ay: 0.6,
-    rz: 3,
+    oz: -14,
+    ax: 1.1,
+    ay: 0.45,
+    rz: 2,
   },
 ];
 
@@ -230,7 +234,7 @@ export function PxAscii({
           const effect = new AsciiEffect(renderer, " .:-=+*#%@", {
             color: true,
             invert: true,
-            resolution: 0.15,
+            resolution: 0.12,
           });
           effect.setSize(width, height);
           const dom = effect.domElement;
@@ -386,11 +390,19 @@ export function PxAscii({
             effect.render(scene, camera);
           };
 
-          // Render loop, paused offscreen. Reduced motion poses a single
-          // still frame and re-renders only on drag.
+          // Render loop, paused offscreen and capped at ~30fps — every
+          // ASCII frame rebuilds thousands of colored spans, so halving the
+          // update rate halves the DOM churn without hurting the floaty
+          // motion. Reduced motion poses a single still frame and
+          // re-renders only on drag.
           let raf = 0;
+          let acc = 0;
           const tick = () => {
-            renderPose(Math.min(clock.getDelta(), 0.05));
+            acc += Math.min(clock.getDelta(), 0.05);
+            if (acc >= 1 / 30) {
+              renderPose(acc);
+              acc = 0;
+            }
             raf = requestAnimationFrame(tick);
           };
           const visTrigger = ScrollTrigger.create({
@@ -463,8 +475,13 @@ export function PxAscii({
         </MaskReveal>
 
         <div className="relative mt-14 border border-white/10">
+          {/* lang="en" on purpose: the ASCII grid is language-neutral, and
+           * under the page's lang="ja" the browser resolves AsciiEffect's
+           * `courier new, monospace` through CJK font fallback — different
+           * glyph metrics shear the whole tableau sideways. */}
           <div
             ref={hostRef}
+            lang="en"
             aria-hidden="true"
             className="h-[340px] overflow-hidden select-none sm:h-[440px] [&>div]:mx-auto"
           >
