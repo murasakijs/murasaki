@@ -687,6 +687,23 @@ export interface LpExtra {
   manifestoCounterLabel: string;
   /** Scroll cue label at the bottom of the hero. */
   scrollCue: string;
+  /** The right-click easter egg — a different register of playful than the
+   * CTA's drag/physics toy: discovery-based (right-click), and a
+   * self-aware joke about the one context menu on this page that ISN'T
+   * real (unlike the native one in nativeDeepDive/PxShowcase). */
+  playground: {
+    eyebrow: string;
+    heading: string;
+    /** Hint pinned inside the mockup, telling people to right-click it. */
+    hint: string;
+    items: {
+      spawn: string;
+      shuffle: string;
+      /** The joke — deliberately not a real menu action. */
+      confession: string;
+    };
+    caption: string;
+  };
 }
 
 const lpEn: LpExtra = {
@@ -745,6 +762,18 @@ const lpEn: LpExtra = {
     "Build native desktop apps with file-based routing, server actions, and React 19 — in a Rust-native window, not Electron's Chromium. Without writing Rust.",
   manifestoCounterLabel: "Lit",
   scrollCue: "Scroll",
+  playground: {
+    eyebrow: "Try it",
+    heading: "Right-click this.",
+    hint: "psst — right-click the screen",
+    items: {
+      spawn: "Spawn a butterfly 🦋",
+      shuffle: "Shuffle the palette 🎨",
+      confession: "(okay, THIS menu is just HTML)",
+    },
+    caption:
+      "In a real Murasaki app this pops a native NSMenu / HMENU. On a website? Still just HTML — we had to be honest somewhere.",
+  },
 };
 
 const lpJa: LpExtra = {
@@ -803,6 +832,18 @@ const lpJa: LpExtra = {
     "ファイルベースルーティング、サーバーアクション、React 19 でネイティブなデスクトップアプリを構築 — Electron の Chromium ではなく、Rust ネイティブなウィンドウで。Rust を書く必要はありません。",
   manifestoCounterLabel: "Lit",
   scrollCue: "Scroll",
+  playground: {
+    eyebrow: "試してみる",
+    heading: "右クリックしてみて。",
+    hint: "こっそり右クリックしてみてください",
+    items: {
+      spawn: "蝶を1匹増やす 🦋",
+      shuffle: "配色をシャッフル 🎨",
+      confession: "(このメニューだけは、ただの HTML です)",
+    },
+    caption:
+      "本物の Murasaki アプリなら、ここでネイティブの NSMenu / HMENU が開きます。Web サイト上では……やっぱりただの HTML です。どこかで正直でいないと、ですね。",
+  },
 };
 
 export const lpExtra: Record<string, LpExtra> = { en: lpEn, ja: lpJa };
