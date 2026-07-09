@@ -2,6 +2,7 @@ import {
   Bricolage_Grotesque,
   Hanken_Grotesk,
   Martian_Mono,
+  Silkscreen,
 } from "next/font/google";
 
 // Landing-page-only type system ("bold grotesque" art direction). These are
@@ -37,9 +38,20 @@ export const lpMono = Martian_Mono({
   display: "swap",
 });
 
+/** Pixel face — micro-labels only (indexes, "SCROLL", section codes). The
+ * pixel design language's typographic anchor, echoing the pixel-butterfly
+ * logo; never used at body sizes. */
+export const lpPixel = Silkscreen({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-lp-pixel",
+  display: "swap",
+});
+
 /** Convenience: every landing font variable, joined for the LP root. */
 export const lpFontVariables = [
   lpDisplay.variable,
   lpSans.variable,
   lpMono.variable,
+  lpPixel.variable,
 ].join(" ");

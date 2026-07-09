@@ -314,6 +314,31 @@ html > body[data-scroll-locked] {
     var(--font-lp-sans), var(--font-sans-ja), var(--font-sans), sans-serif;
 }
 
+/* Pixel micro-label face (Silkscreen) — indexes, scroll cues, section
+ * codes. The typographic echo of the pixel-butterfly mark. */
+.lp-pixel {
+  font-family: var(--font-lp-pixel), var(--font-lp-mono), monospace;
+}
+
+/* Faint pixel graph grid — the paper sections' texture (16px cells, the
+ * same unit the butterfly mark is built on). */
+.px-grid {
+  background-image:
+    linear-gradient(to right, currentColor 1px, transparent 1px),
+    linear-gradient(to bottom, currentColor 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Two-color checkerboard dither — section seams get a pixelated edge
+ * instead of a hard line. Colors via custom props per instance. */
+.px-dither {
+  background-image: repeating-conic-gradient(
+    var(--px-a) 0% 25%,
+    var(--px-b) 0% 50%
+  );
+  background-size: 12px 12px;
+}
+
 /* Vertical Japanese rail (tategaki) — hero right edge. */
 .lp-tategaki {
   writing-mode: vertical-rl;
