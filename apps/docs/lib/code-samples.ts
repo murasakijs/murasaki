@@ -96,3 +96,23 @@ useContextMenu([
   { label: 'Copy', action: <Action.Copy /> },
 ])`,
 };
+
+// The landing page's proof-by-demo snippet (components/home/lp-native-demo
+// .tsx) — the real useAppMenu API from content/docs/guides/app-menu.mdx,
+// matching the live window mock rendered beside it.
+export const appMenuSample: CodeSample = {
+  id: "app-menu",
+  lang: "tsx",
+  code: `import { useAppMenu, Action } from 'murasaki'
+
+useAppMenu([
+  { label: 'File', items: [{ role: 'close' }] },
+  { role: 'editMenu' },
+  {
+    label: 'View',
+    items: [
+      { label: 'Reload', shortcut: 'command,R', action: <Action.Reload /> },
+    ],
+  },
+])`,
+};

@@ -641,3 +641,138 @@ const ja: HomeContent = {
 };
 
 export const homeContent: Record<string, HomeContent> = { en, ja };
+
+// ---------------------------------------------------------------------------
+// Strings that exist only for the redesigned landing page (the "紫 /
+// Murasaki" bold-grotesque direction) — kept separate from HomeContent so
+// the canonical copy above stays the single source of truth for facts.
+// ---------------------------------------------------------------------------
+export interface LpExtra {
+  /** Phrases looping in the marquee band (joined with a separator glyph). */
+  marquee: string[];
+  /** Vertical Japanese rail on the hero's right edge (pure art direction —
+   * shown in both locales, like a hanko/colophon). */
+  tategaki: string;
+  /** The live native-window demo (proof-by-demo section). */
+  demo: {
+    windowTitle: string;
+    menus: {
+      label: string;
+      items: { label: string; shortcut?: string; divider?: boolean }[];
+    }[];
+    contentTitle: string;
+    contentHint: string;
+    counterLabel: string;
+    /** Caption under the code panel — "this code → that menu". */
+    codeCaption: string;
+    /** Small hint that the menus are clickable. */
+    tryHint: string;
+  };
+  /** Word/character-illuminated manifesto (scroll-linked). */
+  manifesto: string;
+  /** Scroll cue label at the bottom of the hero. */
+  scrollCue: string;
+}
+
+const lpEn: LpExtra = {
+  marquee: [
+    "Next.js DX for desktop",
+    "Native windows",
+    "Native menus",
+    "~1/5 Electron memory",
+    "React 19",
+    "Vite HMR",
+    "Rust-native",
+    "No Rust required",
+    "MIT licensed",
+  ],
+  tategaki: "紫は蝶のように軽い",
+  demo: {
+    windowTitle: "Murasaki App",
+    menus: [
+      {
+        label: "File",
+        items: [
+          { label: "New Window", shortcut: "⌘N" },
+          { label: "Close Window", shortcut: "⌘W" },
+        ],
+      },
+      {
+        label: "Edit",
+        items: [
+          { label: "Undo", shortcut: "⌘Z" },
+          { label: "Redo", shortcut: "⇧⌘Z" },
+          { label: "", divider: true },
+          { label: "Cut", shortcut: "⌘X" },
+          { label: "Copy", shortcut: "⌘C" },
+          { label: "Paste", shortcut: "⌘V" },
+        ],
+      },
+      {
+        label: "View",
+        items: [{ label: "Reload", shortcut: "⌘R" }],
+      },
+    ],
+    contentTitle: "Hello, Murasaki 🦋",
+    contentHint: "This menu bar is declared in React — rendered by the OS.",
+    counterLabel: "Clicked",
+    codeCaption: "This code becomes that menu. NSMenu on macOS, HMENU on Windows.",
+    tryHint: "Try the menus — View → Reload works.",
+  },
+  manifesto:
+    "Build native desktop apps with file-based routing, server actions, and React 19 — in a Rust-native window, not Electron's Chromium. Without writing Rust.",
+  scrollCue: "Scroll",
+};
+
+const lpJa: LpExtra = {
+  marquee: [
+    "デスクトップのための Next.js DX",
+    "ネイティブウィンドウ",
+    "ネイティブメニュー",
+    "メモリは Electron の約1/5",
+    "React 19",
+    "Vite HMR",
+    "Rust ネイティブ",
+    "Rust 不要",
+    "MIT ライセンス",
+  ],
+  tategaki: "紫は蝶のように軽い",
+  demo: {
+    windowTitle: "Murasaki App",
+    menus: [
+      {
+        label: "ファイル",
+        items: [
+          { label: "新規ウィンドウ", shortcut: "⌘N" },
+          { label: "ウィンドウを閉じる", shortcut: "⌘W" },
+        ],
+      },
+      {
+        label: "編集",
+        items: [
+          { label: "取り消す", shortcut: "⌘Z" },
+          { label: "やり直す", shortcut: "⇧⌘Z" },
+          { label: "", divider: true },
+          { label: "カット", shortcut: "⌘X" },
+          { label: "コピー", shortcut: "⌘C" },
+          { label: "ペースト", shortcut: "⌘V" },
+        ],
+      },
+      {
+        label: "表示",
+        items: [{ label: "再読み込み", shortcut: "⌘R" }],
+      },
+    ],
+    contentTitle: "Hello, Murasaki 🦋",
+    contentHint: "このメニューバーは React で宣言され、OS が描画しています。",
+    counterLabel: "クリック",
+    codeCaption:
+      "このコードが、このメニューになります。macOS では NSMenu、Windows では HMENU。",
+    tryHint: "メニューを触ってみてください — 表示 → 再読み込みは動きます。",
+  },
+  manifesto:
+    "ファイルベースルーティング、サーバーアクション、React 19 でネイティブなデスクトップアプリを構築 — Electron の Chromium ではなく、Rust ネイティブなウィンドウで。Rust を書く必要はありません。",
+  scrollCue: "Scroll",
+};
+
+export const lpExtra: Record<string, LpExtra> = { en: lpEn, ja: lpJa };

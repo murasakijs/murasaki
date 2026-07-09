@@ -1,140 +1,115 @@
 import { codeToHtml } from "shiki";
-import { CodeShowcase } from "@/components/home/code-showcase";
-import { CtaBand } from "@/components/home/cta-band";
-import { Distribution } from "@/components/home/distribution";
-import { Hero } from "@/components/home/hero";
-import { NativeDeepDive } from "@/components/home/native-deepdive";
-import { NumberedFeatures } from "@/components/home/numbered-features";
-import { QuickStart } from "@/components/home/quick-start";
-import { ShipArtifacts } from "@/components/home/ship-artifacts";
+import { LpGrain } from "@/components/home/lp-backdrop";
+import { LpButterfly } from "@/components/home/lp-butterfly";
+import { LpCta } from "@/components/home/lp-cta";
+import { LpFeatures } from "@/components/home/lp-features";
+import { LpHero } from "@/components/home/lp-hero";
+import { LpManifesto } from "@/components/home/lp-manifesto";
+import { LpMarquee } from "@/components/home/lp-marquee";
+import { LpMotion } from "@/components/home/lp-motion";
+import { LpNativeDemo } from "@/components/home/lp-native-demo";
+import { LpQuickstart } from "@/components/home/lp-quickstart";
+import { LpShip } from "@/components/home/lp-ship";
+import { LpVersus } from "@/components/home/lp-versus";
 import { SiteFooter } from "@/components/home/site-footer";
-import { WhyMurasaki } from "@/components/home/why-murasaki";
-import { Wordmark } from "@/components/home/wordmark";
-import { codeSamples, contextMenuSample } from "@/lib/code-samples";
-import { homeContent } from "@/lib/home-content";
+import { appMenuSample } from "@/lib/code-samples";
+import { homeContent, lpExtra } from "@/lib/home-content";
+import { lpFontVariables } from "@/lib/lp-fonts";
 
 const githubUrl = "https://github.com/murasakijs/murasaki";
 const installCommand = "pnpm create murasaki@latest my-app";
 
-// Matches CODE_CARD_BG in components/home/code-showcase.tsx — the code
-// panel is a deliberately fixed dark "device" card, independent of the
-// docs site's own light/dark theme.
+// The code panels are deliberately fixed dark "device" cards, independent of
+// the docs site's own light/dark theme — the whole landing is art-directed
+// dark-first, with one cream contrast scene (LpShip).
 const CODE_THEME = "vesper";
 
+/**
+ * The landing page — "紫 / Murasaki" bold-grotesque art direction. Server
+ * component: content + Shiki highlighting happen at build time; every
+ * animated piece is a small `"use client"` leaf under one LazyMotion
+ * provider (components/home/lp-motion.tsx). The `lp-*` font variables are
+ * scoped to this subtree so the docs' typography stays untouched.
+ */
 export default async function HomePage(props: PageProps<"/[lang]">) {
   const { lang } = await props.params;
   const t = homeContent[lang] ?? homeContent.en;
+  const x = lpExtra[lang] ?? lpExtra.en;
 
-  const highlighted = await Promise.all(
-    codeSamples.map(
-      async (sample) =>
-        [
-          sample.id,
-          await codeToHtml(sample.code, {
-            lang: sample.lang,
-            theme: CODE_THEME,
-          }),
-        ] as const,
-    ),
-  );
-  const htmlById = new Map(highlighted);
-  const codeTabs = t.codeShowcase.tabs.map((tab, i) => ({
-    ...tab,
-    html: htmlById.get(codeSamples[i].id) ?? "",
-  }));
-
-  const contextMenuHtml = await codeToHtml(contextMenuSample.code, {
-    lang: contextMenuSample.lang,
+  const appMenuHtml = await codeToHtml(appMenuSample.code, {
+    lang: appMenuSample.lang,
     theme: CODE_THEME,
   });
 
+  const getStartedHref = `/${lang}/docs/getting-started/quick-start`;
+
   return (
-    <div className="flex flex-1 flex-col" lang={lang}>
-      <Hero
-        lang={lang}
-        eyebrow={t.eyebrow}
-        headline={t.headline}
-        subhead={t.subhead}
-        getStartedLabel={t.getStarted}
-        getStartedHref={`/${lang}/docs/getting-started/quick-start`}
-        githubLabel={t.github}
-        githubHref={githubUrl}
-        installCommand={installCommand}
-      />
+    <div
+      lang={lang}
+      className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#0b0a12]`}
+    >
+      <LpMotion>
+        <LpGrain />
+        <LpButterfly />
 
-      {/* A full-bleed, solid-purple/white band — the site's boldest "color
-          field" moment, deliberately not theme-reactive. */}
-      <div className="bg-purple-600 py-3 text-white">
-        <p className="px-6 text-center font-mono text-xs tracking-wide uppercase sm:text-sm">
-          {t.bandLabel}
-        </p>
-      </div>
+        <LpHero
+          eyebrow={t.eyebrow}
+          headline={t.headline}
+          getStartedLabel={t.getStarted}
+          getStartedHref={getStartedHref}
+          githubLabel={t.github}
+          githubHref={githubUrl}
+          installCommand={installCommand}
+          tategaki={x.tategaki}
+          scrollCue={x.scrollCue}
+        />
 
-      <ShipArtifacts
-        heading={t.mockup.heading}
-        caption={t.mockup.caption}
-        availableLabel={t.mockup.availableLabel}
-        soonLabel={t.mockup.soonLabel}
-      />
+        <LpMarquee phrases={x.marquee} />
 
-      <CodeShowcase
-        eyebrow={t.codeShowcase.eyebrow}
-        heading={t.codeShowcase.heading}
-        description={t.codeShowcase.description}
-        tabs={codeTabs}
-      />
+        <LpNativeDemo
+          t={t.nativeDeepDive}
+          demo={x.demo}
+          codeHtml={appMenuHtml}
+          codeLabel={t.nativeDeepDive.codeLabel}
+        />
 
-      <NumberedFeatures
-        eyebrow={t.featuresEyebrow}
-        heading={t.featuresHeading}
-        description={t.featuresIntro}
-        features={t.features}
-      />
+        <LpManifesto text={x.manifesto} />
 
-      <WhyMurasaki
-        eyebrow={t.whyMurasaki.eyebrow}
-        heading={t.whyMurasaki.heading}
-        paragraph={t.whyMurasaki.paragraph}
-        tableHeadings={t.whyMurasaki.tableHeadings}
-        rows={t.comparisonRows}
-        statValue={t.whyMurasaki.statValue}
-        statLabel={t.whyMurasaki.statLabel}
-        footnote={t.comparisonFootnote}
-      />
+        <LpFeatures
+          eyebrow={t.featuresEyebrow}
+          heading={t.featuresHeading}
+          intro={t.featuresIntro}
+          features={t.features}
+        />
 
-      <NativeDeepDive
-        eyebrow={t.nativeDeepDive.eyebrow}
-        heading={t.nativeDeepDive.heading}
-        paragraph={t.nativeDeepDive.paragraph}
-        bullets={t.nativeDeepDive.bullets}
-        codeLabel={t.nativeDeepDive.codeLabel}
-        codeHtml={contextMenuHtml}
-        menuMockLabel={t.nativeDeepDive.menuMockLabel}
-      />
+        <LpVersus
+          t={t.whyMurasaki}
+          rows={t.comparisonRows}
+          footnote={t.comparisonFootnote}
+        />
 
-      <Distribution
-        eyebrow={t.distribution.eyebrow}
-        heading={t.distribution.heading}
-        paragraph={t.distribution.paragraph}
-        steps={t.distribution.steps}
-        platforms={t.distribution.platforms}
-      />
+        <LpShip
+          heading={t.mockup.heading}
+          caption={t.mockup.caption}
+          platforms={t.distribution.platforms}
+        />
 
-      <QuickStart
-        eyebrow={t.quickStart.eyebrow}
-        heading={t.quickStart.heading}
-        steps={t.quickStart.steps}
-      />
+        <LpQuickstart
+          eyebrow={t.quickStart.eyebrow}
+          heading={t.quickStart.heading}
+          steps={t.quickStart.steps}
+        />
 
-      <CtaBand
-        heading={t.ctaBand.heading}
-        paragraph={t.ctaBand.paragraph}
-        installCommand={installCommand}
-        getStartedLabel={t.getStarted}
-        getStartedHref={`/${lang}/docs/getting-started/quick-start`}
-      />
-
-      <Wordmark />
+        <LpCta
+          heading={t.ctaBand.heading}
+          paragraph={t.ctaBand.paragraph}
+          installCommand={installCommand}
+          getStartedLabel={t.getStarted}
+          getStartedHref={getStartedHref}
+          githubLabel={t.github}
+          githubHref={githubUrl}
+        />
+      </LpMotion>
 
       <SiteFooter
         lang={lang}

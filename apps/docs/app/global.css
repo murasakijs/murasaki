@@ -268,3 +268,82 @@ html > body[data-scroll-locked] {
     @apply font-sans;
   }
 }
+
+/*
+ * ---------------------------------------------------------------------------
+ * Landing page ("紫 / Murasaki" bold-grotesque art direction) — everything
+ * below is scoped to `.lp-*` class names used ONLY by app/[lang]/(home) and
+ * components/home/lp-*.tsx. The font variables (--font-lp-*) are applied on
+ * the landing page's root element via lib/lp-fonts.ts, so none of this can
+ * leak into the docs' typography.
+ * ---------------------------------------------------------------------------
+ */
+
+/* Display: Bricolage Grotesque, dialed to its large optical size. */
+.lp-display {
+  font-family: var(--font-lp-display), var(--font-sans), sans-serif;
+  font-variation-settings: "opsz" 96;
+}
+
+/* Body/UI: Hanken Grotesk. */
+.lp-sans {
+  font-family: var(--font-lp-sans), var(--font-sans), sans-serif;
+}
+
+/* Mono: Martian Mono — spec labels, marquee, commands, window chrome. */
+.lp-mono {
+  font-family: var(--font-lp-mono), var(--font-mono), monospace;
+}
+
+/* The huge 「紫」 glyph + JP accents: reuses the globally-loaded Zen Old
+ * Mincho (--font-display-ja, lib/fonts.ts) — no extra CJK download. */
+.lp-kanji {
+  font-family: var(--font-display-ja), serif;
+}
+
+/* ja pages: CJK glyphs fall through Bricolage/Hanken (no CJK coverage) to a
+ * deliberate second face — mincho for display (editorial contrast against
+ * the Latin grotesque), Noto Sans JP for body — instead of a random system
+ * fallback. Latin runs keep the grotesque: automatic 和欧混植. */
+:lang(ja) .lp-display {
+  font-family:
+    var(--font-lp-display), var(--font-display-ja), var(--font-sans), serif;
+}
+:lang(ja) .lp-sans {
+  font-family:
+    var(--font-lp-sans), var(--font-sans-ja), var(--font-sans), sans-serif;
+}
+
+/* Vertical Japanese rail (tategaki) — hero right edge. */
+.lp-tategaki {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.5em;
+}
+
+/* Infinite marquee: the track holds two identical copies of its content, so
+ * -50% loops seamlessly. Paused for prefers-reduced-motion. */
+@keyframes lp-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.lp-marquee-track {
+  animation: lp-marquee var(--lp-marquee-duration, 40s) linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lp-marquee-track {
+    animation-play-state: paused;
+  }
+}
+
+/* Outlined display numerals (features index) — stroke-only until hover. */
+.lp-outline-number {
+  -webkit-text-stroke: 1.5px
+    color-mix(in oklch, var(--color-purple-300) 55%, transparent);
+  color: transparent;
+  transition: color 0.35s ease;
+}
+.lp-row:hover .lp-outline-number {
+  color: var(--color-purple-400);
+}
