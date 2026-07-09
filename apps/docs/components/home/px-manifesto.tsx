@@ -87,9 +87,9 @@ export function PxManifesto({
 
   return (
     <section className="bg-[#0e0e10] text-white">
-      <div ref={wrapRef} className="relative lg:h-[260vh]">
-        <div className="lg:sticky lg:top-0 lg:flex lg:h-screen lg:items-center">
-          <div className="mx-auto w-full max-w-5xl px-6 py-28 lg:py-0">
+      <div ref={wrapRef} className="relative motion-safe:lg:h-[260vh]">
+        <div className="motion-safe:lg:sticky motion-safe:lg:top-0 motion-safe:lg:flex motion-safe:lg:h-screen motion-safe:lg:items-center">
+          <div className="mx-auto w-full max-w-5xl px-6 py-28 motion-safe:lg:py-0">
             <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
               <span className="text-[#a78bfa]">02</span> · Why it exists
             </p>
@@ -107,7 +107,7 @@ export function PxManifesto({
             {/* The corner counter — only meaningful while pinned. */}
             <p
               aria-hidden="true"
-              className="lp-pixel mt-14 hidden text-[11px] uppercase tracking-[0.3em] text-white/40 lg:block"
+              className="lp-pixel mt-14 hidden text-[11px] uppercase tracking-[0.3em] text-white/40 motion-safe:lg:block"
             >
               {counterLabel} · <span ref={counterRef}>000</span>
               <span className="text-[#a78bfa]">%</span>

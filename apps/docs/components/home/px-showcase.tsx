@@ -209,9 +209,9 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
 
   return (
     <section className="bg-[#0e0e10] text-white">
-      <div ref={wrapRef} className="relative lg:h-[280vh]">
-        <div className="lg:sticky lg:top-0 lg:flex lg:h-screen lg:items-center">
-          <div className="mx-auto w-full max-w-6xl px-6 py-20 lg:py-0">
+      <div ref={wrapRef} className="relative motion-safe:lg:h-[280vh]">
+        <div className="motion-safe:lg:sticky motion-safe:lg:top-0 motion-safe:lg:flex motion-safe:lg:h-screen motion-safe:lg:items-center">
+          <div className="mx-auto w-full max-w-6xl px-6 py-20 motion-safe:lg:py-0">
             <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
               <span className="text-[#a78bfa]">01</span> · Native proof
             </p>
