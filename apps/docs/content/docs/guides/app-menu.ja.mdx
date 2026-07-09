@@ -1,0 +1,101 @@
+---
+title: アプリメニュー
+description: useAppMenu でネイティブのアプリケーションメニューバーを定義する — macOS では NSMenu、Windows では HMENU。
+---
+
+`useAppMenu` はアプリのメニューバー — macOS では画面上部のメニュー、Windows では
+ウィンドウのメニューバー — を宣言します。[`useContextMenu`](/docs/guides/context-menu)
+と同じく、マークアップではなくフックです。項目は Rust 側に投げられ、本物の OS メニュー
+(`NSMenu` / `HMENU`)が構築されます。Electron の `Menu.setApplicationMenu` や
+Tauri のメニュー API に相当する murasaki の機能です。
+
+これは **opt-in** です。呼ばなくても、アプリには murasaki の標準メニュー(About/Quit
+を持つアプリメニュー + Edit + Window)が付きます。独自のメニューが欲しいときだけ
+`useAppMenu` を呼びます。
+
+## メニューを宣言する
+
+ルートレイアウトで一度だけ呼び出します。メニューは `{ label, items }` のグループか、
+標準の `{ role }` サブメニューのいずれかです。各項目はカスタムエントリ、標準の
+`{ role }`、または区切り線です:
+
+```tsx title="src/app/layout.tsx"
+import { useAppMenu, Action } from 'murasaki'
+
+useAppMenu([
+  {
+    label: 'File',
+    items: [
+      { label: 'New Window', shortcut: 'command,N', action: () => openWindow() },
+      { separator: true },
+      { role: 'close' },
+    ],
+  },
+  { role: 'editMenu' },
+  {
+    label: 'View',
+    items: [{ label: 'Reload', shortcut: 'command,R', action: <Action.Reload /> }],
+  },
+])
+```
+
+macOS では標準のアプリ名メニュー(About / Hide / Quit)が常にあなたのメニューの前に
+追加されるので、`Cmd+Q` などはそのまま機能します — 自分で宣言する必要はありません。
+
+## ロール
+
+`role` は標準の項目やサブメニューを取り込みます。ローカライズ済みで、ネイティブの
+挙動(macOS では `NSMenu` のレスポンダチェーン)に配線されるため、`action` を渡す
+必要はありません。
+
+- **項目ロール**: `quit`, `close`, `minimize`, `zoom`, `undo`, `redo`, `cut`,
+  `copy`, `paste`, `selectAll`, `reload`。
+- **メニューロール**: `editMenu` と `windowMenu` — 標準の Edit / Window サブメニューを
+  1 行で。
+
+標準的なものにはロールを使い(特に Edit 項目 — `copy`/`paste` はフォーカス中の欄に届く
+ネイティブ挙動が必要です)、それ以外は `action` を持つカスタムエントリを使います。
+
+## 形
+
+```ts
+type AppMenu =
+  | { label: string; items: AppMenuItemSpec[] }
+  | { role: 'editMenu' | 'windowMenu' }
+
+type AppMenuItemSpec = AppMenuEntry | { role: AppMenuItemRole } | { separator: true }
+
+interface AppMenuEntry {
+  label: string
+  shortcut?: string          // 例: "command,N"
+  disabled?: boolean
+  action?: AppMenuAction     // 組み込みの <Action.*/> 要素、または関数
+  items?: AppMenuItemSpec[]  // action の代わりにサブメニュー
+}
+```
+
+項目の形と `action` は [`useContextMenu`](/docs/guides/context-menu#actions) と
+同じです。`action` は自作の関数か組み込みの `<Action.*/>`、`shortcut` はネイティブの
+アクセラレータラベルを設定します。アプリのアクションは
+[`createActions`](/docs/guides/context-menu#reusable-actions-with-createactions)
+で再利用できます。
+
+<Callout type="info">
+  `useAppMenu` は一度だけマウントします — 最後の呼び出しが勝ち、インストール済みの
+  メニューを置き換えます。呼ばなければ murasaki のデフォルトメニューのままです。
+</Callout>
+
+## プラットフォームメモ
+
+- **macOS** — 画面上部の `NSMenu`。アプリ名メニューが常に先頭に追加されます。
+- **Windows** — ウィンドウ内の `HMENU` バー。OS のクラシックなスタイルを引き継ぎ、
+  ダークモードには追従しません。`close` と `quit` は現状同じ動作です(murasaki アプリ
+  は今のところ単一ウィンドウ)。
+- **Linux** — デフォルトのメニューバーはまだありません。
+
+## 次へ
+
+<Cards>
+  <Card title="コンテキストメニュー" href="/docs/guides/context-menu" description="useContextMenu による右クリックメニュー。" />
+  <Card title="ネイティブ API" href="/docs/guides/native-apis" description="murasaki のネイティブ面の残り。" />
+</Cards>

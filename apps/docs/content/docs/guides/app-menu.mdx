@@ -1,0 +1,102 @@
+---
+title: App Menu
+description: Define the native application menu bar with useAppMenu — NSMenu on macOS, HMENU on Windows.
+---
+
+`useAppMenu` declares your app's menu bar — the menu at the top of the screen
+on macOS, and the window's menu bar on Windows. Like [`useContextMenu`](/docs/guides/context-menu),
+it's a hook, not markup: items are posted to the Rust side, which builds a real
+OS menu (`NSMenu` / `HMENU`). It's the murasaki equivalent of Electron's
+`Menu.setApplicationMenu` or Tauri's menu API.
+
+It's **opt-in**. Without it, your app still gets murasaki's standard menu (an
+app menu with About/Quit, plus Edit and Window). Call `useAppMenu` only when
+you want your own.
+
+## Declaring a menu
+
+Call it once in your root layout. A menu is either a `{ label, items }` group
+or a standard `{ role }` submenu; each item is a custom entry, a standard
+`{ role }`, or a divider:
+
+```tsx title="src/app/layout.tsx"
+import { useAppMenu, Action } from 'murasaki'
+
+useAppMenu([
+  {
+    label: 'File',
+    items: [
+      { label: 'New Window', shortcut: 'command,N', action: () => openWindow() },
+      { separator: true },
+      { role: 'close' },
+    ],
+  },
+  { role: 'editMenu' },
+  {
+    label: 'View',
+    items: [{ label: 'Reload', shortcut: 'command,R', action: <Action.Reload /> }],
+  },
+])
+```
+
+On macOS the standard app-name menu (About / Hide / Quit) is always added ahead
+of your menus, so `Cmd+Q` and friends keep working — you don't declare it
+yourself.
+
+## Roles
+
+A `role` pulls in a standard item or submenu: it's localized for you and wired
+to the native behavior (via `NSMenu`'s responder chain on macOS), so you don't
+supply an `action`.
+
+- **Item roles**: `quit`, `close`, `minimize`, `zoom`, `undo`, `redo`, `cut`,
+  `copy`, `paste`, `selectAll`, `reload`.
+- **Menu roles**: `editMenu` and `windowMenu` — the standard Edit and Window
+  submenus in one line.
+
+Use roles for anything standard (especially the Edit items — `copy`/`paste`
+need native behavior to reach the focused field), and custom entries with an
+`action` for the rest.
+
+## Shape
+
+```ts
+type AppMenu =
+  | { label: string; items: AppMenuItemSpec[] }
+  | { role: 'editMenu' | 'windowMenu' }
+
+type AppMenuItemSpec = AppMenuEntry | { role: AppMenuItemRole } | { separator: true }
+
+interface AppMenuEntry {
+  label: string
+  shortcut?: string          // e.g. "command,N"
+  disabled?: boolean
+  action?: AppMenuAction     // a built-in <Action.*/> element, or a function
+  items?: AppMenuItemSpec[]  // a submenu, instead of an action
+}
+```
+
+Item shape and `action` are the same as [`useContextMenu`](/docs/guides/context-menu#actions):
+`action` is your own function or a built-in `<Action.*/>`, and `shortcut` sets
+the native accelerator label. Reuse your app's actions with
+[`createActions`](/docs/guides/context-menu#reusable-actions-with-createactions).
+
+<Callout type="info">
+  Mount `useAppMenu` once — the last call wins, replacing whatever menu is
+  installed. Not calling it keeps murasaki's default menu.
+</Callout>
+
+## Platform notes
+
+- **macOS** — a top-of-screen `NSMenu`; the app-name menu is always prepended.
+- **Windows** — an in-window `HMENU` bar; it inherits the OS's classic styling
+  and doesn't follow dark mode. `close` and `quit` currently do the same thing
+  (murasaki apps are single-window today).
+- **Linux** — no default menu bar yet.
+
+## Next
+
+<Cards>
+  <Card title="Context Menu" href="/docs/guides/context-menu" description="Right-click menus with useContextMenu." />
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="The rest of murasaki's native surface." />
+</Cards>
