@@ -91,10 +91,10 @@ npm create murasaki@latest my-app
 cd my-app
 npm run dev
 
-# ship (verified on macOS today — see CLI reference)
-npm run build       # dist/client            Vite production build
-npm run bundle      # dist/bundle/<App>.app  ~120 MB (bundles Node + your app)
-npm run installer   # dist/<App>-<ver>.dmg   ~43 MB compressed
+# ship (macOS and Windows today — see CLI reference)
+npm run build       # dist/client   Vite production build
+npm run bundle      # portable native app bundle for the selected target
+npm run installer   # .dmg on macOS; optional .exe / .msi on Windows targets
 ```
 
 The scaffold gives you a React 19 + Vite + Tailwind app with a Next.js-like
@@ -204,13 +204,15 @@ murasaki help        Show this help
 ```
 
 **Platform status:** `murasaki dev` works on macOS, Windows, and Linux.
-`murasaki bundle` and `murasaki installer` are implemented and verified on
-**macOS** (`.app` / `.dmg`) today; on other platforms they currently print a
-"not supported yet" message rather than producing an installer.
+`murasaki bundle` ships **macOS** `.app` bundles and portable **Windows**
+folders / `.zip` archives today, including cross-architecture targets. On
+Windows targets, `murasaki installer` also produces an NSIS `.exe` when
+`makensis` is installed and an `.msi` when WiX v4 is available on Windows.
+macOS `.app` / `.dmg` artifacts must be built on macOS.
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native)
 itself already ships prebuilt binaries for macOS (arm64/x64), Windows (x64),
-and Linux (x64/arm64) — Windows/Linux app packaging is tracked in the
-[Roadmap](#roadmap).
+and Linux (x64/arm64). Linux app packaging is tracked in the
+[Roadmap](#roadmap); `murasaki dev` already works there.
 
 ---
 
@@ -437,8 +439,8 @@ before v1.0.
 - ✅ **Phase B** — App Router essentially done: routing, Server Actions,
   metadata, middleware, and a dev error overlay all ship.
 - 🚧 **Phase C** — `@murasakijs/ui` component library, docs site, examples.
-- 🚧 **Phase D** — auto-update, code signing/notarization, Windows/Linux
-  packaging, v1.0 stabilization.
+- 🚧 **Phase D** — auto-update, Windows Authenticode signing, Linux packaging,
+  and v1.0 stabilization.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something

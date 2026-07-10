@@ -92,10 +92,10 @@ npm create murasaki@latest my-app
 cd my-app
 npm run dev
 
-# 配布 (現時点では macOS で検証済み — CLI リファレンス参照)
-npm run build       # dist/client            Vite の本番ビルド
-npm run bundle      # dist/bundle/<App>.app  ~120 MB (Node + アプリを同梱)
-npm run installer   # dist/<App>-<ver>.dmg   ~43 MB (圧縮後)
+# 配布 (macOS と Windows に対応 — CLI リファレンス参照)
+npm run build       # dist/client   Vite の本番ビルド
+npm run bundle      # 選択したターゲット向けのポータブルなネイティブアプリ
+npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe / .msi
 ```
 
 生成される雛形は React 19 + Vite + Tailwind のアプリで、Next.js に近い構成です。
@@ -206,13 +206,15 @@ murasaki help        このヘルプを表示
 ```
 
 **プラットフォームの状況:** `murasaki dev` は macOS、Windows、Linux で動作します。
-`murasaki bundle` と `murasaki installer` は現在 **macOS**(`.app` / `.dmg`)で
-実装・検証済みです。それ以外のプラットフォームでは、現時点ではインストーラを生成する
-代わりに "not supported yet" というメッセージを表示します。
+`murasaki bundle` は現在、**macOS** の `.app` とポータブルな **Windows**
+フォルダー / `.zip` を、クロスアーキテクチャのターゲットを含めて生成できます。
+Windows ターゲットでは、`makensis` があれば NSIS `.exe`、Windows 上で WiX v4 が
+利用できれば `.msi` も `murasaki installer` で生成します。macOS の `.app` / `.dmg`
+は macOS 上でビルドする必要があります。
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 自体は
 すでに macOS(arm64/x64)、Windows(x64)、Linux(x64/arm64)向けのビルド済み
-バイナリを提供しています——Windows/Linux 向けアプリパッケージングは
-[ロードマップ](#ロードマップ) で管理しています。
+バイナリを提供しています。Linux 向けアプリパッケージングは
+[ロードマップ](#ロードマップ) で管理しており、`murasaki dev` はすでに動作します。
 
 ---
 
@@ -441,7 +443,7 @@ murasaki は **pre-1.0**(現在 `0.34.5`)です——v1.0 までの間に API �
   メタデータ・ミドルウェア・開発用エラーオーバーレイまで、すべて実装済みです。
 - 🚧 **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
   サンプル集。
-- 🚧 **Phase D** — 自動アップデート、コード署名 / notarization、Windows/Linux
+- 🚧 **Phase D** — 自動アップデート、Windows Authenticode 署名、Linux
   パッケージング、v1.0 の安定化。
 - 🔭 **検討中(post-1.0)**: サーバーサイドレンダリング + ストリーミング。現状の
   アーキテクチャはクライアント側で完結してレンダリングしているため、これは
