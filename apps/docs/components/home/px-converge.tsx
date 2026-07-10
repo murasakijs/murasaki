@@ -112,9 +112,9 @@ function MatrixRain() {
  * The converging headline — the madewithgsap hero move, in Murasaki's
  * vocabulary: the viewport pins while "Native apps." slides in from the
  * left and "Web DX." from the right until they meet as one sentence, a
- * purple `+` popping in between them (native + web). Desktop pins for
- * ~2 viewports; mobile/reduced-motion get the finished line. A faint
- * purple digital rain sits behind it (see MatrixRain).
+ * purple `×` popping in between them (native × web — the crossover).
+ * Desktop pins for ~2 viewports; mobile/reduced-motion get the finished
+ * line. A faint purple digital rain sits behind it (see MatrixRain).
  */
 export function PxConverge({ left, right }: { left: string; right: string }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -178,16 +178,17 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
             <span data-cv-left className="inline-block will-change-transform">
               {left}
             </span>
-            {/* Meaningful, not decorative — it reads as "native plus web", so
-             * it's exposed to AT with an explicit label (a bare "+" glyph is
-             * dropped under some punctuation-verbosity settings). */}
+            {/* Meaningful, not decorative — it reads as "native cross web"
+             * (the collab/crossover ×), so it's exposed to AT with an
+             * explicit label (a bare "×" glyph is dropped under some
+             * punctuation-verbosity settings). */}
             <span
               data-cv-dot
               role="img"
-              aria-label="plus"
+              aria-label="cross"
               className="hidden text-[0.6em] font-extrabold leading-none text-[#7c3aed] lg:inline-block"
             >
-              +
+              ×
             </span>
             <span data-cv-right className="inline-block will-change-transform">
               {right}
