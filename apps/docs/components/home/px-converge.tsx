@@ -98,7 +98,11 @@ function MatrixRain() {
   return (
     <canvas
       ref={canvasRef}
-      aria-hidden="true"
+      // Decorative rain. Left with no ARIA at all on purpose: an empty
+      // <canvas> (no fallback content, no accessible name) is already
+      // ignored by assistive tech, and Biome treats <canvas> as both
+      // focusable and interactive — so `aria-hidden` and `role` each trip
+      // a different a11y rule. `pointer-events-none` keeps it inert.
       className="pointer-events-none absolute inset-0 opacity-[0.18]"
     />
   );
