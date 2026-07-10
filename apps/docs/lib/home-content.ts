@@ -719,6 +719,21 @@ export interface LpExtra {
     hint: string;
     caption: string;
   };
+  /** The DMG-installer easter egg tucked under Artifacts (06) — a faithful,
+   * fully drag-and-droppable mock of the real macOS "drag app into
+   * Applications" install window. Nothing actually installs; the caption
+   * says so once you drop it, the same honesty beat as the playground's
+   * "just HTML" confession. */
+  dmgDemo: {
+    /** "Applications" folder label under the drop target (macOS localizes
+     * this folder name itself — kept per-locale to match). */
+    folderLabel: string;
+    /** Hint shown before a successful drop. */
+    hint: string;
+    /** Shown after a successful drop. */
+    installedTitle: string;
+    installedCaption: string;
+  };
 }
 
 const lpEn: LpExtra = {
@@ -797,6 +812,13 @@ const lpEn: LpExtra = {
     caption:
       "Sasakia charonda — the great purple emperor, Japan's national butterfly, and this framework's namesake. Rendered in plain text, the same way the create-murasaki banner draws it in your terminal.",
   },
+  dmgDemo: {
+    folderLabel: "Applications",
+    hint: "Drag Murasaki into Applications to install.",
+    installedTitle: "Installed.",
+    installedCaption:
+      "(Okay — not really. But the real installer feels exactly like this.)",
+  },
 };
 
 const lpJa: LpExtra = {
@@ -874,6 +896,13 @@ const lpJa: LpExtra = {
     hint: "ドラッグで回せます · すべて文字",
     caption:
       "国蝶オオムラサキ(Sasakia charonda)— murasaki の名前の由来です。create-murasaki がターミナルに描く起動バナーと同じように、すべてテキストで描画しています。",
+  },
+  dmgDemo: {
+    folderLabel: "アプリケーション",
+    hint: "Murasaki を「アプリケーション」へドラッグしてインストール。",
+    installedTitle: "インストール完了。",
+    installedCaption:
+      "(実際にはインストールしていません。でも本物も、こんな感触です。)",
   },
 };
 

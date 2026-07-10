@@ -2,7 +2,8 @@
 
 import { gsap } from "gsap";
 import { useLayoutEffect, useRef } from "react";
-import type { HomeContent } from "@/lib/home-content";
+import type { HomeContent, LpExtra } from "@/lib/home-content";
+import { PxDmgInstaller } from "./px-dmg";
 
 const EXT_BY_NAME: Record<string, string> = {
   macOS: ".app / .dmg",
@@ -19,10 +20,12 @@ export function PxArtifacts({
   heading,
   caption,
   platforms,
+  dmgDemo,
 }: {
   heading: string;
   caption: string;
   platforms: HomeContent["distribution"]["platforms"];
+  dmgDemo: LpExtra["dmgDemo"];
 }) {
   const ref = useRef<HTMLElement>(null);
 
@@ -116,6 +119,8 @@ export function PxArtifacts({
         <p className="lp-mono mt-12 text-xs uppercase tracking-[0.25em] text-[#111014]/45">
           {caption}
         </p>
+
+        <PxDmgInstaller {...dmgDemo} />
       </div>
     </section>
   );

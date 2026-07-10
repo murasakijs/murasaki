@@ -166,6 +166,7 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           heading={t.mockup.heading}
           caption={t.mockup.caption}
           platforms={t.distribution.platforms}
+          dmgDemo={x.dmgDemo}
         />
 
         <DitherDivider from={PAPER} to={INKFIELD} />

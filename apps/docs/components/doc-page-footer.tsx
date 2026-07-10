@@ -1,11 +1,18 @@
+import { buttonVariants } from "fumadocs-ui/components/ui/button";
 import { GitPullRequestArrow } from "lucide-react";
+import { cn } from "@/lib/cn";
 
 // The open-source colophon under each doc page — sits above fumadocs'
-// auto-generated prev/next pagination. A "contribute on GitHub" link (edit
+// auto-generated prev/next pagination. A "contribute on GitHub" button (edit
 // the very file you're reading) plus, when known, the file's last commit
 // date. Server component: pure presentational, copy localized inline for the
 // two locales rather than through fumadocs' i18n text table so the wording
 // ("Improve this page") and the date format are fully controlled here.
+//
+// Rendered as an actual bordered/filled button (fumadocs' own `secondary`
+// variant — the same one the header's GitHub-star and Docs buttons use),
+// not plain muted text: a flat inline link here read as inert copy rather
+// than something clickable.
 
 const COPY = {
   en: {
@@ -43,7 +50,10 @@ export function DocPageFooter({
         href={editUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex w-fit items-center gap-2 font-medium text-fd-muted-foreground transition-colors hover:text-fd-foreground"
+        className={cn(
+          buttonVariants({ color: "secondary", size: "sm" }),
+          "w-fit gap-1.5",
+        )}
       >
         <GitPullRequestArrow className="size-4" />
         {t.contribute}
