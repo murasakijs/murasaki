@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./assets/logo.svg" alt="Murasaki — the desktop framework for Next.js developers" width="720">
+<img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/assets/logo.svg" alt="Murasaki — the desktop framework for Next.js developers" width="720">
 
 **The desktop framework for Next.js developers.**
 
