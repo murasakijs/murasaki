@@ -214,7 +214,13 @@ export function PxDmgInstaller({
           </div>
 
           {installed && (
-            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/95">
+            // `role="status"` (implicit aria-live="polite" + aria-atomic)
+            // so screen readers announce the outcome — the drop itself is a
+            // pointer/keyboard gesture with no other feedback channel for AT.
+            <div
+              role="status"
+              className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/95"
+            >
               <PixelButterfly className="h-10 w-auto" />
               <p className="lp-display text-xl font-extrabold text-[#111014]">
                 {installedTitle}
