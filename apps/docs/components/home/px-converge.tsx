@@ -7,8 +7,8 @@ import { useLayoutEffect, useRef } from "react";
  * The converging headline — the madewithgsap hero move, in Murasaki's
  * vocabulary: the viewport pins while "Native apps." slides in from the
  * left and "Web DX." from the right until they meet as one sentence, a
- * pixel square landing between them. Desktop pins for ~2 viewports;
- * mobile/reduced-motion get the finished line.
+ * purple `+` popping in between them (native + web). Desktop pins for
+ * ~2 viewports; mobile/reduced-motion get the finished line.
  */
 export function PxConverge({ left, right }: { left: string; right: string }) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -74,8 +74,10 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
             <span
               data-cv-dot
               aria-hidden="true"
-              className="hidden size-[0.14em] bg-[#7c3aed] lg:inline-block"
-            />
+              className="hidden text-[0.6em] font-extrabold leading-none text-[#7c3aed] lg:inline-block"
+            >
+              +
+            </span>
             <span data-cv-right className="inline-block will-change-transform">
               {right}
             </span>
