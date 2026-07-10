@@ -10,7 +10,9 @@ import {
 import { createRelativeLink } from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { DocPageFooter } from "@/components/doc-page-footer";
 import { getMDXComponents } from "@/components/mdx";
+import docDates from "@/lib/doc-dates.json";
 import { localizeDocsHref } from "@/lib/localize-href";
 import { gitConfig } from "@/lib/shared";
 import { getPageImage, getPageMarkdownUrl, source } from "@/lib/source";
@@ -26,6 +28,12 @@ export default async function Page(
   const markdownUrl = getPageMarkdownUrl(page).url;
   // Resolve relative in-content links against the current file...
   const RelativeLink = createRelativeLink(source, page);
+
+  // GitHub blob URL for the exact source file (same shape as the top toolbar's
+  // "view options"), plus its last-commit date from the build-time git
+  // manifest (absent when the file has no history yet — see gen-doc-dates.mjs).
+  const editUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/content/docs/${page.path}`;
+  const isoDate = (docDates as Record<string, string>)[page.path];
 
   return (
     <DocsPage toc={page.data.toc} full={page.data.full}>
@@ -56,6 +64,7 @@ export default async function Page(
           })}
         />
       </DocsBody>
+      <DocPageFooter lang={lang} editUrl={editUrl} isoDate={isoDate} />
     </DocsPage>
   );
 }

@@ -3,7 +3,13 @@ import Link from "next/link";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
 import { appName, gitConfig } from "./shared";
 
-export function baseOptions(lang: string): BaseLayoutProps {
+export function baseOptions(
+  lang: string,
+  // The docs pages already sit under /docs with the full sidebar, so the
+  // header "Docs" link is redundant there — it's only useful from the
+  // landing page. Callers on the docs side pass `docsLink: false`.
+  { docsLink = true }: { docsLink?: boolean } = {},
+): BaseLayoutProps {
   return {
     nav: {
       // JSX supported — pixel-butterfly mark + wordmark
@@ -24,14 +30,14 @@ export function baseOptions(lang: string): BaseLayoutProps {
       // child of a plain `<div>`, where that same `<li>` would be invalid
       // outside any list container. `nav.children` has no such list-context
       // duality, so a plain <Link> here is valid HTML everywhere it renders.
-      children: (
+      children: docsLink ? (
         <Link
           href={`/${lang}/docs`}
           className="ml-4 text-sm font-medium underline underline-offset-4"
         >
           Docs
         </Link>
-      ),
+      ) : undefined,
     },
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
