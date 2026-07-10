@@ -10,8 +10,10 @@ import {
 import { createRelativeLink } from "fumadocs-ui/mdx";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { DocPageFooter } from "@/components/doc-page-footer";
 import { JsonLd } from "@/components/json-ld";
 import { getMDXComponents } from "@/components/mdx";
+import docDates from "@/lib/doc-dates.json";
 import { localizeDocsHref } from "@/lib/localize-href";
 import {
   absoluteUrl,
@@ -87,6 +89,12 @@ export default async function Page(
     ],
   };
 
+  // GitHub blob URL for the exact source file (same shape as the top toolbar's
+  // "view options"), plus its last-commit date from the build-time git
+  // manifest (absent when the file has no history yet — see gen-doc-dates.mjs).
+  const editUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/content/docs/${page.path}`;
+  const isoDate = (docDates as Record<string, string>)[page.path];
+
   return (
     <>
       <JsonLd data={structuredData} />
@@ -118,6 +126,7 @@ export default async function Page(
             })}
           />
         </DocsBody>
+        <DocPageFooter lang={lang} editUrl={editUrl} isoDate={isoDate} />
       </DocsPage>
     </>
   );
