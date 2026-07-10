@@ -1,5 +1,4 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
-import Link from "next/link";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
 import { localizedDocsPath, localizedHomePath } from "./seo";
 import { appName, gitConfig } from "./shared";
@@ -21,25 +20,22 @@ export function baseOptions(
         </span>
       ),
       url: localizedHomePath(lang),
-      // `nav.children` is fumadocs-ui's supported "arbitrary content next to
-      // the title" slot — rendered exactly ONCE, as a plain sibling inside
-      // the header's <nav>, before the nav-items <ul>. This is why it's used
-      // here instead of `links` (a `MainItemType` there has no className hook
-      // to add the underline, and a `type: "custom"` item's `children` is
-      // reused verbatim across BOTH the desktop header — a direct child of a
-      // bare `<ul>`, requiring an `<li>` wrapper — and the mobile menu — a
-      // child of a plain `<div>`, where that same `<li>` would be invalid
-      // outside any list container. `nav.children` has no such list-context
-      // duality, so a plain <Link> here is valid HTML everywhere it renders.
-      children: docsLink ? (
-        <Link
-          href={localizedDocsPath(lang)}
-          className="ml-4 text-sm font-medium underline underline-offset-4"
-        >
-          Docs
-        </Link>
-      ) : undefined,
     },
+    // A `type: "button"` link renders as a real fumadocs secondary button in a
+    // valid <li>, and `secondary: true` places it in the header's right-hand
+    // cluster alongside search / theme / language (rather than out by the
+    // logo). Only shown on the landing page — the docs pages pass
+    // docsLink: false since they already have the sidebar.
+    links: docsLink
+      ? [
+          {
+            type: "button",
+            secondary: true,
+            text: "Docs",
+            url: localizedDocsPath(lang),
+          },
+        ]
+      : undefined,
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
 }
