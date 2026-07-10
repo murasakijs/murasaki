@@ -71,9 +71,13 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
             <span data-cv-left className="inline-block will-change-transform">
               {left}
             </span>
+            {/* Meaningful, not decorative — it reads as "native plus web", so
+             * it's exposed to AT with an explicit label (a bare "+" glyph is
+             * dropped under some punctuation-verbosity settings). */}
             <span
               data-cv-dot
-              aria-hidden="true"
+              role="img"
+              aria-label="plus"
               className="hidden text-[0.6em] font-extrabold leading-none text-[#7c3aed] lg:inline-block"
             >
               +
