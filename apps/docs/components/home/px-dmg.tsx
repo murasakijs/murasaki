@@ -213,23 +213,30 @@ export function PxDmgInstaller({
             </p>
           </div>
 
-          {installed && (
-            // `role="status"` (implicit aria-live="polite" + aria-atomic)
-            // so screen readers announce the outcome — the drop itself is a
-            // pointer/keyboard gesture with no other feedback channel for AT.
-            <div
-              role="status"
-              className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/95"
-            >
-              <PixelButterfly className="h-10 w-auto" />
-              <p className="lp-display text-xl font-extrabold text-[#111014]">
-                {installedTitle}
-              </p>
-              <p className="lp-sans max-w-xs text-center text-xs text-[#111014]/55">
-                {installedCaption}
-              </p>
-            </div>
-          )}
+          {/* `role="status"` (implicit aria-live="polite" + aria-atomic) so
+           * screen readers announce the outcome — the drop itself is a
+           * pointer/keyboard gesture with no other feedback channel for AT.
+           * The live region itself stays mounted permanently and only its
+           * TEXT toggles: a region inserted into the DOM already carrying
+           * its content is unreliable across screen readers, which key off
+           * a mutation to an already-registered region, not simultaneous
+           * insertion. The PixelButterfly mark stays conditionally mounted
+           * (aria-hidden, purely visual) so its assemble animation replays
+           * on every drop. */}
+          <div
+            role="status"
+            className={`pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-white/95 transition-opacity duration-300 ${
+              installed ? "opacity-100" : "opacity-0"
+            }`}
+          >
+            {installed && <PixelButterfly className="h-10 w-auto" />}
+            <p className="lp-display text-xl font-extrabold text-[#111014]">
+              {installed ? installedTitle : ""}
+            </p>
+            <p className="lp-sans max-w-xs text-center text-xs text-[#111014]/55">
+              {installed ? installedCaption : ""}
+            </p>
+          </div>
         </div>
       </div>
     </div>
