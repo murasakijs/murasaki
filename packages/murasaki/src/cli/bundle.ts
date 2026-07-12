@@ -895,8 +895,80 @@ async function embedWin32ExeResources(
   )
   vi.outputToResourceEntries(res.entries)
 
+  // Application manifest — RT_MANIFEST (type 24) / id 1, the well-known
+  // CREATEPROCESS_MANIFEST_RESOURCE_ID that Windows reads at process-launch
+  // time (independent of the resource-neutral vi/icon stuff above). The
+  // prebuilt murasaki-launcher.exe ships with no manifest at all, so Windows
+  // treats it as a legacy program with no declared OS compatibility — which
+  // is what makes the Program Compatibility Assistant's InstallFailure
+  // resolver flag it right after install ("this program might not have
+  // installed correctly"). `replaceResourceEntry` adds-or-replaces by
+  // type/id/lang, so this is safe even if a manifest entry already exists.
+  // lang 1033 matches the version-info resource above.
+  res.replaceResourceEntry({
+    type: 24,
+    id: 1,
+    lang: 1033,
+    codepage: 0,
+    bin: utf8ArrayBuffer(win32AppManifest(config)),
+  })
+
   res.outputResource(exe)
   await writeFile(exePath, Buffer.from(exe.generate()))
+}
+
+/**
+ * The win32 application manifest embedded into `<productName>.exe` by
+ * `embedWin32ExeResources` above (see the comment there for why). Declares
+ * only `assemblyIdentity` + `trustInfo` (asInvoker, no elevation) +
+ * `compatibility` (supportedOS for Vista through Windows 10/11) —
+ * deliberately does *not* add a `<windowsSettings>`/`dpiAware`(`ness`)
+ * declaration, since the Rust launcher (tao) already sets DPI awareness
+ * programmatically at runtime; a manifest declaration would take precedence
+ * and could regress multi-monitor scaling. Also omits the Common-Controls
+ * `<dependency>` — kept minimal and behavior-neutral otherwise.
+ */
+function win32AppManifest(config: MurasakiConfig): string {
+  const name = escapeXml(sanitizeAssemblyName(config.productName))
+  const [major, minor, patch, rev] = parseVersionParts(config.version)
+  const version = `${major}.${minor}.${patch}.${rev}`
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32" name="${name}" version="${version}" processorArchitecture="*"/>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"/>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/>
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>
+`
+}
+
+/**
+ * `assemblyIdentity`'s `name` attribute rejects whitespace/punctuation
+ * outside `[A-Za-z0-9.]` — collapse any run of disallowed characters to a
+ * single `.` (e.g. `"My App"` → `"My.App"`), falling back to a generic name
+ * if that leaves nothing usable (e.g. an all-emoji productName).
+ */
+function sanitizeAssemblyName(productName: string): string {
+  const sanitized = productName.replace(/[^A-Za-z0-9.]+/g, '.')
+  return sanitized.length > 0 ? sanitized : 'MurasakiApp'
+}
+
+/** UTF-8-encodes `s` into a plain `ArrayBuffer`, as `resedit`'s raw resource `bin` field wants. */
+function utf8ArrayBuffer(s: string): ArrayBuffer {
+  return new TextEncoder().encode(s).buffer as ArrayBuffer
 }
 
 /**
