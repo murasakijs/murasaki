@@ -627,6 +627,64 @@ function finishRunText(productName: string, languageName: string): string {
 }
 
 /**
+ * The running-app guard's confirmation dialog text (see `nsiScript`'s
+ * `un.onInit`, shown when the uninstaller detects `${name}.exe` still
+ * running) — translated for every language `NSIS_LANGUAGE_NAMES` maps to, so
+ * the full shipped locale set gets a real translation instead of
+ * `finishRunText`'s English-only fallback.
+ *
+ * Spells out both outcomes explicitly rather than phrasing it as a yes/no
+ * question, because Cancel is now the dialog's default button (see
+ * `uninstRunningGuard`) — the user needs to know what each button does
+ * without relying on which one happens to be pre-selected.
+ */
+function uninstRunningText(productName: string, languageName: string): string {
+  switch (languageName) {
+    case 'Japanese':
+      return `${productName} は実行中です。 [OK] 終了してアンインストールを続けます。 [キャンセル] 中止してインストールされたままにします。`
+    case 'SimpChinese':
+      return `${productName} 正在运行。 [确定] 关闭它并继续卸载。 [取消] 停止操作并保留安装。`
+    case 'Korean':
+      return `${productName}이(가) 실행 중입니다. [확인] 종료하고 제거를 계속합니다. [취소] 중단하고 설치된 상태로 둡니다.`
+    case 'Spanish':
+      return `${productName} se está ejecutando. [Aceptar] Ciérrelo y continúe con la desinstalación. [Cancelar] Deténgase y déjelo instalado.`
+    case 'French':
+      return `${productName} est en cours d'exécution. [OK] Fermez-le et poursuivez la désinstallation. [Annuler] Arrêtez et laissez-le installé.`
+    case 'German':
+      return `${productName} wird ausgeführt. [OK] Schließen und Deinstallation fortsetzen. [Abbrechen] Abbrechen und installiert lassen.`
+    default:
+      return `${productName} is running.  [OK] Close it and continue uninstalling.  [Cancel] Stop and leave it installed.`
+  }
+}
+
+/**
+ * Shown when the guard's `taskkill` didn't actually end the process (e.g. the
+ * app is running at a higher integrity level than the non-elevated
+ * uninstaller, so the kill silently fails with access denied) — the
+ * uninstaller re-checks after killing and, if the process is still alive,
+ * shows this instead of proceeding to delete files out from under it. Same
+ * per-language coverage as `uninstRunningText`.
+ */
+function uninstKillFailedText(productName: string, languageName: string): string {
+  switch (languageName) {
+    case 'Japanese':
+      return `${productName} を終了できませんでした。手動で終了してから、アンインストーラーを再度実行してください。`
+    case 'SimpChinese':
+      return `无法关闭 ${productName}。请手动关闭它,然后重新运行卸载程序。`
+    case 'Korean':
+      return `${productName}을(를) 종료할 수 없습니다. 수동으로 종료한 후 제거 프로그램을 다시 실행하세요.`
+    case 'Spanish':
+      return `No se pudo cerrar ${productName}. Ciérrelo manualmente y vuelva a ejecutar el desinstalador.`
+    case 'French':
+      return `Impossible de fermer ${productName}. Veuillez le fermer manuellement, puis relancer le désinstalleur.`
+    case 'German':
+      return `${productName} konnte nicht beendet werden. Bitte schließen Sie es manuell und führen Sie das Deinstallationsprogramm erneut aus.`
+    default:
+      return `Could not close ${productName}. Please close it manually, then run the uninstaller again.`
+  }
+}
+
+/**
  * Generates the `.nsi` script and runs `makensis` against it to produce
  * `dist/<productName>-<version>-setup.exe`. Returns `false` (without
  * throwing) if `makensis` isn't on PATH or compilation fails, so the caller
@@ -802,6 +860,24 @@ function nsiScript(opts: {
     )
     .join('\n')
 
+  // Companion `LangString`s for the running-app guard's MessageBoxes in
+  // `un.onInit` (below) — same one-per-declared-language wiring as
+  // `langStrings`, just different source strings: the confirm dialog shown
+  // before the kill, and the error dialog shown if the kill didn't take.
+  const uninstRunningLangStrings = languageNames
+    .map(
+      (n) =>
+        `LangString UNINST_RUNNING_TEXT ${nsisLangConstant(n)} "${nsisEscape(uninstRunningText(productName, n))}"`,
+    )
+    .join('\n')
+
+  const uninstKillFailedLangStrings = languageNames
+    .map(
+      (n) =>
+        `LangString UNINST_KILL_FAILED_TEXT ${nsisLangConstant(n)} "${nsisEscape(uninstKillFailedText(productName, n))}"`,
+    )
+    .join('\n')
+
   // Solid compression (SetCompressor /SOLID below) decompresses the whole
   // data block before any of it is usable, so the language dialog's own
   // resources must be reserved first — otherwise the dialog couldn't show
@@ -812,9 +888,49 @@ function nsiScript(opts: {
     ? `Function .onInit\n  !insertmacro MUI_LANGDLL_DISPLAY\nFunctionEnd`
     : ''
 
-  const unOnInit = hasLanguagePicker
-    ? `Function un.onInit\n  !insertmacro MUI_UNGETLANGUAGE\nFunctionEnd`
-    : ''
+  // Detects whether `${name}.exe` is still running via the always-bundled
+  // `nsExec` plugin plus Windows' built-in `tasklist`/`taskkill` (no external
+  // NSIS plugin) — `find` exits 0 when the image name shows up in the
+  // filtered `tasklist` output, i.e. the app is running. Reused verbatim for
+  // both the initial check and the post-kill re-check below.
+  const detectRunningCmd = `nsExec::ExecToStack '"$SYSDIR\\cmd.exe" /c tasklist /FI "IMAGENAME eq ${name}.exe" /NH | find /I "${name}.exe"'
+  Pop $0
+  Pop $1`
+
+  // Interactive uninstalls confirm via MessageBox before killing — Cancel is
+  // the *default* button (`MB_DEFBUTTON2`) since it's the safer outcome, and
+  // Cancel aborts the uninstall. Silent uninstalls (`/S`, used by
+  // `QuietUninstallString`) skip the dialog and kill without prompting.
+  //
+  // Killing the launcher alone is normally enough — its Job Object takes its
+  // `node` child down with it — but real-hardware testing found `taskkill`
+  // can silently fail (most likely: the app is running elevated relative to
+  // this non-elevated uninstaller, i.e. "Access is denied") while the
+  // uninstall proceeded anyway, deleting files out from under a still-live
+  // app. So after the `Sleep` (giving Windows a moment to release file locks)
+  // the *same* detection command runs again — the uninstall only proceeds if
+  // that re-check confirms the process is actually gone; otherwise it shows
+  // an error and aborts rather than ever assuming the kill worked.
+  const uninstRunningGuard = `  ${detectRunningCmd}
+  StrCmp $0 "0" 0 murasaki_uninst_notrunning
+  IfSilent murasaki_uninst_kill
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "$(UNINST_RUNNING_TEXT)" IDOK murasaki_uninst_kill
+  Abort
+  murasaki_uninst_kill:
+  nsExec::ExecToStack '"$SYSDIR\\taskkill.exe" /F /IM "${name}.exe"'
+  Pop $0
+  Pop $1
+  Sleep 1500
+  ${detectRunningCmd}
+  StrCmp $0 "0" murasaki_uninst_killfailed murasaki_uninst_notrunning
+  murasaki_uninst_killfailed:
+  MessageBox MB_OK|MB_ICONSTOP "$(UNINST_KILL_FAILED_TEXT)" /SD IDOK
+  Abort
+  murasaki_uninst_notrunning:`
+
+  const unOnInit = `Function un.onInit
+${hasLanguagePicker ? '  !insertmacro MUI_UNGETLANGUAGE\n' : ''}${uninstRunningGuard}
+FunctionEnd`
 
   // `ManifestSupportedOS all` embeds a modern-OS compatibility manifest. Without
   // it, NSIS ships only its Vista-era manifest, and our installer finishes fast
@@ -899,6 +1015,8 @@ SectionEnd`
       '!insertmacro MUI_UNPAGE_CONFIRM\n!insertmacro MUI_UNPAGE_INSTFILES',
       languageMacros,
       langStrings,
+      uninstRunningLangStrings,
+      uninstKillFailedLangStrings,
       reserveLangDll,
       installSection,
       onInit,
