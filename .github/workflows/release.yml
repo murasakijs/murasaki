@@ -89,7 +89,7 @@ jobs:
       #
       # CI-only: the committed manifests keep their workspace: specs so the
       # monorepo's local links keep working.
-      - name: Resolve workspace: dependencies to real versions
+      - name: "Resolve workspace: dependencies to real versions"
         run: node scripts/resolve-workspace-deps.mjs
 
       # Keep the scaffolder template in sync with the release. create-murasaki's
