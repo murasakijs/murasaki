@@ -166,7 +166,4 @@ export type { ToastProps, ToastActionElement } from './components/toast.js'
 
 export { Toaster } from './components/toaster.js'
 
-export { UpdateButton } from './components/update-button.js'
-export type { UpdateButtonProps } from './components/update-button.js'
-
 export { useToast, toast } from './hooks/use-toast.js'

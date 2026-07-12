@@ -47,7 +47,8 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 ロードのロジックは Node 上で動作し、コンテキストメニューやアプリメニューが使う IPC
 ブリッジではなく、アプリの他の部分を配信しているのと同じローカル HTTP サーバー(Server
 Actions や API Routes と同じ仕組み)経由でアクセスされます。`<UpdateButton />`
-(`@murasakijs/ui`)は、それをラップしたすぐに使えるボタンです:
+(こちらも `murasaki` から、`@murasakijs/ui` でスタイリング)は、それをラップした
+すぐに使えるボタンです:
 
 ```tsx
 import { useUpdate } from 'murasaki'

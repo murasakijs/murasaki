@@ -1,23 +1,20 @@
-import { useUpdate } from 'murasaki'
+import { Button, type ButtonProps, cn, Progress } from '@murasakijs/ui'
 import { useEffect } from 'react'
-import { cn } from '../lib/cn.js'
-import { Button } from './button.js'
-import type { ButtonProps } from './button.js'
-import { Progress } from './progress.js'
+import { useUpdate } from './updater.js'
 
 export interface UpdateButtonProps extends Omit<ButtonProps, 'onClick' | 'children'> {}
 
 /**
- * A ready-to-drop-in auto-updater button, wired to `useUpdate()` from
- * `murasaki`. Checks for an update on mount, then renders:
+ * A ready-to-drop-in auto-updater button, wired to `useUpdate()`. Checks for
+ * an update on mount, then renders:
  *  - nothing while idle/checking/not-available/error,
  *  - "Update to vX" (click to download) once one is `available`,
  *  - a progress bar while `downloading`,
  *  - "Restart to update" (click to install + relaunch) once `ready`.
  *
- * Unstyled opinions live in `murasaki`'s `useUpdate()`; this component is the
+ * Unstyled opinions live in `useUpdate()`; this component is the
  * shadcn-style, restyleable presentation layer — override via `className`
- * or fork it, same as any other component here.
+ * or fork it, same as any other component in `@murasakijs/ui`.
  */
 export function UpdateButton({ className, ...props }: UpdateButtonProps) {
   const update = useUpdate()

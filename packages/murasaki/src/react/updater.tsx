@@ -1,8 +1,8 @@
 /**
  * `useUpdate()` — the client half of the check/download/install flow
  * described in the frozen updater contract (`/__murasaki/update/*`, §0/§6/§7).
- * Headless — no styling. `<UpdateButton />` (styled, shadcn-idiom) lives in
- * `@murasakijs/ui`, not here (packages/murasaki must not assume Tailwind).
+ * Headless — no styling. `<UpdateButton />` (styled, shadcn-idiom) lives
+ * alongside it in `./update-button.js`, built on top of `@murasakijs/ui`.
  *
  * Transport: `/__murasaki/update/events` (SSE) is the single source of
  * truth for `UpdateState` — it pushes the full state on every transition,

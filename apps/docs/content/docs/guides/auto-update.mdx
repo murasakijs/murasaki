@@ -43,7 +43,7 @@ the whole trust model is a single Ed25519 keypair you generate once.
 3. Drop in the button:
 
    ```tsx
-   import { UpdateButton } from '@murasakijs/ui'
+   import { UpdateButton } from 'murasaki'
 
    export default function Settings() {
      return <UpdateButton />
@@ -79,7 +79,8 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
   the app; the launcher applies the update and relaunches.
 
 `useUpdate()` is headless — no rendering, no styling opinions. `<UpdateButton
-/>` (`@murasakijs/ui`) is the ready-made presentation for it:
+/>` (also from `murasaki`, styled with `@murasakijs/ui`) is the ready-made
+presentation for it:
 
 - renders nothing while `idle` / `checking` / `not-available` / `error`,
 - **"Update to vX"** once `available` — click to download,

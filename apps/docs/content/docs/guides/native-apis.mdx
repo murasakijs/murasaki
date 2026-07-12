@@ -43,8 +43,8 @@ client-side behavior:
 `useUpdate()` checks for, downloads, and installs updates — its check/download
 logic runs in Node and is reached over the same local HTTP server that serves
 the rest of the app (like Server Actions and API routes), not the IPC bridge
-the context menu and app menu use. `<UpdateButton />` (`@murasakijs/ui`) is a
-ready-made button that wraps it:
+the context menu and app menu use. `<UpdateButton />` (also from `murasaki`,
+styled with `@murasakijs/ui`) is a ready-made button that wraps it:
 
 ```tsx
 import { useUpdate } from 'murasaki'

@@ -316,8 +316,8 @@ export default defineConfig({
 
 `MurasakiConfig` also accepts an optional `devPort` (Vite dev server port,
 default `5178`), `targets` (build targets array), and `updater` — auto-update
-config consumed by `useUpdate()` (from `murasaki`) and `<UpdateButton />`
-(from `@murasakijs/ui`).
+config consumed by `useUpdate()` and `<UpdateButton />` (both from
+`murasaki`).
 
 ---
 
