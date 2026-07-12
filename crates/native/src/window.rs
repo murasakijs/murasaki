@@ -39,15 +39,23 @@ pub struct BrowserWindow {
   /// it builds (`&self`, so in principle more than once) — see
   /// `AppMenuContext`'s doc comment for what this is for.
   app_menu: AppMenuContext,
+  /// Wakes `Application`'s tao event loop — see `webview::Webview::new`'s
+  /// `wake` parameter doc comment. `Rc` (not `Box`) for the same
+  /// "`&self`, in principle more than once" reason as `app_menu` above: each
+  /// `create_webview` call needs its own owned `Box<dyn Fn()>` to hand to
+  /// `Webview::new`, so this is cloned (cheaply, via the `Rc`) into a fresh
+  /// box below rather than moved out of `&self`.
+  wake: Rc<dyn Fn()>,
 }
 
 impl BrowserWindow {
-  pub(crate) fn from_window(window: Window, app_menu: AppMenuContext) -> Self {
+  pub(crate) fn from_window(window: Window, app_menu: AppMenuContext, wake: Rc<dyn Fn()>) -> Self {
     #[cfg(target_os = "macos")]
     let _ = &window; // vibrancy hook lands in the follow-up commit
     Self {
       window: Rc::new(RefCell::new(Some(window))),
       app_menu,
+      wake,
     }
   }
 
@@ -76,7 +84,13 @@ impl BrowserWindow {
         "window disposed",
       ));
     }
-    Webview::new(self.window.clone(), opts, self.app_menu.clone())
+    let wake = self.wake.clone();
+    Webview::new(
+      self.window.clone(),
+      opts,
+      self.app_menu.clone(),
+      Box::new(move || wake()),
+    )
   }
 
   #[napi(js_name = "setTitle")]

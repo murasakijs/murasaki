@@ -475,6 +475,12 @@ mod imp_macos {
     set_activation_policy_regular();
 
     let event_loop = EventLoop::<()>::new();
+    // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
+    // see `webview::Webview::new`'s `wake` parameter doc comment. Without
+    // this, a JS-posted IPC message generates no OS event, so a
+    // `ControlFlow::Wait` loop never re-polls `quit_requested()` until the
+    // next mouse/keyboard event.
+    let quit_proxy = event_loop.create_proxy();
 
     // Matches prod-launcher.mjs's `meta.width ?? 1000` / `meta.height ?? 700`
     // (not Application::createWindow's 1280x800 default, which is for
@@ -553,6 +559,9 @@ mod imp_macos {
         serve_dir: None,
       },
       app_menu_context,
+      Box::new(move || {
+        let _ = quit_proxy.send_event(());
+      }),
     )
     .map_err(|e| format!("build webview: {e}"))?;
     // Handle the app-menu poll below dispatches clicks into — see
@@ -783,10 +792,15 @@ mod win_job {
 /// macOS uses) and `webview::poll_menu_bar_events` for how their clicks are
 /// picked up in the event loop below and dispatched into the webview.
 ///
+/// The "About <app>" panel *is* handled here too, via a Help menu appended
+/// by `menu::build_windows_menu_bar` (muda's `PredefinedMenuItem::about` is
+/// cross-platform, same call macOS's app-name submenu uses) — see that
+/// function's doc comment. `icon_path` isn't threaded through on Windows
+/// (unlike macOS's `about`, below): muda's Windows About dialog is built from
+/// this launcher's own `AboutInfo`, whose `icon_path` field is left `None`
+/// here rather than plumbed from `window_icon`'s already-decoded tao `Icon`.
+///
 /// Deferred macOS-parity items, left for a later packaging phase:
-///  - The "About <app>" panel — mirrors `webview::show_context_menu`'s
-///    Windows stub for the same story on context menus. Windows conventionally
-///    surfaces this under a Help menu, which isn't part of this bar yet.
 ///  - Menu-bar keyboard accelerators (Ctrl+Z etc.) — see
 ///    `menu::build_windows_menu_bar`'s doc comment for why they're
 ///    intentionally left unset rather than shipped as inert decoration.
@@ -815,7 +829,7 @@ mod imp_win {
   };
 
   use crate::{
-    menu::{build_windows_menu_bar, SharedMenu},
+    menu::{build_windows_menu_bar, AboutInfo, SharedMenu},
     types::WebviewOptions,
     webview::{poll_menu_bar_events, AppMenuContext, Webview},
     window::{center_on_primary_monitor, SharedWindow},
@@ -882,6 +896,10 @@ mod imp_win {
     }
 
     let event_loop = EventLoop::<()>::new();
+    // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
+    // see `webview::Webview::new`'s `wake` parameter doc comment / the
+    // matching comment in `imp_macos`.
+    let quit_proxy = event_loop.create_proxy();
 
     // Matches prod-launcher.mjs's / the macOS launcher's `meta.width ?? 1000`
     // / `meta.height ?? 700`.
@@ -889,13 +907,6 @@ mod imp_win {
     let height = meta.height.unwrap_or(700);
     // Vibrancy is macOS-only (see window.rs) — a no-op here too.
     let _ = &meta.vibrancy;
-    // Deferred — see the module doc comment above (no "About" panel/Help menu
-    // yet, so these have nowhere to surface).
-    let _ = &meta.version;
-    let _ = &meta.description;
-    let _ = &meta.copyright;
-    let _ = &meta.homepage;
-    let _ = &meta.authors;
 
     // Title-bar/Alt-Tab window icon — see the module doc comment above for
     // why this is needed in addition to the .exe's already-embedded PE icon.
@@ -933,7 +944,21 @@ mod imp_win {
       meta.locales.as_deref(),
       &locale_table,
     );
-    let menu_bar = build_windows_menu_bar(Some(&menu_labels))
+    // No `icon_path` here (unlike `imp_macos`'s `about`, which reuses the
+    // already-resolved `icon_path`): this launcher only ever decodes the app
+    // icon into a tao `Icon` (`window_icon`, for the window chrome itself),
+    // not a path muda's About dialog could load — see the module doc
+    // comment above.
+    let about = AboutInfo {
+      name: &meta.product_name,
+      icon_path: None,
+      version: meta.version.as_deref(),
+      description: meta.description.as_deref(),
+      copyright: meta.copyright.as_deref(),
+      homepage: meta.homepage.as_deref(),
+      authors: meta.authors.as_deref(),
+    };
+    let menu_bar = build_windows_menu_bar(Some(&about), Some(&menu_labels))
       .map_err(|e| format!("build menu bar: {e}"))?;
     // SAFETY: `hwnd` names the window built above, which is still open (its
     // event loop hasn't run yet). A failure here is cosmetic (missing menu
@@ -964,6 +989,9 @@ mod imp_win {
         serve_dir: None,
       },
       app_menu_context,
+      Box::new(move || {
+        let _ = quit_proxy.send_event(());
+      }),
     )
     .map_err(|e| format!("build webview: {e}"))?;
     // Handle the menu bar's event loop poll dispatches into — see

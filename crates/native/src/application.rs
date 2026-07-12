@@ -141,6 +141,18 @@ impl Application {
       .as_ref()
       .ok_or_else(|| Error::new(Status::GenericFailure, "event loop already consumed"))?;
 
+    // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
+    // see `webview::Webview::new`'s `wake` parameter doc comment. Without
+    // this, a JS-posted IPC message generates no OS event, so a
+    // `ControlFlow::Wait` loop never re-polls `quit_requested()` until the
+    // next mouse/keyboard event. Routed through `UserEvent::Wake` (not
+    // `Quit`) so `run()`'s `quit_requested()` poll below still fires the
+    // registered `onQuit` callback — `UserEvent::Quit` exits without it.
+    let wake_proxy = event_loop.create_proxy();
+    let wake: Rc<dyn Fn()> = Rc::new(move || {
+      let _ = wake_proxy.send_event(UserEvent::Wake);
+    });
+
     let mut builder = WindowBuilder::new()
       .with_title(opts.title.as_deref().unwrap_or("Murasaki"))
       .with_inner_size(LogicalSize::new(
@@ -169,7 +181,10 @@ impl Application {
     // block above this has to happen after `build()` rather than before it.
     #[cfg(target_os = "windows")]
     if self.windows_menu_bar.borrow().is_none() {
-      match build_windows_menu_bar(opts.menu_labels.as_ref()) {
+      // Dev mode has no config→native plumbing for About metadata yet — `None`
+      // here just means the startup bar has no Help/About submenu, same as
+      // before this feature (see `menu::build_windows_menu_bar`'s doc comment).
+      match build_windows_menu_bar(None, opts.menu_labels.as_ref()) {
         Ok(menu) => {
           use tao::platform::windows::WindowExtWindows;
           // SAFETY: `hwnd` was just read from the `window` built above, which
@@ -184,7 +199,7 @@ impl Application {
       }
     }
 
-    let browser_window = BrowserWindow::from_window(window, self.app_menu_context(&opts));
+    let browser_window = BrowserWindow::from_window(window, self.app_menu_context(&opts), wake);
 
     // Windows only: keep a handle so `run()`'s event loop can act on
     // menu-bar clicks that operate on the window itself — see

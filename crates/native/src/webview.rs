@@ -200,7 +200,12 @@ fn is_external_url(target: &str) -> bool {
 }
 
 impl Webview {
-  pub(crate) fn new(window: SharedWindow, opts: WebviewOptions, app_menu: AppMenuContext) -> Result<Self> {
+  pub(crate) fn new(
+    window: SharedWindow,
+    opts: WebviewOptions,
+    app_menu: AppMenuContext,
+    wake: Box<dyn Fn() + 'static>,
+  ) -> Result<Self> {
     let on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>> =
       Rc::new(RefCell::new(None));
     // Created empty and filled in *after* `builder.build()` below, but a
@@ -264,6 +269,7 @@ impl Webview {
 
       if kind.as_deref() == Some("appQuit") {
         QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        wake();
         return;
       }
 

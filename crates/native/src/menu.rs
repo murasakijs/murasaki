@@ -47,7 +47,6 @@ pub(crate) fn build_menu(items: &[MenuItemOptions]) -> Result<Menu> {
 /// Inputs for the native "About <app>" panel. See `build_about_credits` and
 /// `build_default_app_menu` for how these map onto muda's `AboutMetadata` —
 /// macOS and Windows/Linux render different subsets of its fields.
-#[cfg(target_os = "macos")]
 pub(crate) struct AboutInfo<'a> {
   pub name: &'a str,
   pub icon_path: Option<&'a str>,
@@ -65,7 +64,6 @@ pub(crate) struct AboutInfo<'a> {
 /// long after startup can still prepend the standard app-name submenu (see
 /// `build_macos_app_menu_from_spec`) using the same info the startup default
 /// menu was built from.
-#[cfg(target_os = "macos")]
 #[derive(Clone)]
 pub(crate) struct AboutInfoOwned {
   pub name: String,
@@ -77,7 +75,6 @@ pub(crate) struct AboutInfoOwned {
   pub authors: Option<Vec<String>>,
 }
 
-#[cfg(target_os = "macos")]
 impl AboutInfoOwned {
   pub(crate) fn as_ref(&self) -> AboutInfo<'_> {
     AboutInfo {
@@ -462,7 +459,7 @@ pub(crate) mod windows_menu_bar_ids {
 /// doesn't actually fire. Left off rather than shipping a decorative-only,
 /// possibly-misleading label.
 #[cfg(target_os = "windows")]
-pub(crate) fn build_windows_menu_bar(labels: Option<&crate::types::MenuLabels>) -> Result<Menu> {
+pub(crate) fn build_windows_menu_bar(about: Option<&AboutInfo>, labels: Option<&crate::types::MenuLabels>) -> Result<Menu> {
   use windows_menu_bar_ids as ids;
 
   let menu = Menu::new();
@@ -480,7 +477,46 @@ pub(crate) fn build_windows_menu_bar(labels: Option<&crate::types::MenuLabels>) 
     .append_items(&[&file_menu, &edit_menu, &window_menu])
     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
+  // Help > About <app> — parity with macOS's app-name-submenu About panel
+  // (`build_macos_app_submenu`). `None` (no `AboutInfo` supplied, e.g. the
+  // dev-mode caller in `application.rs`, which has no config→native plumbing
+  // for this yet) leaves the bar unchanged.
+  if let Some(info) = about {
+    let help_menu = build_windows_help_submenu(info, labels)?;
+    menu
+      .append(&help_menu)
+      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+  }
+
   Ok(menu)
+}
+
+/// The Help submenu (About <app>) — see `build_windows_menu_bar`'s doc
+/// comment above for why it's conditionally appended there instead of always
+/// being part of this bar.
+#[cfg(target_os = "windows")]
+fn build_windows_help_submenu(info: &AboutInfo, labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
+  let about_label = labels
+    .and_then(|l| l.about.as_deref())
+    .map(String::from)
+    .unwrap_or_else(|| format!("About {}", info.name));
+  let about_metadata = AboutMetadata {
+    name: Some(info.name.to_string()),
+    version: info.version.map(|s| s.to_string()),
+    comments: info.description.map(|s| s.to_string()),
+    copyright: info.copyright.map(|s| s.to_string()),
+    website: info.homepage.map(|s| s.to_string()),
+    authors: info.authors.map(|a| a.to_vec()),
+    ..Default::default()
+  };
+  // MenuLabels has no `help` field, so the Help submenu title is an English
+  // literal for now (i18n of the title is a follow-up). The About *item*
+  // label still uses the i18n'd `about` field above, matching macOS.
+  let help_menu = Submenu::new("Help", true);
+  help_menu
+    .append(&PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)))
+    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+  Ok(help_menu)
 }
 
 /// The Edit submenu (Undo/Redo/sep/Cut/Copy/Paste/Select All) — factored out
