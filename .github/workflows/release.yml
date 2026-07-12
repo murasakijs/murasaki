@@ -45,14 +45,19 @@ jobs:
         # that don't exist here. Standard install is enough for CI.
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build murasaki
-        run: pnpm --filter murasaki build
-
       # @murasakijs/ui ships its own compiled dist (plus styles.css /
       # tailwind-preset.cjs at the package root). It versions independently of
       # the framework, so it is NOT part of the tag-match check below.
+      #
+      # Built BEFORE murasaki, not after: murasaki imports @murasakijs/ui (see
+      # react/update-button.tsx), so its tsc run needs ui's emitted .d.ts to
+      # already exist. With the old order the build failed on "Cannot find
+      # module '@murasakijs/ui'" the first time a release carried the updater.
       - name: Build @murasakijs/ui
         run: pnpm --filter @murasakijs/ui build
+
+      - name: Build murasaki
+        run: pnpm --filter murasaki build
 
       # npm always ships README.md from the package dir (regardless of `files`),
       # so copy the root README into each package before publishing — otherwise
@@ -76,27 +81,50 @@ jobs:
             echo "$pkg version OK: $PKG_VERSION"
           done
 
-      # `npm publish` (unlike `pnpm publish`) does not rewrite the
-      # workspace:^ dependency on @murasakijs/native. Replace it here with the
-      # real published version before publishing. This mutation is CI-only:
-      # the committed packages/murasaki/package.json keeps workspace:^ so the
-      # monorepo's local link keeps working.
-      - name: Resolve workspace:^ dependency to real version
+      # `npm publish` (unlike `pnpm publish`) does not rewrite workspace:^
+      # dependencies. Replace EVERY one of them with the real published version
+      # before publishing — murasaki depends on both @murasakijs/native and
+      # @murasakijs/ui this way, and shipping either as the literal string
+      # "workspace:^" produces a package nobody can install. This mutation is
+      # CI-only: the committed packages/murasaki/package.json keeps workspace:^
+      # so the monorepo's local link keeps working.
+      #
+      # The loop (rather than naming @murasakijs/native alone) is the point: the
+      # ui dependency arrived with the updater and was silently left unresolved,
+      # so a new workspace:^ dep must not be able to slip through again. The
+      # guard below fails the release if any dependency is still a workspace:
+      # spec, whether or not this step knew to rewrite it.
+      - name: Resolve workspace:^ dependencies to real versions
         run: |
           node -e "
           const fs = require('fs');
           const pkgPath = 'packages/murasaki/package.json';
           const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-          const nativeVersion = require('./crates/native/package.json').version;
-          pkg.dependencies['@murasakijs/native'] = '^' + nativeVersion;
+          const versions = {
+            '@murasakijs/native': require('./crates/native/package.json').version,
+            '@murasakijs/ui': require('./packages/ui/package.json').version,
+          };
+          for (const [name, spec] of Object.entries(pkg.dependencies || {})) {
+            if (!String(spec).startsWith('workspace:')) continue;
+            const v = versions[name];
+            if (!v) {
+              console.error('::error::no known version for workspace dependency ' + name);
+              process.exit(1);
+            }
+            pkg.dependencies[name] = '^' + v;
+            console.log('Resolved ' + name + ' -> ^' + v);
+          }
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
           "
-          DEP=$(node -p "require('./packages/murasaki/package.json').dependencies['@murasakijs/native']")
-          echo "Resolved @murasakijs/native to: $DEP"
-          if [[ "$DEP" == workspace:* ]] || ! [[ "$DEP" =~ ^\^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::@murasakijs/native dependency was not resolved to a real version: $DEP"
-            exit 1
-          fi
+          node -e "
+          const deps = require('./packages/murasaki/package.json').dependencies || {};
+          const bad = Object.entries(deps).filter(([, v]) => String(v).startsWith('workspace:'));
+          if (bad.length) {
+            console.error('::error::unresolved workspace dependencies: ' + bad.map(([k]) => k).join(', '));
+            process.exit(1);
+          }
+          console.log('All workspace: dependencies resolved.');
+          "
 
       # Keep the scaffolder template in sync with the release. create-murasaki's
       # default template pins `murasaki` in its package.json, and for a 0.x
@@ -151,30 +179,42 @@ jobs:
       # Each publish is idempotent: skip if that exact version is already on
       # npm, so re-running after a partial failure (e.g. only one package
       # published) doesn't error on the already-published one.
-      - name: Publish packages/murasaki
-        working-directory: packages/murasaki
-        run: |
-          V=$(node -p "require('./package.json').version")
-          if npm view "murasaki@$V" version >/dev/null 2>&1; then
-            echo "murasaki@$V already published — skipping."
-          else
-            npm publish --provenance --access public
-          fi
-
+      #
       # @murasakijs/ui versions independently of the framework and publishes at
-      # its own package.json version (idempotent: skip if that version is
-      # already on npm). This runs BEFORE create-murasaki because the default
-      # template depends on @murasakijs/ui — the scaffolder must not ship
-      # pointing at a UI version that isn't on npm yet. The very first version
-      # must be published manually and its Trusted Publisher configured on npm
-      # before CI can OIDC-publish subsequent versions; until then this step
-      # simply skips the already-published 0.1.0.
+      # its own package.json version. It goes FIRST: both murasaki (since the
+      # updater's <UpdateButton />) and the scaffolder template depend on it, so
+      # neither may be published pointing at a ui version that isn't on npm yet.
+      # The very first version had to be published manually and its Trusted
+      # Publisher configured on npm before CI could OIDC-publish subsequent
+      # versions; until a new one is cut this step simply skips 0.1.0.
       - name: Publish packages/ui
         working-directory: packages/ui
         run: |
           V=$(node -p "require('./package.json').version")
           if npm view "@murasakijs/ui@$V" version >/dev/null 2>&1; then
             echo "@murasakijs/ui@$V already published — skipping."
+          else
+            npm publish --provenance --access public
+          fi
+
+      # Ordering guard, same shape as the @murasakijs/native one above: murasaki
+      # now declares a real dependency on @murasakijs/ui, so refuse to publish it
+      # against a ui version npm can't serve yet.
+      - name: Verify @murasakijs/ui is published
+        run: |
+          UI_VERSION=$(node -p "require('./packages/ui/package.json').version")
+          if [ "$(npm view "@murasakijs/ui@${UI_VERSION}" version 2>/dev/null)" != "$UI_VERSION" ]; then
+            echo "::error::@murasakijs/ui@${UI_VERSION} is not on npm. murasaki depends on it, so publishing now would ship an uninstallable package."
+            exit 1
+          fi
+          echo "@murasakijs/ui@${UI_VERSION} is published — OK to publish murasaki."
+
+      - name: Publish packages/murasaki
+        working-directory: packages/murasaki
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if npm view "murasaki@$V" version >/dev/null 2>&1; then
+            echo "murasaki@$V already published — skipping."
           else
             npm publish --provenance --access public
           fi
