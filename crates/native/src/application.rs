@@ -294,6 +294,10 @@ impl Application {
         {
           if crate::webview::poll_menu_bar_events(window_slot, webview_slot) {
             *control_flow = ControlFlow::Exit;
+            // Drop the wry WebView so WebView2 shuts its browser processes
+            // down — `EventLoop::run` calls `std::process::exit` once this
+            // closure returns, which skips destructors, orphaning it.
+            let _ = webview_slot.borrow_mut().take();
             if let Some(tsf) = on_quit.borrow().as_ref() {
               let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
             }
@@ -316,6 +320,13 @@ impl Application {
       // below: fire the registered `onQuit` callback and exit the loop.
       if crate::webview::quit_requested() {
         *control_flow = ControlFlow::Exit;
+        // Drop the wry WebView so WebView2 shuts its browser processes down —
+        // `EventLoop::run` calls `std::process::exit` once this closure
+        // returns, which skips destructors, orphaning it.
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if let Some(webview_slot) = webview_handle.borrow().as_ref() {
+          let _ = webview_slot.borrow_mut().take();
+        }
         if let Some(tsf) = on_quit.borrow().as_ref() {
           let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
         }
@@ -327,12 +338,24 @@ impl Application {
           ..
         } => {
           *control_flow = ControlFlow::Exit;
+          // Drop the wry WebView so WebView2 shuts its browser processes
+          // down — see the `quit_requested()` branch above for why.
+          #[cfg(any(target_os = "macos", target_os = "windows"))]
+          if let Some(webview_slot) = webview_handle.borrow().as_ref() {
+            let _ = webview_slot.borrow_mut().take();
+          }
           if let Some(tsf) = on_quit.borrow().as_ref() {
             let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
           }
         }
         Event::UserEvent(UserEvent::Quit) => {
           *control_flow = ControlFlow::Exit;
+          // Drop the wry WebView so WebView2 shuts its browser processes
+          // down — see the `quit_requested()` branch above for why.
+          #[cfg(any(target_os = "macos", target_os = "windows"))]
+          if let Some(webview_slot) = webview_handle.borrow().as_ref() {
+            let _ = webview_slot.borrow_mut().take();
+          }
         }
         _ => {}
       }

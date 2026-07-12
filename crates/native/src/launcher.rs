@@ -599,6 +599,9 @@ mod imp_macos {
       // the apply-helper if one is pending, then exit.
       if crate::webview::quit_requested() {
         *control_flow = ControlFlow::Exit;
+        // Drop the wry WebView so WebView2 shuts its browser processes down —
+        // `std::process::exit` below skips destructors, which orphaned them.
+        let _ = webview_handle.borrow_mut().take();
         let _ = child.kill();
         maybe_spawn_apply_helper(&resources_dir, &app_bundle, &app_bundle);
         std::process::exit(0);
@@ -610,6 +613,9 @@ mod imp_macos {
       } = event
       {
         *control_flow = ControlFlow::Exit;
+        // Drop the wry WebView so WebView2 shuts its browser processes down —
+        // `std::process::exit` below skips destructors, which orphaned them.
+        let _ = webview_handle.borrow_mut().take();
         // Best-effort: if we get killed before this runs (force-quit, crash),
         // prod-server.mjs's own orphan check (`ppid === 1`) reaps it within ~2s.
         let _ = child.kill();
@@ -1019,6 +1025,9 @@ mod imp_win {
       // the window's own close button, just below.
       if poll_menu_bar_events(&shared_window, &webview_handle) {
         *control_flow = ControlFlow::Exit;
+        // Drop the wry WebView so WebView2 shuts its browser processes down —
+        // `std::process::exit` below skips destructors, which orphaned them.
+        let _ = webview_handle.borrow_mut().take();
         let _ = child.kill();
         maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
         std::process::exit(0);
@@ -1030,6 +1039,9 @@ mod imp_win {
       // is the real safety net if this process dies before reaching here).
       if crate::webview::quit_requested() {
         *control_flow = ControlFlow::Exit;
+        // Drop the wry WebView so WebView2 shuts its browser processes down —
+        // `std::process::exit` below skips destructors, which orphaned them.
+        let _ = webview_handle.borrow_mut().take();
         let _ = child.kill();
         maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
         std::process::exit(0);
@@ -1041,6 +1053,9 @@ mod imp_win {
       } = event
       {
         *control_flow = ControlFlow::Exit;
+        // Drop the wry WebView so WebView2 shuts its browser processes down —
+        // `std::process::exit` below skips destructors, which orphaned them.
+        let _ = webview_handle.borrow_mut().take();
         // Best-effort direct kill on the clean-shutdown path. If we instead
         // get killed before this ever runs (force-quit, crash), it's the
         // `job` assigned above — not this — that reaps `child`: Windows has
