@@ -35,7 +35,7 @@ export default function Page() {
       </p>
 
       <div className="mt-10 grid grid-cols-3 gap-4">
-        <a href="https://murasaki.dev" rel="noreferrer" className="group">
+        <a href="https://murasaki.ichi10.com" rel="noreferrer" className="group">
           <Card className="flex h-full flex-col items-center gap-2 p-5 text-center transition-colors group-hover:border-murasaki-bright">
             <BookOpen className="h-5 w-5 text-murasaki-bright" />
             <span className="text-sm font-medium text-foreground">Docs</span>
