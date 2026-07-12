@@ -296,6 +296,16 @@ impl Application {
         }
       }
 
+      // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
+      // doc comment. Same shutdown path as the window's own close button
+      // below: fire the registered `onQuit` callback and exit the loop.
+      if crate::webview::quit_requested() {
+        *control_flow = ControlFlow::Exit;
+        if let Some(tsf) = on_quit.borrow().as_ref() {
+          let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+        }
+      }
+
       match event {
         Event::WindowEvent {
           event: WindowEvent::CloseRequested,

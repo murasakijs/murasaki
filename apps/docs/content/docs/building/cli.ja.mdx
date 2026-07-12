@@ -91,17 +91,31 @@ murasaki icon assets/logo.png
 ## `murasaki release`
 
 ```bash
-murasaki release --generate-manifest --base-url <url> --version <v>
+murasaki release --keygen [--force]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --sign
 ```
 
-`dist/<version>/` 配下に見つかったプラットフォームごとの成果物をハッシュ化し、
-`useUpdate()` が期待する更新マニフェスト JSON を出力します。`custom` アップデータープ
-ロバイダーの場合にのみ必要です — `github` プロバイダーは、あなたの GitHub Releases か
-らリリース情報を直接導出します。
+署名付き自動更新を公開するための、3つの独立したモードです — 全体の流れについては
+[自動更新](/docs/guides/auto-update)ガイドを参照してください。
+
+- **`--keygen`** — 更新マニフェストの署名に使う Ed25519 の鍵ペアを生成します。
+  `.murasaki/update-key.pub`(コミットしてください)と `.murasaki/update-key`
+  (自動的に gitignore されます)を書き出し、秘密鍵を一度だけ表示して
+  `MURASAKI_UPDATE_KEY` という GitHub シークレットとして保存する手順を案内します。
+  `--force` を指定しない限り、既存の鍵を上書きすることはありません。
+- **`--manifest`** — `dist/` 配下からこのバージョンの成果物(macOS の `.app.zip`、
+  Windows の `-setup.exe`)を探してハッシュ化し、`dist/latest.json` を書き出します。
+  見つからないターゲットはエラーではなくスキップされます。
+- **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成します。
+  鍵は `$MURASAKI_UPDATE_KEY`、なければ `.murasaki/update-key` から読み込まれます。
+
+`--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作します。
 
 ## 次へ
 
 <Cards>
   <Card title="設定" href="/docs/building/configuration" />
   <Card title="配布" href="/docs/building/distribution" />
+  <Card title="自動更新" href="/docs/guides/auto-update" />
 </Cards>

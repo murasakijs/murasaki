@@ -1,0 +1,328 @@
+---
+title: Auto-update
+description: Signed, self-verifying app updates from GitHub Releases or your own server — no IPC, no third-party update service.
+---
+
+Murasaki apps can check for, download, and install updates themselves. There's
+no update service to run — the manifest is a JSON file next to your release
+artifacts (GitHub Releases by default, or any static host you control), and
+the whole trust model is a single Ed25519 keypair you generate once.
+
+<Callout type="warn">
+  macOS and Windows only. Linux app packaging doesn't exist in Murasaki yet
+  (see [CLI reference](/docs/building/cli)), so there's nothing to update on
+  Linux either.
+</Callout>
+
+## Quick start
+
+1. Generate a signing key, once, from your project root:
+
+   ```bash
+   murasaki release --keygen
+   ```
+
+   This writes `.murasaki/update-key.pub` (commit it) and
+   `.murasaki/update-key` (gitignored automatically), and prints the private
+   key **once** — save it as a `MURASAKI_UPDATE_KEY` GitHub secret (the
+   command prints the exact `gh secret set` invocation to do that).
+
+2. Turn the updater on:
+
+   ```ts title="murasaki.config.ts"
+   export default defineConfig({
+     // ...
+     updater: true,
+   })
+   ```
+
+   `true` is a complete config: the GitHub repo is inferred from
+   `package.json`'s `repository` field, and the public key from
+   `.murasaki/update-key.pub`.
+
+3. Drop in the button:
+
+   ```tsx
+   import { UpdateButton } from '@murasakijs/ui'
+
+   export default function Settings() {
+     return <UpdateButton />
+   }
+   ```
+
+That covers the app side. Publishing signed releases is
+[below](#publishing-releases).
+
+## How it works
+
+`useUpdate()`'s check/download/verify logic runs in **Node**, reached from
+the page over the same local HTTP server that already serves your app (the
+same mechanism Server Actions and API routes use) — not the native IPC bridge
+the context menu and app menu use. Only the final "quit and apply" step
+touches the native launcher, since it has to keep running after your app
+process exits.
+
+```tsx
+import { useUpdate } from 'murasaki'
+
+const { status, latest, notes, progress, check, download, install, dismiss } = useUpdate()
+```
+
+`status` moves through `idle → checking → available → downloading → ready`
+(or `not-available` / `error`):
+
+- **`check()`** fetches the manifest, verifies its signature, and compares
+  versions.
+- **`download()`** streams the platform-matching asset to disk and verifies
+  its SHA-256.
+- **`install()`** hands the verified payload to the native launcher and quits
+  the app; the launcher applies the update and relaunches.
+
+`useUpdate()` is headless — no rendering, no styling opinions. `<UpdateButton
+/>` (`@murasakijs/ui`) is the ready-made presentation for it:
+
+- renders nothing while `idle` / `checking` / `not-available` / `error`,
+- **"Update to vX"** once `available` — click to download,
+- a progress bar while `downloading`,
+- **"Restart to update"** once `ready` — click to install and relaunch,
+- checks once, itself, when it mounts.
+
+<Callout type="info">
+  `<UpdateButton />` renders nothing on `error` — read `update.error` from
+  `useUpdate()` yourself if you want to surface failures in your own UI.
+  Likewise, a manifest's `mandatory` flag is carried on `useUpdate()`'s state,
+  but `<UpdateButton />` doesn't special-case it (no forced, non-dismissable
+  flow) — build your own UI around `update.mandatory` if you need one.
+</Callout>
+
+`channel` changes which manifest URL gets resolved (see
+[Self-hosting the manifest](#self-hosting-the-manifest)). `checkOnStart` and
+`checkInterval` are also resolved from config, but nothing consumes them yet
+to actually schedule a check — today the only thing calling `check()` is
+`<UpdateButton />`'s own mount effect. Call `useUpdate().check()` yourself
+(e.g. on your own timer) if you want checks beyond that.
+
+In dev, `check()` works — so you can validate a manifest/key pair without a
+full bundle — but `download()` / `install()` fail fast with `status:
+'error'` and `error: 'Updates only apply to a bundled app. Run \`murasaki
+bundle\` first.'`: there's no packaged app or launcher binary to apply an
+update to yet.
+
+## The manifest
+
+`murasaki release --manifest` writes `dist/latest.json`, always published
+alongside a detached signature, `dist/latest.json.sig`:
+
+```json title="latest.json"
+{
+  "version": "1.2.0",
+  "publishedAt": "2026-07-12T09:00:00.000Z",
+  "notes": "markdown release notes",
+  "mandatory": false,
+  "assets": {
+    "darwin-arm64": { "url": "https://.../App-1.2.0-darwin-arm64.app.zip", "sha256": "<hex>" },
+    "darwin-x64":   { "url": "https://.../App-1.2.0-darwin-x64.app.zip",   "sha256": "<hex>" },
+    "win32-x64":    { "url": "https://.../App-1.2.0-setup.exe",           "sha256": "<hex>" }
+  }
+}
+```
+
+`assets` keys are `<platform>-<arch>`, matching Node's `process.platform` /
+`process.arch` on the running app. A missing key for the running platform
+means "no update available for you," not an error — an app can ship for
+fewer platforms than a manifest might otherwise cover.
+
+`latest.json.sig` is the base64 of a detached Ed25519 signature over
+`latest.json`'s **exact raw bytes**. The client verifies those bytes before
+ever parsing them as JSON, never the other way around — there's no JSON
+canonicalization ambiguity to worry about.
+
+## Publishing releases
+
+```bash
+murasaki release --keygen [--force]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --sign
+```
+
+- **`--keygen`** — generates the Ed25519 keypair (see [Quick start](#quick-start)).
+  Refuses to overwrite an existing key unless you pass `--force` — rotating
+  the key invalidates trust for any already-shipped app still holding the old
+  public key.
+- **`--manifest`** — scans `dist/` for this version's payloads (the macOS
+  `.app.zip` files `murasaki bundle` produces, the Windows `-setup.exe`
+  `murasaki installer` produces), hashes whichever exist, and writes
+  `dist/latest.json`. A missing target is skipped, not an error — only zero
+  payloads found is fatal.
+- **`--sign`** — signs `dist/latest.json` into `dist/latest.json.sig`. Reads
+  the private key from `$MURASAKI_UPDATE_KEY`, falling back to
+  `.murasaki/update-key`.
+
+(`--generate-manifest` still works as a deprecated alias of `--manifest`.)
+
+### GitHub Actions
+
+A release workflow needs to build the update payloads for each platform,
+generate and sign the manifest, and upload everything to the same GitHub
+Release — so the default `updater: true` URL
+(`releases/latest/download/latest.json`) actually resolves them:
+
+```yaml title=".github/workflows/release.yml"
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: pnpm install
+      - run: pnpm exec murasaki bundle            # darwin-arm64 (host arch)
+      - run: pnpm exec murasaki bundle --arch x64  # darwin-x64 (cross-arch)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-payloads
+          path: dist/bundle/*.app.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: pnpm install
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+      - run: pnpm exec murasaki installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-payload
+          path: dist/*-setup.exe
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: pnpm install
+      - uses: actions/download-artifact@v4
+        with: { name: macos-payloads, path: dist/bundle }
+      - uses: actions/download-artifact@v4
+        with: { name: windows-payload, path: dist }
+      - name: Build + sign the manifest
+        env:
+          MURASAKI_UPDATE_KEY: ${{ secrets.MURASAKI_UPDATE_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
+          pnpm exec murasaki release --manifest --base-url "$BASE_URL" --version "$VERSION"
+          pnpm exec murasaki release --sign
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bundle/*.app.zip
+            dist/*-setup.exe
+            dist/latest.json
+            dist/latest.json.sig
+```
+
+Add `MURASAKI_UPDATE_KEY` as a repository secret (the value `--keygen`
+printed). This is independent of code-signing — see
+[Distribution](/docs/building/distribution#signing--notarization) if you also
+want a Developer ID-signed, notarized `.dmg`; nothing stops you from adding
+those steps to the same `macos` job.
+
+<Callout type="warn">
+  This example only publishes `win32-x64` — see [Platform
+  support](#platform-support) below for why `win32-arm64` isn't publishable
+  yet. If you build a `win32-arm64` installer too, keep it in a separate
+  output path: the NSIS filename doesn't encode architecture, so an `x64` and
+  an `arm64` build landing in the same `dist/` would overwrite each other
+  before `--manifest` ever runs.
+</Callout>
+
+## Security model
+
+Signature verification is **mandatory — there is no config option to disable
+it.** Every `check()` fetches `latest.json` and `latest.json.sig`, verifies
+the Ed25519 signature over the manifest's raw bytes against the app's public
+key, and refuses to trust the manifest if that fails. Every `download()`
+separately re-verifies the payload's SHA-256 against the hash inside the
+(already-verified) manifest.
+
+That combination means an attacker who controls only the file host (a
+compromised CDN, a MITM'd mirror, a malicious PR to a self-hosted `dist/`
+bucket) can't push a fake update without also holding the private key — which
+never leaves `.murasaki/update-key` / your CI secret.
+
+<Callout type="warn">
+  This project ships no Windows code-signing (Authenticode) — see
+  [Distribution](/docs/building/distribution#signing--notarization). On
+  Windows, the Ed25519 manifest signature is therefore the **only**
+  authenticity guarantee an update has.
+</Callout>
+
+Keep `.murasaki/update-key` out of version control (`--keygen` gitignores it
+automatically) and treat `MURASAKI_UPDATE_KEY` like any other release-signing
+secret.
+
+## Platform support
+
+| Platform | Update payload | Status |
+| --- | --- | --- |
+| macOS (arm64) | `<productName>-darwin-arm64.app.zip` | Supported |
+| macOS (x64) | `<productName>-darwin-x64.app.zip` | Supported |
+| Windows (x64) | `<productName>-<version>-setup.exe` | Supported |
+| Windows (arm64) | — | Not yet — see below |
+| Linux | — | No app packaging in Murasaki yet |
+
+Windows arm64 has no update path today: the NSIS installer's filename doesn't
+encode architecture, so `murasaki release --manifest` can only ever produce a
+`win32-x64` entry. An arm64 Windows app checking for updates just gets
+`not-available` — it degrades gracefully, it doesn't crash or error.
+
+## Self-hosting the manifest
+
+Not using GitHub Releases? Point `endpoint` at any URL serving `latest.json`
+(with `latest.json.sig` alongside it) instead of `repo`:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  updater: {
+    endpoint: 'https://updates.example.com/latest.json',
+  },
+})
+```
+
+`repo` and `endpoint` are mutually exclusive — `murasaki` throws at build/dev
+time if both are set. Run `murasaki release --manifest --base-url
+https://updates.example.com` and upload `dist/latest.json` +
+`dist/latest.json.sig` + the payloads to wherever that URL resolves.
+
+For a non-`stable` channel on GitHub, Murasaki points at
+`releases/download/<channel>/latest.json` instead of
+`releases/latest/download/…` — a moving tag you re-push on every release for
+that channel (e.g. a `beta` tag for a beta channel).
+
+## Next
+
+<Cards>
+  <Card title="Configuration" href="/docs/building/configuration" description="The full UpdaterConfig reference." />
+  <Card title="CLI reference" href="/docs/building/cli" description="murasaki release and every other command." />
+  <Card title="Distribution" href="/docs/building/distribution" description="Code-signing and notarization for the .app/.dmg itself." />
+</Cards>

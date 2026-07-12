@@ -92,17 +92,31 @@ Windows `.ico` (embedded into the `.exe`).
 ## `murasaki release`
 
 ```bash
-murasaki release --generate-manifest --base-url <url> --version <v>
+murasaki release --keygen [--force]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --sign
 ```
 
-Emits the update-manifest JSON that `useUpdate()` expects, hashing whatever
-per-platform artifacts it finds under `dist/<version>/`. Only needed for the
-`custom` updater provider — the `github` provider derives release info
-directly from your GitHub Releases.
+Three independent modes for publishing signed auto-updates — see the
+[Auto-update](/docs/guides/auto-update) guide for the full flow.
+
+- **`--keygen`** — generates the Ed25519 keypair used to sign update
+  manifests. Writes `.murasaki/update-key.pub` (commit it) and
+  `.murasaki/update-key` (gitignored automatically), and prints the private
+  key once with instructions to store it as a `MURASAKI_UPDATE_KEY` GitHub
+  secret. Refuses to overwrite an existing key without `--force`.
+- **`--manifest`** — scans `dist/` for this version's payloads (the macOS
+  `.app.zip`, the Windows `-setup.exe`), hashes whichever exist, and writes
+  `dist/latest.json`. Missing targets are skipped, not errors.
+- **`--sign`** — signs `dist/latest.json` into `dist/latest.json.sig`. Key
+  from `$MURASAKI_UPDATE_KEY`, falling back to `.murasaki/update-key`.
+
+`--generate-manifest` still works as a deprecated alias of `--manifest`.
 
 ## Next
 
 <Cards>
   <Card title="Configuration" href="/docs/building/configuration" />
   <Card title="Distribution" href="/docs/building/distribution" />
+  <Card title="Auto-update" href="/docs/guides/auto-update" />
 </Cards>

@@ -40,9 +40,11 @@ client-side behavior:
 
 ## Auto-update
 
-`useUpdate()` / `<UpdateButton />` talk to the native updater over the same
-IPC channel, driven by the `updater` config (GitHub releases or a custom
-endpoint):
+`useUpdate()` checks for, downloads, and installs updates — its check/download
+logic runs in Node and is reached over the same local HTTP server that serves
+the rest of the app (like Server Actions and API routes), not the IPC bridge
+the context menu and app menu use. `<UpdateButton />` (`@murasakijs/ui`) is a
+ready-made button that wraps it:
 
 ```tsx
 import { useUpdate } from 'murasaki'
@@ -51,8 +53,9 @@ const { status, latest, check, download, install } = useUpdate()
 ```
 
 `status` moves through `idle → checking → available → downloading → ready`
-(or `not-available` / `error`). `<UpdateButton />` is a ready-made button that
-wraps this for the common case.
+(or `not-available` / `error`). Setup is two commands — see the dedicated
+[Auto-update](/docs/guides/auto-update) guide for the manifest format, the
+security model, and a GitHub Actions release workflow.
 
 <Callout type="warn">
   **Not yet public:** open/save/directory dialogs, clipboard read/write, OS
@@ -67,6 +70,7 @@ wraps this for the common case.
 ## Next
 
 <Cards>
+  <Card title="Auto-update" href="/docs/guides/auto-update" description="Manifest format, signing, and publishing releases." />
   <Card title="Context Menu" href="/docs/guides/context-menu" description="The full useContextMenu API." />
   <Card title="Configuration" href="/docs/building/configuration" description="Window, signing, and installer settings." />
 </Cards>

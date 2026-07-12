@@ -7,6 +7,7 @@
     "metadata",
     "middleware",
     "native-apis",
+    "auto-update",
     "context-menu",
     "app-menu",
     "styling"

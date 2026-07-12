@@ -1,5 +1,29 @@
+/**
+ * `useUpdate()` — the client half of the check/download/install flow
+ * described in the frozen updater contract (`/__murasaki/update/*`, §0/§6/§7).
+ * Headless — no styling. `<UpdateButton />` (styled, shadcn-idiom) lives in
+ * `@murasakijs/ui`, not here (packages/murasaki must not assume Tailwind).
+ *
+ * Transport: `/__murasaki/update/events` (SSE) is the single source of
+ * truth for `UpdateState` — it pushes the full state on every transition,
+ * and the current state immediately on connect, so this hook just mirrors
+ * whatever the server says. `check()`/`download()`/`install()` are POSTs
+ * that kick off work server-side; their results are observed via the SSE
+ * stream, not their HTTP responses.
+ *
+ * This is the *only* transport now. The previous `window.ipc.postMessage({
+ * kind: 'update.check' })` path is dead in both dev and prod — see the
+ * contract's §0 and the comment at the top of `crates/native/src/webview.rs`
+ * for why (nothing ever wires up the napi round-trip that would have carried
+ * it).
+ */
 import { useCallback, useEffect, useState } from 'react'
-import { post, subscribe } from './rpc.js'
+import { quit } from './rpc.js'
+
+const EVENTS_URL = '/__murasaki/update/events'
+const CHECK_URL = '/__murasaki/update/check'
+const DOWNLOAD_URL = '/__murasaki/update/download'
+const INSTALL_URL = '/__murasaki/update/install'
 
 export interface UpdateState {
   status:
@@ -10,8 +34,12 @@ export interface UpdateState {
     | 'downloading'
     | 'ready'
     | 'error'
+  /** Running app version. */
   current: string
   latest?: string
+  notes?: string
+  mandatory?: boolean
+  /** 0..1, only meaningful while `status === 'downloading'`. */
   progress?: number
   error?: string
 }
@@ -29,44 +57,53 @@ export function useUpdate(): UpdateState & {
   })
 
   useEffect(() => {
-    const off = subscribe((msg: any) => {
-      if (msg && msg.kind === 'update') {
-        setState((s) => ({ ...s, ...msg }))
+    const source = new EventSource(EVENTS_URL)
+    source.onmessage = (ev) => {
+      try {
+        setState(JSON.parse(ev.data) as UpdateState)
+      } catch {
+        // Malformed frame — ignore, the next one will resync.
       }
-    })
-    return off
+    }
+    return () => source.close()
   }, [])
 
-  return {
-    ...state,
-    check: useCallback(() => post({ kind: 'update.check' }), []),
-    download: useCallback(() => post({ kind: 'update.download' }), []),
-    install: useCallback(() => post({ kind: 'update.install' }), []),
-    dismiss: useCallback(
-      () => setState((s) => ({ ...s, status: 'idle' })),
-      [],
-    ),
-  }
+  const check = useCallback(() => {
+    fetch(CHECK_URL, { method: 'POST' }).catch((err) => {
+      setState((s) => ({ ...s, status: 'error', error: errorMessage(err) }))
+    })
+  }, [])
+
+  const download = useCallback(() => {
+    fetch(DOWNLOAD_URL, { method: 'POST' }).catch((err) => {
+      setState((s) => ({ ...s, status: 'error', error: errorMessage(err) }))
+    })
+  }, [])
+
+  const install = useCallback(() => {
+    fetch(INSTALL_URL, { method: 'POST' })
+      .then((res) => {
+        // The backend has spawned the detached apply-helper and deliberately
+        // does NOT quit the app itself (contract §7 step 3) — that's on the
+        // client. On failure the engine has already pushed an 'error' state
+        // over SSE, so there's nothing further to do here.
+        if (res.ok) quit()
+      })
+      .catch((err) => {
+        setState((s) => ({ ...s, status: 'error', error: errorMessage(err) }))
+      })
+  }, [])
+
+  const dismiss = useCallback(
+    () => setState((s) => ({ ...s, status: 'idle' })),
+    [],
+  )
+
+  return { ...state, check, download, install, dismiss }
 }
 
-export function UpdateButton() {
-  const u = useUpdate()
-  useEffect(() => {
-    u.check()
-  }, [])
-  if (u.status !== 'available' && u.status !== 'ready') return null
-  const label =
-    u.status === 'ready'
-      ? `Restart to update to ${u.latest}`
-      : `Update to ${u.latest}`
-  return (
-    <button
-      onClick={() => (u.status === 'ready' ? u.install() : u.download())}
-      className="rounded-md bg-violet-600 text-white px-3 py-1.5 text-sm hover:bg-violet-700"
-    >
-      {label}
-    </button>
-  )
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
 }
 
 declare global {

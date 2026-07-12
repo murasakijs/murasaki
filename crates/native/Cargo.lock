@@ -1790,6 +1790,7 @@ name = "murasaki-native"
 version = "0.26.0"
 dependencies = [
  "arboard",
+ "libc",
  "muda",
  "napi",
  "napi-build",
@@ -1803,6 +1804,7 @@ dependencies = [
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "tao",
  "tray-icon",
  "url",

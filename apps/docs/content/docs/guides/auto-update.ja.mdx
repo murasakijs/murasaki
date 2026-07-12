@@ -1,0 +1,327 @@
+---
+title: 自動更新
+description: GitHub Releases、またはあなた自身のサーバーからの、署名付き・自己検証型のアプリ更新 — IPC もサードパーティの更新サービスも不要です。
+---
+
+Murasaki アプリは、更新の確認・ダウンロード・インストールを自分自身で行えます。専用の
+更新サービスを立てる必要はありません — マニフェストはリリース成果物の隣に置かれる
+単なる JSON ファイル(デフォルトでは GitHub Releases、またはあなたが管理する任意の静的
+ホスティング)であり、信頼モデル全体は一度だけ生成する Ed25519 の鍵ペア1つに集約され
+ます。
+
+<Callout type="warn">
+  macOS と Windows のみです。Murasaki には Linux 向けのアプリパッケージングがまだ存在
+  しないため([CLI リファレンス](/docs/building/cli)を参照)、Linux では更新するもの
+  自体がありません。
+</Callout>
+
+## クイックスタート
+
+1. プロジェクトルートで、一度だけ署名鍵を生成します:
+
+   ```bash
+   murasaki release --keygen
+   ```
+
+   これにより `.murasaki/update-key.pub`(コミットしてください)と
+   `.murasaki/update-key`(自動的に gitignore されます)が書き出され、秘密鍵が
+   **一度だけ**表示されます — `MURASAKI_UPDATE_KEY` という GitHub シークレットとして
+   保存してください(コマンドが、そのための `gh secret set` の実行例をそのまま表示し
+   ます)。
+
+2. アップデーターを有効化します:
+
+   ```ts title="murasaki.config.ts"
+   export default defineConfig({
+     // ...
+     updater: true,
+   })
+   ```
+
+   `true` は完全な設定です: GitHub リポジトリは `package.json` の `repository`
+   フィールドから、公開鍵は `.murasaki/update-key.pub` から推論されます。
+
+3. ボタンを配置します:
+
+   ```tsx
+   import { UpdateButton } from '@murasakijs/ui'
+
+   export default function Settings() {
+     return <UpdateButton />
+   }
+   ```
+
+アプリ側はこれで完了です。署名済みリリースの公開については、[下記](#publishing-releases)
+を参照してください。
+
+## 仕組み
+
+`useUpdate()` の確認/ダウンロード/検証ロジックは **Node** 上で動作し、コンテキストメ
+ニューやアプリメニューが使うネイティブの IPC ブリッジではなく、アプリの他の部分をすで
+に配信しているのと同じローカル HTTP サーバー(Server Actions や API Routes と同じ仕組
+み)経由でページから到達します。最後の「終了してから適用する」ステップだけがネイティ
+ブランチャーに触れます — アプリのプロセスが終了したあとも動き続ける必要があるためで
+す。
+
+```tsx
+import { useUpdate } from 'murasaki'
+
+const { status, latest, notes, progress, check, download, install, dismiss } = useUpdate()
+```
+
+`status` は `idle → checking → available → downloading → ready`(または
+`not-available` / `error`)と遷移します:
+
+- **`check()`** — マニフェストを取得し、署名を検証し、バージョンを比較します。
+- **`download()`** — プラットフォームに一致するアセットをディスクにストリーミング
+  し、その SHA-256 を検証します。
+- **`install()`** — 検証済みのペイロードをネイティブランチャーに渡し、アプリを終了し
+  ます。ランチャーが更新を適用して再起動します。
+
+`useUpdate()` はヘッドレスです — 描画もスタイリングの意見も持ちません。
+`<UpdateButton />`(`@murasakijs/ui`)は、それをラップしたすぐに使える表示レイヤーで
+す:
+
+- `idle` / `checking` / `not-available` / `error` の間は何も描画しません。
+- `available` になると **「Update to vX」** — クリックでダウンロードを開始します。
+- `downloading` の間はプログレスバーを表示します。
+- `ready` になると **「Restart to update」** — クリックでインストールして再起動します。
+- マウント時に、自分自身で一度だけチェックを行います。
+
+<Callout type="info">
+  `<UpdateButton />` は `error` のとき何も描画しません — 失敗を自分の UI に表示したい
+  場合は、`useUpdate()` から `update.error` を自分で読み取ってください。同様に、マニ
+  フェストの `mandatory` フラグは `useUpdate()` の状態として渡されますが、
+  `<UpdateButton />` はそれを特別扱いしません(強制的で閉じられないフローはありませ
+  ん)— そうしたものが必要な場合は、`update.mandatory` を使って自分で UI を組み立て
+  てください。
+</Callout>
+
+`channel` は、どのマニフェスト URL が解決されるかを変えます(
+[マニフェストのセルフホスティング](#self-hosting-the-manifest)を参照)。
+`checkOnStart` と `checkInterval` も設定から解決されますが、現時点ではそれらから実際
+にチェックをスケジュールする仕組みはありません — 今日 `check()` を呼び出しているの
+は、`<UpdateButton />` 自身のマウント時の効果だけです。それ以上のチェックが必要な場
+合は、`useUpdate().check()` を(たとえば自分のタイマーから)自分で呼び出してくださ
+い。
+
+開発時には `check()` は動作します — フルバンドルなしでマニフェストと鍵の組を検証でき
+ます — が、`download()` / `install()` は `status: 'error'` と
+`error: 'Updates only apply to a bundled app. Run \`murasaki bundle\` first.'`
+で即座に失敗します: 更新を適用する対象の、パッケージ化されたアプリやランチャーバイナ
+リがまだ存在しないためです。
+
+## マニフェスト
+
+`murasaki release --manifest` は `dist/latest.json` を書き出し、常に検出署名
+`dist/latest.json.sig` と一緒に公開されます:
+
+```json title="latest.json"
+{
+  "version": "1.2.0",
+  "publishedAt": "2026-07-12T09:00:00.000Z",
+  "notes": "markdown release notes",
+  "mandatory": false,
+  "assets": {
+    "darwin-arm64": { "url": "https://.../App-1.2.0-darwin-arm64.app.zip", "sha256": "<hex>" },
+    "darwin-x64":   { "url": "https://.../App-1.2.0-darwin-x64.app.zip",   "sha256": "<hex>" },
+    "win32-x64":    { "url": "https://.../App-1.2.0-setup.exe",           "sha256": "<hex>" }
+  }
+}
+```
+
+`assets` のキーは `<platform>-<arch>` で、実行中のアプリの `process.platform` /
+`process.arch` に一致します。実行中のプラットフォームに対応するキーが無い場合は、エラ
+ーではなく「あなた向けの更新はありません」を意味します — アプリは、マニフェストが本来
+カバーしうる範囲より少ないプラットフォーム向けに出荷されることもあります。
+
+`latest.json.sig` は、`latest.json` の**そのままの生バイト列**に対する検出 Ed25519
+署名の base64 です。クライアントは、それを JSON としてパースする前に、必ずそのバイト
+列を検証します — 逆ではありません。そのため JSON の正規化に関する曖昧さを心配する必要
+はありません。
+
+## リリースの公開
+
+```bash
+murasaki release --keygen [--force]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --sign
+```
+
+- **`--keygen`** — Ed25519 の鍵ペアを生成します([クイックスタート](#quick-start)参
+  照)。`--force` を指定しない限り既存の鍵を上書きしません — 鍵をローテーションする
+  と、古い公開鍵をまだ持っている既存のアプリからの信頼が失われます。
+- **`--manifest`** — `dist/` 配下からこのバージョンの成果物(`murasaki bundle` が生
+  成する macOS の `.app.zip`、`murasaki installer` が生成する Windows の
+  `-setup.exe`)を探してハッシュ化し、`dist/latest.json` を書き出します。見つからない
+  ターゲットはエラーではなくスキップされます — 何も見つからなかった場合のみエラーで
+  す。
+- **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成しま
+  す。秘密鍵は `$MURASAKI_UPDATE_KEY` から、なければ `.murasaki/update-key` から読み
+  込まれます。
+
+(`--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作しま
+す。)
+
+### GitHub Actions
+
+リリースワークフローがすべきことは、各プラットフォーム向けの更新ペイロードをビルドし、
+マニフェストを生成・署名し、それらすべてを同じ GitHub Release にアップロードすること
+です — そうすることで、デフォルトの `updater: true` が使う URL
+(`releases/latest/download/latest.json`)が実際にそれらを解決できます:
+
+```yaml title=".github/workflows/release.yml"
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: pnpm install
+      - run: pnpm exec murasaki bundle            # darwin-arm64(ホストアーキテクチャ)
+      - run: pnpm exec murasaki bundle --arch x64  # darwin-x64(クロスアーキテクチャ)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-payloads
+          path: dist/bundle/*.app.zip
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: pnpm install
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          echo "C:\Program Files (x86)\NSIS" >> $env:GITHUB_PATH
+      - run: pnpm exec murasaki installer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-payload
+          path: dist/*-setup.exe
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: pnpm install
+      - uses: actions/download-artifact@v4
+        with: { name: macos-payloads, path: dist/bundle }
+      - uses: actions/download-artifact@v4
+        with: { name: windows-payload, path: dist }
+      - name: Build + sign the manifest
+        env:
+          MURASAKI_UPDATE_KEY: ${{ secrets.MURASAKI_UPDATE_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BASE_URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
+          pnpm exec murasaki release --manifest --base-url "$BASE_URL" --version "$VERSION"
+          pnpm exec murasaki release --sign
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bundle/*.app.zip
+            dist/*-setup.exe
+            dist/latest.json
+            dist/latest.json.sig
+```
+
+`MURASAKI_UPDATE_KEY` をリポジトリシークレットとして追加してください(`--keygen` が
+表示した値です)。これはコード署名とは独立したものです — Developer ID で署名・公証さ
+れた `.dmg` も欲しい場合は[配布](/docs/building/distribution#signing--notarization)
+を参照してください。同じ `macos` ジョブにそのステップを追加しても構いません。
+
+<Callout type="warn">
+  この例は `win32-x64` のみを公開します — `win32-arm64` がまだ公開できない理由につい
+  ては、下記の[プラットフォーム対応状況](#platform-support)を参照してください。
+  `win32-arm64` のインストーラーもビルドする場合は、別の出力パスに置いてください:
+  NSIS のファイル名にはアーキテクチャが含まれないため、`x64` と `arm64` のビルドが同
+  じ `dist/` に置かれると、`--manifest` が実行される前に互いを上書きしてしまいます。
+</Callout>
+
+## セキュリティモデル
+
+署名検証は**必須です — それを無効化する設定オプションはありません。** すべての
+`check()` は `latest.json` と `latest.json.sig` を取得し、マニフェストの生バイト列に
+対する Ed25519 署名をアプリの公開鍵で検証し、失敗した場合はそのマニフェストを信頼する
+ことを拒否します。すべての `download()` は、(すでに検証済みの)マニフェスト内のハッ
+シュに対して、ペイロードの SHA-256 を個別に再検証します。
+
+この組み合わせにより、ファイルホストだけを制御できる攻撃者(侵害された CDN、MITM され
+たミラー、セルフホストの `dist/` バケットへの悪意ある PR など)は、秘密鍵も同時に握っ
+ていない限り、偽の更新を送り込むことはできません — 秘密鍵は `.murasaki/update-key` /
+あなたの CI シークレットの外に出ることはありません。
+
+<Callout type="warn">
+  このプロジェクトは Windows のコード署名(Authenticode)を一切同梱していません —
+  [配布](/docs/building/distribution#signing--notarization)を参照してください。その
+  ため Windows では、Ed25519 のマニフェスト署名が更新の**唯一の**真正性の保証です。
+</Callout>
+
+`.murasaki/update-key` はバージョン管理の外に置いてください(`--keygen` が自動的に
+gitignore します)。`MURASAKI_UPDATE_KEY` は、他のリリース署名用シークレットと同様に
+扱ってください。
+
+## プラットフォーム対応状況
+
+| プラットフォーム | 更新ペイロード | 状態 |
+| --- | --- | --- |
+| macOS(arm64） | `<productName>-darwin-arm64.app.zip` | 対応 |
+| macOS(x64） | `<productName>-darwin-x64.app.zip` | 対応 |
+| Windows(x64） | `<productName>-<version>-setup.exe` | 対応 |
+| Windows(arm64） | — | まだ未対応 — 下記参照 |
+| Linux | — | Murasaki にはまだアプリパッケージングがありません |
+
+Windows arm64 には、今のところ更新経路がありません: NSIS インストーラーのファイル名に
+はアーキテクチャが含まれないため、`murasaki release --manifest` は常に `win32-x64`
+のエントリしか生成できません。arm64 の Windows アプリが更新を確認すると、単に
+`not-available` になります — クラッシュやエラーにはならず、正常に縮退します。
+
+## マニフェストのセルフホスティング
+
+GitHub Releases を使わない場合は、`repo` の代わりに `endpoint` を、`latest.json` を
+配信する任意の URL に向けてください(`latest.json.sig` も同じ場所に置きます):
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  updater: {
+    endpoint: 'https://updates.example.com/latest.json',
+  },
+})
+```
+
+`repo` と `endpoint` は互いに排他的です — 両方が設定されていると、`murasaki` は
+ビルド時/開発時にエラーになります。`murasaki release --manifest --base-url
+https://updates.example.com` を実行し、`dist/latest.json` + `dist/latest.json.sig`
++ 各ペイロードを、その URL が解決する場所にアップロードしてください。
+
+GitHub 上で `stable` 以外のチャンネルを使う場合、Murasaki は
+`releases/latest/download/…` の代わりに `releases/download/<channel>/latest.json`
+を参照します — そのチャンネル向けにリリースのたびに push し直す、移動するタグです
+(例: beta チャンネル向けの `beta` タグ)。
+
+## 次へ
+
+<Cards>
+  <Card title="設定" href="/docs/building/configuration" description="UpdaterConfig の完全なリファレンス。" />
+  <Card title="CLI リファレンス" href="/docs/building/cli" description="murasaki release と、その他すべてのコマンド。" />
+  <Card title="配布" href="/docs/building/distribution" description=".app / .dmg 自体のコード署名と公証。" />
+</Cards>

@@ -43,9 +43,11 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 
 ## 自動更新
 
-`useUpdate()` / `<UpdateButton />` は、`updater` 設定(GitHub releases またはカスタム
-エンドポイント)によって駆動される、同じ IPC チャンネル経由でネイティブのアップデータ
-ーとやり取りします:
+`useUpdate()` は、更新の確認・ダウンロード・インストールを行います — その確認/ダウン
+ロードのロジックは Node 上で動作し、コンテキストメニューやアプリメニューが使う IPC
+ブリッジではなく、アプリの他の部分を配信しているのと同じローカル HTTP サーバー(Server
+Actions や API Routes と同じ仕組み)経由でアクセスされます。`<UpdateButton />`
+(`@murasakijs/ui`)は、それをラップしたすぐに使えるボタンです:
 
 ```tsx
 import { useUpdate } from 'murasaki'
@@ -54,8 +56,9 @@ const { status, latest, check, download, install } = useUpdate()
 ```
 
 `status` は `idle → checking → available → downloading → ready`(または
-`not-available` / `error`)と遷移します。`<UpdateButton />` は、この一般的なケースをラ
-ップした、すぐに使えるボタンです。
+`not-available` / `error`)と遷移します。セットアップはコマンド2つだけです — マニフェ
+ストの形式、セキュリティモデル、GitHub Actions でのリリースワークフローについては、専
+用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
   **まだ公開されていません:** open/save/directory ダイアログ、クリップボードの読み書
@@ -69,6 +72,7 @@ const { status, latest, check, download, install } = useUpdate()
 ## 次へ
 
 <Cards>
+  <Card title="自動更新" href="/docs/guides/auto-update" description="マニフェストの形式、署名、リリースの公開。" />
   <Card title="コンテキストメニュー" href="/docs/guides/context-menu" description="useContextMenu API の全体像。" />
   <Card title="設定" href="/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
 </Cards>

@@ -6,6 +6,7 @@ import { apiRoutesPlugin } from './api-routes.js'
 import { fileRouterPlugin } from './routing.js'
 import { serverActionsPlugin } from './server-actions.js'
 import { appShellPlugin } from './shell.js'
+import { updaterPlugin } from './updater.js'
 
 export interface MurasakiPluginOptions {
   config: MurasakiConfig
@@ -23,6 +24,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     fileRouterPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),
     apiRoutesPlugin({ srcDir: opts.srcDir }),
+    updaterPlugin({ config: opts.config }),
     appShellPlugin(),
     {
       name: 'murasaki:core',

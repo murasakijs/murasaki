@@ -36,6 +36,7 @@ export {
 export {
   installClientRpc,
   useGlobalContextMenu,
+  quit,
 } from './react/rpc.js'
 
 export { App } from './react/app.js'
@@ -67,7 +68,5 @@ export type {
   AppMenuAction,
 } from './react/app-menu.js'
 
-export {
-  UpdateButton,
-  useUpdate,
-} from './react/updater.js'
+export { useUpdate } from './react/updater.js'
+export type { UpdateState } from './react/updater.js'

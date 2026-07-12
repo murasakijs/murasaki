@@ -1,14 +1,25 @@
 #!/usr/bin/env node
 // murasaki production server — serves the built client (dist/client), runs
 // 'use server' actions out of the registry built by cli/build-server.ts
-// (dist/server/actions.mjs), and dispatches `src/api/**/route.ts` handlers
-// out of the parallel routes registry (dist/server/routes.mjs). This is the
+// (dist/server/actions.mjs), dispatches `src/api/**/route.ts` handlers out of
+// the parallel routes registry (dist/server/routes.mjs), and answers the
+// auto-updater's `/__murasaki/update/*` routes (contract §6). This is the
 // prod counterpart of Vite's dev server + the dev middlewares in
-// src/vite-plugin/server-actions.ts and src/vite-plugin/api-routes.ts: the
-// client's `fetch('/__murasaki/action/<id>/<name>')` stub and `/api/*`
-// requests are identical in both, so this process only needs to answer the
-// same shapes Vite's dev middlewares do (static files, POST
-// /__murasaki/action/…, and /api/…).
+// src/vite-plugin/server-actions.ts, src/vite-plugin/api-routes.ts, and
+// src/vite-plugin/updater.ts: the client's
+// `fetch('/__murasaki/action/<id>/<name>')` stub, `/api/*` requests, and the
+// updater's routes are identical in both, so this process only needs to
+// answer the same shapes Vite's dev middlewares do (static files, POST
+// /__murasaki/action/…, /api/…, and /__murasaki/update/…).
+//
+// `cli/bundle.ts` copies this file PLUS `dist/runtime/updater.js` (renamed to
+// `updater-engine.mjs`) into the packaged resources dir, and this file
+// imports it below. Unlike handleAction/handleApiRoute, which hand-mirror
+// (never import) vite-plugin/server-actions.ts/api-routes.ts, the updater
+// engine — including the Ed25519 manifest signature verification that is
+// this feature's entire security model — has exactly ONE implementation,
+// `src/runtime/updater.ts`, shared by dev (src/vite-plugin/updater.ts) and
+// prod (here). Do not reintroduce a second copy of it in this file.
 //
 // Run standalone for testing (`node prod-server.mjs --client <dir> --registry
 // <path> --routes <path> --port <n>`) or spawned by assets/prod-launcher.mjs,
@@ -18,9 +29,11 @@ import http from 'node:http'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { createUpdateRequestHandler, createUpdaterEngine } from './updater-engine.mjs'
 
 const ACTION_PATH_PREFIX = '/__murasaki/action/'
 const API_PATH_PREFIX = '/api/'
+const UPDATE_PATH_PREFIX = '/__murasaki/update/'
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -60,6 +73,33 @@ function loadRoutes() {
   return routesPromise
 }
 
+// murasaki-meta.json — read once at startup from cwd. The launcher already
+// sets cwd = the resources dir before spawning this process (see
+// crates/native/src/launcher.rs's `current_dir(resources_dir)`), so
+// `resolve('murasaki-meta.json')` here lands on the same file `read_meta`
+// reads on the Rust side. Missing/unparsable (e.g. this file run standalone
+// per the header comment above) is tolerated — the updater engine below just
+// degrades to "not configured" rather than crashing the whole server.
+let meta = {}
+try {
+  meta = JSON.parse(await readFile(resolve(process.cwd(), 'murasaki-meta.json'), 'utf8'))
+} catch {}
+
+// `meta.updater`, when present, is already the fully-resolved shape
+// (`ResolvedUpdater` — manifestUrl/publicKey/channel/checkOnStart/
+// checkIntervalMs) written by `cli/bundle.ts`'s `metaJson()` via
+// `resolveUpdater()` — this process never re-derives a GitHub URL or reads
+// `.murasaki/update-key.pub` itself. `currentVersion` is `meta.version`
+// (config.version at bundle time), NOT `@murasakijs/native`'s `version()` —
+// that returns the native crate's own version, a different number entirely.
+const updateEngine = createUpdaterEngine({
+  resolvedUpdater: meta.updater ?? null,
+  currentVersion: meta.version ?? '0.0.0',
+  mode: 'prod',
+  resourcesDir: process.cwd(),
+})
+const handleUpdateRequest = createUpdateRequestHandler(updateEngine)
+
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((err) => {
     if (!res.headersSent) res.statusCode = 500
@@ -72,6 +112,10 @@ async function handleRequest(req, res) {
     return handleAction(req, res)
   }
   const pathname = (req.url ?? '/').split('?')[0]
+  if (pathname.startsWith(UPDATE_PATH_PREFIX)) {
+    await handleUpdateRequest(req, res)
+    return
+  }
   if (pathname.startsWith(API_PATH_PREFIX)) {
     return handleApiRoute(req, res, pathname)
   }
@@ -288,8 +332,14 @@ server.listen(port, '127.0.0.1', () => {
   process.stdout.write(`MURASAKI_PORT=${server.address().port}\n`)
 })
 
-process.on('SIGINT', () => process.exit(0))
-process.on('SIGTERM', () => process.exit(0))
+process.on('SIGINT', () => {
+  updateEngine.dispose()
+  process.exit(0)
+})
+process.on('SIGTERM', () => {
+  updateEngine.dispose()
+  process.exit(0)
+})
 
 // Safety net against orphaned servers on macOS/Linux: if the launcher (our
 // parent) dies without running its shutdown handler — a force-quit or a

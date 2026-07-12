@@ -63,29 +63,35 @@ export default defineConfig({
 
 ## `updater`
 
-`provider` に対する判別共用体です:
+`true` は、通常の OSS アプリにとって完全に動作する設定です — GitHub リポジトリは
+`package.json` の `repository` フィールドから、公開鍵は `.murasaki/update-key.pub`
+から推論され、チャンネルはデフォルトで `'stable'`、起動時に一度だけチェックします。
+オブジェクト形式では、これらのデフォルトに合わない部分だけを上書きすればよいです:
 
 ```ts
 type UpdaterConfig =
+  | boolean
   | {
-      provider: 'github'
-      repo: string              // "owner/repo"
-      channel?: string
-      checkOnStart?: boolean
-      checkInterval?: string
-    }
-  | {
-      provider: 'custom'
-      endpoint: string          // murasaki release が生成するマニフェストを提供する URL
-      publicKey?: string
-      checkOnStart?: boolean
-      checkInterval?: string
+      repo?: string                    // "owner/repo" — デフォルトは package.json#repository
+      endpoint?: string                // セルフホストのマニフェスト URL — repo とは排他
+      channel?: string                 // リリースチャンネル、デフォルト 'stable'
+      checkOnStart?: boolean           // 起動時に一度チェック、デフォルト true
+      checkInterval?: string | false   // 例 '6h' — タイマーで再チェック、デフォルト '6h'
+      publicKey?: string               // base64 の Ed25519 公開鍵 — デフォルトは .murasaki/update-key.pub
     }
 ```
 
-`useUpdate()` / `<UpdateButton />` から利用されます — 詳しくは
-[Native APIs → Auto-update](/docs/guides/native-apis#auto-update)を参照してくださ
-い。
+意図的に `provider` フィールドはありません — GitHub かセルフホストかは、`repo` と
+`endpoint` のどちらが設定されているかから推論されるため、設定の他の部分とずれることが
+ありません。また、署名検証を無効化する方法もありません。
+
+`checkOnStart` と `checkInterval` は更新エンジン自身が処理するため、UI 側で
+`check()` を呼ばなくても機能します。`useUpdate().check()` を手動で呼ぶこともできます —
+チェックが実行中のときに二重に走ることはありません。
+
+`useUpdate()`(`murasaki` から)と `<UpdateButton />`(`@murasakijs/ui` から)から利
+用されます — マニフェストの形式、署名、リリースの公開については、完全な
+[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 ## `installer`
 

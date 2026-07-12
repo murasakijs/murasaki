@@ -63,28 +63,38 @@ nothing to await or configure beyond the object you pass it.
 
 ## `updater`
 
-A discriminated union on `provider`:
+`true` is a complete, working setup for a normal OSS app — the GitHub repo is
+inferred from `package.json`'s `repository` field, the public key from
+`.murasaki/update-key.pub`, channel defaults to `'stable'`, checked once at
+launch. The object form only needs to override what doesn't fit those
+defaults:
 
 ```ts
 type UpdaterConfig =
+  | boolean
   | {
-      provider: 'github'
-      repo: string              // "owner/repo"
-      channel?: string
-      checkOnStart?: boolean
-      checkInterval?: string
-    }
-  | {
-      provider: 'custom'
-      endpoint: string          // URL serving the manifest `murasaki release` generates
-      publicKey?: string
-      checkOnStart?: boolean
-      checkInterval?: string
+      repo?: string                    // "owner/repo" — defaults to package.json#repository
+      endpoint?: string                // self-hosted manifest URL — mutually exclusive with repo
+      channel?: string                 // release channel, default 'stable'
+      checkOnStart?: boolean           // check once at launch, default true
+      checkInterval?: string | false   // e.g. '6h' — re-check on a timer, default '6h'
+      publicKey?: string               // base64 Ed25519 public key — defaults to .murasaki/update-key.pub
     }
 ```
 
-Consumed by `useUpdate()` / `<UpdateButton />` — see
-[Native APIs → Auto-update](/docs/guides/native-apis#auto-update).
+There is deliberately no `provider` field — GitHub vs. self-hosted is
+inferred from whether `repo` or `endpoint` is set, so it can't drift out of
+sync with the rest of the config. There is also no way to disable signature
+verification.
+
+`checkOnStart` and `checkInterval` are driven by the update engine itself, so
+they apply whether or not anything in your UI ever calls `check()`. You can
+still call `useUpdate().check()` by hand — an in-flight check is never started
+twice concurrently.
+
+Consumed by `useUpdate()` (from `murasaki`) and `<UpdateButton />` (from
+`@murasakijs/ui`) — see the full [Auto-update](/docs/guides/auto-update)
+guide for the manifest format, signing, and publishing releases.
 
 ## `installer`
 

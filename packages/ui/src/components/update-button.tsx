@@ -1,0 +1,58 @@
+import { useUpdate } from 'murasaki'
+import { useEffect } from 'react'
+import { cn } from '../lib/cn.js'
+import { Button } from './button.js'
+import type { ButtonProps } from './button.js'
+import { Progress } from './progress.js'
+
+export interface UpdateButtonProps extends Omit<ButtonProps, 'onClick' | 'children'> {}
+
+/**
+ * A ready-to-drop-in auto-updater button, wired to `useUpdate()` from
+ * `murasaki`. Checks for an update on mount, then renders:
+ *  - nothing while idle/checking/not-available/error,
+ *  - "Update to vX" (click to download) once one is `available`,
+ *  - a progress bar while `downloading`,
+ *  - "Restart to update" (click to install + relaunch) once `ready`.
+ *
+ * Unstyled opinions live in `murasaki`'s `useUpdate()`; this component is the
+ * shadcn-style, restyleable presentation layer — override via `className`
+ * or fork it, same as any other component here.
+ */
+export function UpdateButton({ className, ...props }: UpdateButtonProps) {
+  const update = useUpdate()
+
+  useEffect(() => {
+    update.check()
+  }, [])
+
+  if (update.status === 'downloading') {
+    const percent = Math.round((update.progress ?? 0) * 100)
+    return (
+      <div className={cn('flex flex-col gap-1.5', className)}>
+        <Button disabled {...props}>
+          Downloading… {percent}%
+        </Button>
+        <Progress value={percent} className="h-1" />
+      </div>
+    )
+  }
+
+  if (update.status === 'ready') {
+    return (
+      <Button className={className} onClick={() => update.install()} {...props}>
+        Restart to update
+      </Button>
+    )
+  }
+
+  if (update.status === 'available') {
+    return (
+      <Button className={className} onClick={() => update.download()} {...props}>
+        Update to v{update.latest}
+      </Button>
+    )
+  }
+
+  return null
+}

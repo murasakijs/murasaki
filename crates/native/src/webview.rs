@@ -1,12 +1,13 @@
 //! Webview — wry WebView + IPC channel + **native context menu popup** +
-//! **native app-menu bar** (`useAppMenu`).
+//! **native app-menu bar** (`useAppMenu`) + **app quit** (`quit()`).
 //!
-//! Both are handled entirely on the Rust side (see `show_native_context_menu`
-//! and `handle_app_menu_message` below, one variant per platform each):
-//! `Application::run()` blocks Node's libuv loop for as long as the app is
-//! open, so a round-trip through `onIpcMessage` back into JS never fires.
-//! Instead the IPC handler below intercepts `{ kind: "contextMenu" }` and
-//! `{ kind: "appMenu" }` messages itself.
+//! All three are handled entirely on the Rust side (see
+//! `show_native_context_menu`, `handle_app_menu_message`, and
+//! `QUIT_REQUESTED`/`quit_requested` below): `Application::run()` blocks
+//! Node's libuv loop for as long as the app is open, so a round-trip through
+//! `onIpcMessage` back into JS never fires. Instead the IPC handler below
+//! intercepts `{ kind: "contextMenu" }`, `{ kind: "appMenu" }`, and
+//! `{ kind: "appQuit" }` messages itself.
 //!
 //! Context menus pop the muda menu synchronously — via a modal call that
 //! pumps its own nested run/message loop (`show_context_menu_for_nsview` on
@@ -21,13 +22,24 @@
 //! synchronously like a popup), picked up by `poll_app_menu_events` (macOS)
 //! / `poll_menu_bar_events` (Windows), polled once per tao event-loop tick
 //! from `Application::run` and `launcher.rs`'s per-platform launchers.
+//!
+//! `appQuit` (`quit()`) sets `QUIT_REQUESTED` instead of acting immediately —
+//! the ipc_handler closure has no access to the event loop's `ControlFlow`,
+//! so like the two polls above, it's read once per tick (`quit_requested`)
+//! by those same three event loops, which do have access to it.
 
 use napi::{
   bindgen_prelude::{Error, Result, Status},
   threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use napi_derive::napi;
-use std::{borrow::Cow, cell::RefCell, path::Path, rc::Rc, sync::Arc};
+use std::{
+  borrow::Cow,
+  cell::RefCell,
+  path::Path,
+  rc::Rc,
+  sync::{atomic::AtomicBool, Arc},
+};
 
 use wry::{
   http::{header::CONTENT_TYPE, Response, StatusCode},
@@ -63,6 +75,26 @@ struct ContextMenuPayload {
 #[derive(serde::Deserialize)]
 struct AppMenuPayload {
   menus: Vec<AppMenuSpec>,
+}
+
+/// Set synchronously by the IPC handler below when `{ kind: "appQuit" }`
+/// arrives (posted by `quit()` — see the updater install→quit→apply
+/// handshake, contract §7). Like `contextMenu`/`appMenu`, this can't be
+/// handled by calling into `ControlFlow` directly — the ipc_handler closure
+/// has no access to it — so it's a flag instead, read once per tao
+/// event-loop tick by `Application::run` (dev) and both of `launcher.rs`'s
+/// prod event loops (`quit_requested` below) so *they* can set
+/// `ControlFlow::Exit`. A plain `static` (rather than a field threaded
+/// through `Application`/the launchers) is enough: murasaki only ever drives
+/// one window/webview per process (see `SharedWebview`'s doc comment).
+static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Whether `{ kind: "appQuit" }` has been requested since the last check —
+/// see `QUIT_REQUESTED`'s doc comment. Consumes the flag (so once an
+/// event-loop tick acts on it, later ticks don't see it again), the same way
+/// `poll_menu_bar_events`/`poll_app_menu_events` drain their event channel.
+pub(crate) fn quit_requested() -> bool {
+  QUIT_REQUESTED.swap(false, std::sync::atomic::Ordering::SeqCst)
 }
 
 /// A clone-able handle to the internal wry `WebView`, so `Application`/the
@@ -227,6 +259,11 @@ impl Webview {
         if let Ok(payload) = serde_json::from_str::<AppMenuPayload>(&body) {
           handle_app_menu_message(&ipc_window_slot, &ipc_app_menu, &payload.menus);
         }
+        return;
+      }
+
+      if kind.as_deref() == Some("appQuit") {
+        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
         return;
       }
 

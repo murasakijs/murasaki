@@ -29,10 +29,6 @@
     "./vite-plugin": {
       "types": "./dist/vite-plugin/index.d.ts",
       "default": "./dist/vite-plugin/index.js"
-    },
-    "./react": {
-      "types": "./dist/react/index.d.ts",
-      "default": "./dist/react/index.js"
     }
   },
   "files": [

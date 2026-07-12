@@ -199,6 +199,95 @@ mod shared {
       .map_err(|_| "prod server did not report a port in time".to_string())
   }
 
+  /// Payload of `<resources_dir>/.murasaki-apply.json` — the entire handoff
+  /// Node's `install()` (`packages/murasaki/src/runtime/updater.ts`) leaves
+  /// for this launcher, per the frozen updater contract's §7 REVISED. This
+  /// is deliberately the ONLY thing Node hands over: `--target`/`--relaunch`/
+  /// `--wait-pid` are derived by `maybe_spawn_apply_helper` below, not
+  /// trusted from Node.
+  #[derive(Deserialize)]
+  struct ApplyHandoff {
+    payload: String,
+    sha256: String,
+  }
+
+  /// Checked on every clean exit path — `{ kind: "appQuit" }` and
+  /// `WindowEvent::CloseRequested`, on both macOS and Windows — right before
+  /// the launcher process exits (contract §7 REVISED step 6). If
+  /// `<resources_dir>/.murasaki-apply.json` is present, this reads it,
+  /// deletes it immediately (so a crash partway through applying can't leave
+  /// a poisoned pending apply that re-triggers on a future launch), and
+  /// spawns `current_exe() --apply-update …` (argv contract §8) detached,
+  /// passing `target`/`relaunch` (the caller's own already-resolved install
+  /// location — see `imp_macos`/`imp_win`'s `run_inner`) and this process's
+  /// own pid as `--wait-pid`.
+  ///
+  /// This is *why* the launcher — not Node — must be the one to spawn the
+  /// apply-helper (contract §7 REVISED): this launcher process was never
+  /// itself assigned to the `KILL_ON_JOB_CLOSE` Job Object (only the spawned
+  /// `node.exe` child was, see `win_job`), so anything it spawns here is
+  /// outside that job by construction and survives past this process's own
+  /// exit on Windows — unlike a helper Node itself would have spawned, which
+  /// inherits into the same job and gets killed the instant this launcher's
+  /// job handle closes.
+  ///
+  /// Best-effort throughout: a missing handoff file is the common case (no
+  /// pending update) and is silently a no-op; a malformed handoff file or a
+  /// failed spawn is logged to stderr and swallowed — either way, a broken
+  /// handoff must never prevent the launcher from exiting normally.
+  pub(super) fn maybe_spawn_apply_helper(resources_dir: &Path, target: &Path, relaunch: &Path) {
+    let handoff_path = resources_dir.join(".murasaki-apply.json");
+    let Ok(raw) = fs::read_to_string(&handoff_path) else {
+      return;
+    };
+    // Delete before acting on it, not after — see the doc comment above.
+    let _ = fs::remove_file(&handoff_path);
+
+    let handoff: ApplyHandoff = match serde_json::from_str(&raw) {
+      Ok(h) => h,
+      Err(e) => {
+        let _ = writeln!(
+          std::io::stderr(),
+          "murasaki-launcher: malformed {}: {e}",
+          handoff_path.display()
+        );
+        return;
+      }
+    };
+
+    let exe = match std::env::current_exe() {
+      Ok(e) => e,
+      Err(e) => {
+        let _ = writeln!(std::io::stderr(), "murasaki-launcher: current_exe: {e}");
+        return;
+      }
+    };
+
+    let spawned = Command::new(&exe)
+      .arg("--apply-update")
+      .arg("--payload")
+      .arg(&handoff.payload)
+      .arg("--sha256")
+      .arg(&handoff.sha256)
+      .arg("--wait-pid")
+      .arg(std::process::id().to_string())
+      .arg("--target")
+      .arg(target)
+      .arg("--relaunch")
+      .arg(relaunch)
+      // `stdin` closed (the helper never reads it); `stdout`/`stderr`
+      // inherited (the default) rather than nulled, so the `murasaki-apply:`
+      // diagnostics `updater.rs` writes (see that module's `log!` macro) land
+      // wherever this launcher's own stderr does — the only channel this
+      // headless, post-quit process has.
+      .stdin(Stdio::null())
+      .spawn();
+
+    if let Err(e) = spawned {
+      let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to spawn apply-helper: {e}");
+    }
+  }
+
   /// One locale's worth of default-menu labels — mirrors `MenuLabels` in
   /// `packages/murasaki/src/menu-i18n.ts`, deserialized straight out of
   /// `menu-locales.json` (`Contents/Resources/` on macOS, `resources/` on
@@ -340,7 +429,9 @@ mod imp_macos {
     window::{center_on_primary_monitor, SharedWindow},
   };
 
-  use super::shared::{load_menu_locales, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server};
+  use super::shared::{
+    load_menu_locales, maybe_spawn_apply_helper, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server,
+  };
 
   pub fn run() {
     if let Err(err) = run_inner() {
@@ -363,6 +454,17 @@ mod imp_macos {
       .join("Resources")
       .canonicalize()
       .map_err(|e| format!("resolve Resources dir: {e}"))?;
+
+    // The `.app` bundle path — contract §8's `--target` AND `--relaunch` for
+    // macOS (both the same path; see `maybe_spawn_apply_helper`'s call sites
+    // below and this module's own doc comment on why that differs from
+    // Windows). Two hops up from `Contents/Resources`: `Contents`, then the
+    // `.app` bundle itself.
+    let app_bundle = resources_dir
+      .parent()
+      .and_then(Path::parent)
+      .map(Path::to_path_buf)
+      .ok_or_else(|| "murasaki-launcher: could not resolve .app bundle path from Resources dir".to_string())?;
 
     let meta = read_meta(&resources_dir)?;
     // `meta.console` is Windows-only (see that field's doc comment) — ignored
@@ -469,15 +571,29 @@ mod imp_macos {
     // that "values not passed to this function will *not* be dropped" — so
     // `webview`/`app_menu_slot`/`shared_window`, though never referenced
     // again after this point, simply stay alive on this stack frame for as
-    // long as the app runs. `webview_handle` and `child` move into the
-    // closure below — the former so the app-menu poll can reach the webview
-    // every tick, the latter to be killed on window close.
+    // long as the app runs. `webview_handle`, `child`, `resources_dir`, and
+    // `app_bundle` move into the closure below — the first two so the
+    // app-menu poll can reach the webview every tick and `child` can be
+    // killed on window close, the latter two so both clean-exit paths can
+    // check for a pending `.murasaki-apply.json` handoff (contract §7
+    // REVISED step 6) on the way out.
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
 
       // Drain clicks on `useAppMenu`'s custom (non-role) items every tick —
       // see `poll_app_menu_events`'s doc comment in webview.rs.
       crate::webview::poll_app_menu_events(&webview_handle);
+
+      // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
+      // doc comment. Same clean-shutdown as the window's own close button
+      // just below: best-effort kill the spawned `node` child, hand off to
+      // the apply-helper if one is pending, then exit.
+      if crate::webview::quit_requested() {
+        *control_flow = ControlFlow::Exit;
+        let _ = child.kill();
+        maybe_spawn_apply_helper(&resources_dir, &app_bundle, &app_bundle);
+        std::process::exit(0);
+      }
 
       if let Event::WindowEvent {
         event: WindowEvent::CloseRequested,
@@ -488,6 +604,7 @@ mod imp_macos {
         // Best-effort: if we get killed before this runs (force-quit, crash),
         // prod-server.mjs's own orphan check (`ppid === 1`) reaps it within ~2s.
         let _ = child.kill();
+        maybe_spawn_apply_helper(&resources_dir, &app_bundle, &app_bundle);
         std::process::exit(0);
       }
     });
@@ -704,7 +821,9 @@ mod imp_win {
     window::{center_on_primary_monitor, SharedWindow},
   };
 
-  use super::shared::{load_menu_locales, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server};
+  use super::shared::{
+    load_menu_locales, maybe_spawn_apply_helper, normalize_locale, read_meta, resolve_menu_labels, spawn_prod_server,
+  };
   use super::win_job::KillOnCloseJob;
 
   pub fn run() {
@@ -736,6 +855,15 @@ mod imp_win {
       .map_err(|e| format!("resolve resources dir: {e}"))?;
 
     let meta = read_meta(&resources_dir)?;
+
+    // Contract §8: on Windows `--target` is the install dir (`exe_dir`) and
+    // `--relaunch` is `<installDir>\<productName>.exe` — see
+    // `maybe_spawn_apply_helper`'s call sites below. `exe_dir` is a `&Path`
+    // borrowed from `exe`, so this is captured as an owned `PathBuf` now
+    // rather than re-derived later.
+    let apply_target = exe_dir.to_path_buf();
+    let apply_relaunch = apply_target.join(format!("{}.exe", meta.product_name));
+
     // Spawns resources/node.exe prod-server.mjs — same handshake as macOS,
     // see `shared::spawn_prod_server`. `meta.console` (default `false`) hides
     // the console window `node.exe` would otherwise get, via
@@ -847,9 +975,12 @@ mod imp_win {
     // explicitly documents that values not passed into it aren't dropped, so
     // `webview`/`app_menu_slot`/`job` simply stay alive on this stack frame
     // for the app's lifetime (`shared_window` and `webview_handle` move into
-    // the closure below, since the menu-bar poll needs them every tick). Only
-    // `child` needs to move into the closure too, to be killed on window
-    // close/Exit.
+    // the closure below, since the menu-bar poll needs them every tick).
+    // `child`, `resources_dir`, `apply_target`, and `apply_relaunch` also
+    // move in — the first to be killed on window close/Exit, the latter
+    // three so every clean-exit path below can check for a pending
+    // `.murasaki-apply.json` handoff (contract §7 REVISED step 6) on the way
+    // out.
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::Wait;
 
@@ -861,6 +992,18 @@ mod imp_win {
       if poll_menu_bar_events(&shared_window, &webview_handle) {
         *control_flow = ControlFlow::Exit;
         let _ = child.kill();
+        maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
+        std::process::exit(0);
+      }
+
+      // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
+      // doc comment. Same clean-shutdown path as Exit/CloseRequested above
+      // and below: best-effort kill `child` directly (the Job Object above
+      // is the real safety net if this process dies before reaching here).
+      if crate::webview::quit_requested() {
+        *control_flow = ControlFlow::Exit;
+        let _ = child.kill();
+        maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
         std::process::exit(0);
       }
 
@@ -877,6 +1020,7 @@ mod imp_win {
         // (unlike macOS/Linux's `ppid === 1` check), so the Job Object is
         // what actually guarantees no orphaned `node.exe` here.
         let _ = child.kill();
+        maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
         std::process::exit(0);
       }
     });
@@ -948,17 +1092,20 @@ mod imp_win {
   }
 }
 
-#[cfg(target_os = "macos")]
+/// Entry point for `bin/murasaki-launcher.rs`'s `main`. Checked *before*
+/// anything else: `--apply-update` (see `updater.rs`) must be reachable
+/// before any window/webview/event-loop is created, since that mode runs
+/// headless right after the previous app instance has quit to make way for
+/// it.
 pub fn run_launcher() {
+  if let Some(code) = crate::updater::maybe_apply_update() {
+    std::process::exit(code);
+  }
+
+  #[cfg(target_os = "macos")]
   imp_macos::run();
-}
-
-#[cfg(target_os = "windows")]
-pub fn run_launcher() {
+  #[cfg(target_os = "windows")]
   imp_win::run();
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn run_launcher() {
+  #[cfg(not(any(target_os = "macos", target_os = "windows")))]
   eprintln!("murasaki-launcher: unsupported platform (macOS/Windows only)");
 }

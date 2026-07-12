@@ -13,6 +13,7 @@ import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote } from './brand.js'
 import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import type { MurasakiConfig } from '../config.js'
+import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 
 export type Arch = 'arm64' | 'x64'
@@ -140,6 +141,18 @@ export default async function bundle(argv: string[]) {
   const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
   await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
 
+  // Contents/Resources/updater-engine.mjs — the compiled updater engine
+  // (src/runtime/updater.ts → dist/runtime/updater.js) that prod-server.mjs
+  // imports. This IS the security boundary (Ed25519 manifest verification):
+  // there must be exactly one implementation of it, shared by dev (mounted
+  // via src/vite-plugin/updater.ts) and prod. `dist/runtime/updater.js`
+  // compiles to standalone ESM (only `node:` imports — its one non-builtin
+  // import, `ResolvedUpdater`, is `import type` and erased), so it can be
+  // copied as-is; named `.mjs` since there's no package.json in the
+  // resources dir to declare `"type": "module"`.
+  const updaterEngineSrc = resolve(__dirname, '../runtime/updater.js')
+  await copyFile(updaterEngineSrc, join(resourcesDir, 'updater-engine.mjs'))
+
   // Contents/Resources/menu-locales.json — read by the launcher binary at
   // runtime to localize the default app menu for the end user's locale (see
   // crates/native/src/launcher.rs).
@@ -156,7 +169,7 @@ export default async function bundle(argv: string[]) {
   // Contents/Resources/murasaki-meta.json
   await writeFile(
     join(resourcesDir, 'murasaki-meta.json'),
-    metaJson(config, productName, iconResource),
+    metaJson(config, productName, iconResource, cwd),
   )
 
   // Contents/Resources/client — the Vite build output.
@@ -192,6 +205,13 @@ export default async function bundle(argv: string[]) {
   if (shouldSign) await signApp(appDir, config)
 
   process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
+
+  // dist/bundle/<productName>-darwin-<arch>.app.zip — the macOS auto-update
+  // payload (murasaki release --manifest / --sign). Must run AFTER signApp
+  // above so the zip carries the code signature — see zipDarwinApp's doc
+  // comment for why this shells out to `ditto` rather than `zip`.
+  const zipPath = await zipDarwinApp(resolve(cwd, 'dist/bundle'), productName, arch, appDir)
+  process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
 
   if (!shouldSign) process.stdout.write(unsignedNote(appDir))
 }
@@ -238,6 +258,11 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
   await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
 
+  // resources/updater-engine.mjs — see the macOS path above for why this is
+  // copied verbatim rather than mirrored by hand.
+  const updaterEngineSrc = resolve(__dirname, '../runtime/updater.js')
+  await copyFile(updaterEngineSrc, join(resourcesDir, 'updater-engine.mjs'))
+
   // resources/menu-locales.json — read by the launcher binary at runtime to
   // localize the default app menu for the end user's locale.
   const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
@@ -265,7 +290,7 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   // the launcher binary at runtime.
   await writeFile(
     join(resourcesDir, 'murasaki-meta.json'),
-    metaJson(config, productName, iconResource),
+    metaJson(config, productName, iconResource, cwd),
   )
 
   // resources/client — the Vite build output.
@@ -339,12 +364,57 @@ async function zipWin32Bundle(bundleRoot: string, productName: string, arch: Arc
 }
 
 /**
+ * Zips the just-signed `<appDir>` (`<bundleRoot>/<productName>.app`) into
+ * `<bundleRoot>/<productName>-darwin-<arch>.app.zip` — the macOS auto-update
+ * payload (see `murasaki release --manifest`). Shells out to `ditto`, NOT
+ * `zip`: plain `zip` doesn't round-trip the symlinks/resource forks a signed
+ * `.app`'s `Contents/` relies on and corrupts the code signature applied by
+ * `signApp` above, so this must run after that signing step.
+ * `--sequesterRsrc --keepParent` mirrors Apple's own documented recipe for
+ * zipping a bundle for distribution; the matching unzip is `ditto -x -k`
+ * (the apply-helper's extraction step).
+ */
+async function zipDarwinApp(
+  bundleRoot: string,
+  productName: string,
+  arch: Arch,
+  appDir: string,
+): Promise<string> {
+  const zipPath = join(bundleRoot, `${productName}-darwin-${arch}.app.zip`)
+  await rm(zipPath, { force: true })
+
+  const result = spawnSync(
+    'ditto',
+    ['-c', '-k', '--sequesterRsrc', '--keepParent', appDir, zipPath],
+    { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 },
+  )
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `murasaki: failed to create ${zipPath}: ${(result.stderr || result.stdout || result.error?.message || '').trim()}`,
+    )
+  }
+  return zipPath
+}
+
+/**
  * The `murasaki-meta.json` object written into both the `.app`'s
  * `Contents/Resources/` and the win32 folder's `resources/` — read by
  * `murasaki-launcher` at runtime for window title/size, About panel fields,
- * etc. Kept as one function so the two bundle targets can't drift apart.
+ * etc., and by `prod-server.mjs` (from its cwd, the resources dir) for the
+ * resolved updater config. Kept as one function so the two bundle targets
+ * can't drift apart.
  */
-function metaJson(config: MurasakiConfig, productName: string, iconResource: string | null): string {
+function metaJson(
+  config: MurasakiConfig,
+  productName: string,
+  iconResource: string | null,
+  cwd: string,
+): string {
+  // Resolved (not raw) so prod-server.mjs never has to re-derive the GitHub
+  // manifest URL / public key / interval parsing itself — resolveUpdater()
+  // throws on a broken updater config, which surfaces as a bundle failure
+  // here rather than a silent runtime no-op.
+  const updater = resolveUpdater(config.updater, { projectRoot: cwd })
   return JSON.stringify(
     {
       appId: config.appId,
@@ -360,6 +430,7 @@ function metaJson(config: MurasakiConfig, productName: string, iconResource: str
       vibrancy: config.window?.vibrancy,
       console: config.window?.console,
       icon: iconResource ?? undefined,
+      ...(updater ? { updater } : {}),
     },
     null,
     2,
@@ -901,7 +972,7 @@ function escapeXml(s: string): string {
     .replace(/'/g, '&apos;')
 }
 
-async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
+export async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
   for (const name of ['murasaki.config.ts', 'murasaki.config.js', 'murasaki.config.mjs']) {
     const p = resolve(cwd, name)
     try {

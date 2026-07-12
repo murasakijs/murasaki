@@ -28,6 +28,7 @@ mod notification;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod shell;
 mod launcher;
+mod updater;
 
 pub use types::*;
 

@@ -10,6 +10,12 @@ name: App package smoke test (Windows)
 # Windows packaging — see packages/murasaki/src/cli/installer.ts's win32
 # path), which only run for real on Windows (WiX in particular is
 # Windows-only), so this workflow is their only pre-merge verification.
+# Finally, end-to-end verifies the Windows auto-updater apply path (Phase 3 —
+# see .github/scripts/win-updater-e2e.ps1's header comment) against a real
+# installed app: the "launcher spawns the apply-helper, not Node" fix
+# (updater contract §7 REVISED) exists specifically because of a
+# Windows-only Job Object bug that had never been observed on real Windows
+# before this workflow existed.
 #
 # Runs the whole pipeline once per supported win32 arch via a matrix — x64
 # and arm64 (ia32/x86 isn't a supported target) — each on a runner that's
@@ -345,6 +351,95 @@ jobs:
           } else {
             Write-Host 'Silent-install smoke test passed.'
           }
+
+      # ── Phase 3: Windows auto-updater end-to-end (updater contract §7
+      # REVISED / §8) ──────────────────────────────────────────────────────
+      #
+      # The apply-helper used to be spawned by Node, which sits inside the
+      # launcher's KILL_ON_JOB_CLOSE Job Object (win_job in launcher.rs) — on
+      # Windows a child of a job member is auto-assigned to the same job, so
+      # the OS killed the helper the instant the app quit and the update
+      # silently never applied. The fix (the launcher spawns the helper
+      # instead of Node, since the launcher itself isn't in that job) has
+      # only ever been verified end-to-end on macOS; this phase is what turns
+      # "should also work on Windows" into observed fact, on both arch legs.
+      # See .github/scripts/win-updater-e2e.ps1's header comment for the full
+      # story and its assertions in order.
+      #
+      # Needs a real NSIS `-setup.exe`, so it's gated on the same
+      # `setupPath` output as the bonus silent-install smoke test above —
+      # but unlike that step, this one is NOT continue-on-error: a failure
+      # here is the actual regression this workflow exists to catch, not a
+      # flaky CI hiccup.
+      #
+      # Produces a "v2" build of the same test app — same version (this
+      # doesn't bump anything; the updater only cares about the payload +
+      # its sha256, not the version number, for this test) but with one
+      # extra marker file baked into resources\, so the E2E script can tell
+      # "v2 was actually applied" apart from "v1 is still installed"
+      # without v1 ever shipping it.
+      - name: Copy the v1 installer aside (updater E2E)
+        id: copy-v1
+        if: steps.locate-installers.outputs.setupPath != ''
+        shell: pwsh
+        run: |
+          $v1 = "${{ steps.locate-installers.outputs.setupPath }}"
+          $dest = Join-Path $env:RUNNER_TEMP 'murasaki-updater-e2e-v1-setup.exe'
+          Copy-Item -Path $v1 -Destination $dest -Force
+          Write-Host "v1 installer copied aside: $dest"
+          "setupV1Path=$dest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # productName is derived from the already-located bundle .exe's base
+      # name (steps.locate.outputs.exePath, from earlier in this job) rather
+      # than hardcoded — bundleWin32 always names it `<productName>.exe` at
+      # the bundle root (see bundle.ts), so this stays correct even if the
+      # scaffolded template's productName ever changes.
+      - name: Bake a v2 marker into the staged bundle (updater E2E)
+        id: build-v2
+        if: steps.locate-installers.outputs.setupPath != ''
+        shell: pwsh
+        run: |
+          $productName = [System.IO.Path]::GetFileNameWithoutExtension("${{ steps.locate.outputs.exePath }}")
+          $bundleDir = "examples/win-smoke-app/dist/bundle/$productName"
+          $resourcesDir = Join-Path $bundleDir 'resources'
+          if (-not (Test-Path $resourcesDir)) {
+            Write-Error "expected bundle resources dir not found: $resourcesDir"
+            exit 1
+          }
+          $markerPath = Join-Path $resourcesDir '.murasaki-e2e-marker'
+          Set-Content -Path $markerPath -Value 'murasaki updater E2E v2 marker' -NoNewline
+          if (-not (Test-Path $markerPath)) {
+            Write-Error "failed to write marker file: $markerPath"
+            exit 1
+          }
+          Write-Host "Marker written: $markerPath"
+          "productName=$productName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: murasaki installer --target win32-${{ matrix.arch }} (v2, --no-build)
+        if: steps.locate-installers.outputs.setupPath != ''
+        working-directory: examples/win-smoke-app
+        # Re-runs against the SAME staged bundle (now containing the marker
+        # file from the previous step) with --no-build, so this overwrites
+        # the exact same dist/<productName>-<version>-setup.exe path
+        # steps.locate-installers.outputs.setupPath already points at —
+        # that path now holds "v2"; steps.copy-v1's copy (above) is "v1".
+        run: pnpm exec murasaki installer --target win32-${{ matrix.arch }} --no-build
+
+      - name: Windows updater E2E (v1 -> v2 via the real quit -> apply -> relaunch path)
+        if: steps.locate-installers.outputs.setupPath != ''
+        shell: pwsh
+        run: |
+          .github/scripts/win-updater-e2e.ps1 `
+            -ProductName "${{ steps.build-v2.outputs.productName }}" `
+            -SetupV1 "${{ steps.copy-v1.outputs.setupV1Path }}" `
+            -SetupV2 "${{ steps.locate-installers.outputs.setupPath }}"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: win32-updater-e2e-log-${{ matrix.arch }}
+          path: ${{ runner.temp }}/murasaki-updater-e2e.log
+          if-no-files-found: warn
 
       # Full set: both installers + the portable zip (whichever exist).
       - uses: actions/upload-artifact@v4

@@ -11,9 +11,7 @@
  */
 import { useEffect } from 'react'
 
-type IpcMsg =
-  | { kind: 'ready' }
-  | { kind: 'update'; status: string; latest?: string }
+type IpcMsg = { kind: 'ready' }
 
 type Handler = (msg: IpcMsg) => void
 
@@ -44,6 +42,24 @@ export function post(msg: unknown) {
   if (bridge && typeof bridge.postMessage === 'function') {
     bridge.postMessage(JSON.stringify(msg))
   }
+}
+
+/**
+ * Quits the app.
+ *
+ * Posts `{ kind: 'appQuit' }` over the IPC bridge. Handled synchronously in
+ * Rust (see `crates/native/src/webview.rs`'s `QUIT_REQUESTED`), exactly like
+ * `contextMenu`/`appMenu` — it never round-trips through Node, since
+ * `Application::run()` blocks the libuv loop for as long as the app is open.
+ *
+ * This is the only way to quit a murasaki app programmatically; there is no
+ * other API for it. `useUpdate()`'s `install()` calls this after the backend
+ * has staged an update and spawned the detached apply-helper, per the
+ * install → quit → apply handshake (updater contract §7) — but it's a
+ * general-purpose primitive, not an updater internal.
+ */
+export function quit() {
+  post({ kind: 'appQuit' })
 }
 
 export interface ContextMenuItem {

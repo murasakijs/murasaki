@@ -18,21 +18,55 @@ export interface WindowConfig {
   console?: boolean
 }
 
+/**
+ * `true` enables the updater with every default inferred (GitHub repo from
+ * `package.json#repository`, public key from `.murasaki/update-key.pub`,
+ * stable channel, 6h re-check) — a complete, working config for a normal OSS
+ * app. `false`/omitted disables it entirely. The object form only needs to
+ * override what doesn't fit those defaults.
+ *
+ * There is deliberately no `provider` field — GitHub vs. self-hosted is
+ * inferred from whether `repo` or `endpoint` is set (see `resolveUpdater`),
+ * so it can't drift out of sync with the rest of the config.
+ */
 export type UpdaterConfig =
+  | boolean
   | {
-      provider: 'github'
-      repo: string
+      /** GitHub "owner/repo". Defaults to `repository` in package.json. */
+      repo?: string
+      /** Self-hosted manifest URL (points at latest.json). Mutually exclusive with `repo`. */
+      endpoint?: string
+      /** Release channel. Default 'stable' (GitHub: ignores prereleases). */
       channel?: string
+      /** Check once at launch. Default true. */
       checkOnStart?: boolean
-      checkInterval?: string
-    }
-  | {
-      provider: 'custom'
-      endpoint: string
+      /** Re-check on a timer, e.g. '6h'. `false` disables. Default '6h'. */
+      checkInterval?: string | false
+      /** Ed25519 public key (base64, raw 32 bytes). Defaults to .murasaki/update-key.pub. */
       publicKey?: string
-      checkOnStart?: boolean
-      checkInterval?: string
     }
+
+/** The fully-resolved shape `resolveUpdater()` produces from a `UpdaterConfig`. */
+export interface ResolvedUpdater {
+  /** Absolute URL of latest.json. Derived from repo or endpoint. */
+  manifestUrl: string
+  /** base64 raw-32-byte Ed25519 public key. */
+  publicKey: string
+  channel: string
+  checkOnStart: boolean
+  /** milliseconds, or false */
+  checkIntervalMs: number | false
+}
+
+/**
+ * `resolveUpdater()` — which resolves a `UpdaterConfig` down to a
+ * `ResolvedUpdater` per contract §3 — lives in `resolve-updater.ts`, not
+ * here. It does filesystem/env I/O (reads `package.json`,
+ * `.murasaki/update-key.pub`), and this module must stay free of any Node
+ * builtin imports: `index.ts`'s client-facing barrel re-exports
+ * `defineConfig`/`UpdaterConfig` from here, so anything this file imports
+ * is reachable from a browser bundle.
+ */
 
 export interface MurasakiConfig {
   appId: string
@@ -52,6 +86,12 @@ export interface MurasakiConfig {
   authors?: string[]
 
   window?: WindowConfig
+
+  /**
+   * Auto-update config. `true` is a complete, working setup for a normal OSS
+   * app (GitHub repo inferred from `package.json`, public key from
+   * `.murasaki/update-key.pub`). See `UpdaterConfig`/`resolveUpdater`.
+   */
   updater?: UpdaterConfig
 
   /**
