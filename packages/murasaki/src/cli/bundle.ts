@@ -192,7 +192,7 @@ export default async function bundle(argv: string[]) {
   // currently requires this package. Kept for now to minimize risk.
   const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
   await mkdir(dirname(nativeDest), { recursive: true })
-  await copyNativeModule(nativeDir, nativeDest)
+  await copyNativeModule(nativeDir, nativeDest, target)
 
   // Contents/Info.plist
   await writeFile(
@@ -306,7 +306,7 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   // through esbuild/tsc (dev-only Rust artifacts filtered out).
   const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
   await mkdir(dirname(nativeDest), { recursive: true })
-  await copyNativeModule(nativeDir, nativeDest)
+  await copyNativeModule(nativeDir, nativeDest, { platform: 'win32', arch })
 
   process.stdout.write(`\n${success(`bundle written  ${dim(outDir)}`)}\n\n`)
 
@@ -623,16 +623,36 @@ function parseTargetId(id: string | undefined): BundleTarget {
  * than hoisting it to the project root.
  */
 /**
- * Vendor `@murasakijs/native` into the bundle, EXCLUDING dev-only artifacts.
- * A published tarball ships only the `.node` binaries + launcher + JS shim, but
- * when the package is workspace-linked to `crates/native` (dev tree, or CI that
- * scaffolds the app inside the workspace) a naive recursive copy drags in the
- * Rust `target/` dir (multi-GB) and the crate source — which would then get
- * zipped/wrapped into every installer. This filter keeps the bundle small in
- * both cases (the excluded dirs simply don't exist in a real npm install).
+ * Vendor `@murasakijs/native` into the bundle, EXCLUDING dev-only artifacts
+ * AND every native artifact (`.node` addon, `murasaki-launcher` binary) that
+ * isn't built for `target`.
+ *
+ * A published `@murasakijs/native` tarball ships every platform/arch's
+ * prebuilt binaries in the SAME package (see `resolveLauncherBinary`'s doc
+ * comment) — left unfiltered, a naive recursive copy vendors all of them
+ * into every bundle, e.g. a win32-x64 installer shipping a macOS
+ * `murasaki-native.darwin-arm64.node`. `nativeArtifactTargetSuffix` reuses
+ * `launcherFilename`'s napi-triple naming convention (rather than inventing
+ * a second one) to recognize these target-suffixed filenames and skip any
+ * that don't match `target`. It's fine — expected, even — for no matching
+ * `.node` addon to exist for `target` (e.g. this workspace-linked dev tree
+ * has no win32 addon compiled); that file is just omitted, nothing is
+ * substituted in its place.
+ *
+ * Also strips dev-only artifacts: when the package is workspace-linked to
+ * `crates/native` (dev tree, or CI that scaffolds the app inside the
+ * workspace) a naive recursive copy drags in the Rust `target/` dir
+ * (multi-GB) and the crate source — which would then get zipped/wrapped into
+ * every installer. This filter keeps the bundle small in both cases (the
+ * excluded dirs simply don't exist in a real npm install).
  */
-async function copyNativeModule(nativeDir: string, dest: string): Promise<void> {
+async function copyNativeModule(
+  nativeDir: string,
+  dest: string,
+  target: BundleTarget,
+): Promise<void> {
   const EXCLUDE_DIRS = new Set(['target', 'src', 'npm', 'node_modules', '.git'])
+  const triple = napiTargetTriple(target.platform, target.arch)
   await cp(nativeDir, dest, {
     recursive: true,
     filter: (src) => {
@@ -644,9 +664,41 @@ async function copyNativeModule(nativeDir: string, dest: string): Promise<void> 
       if (!rel.includes(sep) && /^(Cargo\.(toml|lock)|build\.rs|\.gitignore)$/.test(rel)) {
         return false
       }
+      const base = rel.split(sep).pop() ?? rel
+      const artifactSuffix = nativeArtifactTargetSuffix(base)
+      if (artifactSuffix !== null) return artifactSuffix === triple
       return true
     },
   })
+}
+
+/**
+ * The napi-rs target triple embedded in both `@murasakijs/native`'s compiled
+ * `.node` addon filenames and the `murasaki-launcher` binary filenames (e.g.
+ * `darwin-arm64`, `win32-x64-msvc`) — derived from `launcherFilename` itself
+ * (stripping its `murasaki-launcher.` prefix and any `.exe` suffix) so
+ * there's exactly one place that knows this naming convention, not two.
+ */
+function napiTargetTriple(platform: Platform, arch: Arch): string {
+  return launcherFilename(platform, arch).replace(/^murasaki-launcher\./, '').replace(/\.exe$/, '')
+}
+
+/**
+ * If `basename` is a target-suffixed native artifact — `murasaki-native.
+ * <triple>.node` or `murasaki-launcher.<triple>[.exe]` — returns its triple
+ * suffix (e.g. `"darwin-arm64"`, `"win32-x64-msvc"`); otherwise `null` for
+ * every other file (JS, `package.json`, `.d.ts`, …), which `copyNativeModule`
+ * copies unfiltered regardless of `target`.
+ */
+function nativeArtifactTargetSuffix(basename: string): string | null {
+  if (basename.startsWith('murasaki-native.') && basename.endsWith('.node')) {
+    return basename.slice('murasaki-native.'.length, -'.node'.length)
+  }
+  if (basename.startsWith('murasaki-launcher.')) {
+    const suffix = basename.slice('murasaki-launcher.'.length)
+    return suffix.endsWith('.exe') ? suffix.slice(0, -'.exe'.length) : suffix
+  }
+  return null
 }
 
 function resolveNativeModuleDir(cwd: string): string {
