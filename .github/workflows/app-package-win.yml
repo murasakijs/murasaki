@@ -10,12 +10,15 @@ name: App package smoke test (Windows)
 # Windows packaging — see packages/murasaki/src/cli/installer.ts's win32
 # path), which only run for real on Windows (WiX in particular is
 # Windows-only), so this workflow is their only pre-merge verification.
-# Finally, end-to-end verifies the Windows auto-updater apply path (Phase 3 —
-# see .github/scripts/win-updater-e2e.ps1's header comment) against a real
-# installed app: the "launcher spawns the apply-helper, not Node" fix
-# (updater contract §7 REVISED) exists specifically because of a
-# Windows-only Job Object bug that had never been observed on real Windows
-# before this workflow existed.
+# Finally, end-to-end verifies the Windows auto-updater apply mechanism
+# (Phase 3, updater contract §8 — see .github/scripts/win-updater-e2e.ps1's
+# header comment) against a real installed app, by invoking the installed
+# launcher's `--apply-update` mode directly: sha256 gate, wait-pid gate,
+# self-copy + re-exec, silent NSIS install, marker-verified swap. Directly
+# (not through the app's webview + injected appQuit) because WebView2 can't
+# initialize on a headless CI runner (0x80070578); the §7 handoff/appQuit
+# trigger and the Windows Job Object survival need the GUI and are covered by
+# code review instead.
 #
 # Runs the whole pipeline once per supported win32 arch via a matrix — x64
 # and arm64 (ia32/x86 isn't a supported target) — each on a runner that's
@@ -352,19 +355,23 @@ jobs:
             Write-Host 'Silent-install smoke test passed.'
           }
 
-      # ── Phase 3: Windows auto-updater end-to-end (updater contract §7
-      # REVISED / §8) ──────────────────────────────────────────────────────
+      # ── Phase 3: Windows auto-updater end-to-end (updater contract §8) ────
       #
-      # The apply-helper used to be spawned by Node, which sits inside the
-      # launcher's KILL_ON_JOB_CLOSE Job Object (win_job in launcher.rs) — on
-      # Windows a child of a job member is auto-assigned to the same job, so
-      # the OS killed the helper the instant the app quit and the update
-      # silently never applied. The fix (the launcher spawns the helper
-      # instead of Node, since the launcher itself isn't in that job) has
-      # only ever been verified end-to-end on macOS; this phase is what turns
-      # "should also work on Windows" into observed fact, on both arch legs.
-      # See .github/scripts/win-updater-e2e.ps1's header comment for the full
-      # story and its assertions in order.
+      # Verifies the Windows apply mechanism against a real installed app by
+      # invoking the installed launcher's `--apply-update` mode directly:
+      # sha256 gate, wait-pid gate, the self-copy + re-exec-outside-target
+      # hop, the silent NSIS install, and a marker-based proof of the swap.
+      # Invoked directly (not through the app's webview + an injected
+      # `appQuit`) because WebView2 cannot initialize on a headless /
+      # session-0 CI runner (0x80070578) — the direct call reaches the exact
+      # same Rust apply code with the exact same argv `maybe_spawn_apply_helper`
+      # would build. Note this covers §8 (the apply itself); the §7
+      # `.murasaki-apply.json` handoff read + `appQuit` trigger, and the
+      # Windows Job Object survival, need the GUI and are covered by code
+      # review (see win_job / maybe_spawn_apply_helper in launcher.rs). This
+      # apply path was also verified end-to-end on real Windows hardware. See
+      # .github/scripts/win-updater-e2e.ps1's header comment for the full story
+      # and its assertions in order.
       #
       # Needs a real NSIS `-setup.exe`, so it's gated on the same
       # `setupPath` output as the bonus silent-install smoke test above —
@@ -425,7 +432,7 @@ jobs:
         # that path now holds "v2"; steps.copy-v1's copy (above) is "v1".
         run: pnpm exec murasaki installer --target win32-${{ matrix.arch }} --no-build
 
-      - name: Windows updater E2E (v1 -> v2 via the real quit -> apply -> relaunch path)
+      - name: Windows updater E2E (headless --apply-update — apply mechanism, contract §8)
         if: steps.locate-installers.outputs.setupPath != ''
         shell: pwsh
         run: |

@@ -1,61 +1,55 @@
 <#
 .SYNOPSIS
-  End-to-end verifies the Windows auto-updater apply path (the frozen
-  updater contract's §7 REVISED / §8) against a REAL installed murasaki app.
+  End-to-end verifies the Windows auto-updater apply mechanism (the frozen
+  updater contract's §8) against a REAL installed murasaki app, by invoking
+  the installed launcher's `--apply-update` mode directly.
 
 .DESCRIPTION
-  Why this exists: the apply-helper used to be spawned by Node, which sits
-  inside the launcher's `KILL_ON_JOB_CLOSE` Win32 Job Object (`win_job` in
-  crates/native/src/launcher.rs). On Windows, a child of a job member is
-  auto-assigned to the same job unless spawned with
-  `CREATE_BREAKAWAY_FROM_JOB` (which Node's `child_process` has no way to
-  request), so the moment the app quit, the OS killed the helper and the
-  update silently never applied. The fix — the launcher spawns the helper
-  instead of Node, since the launcher itself was never assigned to that job
-  — has only ever been verified end-to-end on macOS. This script is what
-  turns "should also work on Windows" into observed fact.
+  Why directly, and not through the webview/appQuit path: this script used to
+  drive the update by launching the installed app, letting its WebView2 load
+  an injected script that posted `{ kind: 'appQuit' }`, and waiting for that
+  to trigger the launcher's event loop to spawn the apply-helper. That cannot
+  run on a headless / session-0 CI runner — WebView2 fails to initialize
+  there (`0x80070578`, invalid window handle), so the injected script never
+  ran and the decisive assertion failed for a reason unrelated to the code
+  under test.
 
-  Positive case:
-    1. Silently installs the v1 NSIS `-setup.exe`, resolves the (default
-       perUser) install dir, and asserts the app landed there with no v2
-       marker present yet.
-    2. Hand-writes the exact `<resourcesDir>\.murasaki-apply.json` handoff
-       `runtime/updater.ts`'s `install()` would have written — `{ payload,
-       sha256 }`, the real sha256 of the v2 `-setup.exe` — the only two keys
-       `crates/native/src/launcher.rs`'s `ApplyHandoff` deserializes.
-    3. Injects a one-shot script into the installed app's own
-       `resources\client\index.html` that sends exactly what murasaki's real
-       `quit()` sends (`packages/murasaki/src/react/rpc.ts`):
-       `window.ipc.postMessage(JSON.stringify({ kind: 'appQuit' }))`. This is
-       load-bearing: a forced process kill (`Stop-Process -Force`) never
-       reaches `crates/native/src/webview.rs`'s `QUIT_REQUESTED` /
-       `maybe_spawn_apply_helper`, so this test would pass vacuously without
-       going through the real quit path.
-    4. Launches the installed exe and waits for the v2 marker file that only
-       `murasaki-launcher --apply-update` (crates/native/src/updater.rs) can
-       plant to appear in the install dir. **That single assertion is the
-       whole point of this script**: under the old (broken) Node-spawns-the-
-       helper design, the Job Object would have killed the helper before it
-       could ever get there.
-    5. Asserts the handoff file is gone (the launcher deletes it on its way
-       out — contract §7 REVISED step 6) and that the app relaunched.
+  `--apply-update` (`crates/native/src/updater.rs`) is reachable before any
+  window/webview is created — `run_launcher()` calls
+  `maybe_apply_update()` first (`crates/native/src/launcher.rs`) — so
+  invoking the installed launcher binary directly with `--apply-update` and
+  its argv is fully headless, and reaches the exact same Rust apply code with
+  the exact same argv `maybe_spawn_apply_helper` would build in production:
 
-  Negative case: same shape, but with a deliberately wrong sha256 in the
-  handoff — asserts the marker never appears and the existing install is
-  left completely intact and launchable. A corrupt payload must never cost
-  the user their app.
+    <ExePath> --apply-update
+              --payload   <SetupV2 absolute path>
+              --sha256    <hex sha256 of SetupV2>
+              --wait-pid  <pid of a process that will exit shortly>
+              --target    <InstallDir>
+              --relaunch  <ExePath>
 
-  Reuses win-smoke-test.ps1's patterns: redirected stdout/stderr + the
-  `MURASAKI_PORT=<n>` handshake + an HTTP 200 poll to know the app is fully
-  up, and its `Stop-ProcessTree`/path-based sweep approach for cleanup.
+  This exercises the sha256 gate, the wait-pid gate, the self-copy +
+  re-exec-outside-`--target` hop (`Outcome::ReExeced`), the silent NSIS
+  install that follows, and marker-based proof of the swap.
 
-  Best-effort bonus: `maybe_spawn_apply_helper` and the apply-helper itself
-  never redirect their own stdout/stderr, so (assuming ordinary Windows
-  handle inheritance holds — exactly the kind of thing this workflow exists
-  to observe, not assume) every `murasaki-apply:` diagnostic line the helper
-  writes should land on the SAME captured stream as the original launch, with
-  no extra plumbing. This script prints that stream in full; it is not
-  asserted on.
+  Honest scope note: this covers §8 (the apply itself) only. It does NOT
+  exercise §7's `.murasaki-apply.json` handoff read, nor the
+  `appQuit` -> event-loop -> `maybe_spawn_apply_helper` trigger — both need
+  the GUI/webview. It also does not empirically exercise the Windows Job
+  Object survival property: the helper here is spawned by this script,
+  outside of any job. That the launcher spawns the apply-helper outside its
+  own `KILL_ON_JOB_CLOSE` job is guaranteed structurally — the launcher
+  itself is never assigned to that job, only the node child is (see
+  `win_job` and `maybe_spawn_apply_helper` in launcher.rs) — and is covered
+  by code review, not by this script.
+
+  Positive case: silently installs v1, invokes `--apply-update` with the
+  real v2 sha256, and waits for the v2 marker file (planted by the v2 NSIS
+  installer, run silently by the re-exec'd helper) to appear.
+
+  Negative case: same shape, but with a deliberately wrong sha256 — asserts
+  the marker never appears and the existing install is left completely
+  intact. A corrupt payload must never cost the user their app.
 #>
 param(
   [Parameter(Mandatory = $true)]
@@ -73,9 +67,6 @@ param(
   # applied" apart from "v1 is still installed" (v1 never ships this file).
   [string]$MarkerRelativePath = 'resources\.murasaki-e2e-marker',
 
-  # Port/HTTP-up wait — same default as win-smoke-test.ps1.
-  [int]$TimeoutSeconds = 60,
-
   # Generous: covers a silent NSIS install running as part of the apply, on
   # a possibly-loaded CI runner.
   [int]$MarkerTimeoutSeconds = 180,
@@ -85,8 +76,6 @@ param(
   # this only needs to be generous enough to rule out "just slow", not
   # "never".
   [int]$NegativeMarkerTimeoutSeconds = 45,
-
-  [int]$RelaunchTimeoutSeconds = 60,
 
   # Falls back to the OS temp dir so this script can also be run manually
   # (e.g. reproducing a CI failure locally) without $env:RUNNER_TEMP set.
@@ -105,22 +94,9 @@ foreach ($path in @($SetupV1, $SetupV2)) {
 $InstallDir = Join-Path $env:LOCALAPPDATA "Programs\$ProductName"
 $ExePath = Join-Path $InstallDir "$ProductName.exe"
 $ResourcesDir = Join-Path $InstallDir 'resources'
-$HandoffPath = Join-Path $ResourcesDir '.murasaki-apply.json'
 $MarkerPath = Join-Path $InstallDir $MarkerRelativePath
-$IndexHtmlPath = Join-Path $ResourcesDir 'client\index.html'
 
 # ── small utilities ──────────────────────────────────────────────────────
-
-# Writes UTF-8 with NO byte-order mark, regardless of PowerShell version
-# quirks around `-Encoding utf8` (which has, at various points, silently
-# added a BOM). A BOM at the front of `.murasaki-apply.json` would make
-# `serde_json::from_str` in launcher.rs fail to parse it — a self-inflicted
-# test bug that has nothing to do with the real regression this script
-# exists to catch.
-function Set-Utf8NoBom([string]$Path, [string]$Content) {
-  $encoding = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($Path, $Content, $encoding)
-}
 
 function Get-ChildProcessIds([int]$ParentId) {
   Get-CimInstance Win32_Process -Filter "ParentProcessId=$ParentId" |
@@ -151,8 +127,8 @@ function Stop-InstallDirProcesses {
 # out of $InstallDir, silently runs the installed Uninstall.exe (NSIS's
 # `RMDir /r "$INSTDIR"` — see installer.ts's uninstallSection — wipes
 # everything under the install dir, not just originally-installed files, so
-# this also clears any leftover handoff/marker file from a previous phase),
-# then removes anything left behind. A no-op if $InstallDir doesn't exist.
+# this also clears any leftover marker file from a previous phase), then
+# removes anything left behind. A no-op if $InstallDir doesn't exist.
 function Uninstall-InstalledApp {
   if (-not (Test-Path $InstallDir)) { return }
 
@@ -185,175 +161,6 @@ function Install-SetupSilently([string]$SetupPath) {
   }
 }
 
-# Injects a one-shot script into the installed app's own
-# resources\client\index.html (the Vite build output, copied verbatim by
-# bundleWin32 — see cli/bundle.ts) that polls for `window.ipc` (wired up
-# synchronously by wry's IPC handler before the page's own scripts run — see
-# webview.rs's `with_ipc_handler` — so it should already be present by the
-# time this fires) and then sends exactly what murasaki's real `quit()`
-# sends: `window.ipc.postMessage(JSON.stringify({ kind: 'appQuit' }))`. This
-# reaches the REAL production quit path (webview.rs's `QUIT_REQUESTED`), not
-# a forced kill — see this script's header comment for why that distinction
-# is the entire point.
-#
-# Marked with an HTML comment so a second call is a no-op — not expected in
-# practice, since every phase reinstalls (and thus gets a pristine
-# index.html) before injecting, but cheap insurance against a future caller
-# forgetting that.
-function Add-QuitScript([string]$Path) {
-  if (-not (Test-Path $Path)) {
-    Write-Error "index.html not found at $Path"
-    exit 1
-  }
-  $html = Get-Content -Raw -Path $Path
-  if ($html.Contains('murasaki-updater-e2e:appQuit')) {
-    return
-  }
-
-  $script = @'
-<!-- murasaki-updater-e2e:appQuit -->
-<script>
-  (function () {
-    var attempts = 0;
-    var timer = setInterval(function () {
-      attempts += 1;
-      if (window.ipc && typeof window.ipc.postMessage === 'function') {
-        clearInterval(timer);
-        window.ipc.postMessage(JSON.stringify({ kind: 'appQuit' }));
-      } else if (attempts > 100) {
-        clearInterval(timer);
-      }
-    }, 100);
-  })();
-</script>
-'@
-
-  if ($html.Contains('</body>')) {
-    $html = $html.Replace('</body>', "$script`n</body>")
-  } else {
-    $html += "`n$script`n"
-  }
-  Set-Utf8NoBom -Path $Path -Content $html
-  Write-Host "Injected the appQuit script into $Path"
-}
-
-# Writes the exact handoff shape `runtime/updater.ts`'s `install()` writes —
-# `JSON.stringify({ payload: stagedPath, sha256: stagedSha256 })` — and the
-# only two keys `launcher.rs`'s `ApplyHandoff` struct deserializes. Getting
-# this exactly right is the difference between testing the real regression
-# and failing for an unrelated reason.
-function Write-Handoff([string]$PayloadPath, [string]$Sha256) {
-  $payloadAbs = (Resolve-Path $PayloadPath).Path
-  $json = (@{ payload = $payloadAbs; sha256 = $Sha256 } | ConvertTo-Json -Compress)
-  Set-Utf8NoBom -Path $HandoffPath -Content $json
-  Write-Host "Wrote handoff: $HandoffPath -> $json"
-}
-
-# Launches $ExePath with stdout/stderr redirected — same technique as
-# win-smoke-test.ps1 — and waits for the MURASAKI_PORT handshake + an HTTP
-# 200, so the caller knows the app (and its embedded node.exe) is fully up
-# before whatever the injected quit script does next takes effect.
-#
-# Unlike win-smoke-test.ps1 (which owns the whole process lifecycle), this
-# does NOT kill the process before returning — the caller decides what
-# happens next (wait for the quit-triggered marker, or force-kill for a
-# plain liveness check).
-function Start-InstalledApp([int]$WaitTimeoutSeconds) {
-  $psi = New-Object System.Diagnostics.ProcessStartInfo
-  $psi.FileName = $ExePath
-  $psi.WorkingDirectory = $InstallDir
-  $psi.UseShellExecute = $false
-  $psi.RedirectStandardOutput = $true
-  $psi.RedirectStandardError = $true
-
-  $proc = New-Object System.Diagnostics.Process
-  $proc.StartInfo = $psi
-
-  $stdout = New-Object System.Text.StringBuilder
-  $stderr = New-Object System.Text.StringBuilder
-
-  $outEvent = Register-ObjectEvent -InputObject $proc -EventName OutputDataReceived -Action {
-    if ($null -ne $Event.SourceEventArgs.Data) {
-      Write-Host "[app] $($Event.SourceEventArgs.Data)"
-      [void]$Event.MessageData.AppendLine($Event.SourceEventArgs.Data)
-    }
-  } -MessageData $stdout
-
-  $errEvent = Register-ObjectEvent -InputObject $proc -EventName ErrorDataReceived -Action {
-    if ($null -ne $Event.SourceEventArgs.Data) {
-      Write-Host "[app:stderr] $($Event.SourceEventArgs.Data)"
-      [void]$Event.MessageData.AppendLine($Event.SourceEventArgs.Data)
-    }
-  } -MessageData $stderr
-
-  Write-Host "Launching $ExePath ..."
-  [void]$proc.Start()
-  $proc.BeginOutputReadLine()
-  $proc.BeginErrorReadLine()
-
-  $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
-
-  # Phase 1: wait for the relayed "MURASAKI_PORT=<n>" line.
-  $port = $null
-  while (-not $port -and (Get-Date) -lt $deadline) {
-    if ($stdout.ToString() -match 'MURASAKI_PORT=(\d+)') {
-      $port = [int]$Matches[1]
-      break
-    }
-    if ($proc.HasExited) {
-      Unregister-Event -SourceIdentifier $outEvent.Name -ErrorAction SilentlyContinue
-      Unregister-Event -SourceIdentifier $errEvent.Name -ErrorAction SilentlyContinue
-      Write-Error "$ExePath exited early (code $($proc.ExitCode)) before reporting a port."
-      exit 1
-    }
-    Start-Sleep -Milliseconds 500
-  }
-  if (-not $port) {
-    Write-Error "Timed out after ${WaitTimeoutSeconds}s waiting for MURASAKI_PORT."
-    exit 1
-  }
-
-  # Phase 2: poll the backend for an HTTP 200 — proves prod-server.mjs is
-  # actually serving, not just that node started.
-  Write-Host "Backend reported port $port — polling http://127.0.0.1:$port/ ..."
-  $ok = $false
-  while (-not $ok -and (Get-Date) -lt $deadline) {
-    try {
-      $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$port/" -UseBasicParsing -TimeoutSec 5
-      if ($resp.StatusCode -eq 200) { $ok = $true; break }
-    } catch {
-      # Not up yet (or crashed after printing the port) — keep polling.
-    }
-    Start-Sleep -Milliseconds 500
-  }
-  if (-not $ok) {
-    Write-Error "Never got HTTP 200 from 127.0.0.1:$port within the timeout."
-    exit 1
-  }
-  Write-Host 'Got HTTP 200 from the installed app.'
-
-  [PSCustomObject]@{
-    Process      = $proc
-    Stdout       = $stdout
-    Stderr       = $stderr
-    Port         = $port
-    OutEventName = $outEvent.Name
-    ErrEventName = $errEvent.Name
-  }
-}
-
-# Unregisters a session's output/error event subscriptions and force-kills
-# its process tree if it's still running (a clean quit exits it on its own;
-# this is the fallback for the negative case, where nothing relaunches it).
-function Stop-AppSession($Session) {
-  if ($null -eq $Session) { return }
-  Unregister-Event -SourceIdentifier $Session.OutEventName -ErrorAction SilentlyContinue
-  Unregister-Event -SourceIdentifier $Session.ErrEventName -ErrorAction SilentlyContinue
-  if (-not $Session.Process.HasExited) {
-    Stop-ProcessTree -RootId $Session.Process.Id
-  }
-}
-
 function Wait-Marker([int]$WaitTimeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
@@ -363,18 +170,47 @@ function Wait-Marker([int]$WaitTimeoutSeconds) {
   return (Test-Path $MarkerPath)
 }
 
-# Looks for a NEW process running $ExePath (a different pid from the one
-# that just quit) — the apply-helper's relaunch step (updater.rs's
-# `relaunch()`) spawns exactly this.
-function Wait-Relaunch([int]$OriginalPid, [int]$WaitTimeoutSeconds) {
-  $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
-  while ((Get-Date) -lt $deadline) {
-    $found = Get-Process -ErrorAction SilentlyContinue |
-      Where-Object { $_.Path -eq $ExePath -and $_.Id -ne $OriginalPid }
-    if ($found) { return @($found)[0] }
-    Start-Sleep -Milliseconds 500
-  }
-  return $null
+# Invokes the installed launcher's `--apply-update` mode directly, with the
+# exact argv `maybe_spawn_apply_helper` (launcher.rs) builds in production.
+# Uses `Start-Process -Wait -PassThru` rather than the `&` call operator — a
+# `windows_subsystem="windows"` binary is not reliably waited on by `&`.
+# $SetupV2/$InstallDir/$ExePath may contain spaces, so each space-containing
+# argument is individually wrapped in embedded double quotes.
+#
+# Redirects the helper's stdout/stderr to files. The re-exec'd copy that does
+# the actual install inherits these handles and keeps writing to them after
+# this original process has already returned `Outcome::ReExeced`, so the files
+# accumulate the WHOLE `murasaki-apply:` diagnostic chain — read them after the
+# marker wait resolves (see `Show-ApplyDiagnostics`). On a failure this is the
+# difference between a bare "marker never appeared" and seeing exactly where
+# the apply stopped (bad sha256, a stuck NSIS install, …), which is the only
+# thing a CI log has to go on. Returns the process plus the two log paths.
+function Invoke-ApplyUpdate([string]$Sha256, [int]$WaitPid, [string]$Label) {
+  $outLog = Join-Path $env:TEMP "murasaki-apply-$Label-out.log"
+  $errLog = Join-Path $env:TEMP "murasaki-apply-$Label-err.log"
+  $argArray = @(
+    '--apply-update',
+    '--payload', "`"$SetupV2`"",
+    '--sha256', $Sha256,
+    '--wait-pid', "$WaitPid",
+    '--target', "`"$InstallDir`"",
+    '--relaunch', "`"$ExePath`""
+  )
+  $proc = Start-Process -FilePath $ExePath -ArgumentList $argArray -Wait -PassThru `
+    -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+  [PSCustomObject]@{ Process = $proc; OutLog = $outLog; ErrLog = $errLog }
+}
+
+# Prints whatever the apply-helper chain wrote. Call it AFTER the marker wait
+# resolves, by which point the re-exec'd copy has finished (or timed out) and
+# flushed its output. Best-effort reads (`-ErrorAction SilentlyContinue`): the
+# relaunched app can still hold the stderr handle open, and a missing/locked
+# log must never turn a diagnostic aid into a hard failure.
+function Show-ApplyDiagnostics($Apply) {
+  Write-Host '--- apply-helper stderr (murasaki-apply: lines) ---'
+  Get-Content -Path $Apply.ErrLog -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
+  Write-Host '--- apply-helper stdout ---'
+  Get-Content -Path $Apply.OutLog -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
 }
 
 # ── main ──────────────────────────────────────────────────────────────────
@@ -394,60 +230,51 @@ try {
 
   # ── Positive case ────────────────────────────────────────────────────
   Write-Host ''
-  Write-Host '=== Positive case: v1 -> v2 via the real quit -> apply -> relaunch path ==='
+  Write-Host '=== Positive case: v1 -> v2 via --apply-update, invoked directly ==='
 
   Install-SetupSilently -SetupPath $SetupV1
   if (Test-Path $MarkerPath) {
     Write-Error "unexpected: v2 marker already present after a fresh v1 install ($MarkerPath)"
     exit 1
   }
-  Write-Host "v1 installed at $ExePath; v2 marker correctly absent."
+  Write-Host "v1 installed at $ExePath; v2 marker correctly absent after a fresh v1 install."
 
   $sha256 = (Get-FileHash -Path $SetupV2 -Algorithm SHA256).Hash.ToLower()
   Write-Host "v2 payload sha256: $sha256"
 
-  Write-Handoff -PayloadPath $SetupV2 -Sha256 $sha256
-  Add-QuitScript -Path $IndexHtmlPath
+  # A genuinely short-lived process so the helper exercises the real
+  # "wait for the quitting launcher's pid to exit" gate — in production this
+  # is the launcher's own pid; here it's this sleeper's.
+  $sleeper = Start-Process -FilePath 'powershell' -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 4' -PassThru
+  Write-Host "wait-pid (sleeper): $($sleeper.Id)"
 
-  $session = Start-InstalledApp -WaitTimeoutSeconds $TimeoutSeconds
-  $originalPid = $session.Process.Id
-  Write-Host "App is up (pid $originalPid); waiting for its injected script to fire the real appQuit path..."
+  $apply = Invoke-ApplyUpdate -Sha256 $sha256 -WaitPid $sleeper.Id -Label 'pos'
+  Write-Host "--apply-update exit code: $($apply.Process.ExitCode)"
+  # The installed exe lives inside --target, so it self-copies to
+  # %TEMP%\murasaki-apply-<pid>.exe, re-execs with --no-self-copy, and
+  # returns exit 0 (Outcome::ReExeced) BEFORE the real install happens — the
+  # marker is not expected to exist yet at this point.
 
-  try {
-    $markerAppeared = Wait-Marker -WaitTimeoutSeconds $MarkerTimeoutSeconds
-  } finally {
-    Stop-AppSession -Session $session
-  }
-
+  $markerAppeared = Wait-Marker -WaitTimeoutSeconds $MarkerTimeoutSeconds
+  Show-ApplyDiagnostics $apply
   if (-not $markerAppeared) {
     Write-Error (
       "v2 marker never appeared at $MarkerPath within ${MarkerTimeoutSeconds}s. " +
-      'This is the decisive assertion this workflow exists to make: if the apply-helper ' +
-      "was killed by the launcher's Job Object before it could apply the update (the " +
-      'exact Windows-specific bug the "launcher spawns the helper, not Node" fix — contract ' +
-      '§7 REVISED — addresses), this is what it looks like.'
+      'This is the decisive assertion this workflow exists to make: the apply ' +
+      'path (contract §8 — sha256 verify, wait-pid gate, self-copy/re-exec, ' +
+      'silent NSIS install) did not complete.'
     )
     exit 1
   }
   Write-Host 'v2 marker present — the update was applied for real.'
 
-  if (Test-Path $HandoffPath) {
-    Write-Error "handoff file $HandoffPath is still present — the launcher should have deleted it on its way out (contract §7 REVISED step 6)."
+  if (-not (Test-Path $ExePath)) {
+    Write-Error "$ExePath is gone after a successful apply — the app must remain installed/relaunchable."
     exit 1
   }
-  Write-Host 'Handoff file correctly deleted by the launcher.'
-
-  $relaunched = Wait-Relaunch -OriginalPid $originalPid -WaitTimeoutSeconds $RelaunchTimeoutSeconds
-  if (-not $relaunched) {
-    Write-Error "no relaunched $ExePath process was found within ${RelaunchTimeoutSeconds}s after the update applied."
-    exit 1
-  }
-  Write-Host "App relaunched: pid $($relaunched.Id)."
-
-  Write-Host '--- full stdout (original process; may include the apply-helper''s inherited output — see this script''s header comment) ---'
-  Write-Host $session.Stdout.ToString()
-  Write-Host '--- full stderr (original process; look for murasaki-apply: lines) ---'
-  Write-Host $session.Stderr.ToString()
+  Write-Host "$ExePath still present after the apply."
+  # Note: confirming the relaunched app actually starts is not reliable
+  # headless (it needs a webview), so it is intentionally not asserted here.
 
   Stop-InstallDirProcesses
   Write-Host 'Positive case PASSED.'
@@ -466,42 +293,34 @@ try {
   # Deliberately wrong — a real sha256 is astronomically unlikely to ever be
   # all zeros.
   $badSha256 = '0' * 64
-  Write-Handoff -PayloadPath $SetupV2 -Sha256 $badSha256
-  Add-QuitScript -Path $IndexHtmlPath
 
-  $session2 = Start-InstalledApp -WaitTimeoutSeconds $TimeoutSeconds
-  Write-Host "App is up (pid $($session2.Process.Id)); waiting to confirm the marker does NOT appear..."
-
-  try {
-    $markerAppearedBad = Wait-Marker -WaitTimeoutSeconds $NegativeMarkerTimeoutSeconds
-  } finally {
-    Stop-AppSession -Session $session2
+  # verify_sha256 runs before the wait-pid gate (updater.rs's
+  # verify_and_wait), so this dummy pid is never actually waited on.
+  $applyBad = Invoke-ApplyUpdate -Sha256 $badSha256 -WaitPid 999999 -Label 'neg'
+  Write-Host "--apply-update exit code: $($applyBad.Process.ExitCode) (expect non-zero)"
+  Show-ApplyDiagnostics $applyBad
+  if ($applyBad.Process.ExitCode -eq 0) {
+    Write-Error "--apply-update exited 0 despite a deliberately wrong sha256 — the sha256 gate did not fire."
+    exit 1
   }
 
+  $markerAppearedBad = Wait-Marker -WaitTimeoutSeconds $NegativeMarkerTimeoutSeconds
   if ($markerAppearedBad) {
     Write-Error "v2 marker appeared at $MarkerPath despite a deliberately wrong sha256 — a corrupt payload must never apply."
     exit 1
   }
   Write-Host 'Marker correctly absent — the sha256 mismatch aborted the apply before touching the install.'
 
-  if (Test-Path $HandoffPath) {
-    Write-Error "handoff file $HandoffPath is still present after the failed apply — the launcher should still delete it on its way out."
-    exit 1
-  }
-
   if (-not (Test-Path $ExePath)) {
     Write-Error "$ExePath is gone after the failed apply — the install must survive a corrupt payload intact."
     exit 1
   }
-
-  Write-Host 'Confirming the install is still launchable after the failed apply...'
-  Stop-InstallDirProcesses
-  $sanitySession = Start-InstalledApp -WaitTimeoutSeconds $TimeoutSeconds
-  Stop-AppSession -Session $sanitySession
-  Write-Host 'Install is still intact and launchable.'
-
-  Write-Host '--- full stderr (negative-case original process) ---'
-  Write-Host $session2.Stderr.ToString()
+  $metaPath = Join-Path $ResourcesDir 'murasaki-meta.json'
+  if (-not (Test-Path $metaPath)) {
+    Write-Error "$metaPath is gone after the failed apply — the install must survive a corrupt payload intact."
+    exit 1
+  }
+  Write-Host 'Install is still intact after the failed apply.'
 
   Stop-InstallDirProcesses
   Write-Host 'Negative case PASSED.'
@@ -510,6 +329,8 @@ try {
 } finally {
   Stop-InstallDirProcesses
   Uninstall-InstalledApp
+  Get-ChildItem $env:TEMP -Filter 'murasaki-apply-*' -ErrorAction SilentlyContinue |
+    ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
   if ($transcriptStarted) {
     Stop-Transcript | Out-Null
   }
