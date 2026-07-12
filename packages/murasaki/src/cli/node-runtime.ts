@@ -58,26 +58,25 @@ export async function ensureNodeBinary(
     const extractDir = join(workDir, 'extract')
     await mkdir(extractDir, { recursive: true })
 
+    // `tar` extracts both the Windows `.zip` and the macOS/Linux `.tar.gz`
+    // (bsdtar auto-detects the format from `-xf`), and — unlike `unzip` — it
+    // ships in the box on every target we build on: `tar.exe` is bundled with
+    // Windows 10 1803+ (as bsdtar/libarchive), and `unzip` is NOT a stock
+    // Windows command, so the previous win32 branch failed with `spawnSync
+    // unzip ENOENT` on a clean Windows host (CI only passed because Git Bash
+    // supplies `unzip` there). One extractor, every platform.
+    const extract = spawnSync('tar', ['-xf', archivePath, '-C', extractDir])
+    if (extract.status !== 0) {
+      throw new Error(
+        `murasaki: failed to extract ${archiveName}: ${extract.stderr?.toString().trim() || extract.error}`,
+      )
+    }
     // The Windows zip lays node.exe at the archive root (node-v.../node.exe);
     // the macOS/Linux tarball nests it under bin/ (node-v.../bin/node).
-    let extractedNode: string
-    if (platform === 'win32') {
-      const extract = spawnSync('unzip', ['-q', '-o', archivePath, '-d', extractDir])
-      if (extract.status !== 0) {
-        throw new Error(
-          `murasaki: failed to extract ${archiveName}: ${extract.stderr?.toString().trim() || extract.error}`,
-        )
-      }
-      extractedNode = join(extractDir, dist, 'node.exe')
-    } else {
-      const extract = spawnSync('tar', ['-xzf', archivePath, '-C', extractDir])
-      if (extract.status !== 0) {
-        throw new Error(
-          `murasaki: failed to extract ${archiveName}: ${extract.stderr?.toString().trim() || extract.error}`,
-        )
-      }
-      extractedNode = join(extractDir, dist, 'bin', 'node')
-    }
+    const extractedNode =
+      platform === 'win32'
+        ? join(extractDir, dist, 'node.exe')
+        : join(extractDir, dist, 'bin', 'node')
     if (!existsSync(extractedNode)) {
       throw new Error(`murasaki: extracted archive is missing ${binaryName} at ${extractedNode}`)
     }
