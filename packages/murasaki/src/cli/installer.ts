@@ -529,6 +529,37 @@ function detectTool(cmd: string, versionArgs: string[]): boolean {
 }
 
 /**
+ * Resolves the `makensis` executable to a runnable command/path, or `null`
+ * when NSIS isn't installed anywhere we can find it.
+ *
+ * Prefers a bare `makensis` on PATH — which covers `brew install makensis` on
+ * macOS, the distro package on Linux, and Windows setups that opted NSIS onto
+ * PATH. Falls back — on Windows only — to NSIS's default install locations,
+ * because the NSIS Windows installer does **not** add itself to PATH (unlike
+ * Homebrew/apt), so a stock `Program Files (x86)\NSIS\makensis.exe` is present
+ * on disk yet invisible to a bare-name `spawnSync`, which fails with ENOENT
+ * (confirmed on a clean Windows host — the reason a stock NSIS install looked
+ * "not found"). The full path is passed as argv, not through a shell, so the
+ * spaces in `Program Files (x86)` need no quoting.
+ */
+function resolveMakensis(): string | null {
+  if (detectTool('makensis', ['-VERSION'])) return 'makensis'
+  if (process.platform === 'win32') {
+    const roots = [
+      process.env['ProgramFiles(x86)'],
+      process.env.ProgramFiles,
+      'C:\\Program Files (x86)',
+      'C:\\Program Files',
+    ].filter((r): r is string => Boolean(r))
+    for (const root of roots) {
+      const candidate = join(root, 'NSIS', 'makensis.exe')
+      if (existsSync(candidate) && detectTool(candidate, ['-VERSION'])) return candidate
+    }
+  }
+  return null
+}
+
+/**
  * Escapes a string for use inside a double-quoted NSIS literal: `$` starts a
  * variable/constant reference and `"` closes the string, so both need NSIS's
  * own escapes (`$$` and `$\"` respectively) rather than the backslash
@@ -611,7 +642,8 @@ async function buildNsisInstaller(opts: {
 }): Promise<boolean> {
   const { cwd, config, productName, version, bundleDir, branding } = opts
 
-  if (!detectTool('makensis', ['-VERSION'])) {
+  const makensis = resolveMakensis()
+  if (!makensis) {
     process.stdout.write(
       `\n${warn('installer: makensis not found — skipping the NSIS .exe installer.')}\n` +
         `${dim('  install NSIS: https://nsis.sourceforge.net/ (or `brew install makensis` on macOS, which can compile — but not run — the installer).')}\n\n`,
@@ -628,21 +660,25 @@ async function buildNsisInstaller(opts: {
   const nsiDir = await mkdtemp(join(tmpdir(), 'murasaki-nsis-'))
   try {
     const nsiPath = join(nsiDir, 'installer.nsi')
-    await writeFile(
-      nsiPath,
-      nsiScript({
-        productName,
-        version,
-        publisher,
-        bundleDir,
-        setupPath,
-        installMode,
-        locales: config.locales,
-        branding,
-      }),
-    )
+    // Prepend a UTF-8 BOM so makensis reads the script as UTF-8 regardless of
+    // the host's ANSI codepage. Without it, a non-ASCII byte — the © in a
+    // copyright string, a Japanese LangString like "起動" — is decoded in the
+    // system codepage (CP932 on a Japanese Windows host) and makensis aborts
+    // with "Bad text encoding". `Unicode true` inside the script controls the
+    // *output* installer's encoding, not how the *source* file is read.
+    const nsi = nsiScript({
+      productName,
+      version,
+      publisher,
+      bundleDir,
+      setupPath,
+      installMode,
+      locales: config.locales,
+      branding,
+    })
+    await writeFile(nsiPath, `\uFEFF${nsi}`)
 
-    const result = spawnSync('makensis', [nsiPath], { encoding: 'utf8' })
+    const result = spawnSync(makensis, [nsiPath], { encoding: 'utf8' })
     if (result.status !== 0) {
       process.stdout.write(
         `\n${warn('installer: makensis failed, skipping the NSIS installer:')}\n${dim((result.stderr || result.stdout).trim())}\n\n`,
