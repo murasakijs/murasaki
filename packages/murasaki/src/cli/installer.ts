@@ -1,6 +1,6 @@
 import { resolve, join, dirname } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readdir } from 'node:fs/promises'
+import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -571,49 +571,94 @@ function nsisEscape(s: string): string {
 
 /**
  * BCP-47 locale → NSIS built-in language file name (NSIS ships these under
- * its own `Contents/Language files/`) — covers the locale set murasaki's
- * native menu i18n ships translations for (see menu-i18n.ts's
- * `DEFAULT_LOCALES`). Locales outside this set fall back to English, same as
- * `resolveMenuLabels` falling back to its `FALLBACK` locale.
+ * its own `Contents/Language files/`) plus the Windows "primary language
+ * id" — the low 10 bits of a LANGID (`LANGID & 0x3FF`) — used by
+ * `nsiScript`'s OS-language auto-detection in `.onInit`/`un.onInit` (mirrors
+ * `detect_locale()` in the native menu bar's Rust launcher). One table is
+ * the single source of truth for both the NSIS language declarations and
+ * the detection comparison chain below, rather than two parallel tables.
+ * Covers the locale set murasaki's native menu i18n ships translations for
+ * (see menu-i18n.ts's `DEFAULT_LOCALES`). Locales outside this set fall back
+ * to English, same as `resolveMenuLabels` falling back to its `FALLBACK`
+ * locale. Primary ids per
+ * https://learn.microsoft.com/windows/win32/intl/language-identifiers.
  */
-const NSIS_LANGUAGE_NAMES: Record<string, string> = {
-  en: 'English',
-  ja: 'Japanese',
-  'zh-Hans': 'SimpChinese',
-  ko: 'Korean',
-  es: 'Spanish',
-  fr: 'French',
-  de: 'German',
+const NSIS_LANGUAGES: Record<string, { name: string; primaryId: number }> = {
+  en: { name: 'English', primaryId: 0x09 },
+  ja: { name: 'Japanese', primaryId: 0x11 },
+  'zh-Hans': { name: 'SimpChinese', primaryId: 0x04 },
+  ko: { name: 'Korean', primaryId: 0x12 },
+  es: { name: 'Spanish', primaryId: 0x0a },
+  fr: { name: 'French', primaryId: 0x0c },
+  de: { name: 'German', primaryId: 0x07 },
 }
 
 /**
- * Resolves `config.locales` to the ordered, deduplicated NSIS language names
- * to declare via `MUI_LANGUAGE` — the first entry becomes the installer's
+ * Resolves `config.locales` to the ordered, deduplicated NSIS languages to
+ * declare via `MUI_LANGUAGE` — the first entry becomes the installer's
  * default/fallback language (the same "first entry wins" convention
- * `resolveMenuLabels` uses for the native menu). Defaults to `['English']`
- * when `locales` is unset or empty, so the installer stays single-language
- * with no picker (see `nsiScript`'s `hasLanguagePicker`) unless the app opts
- * into multiple locales.
+ * `resolveMenuLabels` uses for the native menu, and NSIS's own convention: a
+ * `$LANGUAGE` left unset by `.onInit` falls back to whichever
+ * `MUI_LANGUAGE` was inserted first). Defaults to `[English]` when
+ * `locales` is unset or empty.
  */
-function nsisLanguageNames(locales: string[] | undefined): string[] {
+function nsisLanguages(locales: string[] | undefined): { name: string; primaryId: number }[] {
   const list = locales && locales.length > 0 ? locales : ['en']
-  const names: string[] = []
+  const result: { name: string; primaryId: number }[] = []
   for (const locale of list) {
-    const mapped = NSIS_LANGUAGE_NAMES[locale] ?? 'English'
-    if (!names.includes(mapped)) names.push(mapped)
+    const mapped = NSIS_LANGUAGES[locale] ?? NSIS_LANGUAGES.en
+    if (!result.some((l) => l.name === mapped.name)) result.push(mapped)
   }
-  return names
+  return result
 }
 
 /**
  * The `${LANG_<NAME>}` NSIS preprocessor constant for a language name from
- * `nsisLanguageNames` (e.g. `"Japanese"` → `${LANG_JAPANESE}`). Built by
- * plain concatenation rather than a template literal so the literal
- * `${...}` reaches the generated `.nsi` text instead of being evaluated as a
- * JS interpolation.
+ * `nsisLanguages` (e.g. `"Japanese"` → `${LANG_JAPANESE}`). Built by plain
+ * concatenation rather than a template literal so the literal `${...}`
+ * reaches the generated `.nsi` text instead of being evaluated as a JS
+ * interpolation.
  */
 function nsisLangConstant(languageName: string): string {
   return '${LANG_' + languageName.toUpperCase() + '}'
+}
+
+/**
+ * Generates NSIS instructions that read the OS UI language via the
+ * always-bundled System plugin (`System.dll` ships with every NSIS
+ * install — not an external plugin, same "built-in" status as `nsExec`/
+ * `NSISdl` used elsewhere in this script) and set `$LANGUAGE` to the first
+ * declared `languages` entry whose Windows primary language id matches —
+ * mirroring `detect_locale()`'s OS-language-follows behavior in the native
+ * menu bar, with no picker dialog. Matches on the *primary* id (masked with
+ * `0x3FF`) rather than the full LANGID so regional variants (e.g. en-GB,
+ * en-US) both resolve to the same declared language. When nothing matches,
+ * `$LANGUAGE` is simply left untouched — it already holds NSIS's own
+ * default (the first `!insertmacro MUI_LANGUAGE` declared, see
+ * `nsisLanguages`) before `.onInit`/`un.onInit` runs, so that's the correct
+ * fallback for free. `labelPrefix` keeps this block's labels distinct
+ * between the installer's `.onInit` and the uninstaller's `un.onInit` (both
+ * call this) — every label is explicit and unique, no relative `+N` jumps.
+ */
+function nsisLanguageDetection(
+  languages: { name: string; primaryId: number }[],
+  labelPrefix: string,
+): string {
+  const lines = [
+    `System::Call 'kernel32::GetUserDefaultUILanguage() i .r0'`,
+    `IntOp $0 $0 & 0x3FF`,
+  ]
+  languages.forEach((lang, i) => {
+    const matchLabel = `${labelPrefix}_match_${i}`
+    const nextLabel = `${labelPrefix}_next_${i}`
+    lines.push(`StrCmp $0 "${lang.primaryId}" ${matchLabel} ${nextLabel}`)
+    lines.push(`${matchLabel}:`)
+    lines.push(`StrCpy $LANGUAGE ${nsisLangConstant(lang.name)}`)
+    lines.push(`Goto ${labelPrefix}_done`)
+    lines.push(`${nextLabel}:`)
+  })
+  lines.push(`${labelPrefix}_done:`)
+  return lines.map((l) => `  ${l}`).join('\n')
 }
 
 /**
@@ -629,7 +674,7 @@ function finishRunText(productName: string, languageName: string): string {
 /**
  * The running-app guard's confirmation dialog text (see `nsiScript`'s
  * `un.onInit`, shown when the uninstaller detects `${name}.exe` still
- * running) — translated for every language `NSIS_LANGUAGE_NAMES` maps to, so
+ * running) — translated for every language `NSIS_LANGUAGES` maps to, so
  * the full shipped locale set gets a real translation instead of
  * `finishRunText`'s English-only fallback.
  *
@@ -724,7 +769,7 @@ async function buildNsisInstaller(opts: {
     // system codepage (CP932 on a Japanese Windows host) and makensis aborts
     // with "Bad text encoding". `Unicode true` inside the script controls the
     // *output* installer's encoding, not how the *source* file is read.
-    const nsi = nsiScript({
+    const nsi = await nsiScript({
       productName,
       version,
       publisher,
@@ -752,6 +797,92 @@ async function buildNsisInstaller(opts: {
 }
 
 /**
+ * Recursively walks `bundleDir` and reports the single largest file, for
+ * `nsiScript`'s progress-bar fix (see `installFilesInstructions`) — NSIS's
+ * InstFiles progress bar advances one tick per executed instruction
+ * regardless of the bytes that instruction actually copies, so extracting
+ * the dominant file (often ~90%+ of total bundle size, e.g. the bundled
+ * `node.exe`) as its own LAST `File` instruction is what keeps the bar
+ * tracking real progress instead of freezing then jumping to 100%.
+ *
+ * Returns `null` when splitting it out isn't worth it: either it isn't a
+ * meaningful share of the payload (< 30% of the bundle's total bytes), or its
+ * basename collides with another file elsewhere in the tree — an `/x
+ * <basename>` exclusion in `installFilesInstructions` would then also
+ * (wrongly) exclude that other file.
+ */
+async function findDominantFile(
+  bundleDir: string,
+): Promise<{ absPath: string; relPath: string; basename: string } | null> {
+  const files: { absPath: string; relPath: string; basename: string; size: number }[] = []
+
+  async function walk(dir: string, relDir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true })
+    for (const entry of entries) {
+      const abs = join(dir, entry.name)
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name
+      if (entry.isDirectory()) {
+        await walk(abs, rel)
+      } else if (entry.isFile()) {
+        const { size } = await stat(abs)
+        files.push({ absPath: abs, relPath: rel, basename: entry.name, size })
+      }
+    }
+  }
+  await walk(bundleDir, '')
+  if (files.length === 0) return null
+
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0)
+  const largest = files.reduce((max, f) => (f.size > max.size ? f : max))
+  if (totalBytes === 0 || largest.size < totalBytes * 0.3) return null
+  if (files.filter((f) => f.basename === largest.basename).length > 1) return null
+
+  return { absPath: largest.absPath, relPath: largest.relPath, basename: largest.basename }
+}
+
+/**
+ * Builds the install section's `File` instruction(s) for `sourceGlob`. With
+ * no `dominant` file (see `findDominantFile`), this is just the original
+ * single `File /r` extraction. With one, the dominant file is excluded from
+ * the `/r` extraction (`/x <basename>`) and instead extracted by itself as
+ * the LAST instruction — see `findDominantFile`'s doc comment for WHY this
+ * ordering matters (NSIS's InstFiles progress bar is instruction-count
+ * based, not byte based).
+ */
+function installFilesInstructions(
+  sourceGlob: string,
+  dominant: { absPath: string; relPath: string; basename: string } | null,
+): string {
+  if (!dominant) return `File /r "${sourceGlob}"`
+  return `File /r /x "${nsisEscape(dominant.basename)}" "${sourceGlob}"`
+}
+
+/**
+ * Extracts the dominant file, emitted as the very LAST instructions of the
+ * install section (after the shortcuts, the uninstaller and the registry
+ * writes — none of which depend on this file existing yet). The progress bar
+ * ticks once per instruction, so anything emitted after this would keep the
+ * bar short of full for the entire multi-second extraction; putting it dead
+ * last means the bar climbs through everything else first and only then sits
+ * on the big file, which is what "almost done" is supposed to look like.
+ * Empty when there's no dominant file — `installFilesInstructions` then
+ * already extracted everything.
+ */
+function dominantFileInstructions(
+  dominant: { absPath: string; relPath: string; basename: string } | null,
+): string {
+  if (!dominant) return ''
+
+  const slash = dominant.relPath.lastIndexOf('/')
+  const relDir = slash === -1 ? '' : dominant.relPath.slice(0, slash)
+  const bigFile = `File "${nsisEscape(dominant.absPath)}"`
+  if (relDir === '') return bigFile
+
+  const relDirWin = nsisEscape(relDir.split('/').join('\\'))
+  return `SetOutPath "$INSTDIR\\${relDirWin}"\n  ${bigFile}\n  SetOutPath "$INSTDIR"`
+}
+
+/**
  * Builds the NSIS script text. Uses Modern UI 2 (`MUI2.nsh`, bundled with
  * every NSIS install) for the wizard pages, `NSISdl` (also bundled) to fetch
  * the WebView2 Evergreen Bootstrapper when the runtime isn't already present,
@@ -760,13 +891,12 @@ async function buildNsisInstaller(opts: {
  * `installMode` — see `config.installer.windows.installMode`'s doc comment.
  *
  * `locales` (top-level `config.locales`) drives which `MUI_LANGUAGE`s get
- * declared (see `nsisLanguageNames`); when more than one resolves, a
- * language-selection dialog is shown at launch (`MUI_LANGDLL_DISPLAY` in
- * `.onInit`), reserved early for solid compression
- * (`MUI_RESERVEFILE_LANGDLL`), and the choice is persisted to the registry
- * (`MUI_LANGDLL_REGISTRY_*`) so the separately-run uninstaller picks it back
- * up (`MUI_UNGETLANGUAGE` in `un.onInit`) instead of re-prompting. With 0/1
- * locale, none of that is emitted — just the plain single-language installer.
+ * declared (see `nsisLanguages`). There's no language-picker dialog — both
+ * `.onInit` and `un.onInit` auto-detect the OS UI language and select the
+ * matching declared language (`nsisLanguageDetection`), the same
+ * OS-language-follows behavior `detect_locale()` gives the native menu bar.
+ * An unmatched OS language falls back to the first declared language, same
+ * as NSIS's own default.
  * `branding` (`config.installer.windows.{icon,banner,sidebar,license}`) maps
  * onto `MUI_ICON`/`MUI_UNICON`, `MUI_HEADERIMAGE_BITMAP`,
  * `MUI_WELCOMEFINISHPAGE_BITMAP`, and an optional `MUI_PAGE_LICENSE` (added
@@ -780,7 +910,7 @@ async function buildNsisInstaller(opts: {
  * through `nsisEscape` first so a stray `$`/`"` in config text (product name,
  * publisher, …) can't corrupt the script.
  */
-function nsiScript(opts: {
+async function nsiScript(opts: {
   productName: string
   version: string
   publisher: string
@@ -789,7 +919,7 @@ function nsiScript(opts: {
   installMode: 'perUser' | 'perMachine'
   locales?: string[]
   branding: WindowsBranding
-}): string {
+}): Promise<string> {
   const { productName, version, publisher, bundleDir, setupPath, installMode, locales, branding } = opts
   const name = nsisEscape(productName)
   const pub = nsisEscape(publisher)
@@ -809,9 +939,13 @@ function nsiScript(opts: {
   // dir, recursively" — despite the name, `*.*` matches extension-less files
   // too (a long-standing NSIS/DOS glob convention, not a literal dot filter).
   const sourceGlob = join(bundleDir, '*.*')
+  // The single largest file in the bundle (if it's worth splitting out — see
+  // findDominantFile), extracted LAST by installFilesInstructions below
+  // instead of being lumped into the `/r` extraction.
+  const dominant = await findDominantFile(bundleDir)
 
-  const languageNames = nsisLanguageNames(locales)
-  const hasLanguagePicker = languageNames.length > 1
+  const languages = nsisLanguages(locales)
+  const languageNames = languages.map((l) => l.name)
 
   const brandingDefines = [
     branding.icon ? `!define MUI_ICON "${nsisEscape(branding.icon)}"` : '',
@@ -822,14 +956,6 @@ function nsiScript(opts: {
   ]
     .filter(Boolean)
     .join('\n')
-
-  const langDllDefines = hasLanguagePicker
-    ? [
-        `!define MUI_LANGDLL_REGISTRY_ROOT "${regRoot}"`,
-        `!define MUI_LANGDLL_REGISTRY_KEY "Software\\${name}"`,
-        `!define MUI_LANGDLL_REGISTRY_VALUENAME "Installer Language"`,
-      ].join('\n')
-    : ''
 
   const pages = [
     '!insertmacro MUI_PAGE_WELCOME',
@@ -878,15 +1004,12 @@ function nsiScript(opts: {
     )
     .join('\n')
 
-  // Solid compression (SetCompressor /SOLID below) decompresses the whole
-  // data block before any of it is usable, so the language dialog's own
-  // resources must be reserved first — otherwise the dialog couldn't show
-  // until the entire (potentially large) install payload had decompressed.
-  const reserveLangDll = hasLanguagePicker ? '!insertmacro MUI_RESERVEFILE_LANGDLL' : ''
-
-  const onInit = hasLanguagePicker
-    ? `Function .onInit\n  !insertmacro MUI_LANGDLL_DISPLAY\nFunctionEnd`
-    : ''
+  // Always emitted (no language-picker guard needed anymore) — detects the
+  // OS UI language and selects the matching declared language, no dialog.
+  // See `nsisLanguageDetection`'s doc comment.
+  const onInit = `Function .onInit
+${nsisLanguageDetection(languages, 'instlang')}
+FunctionEnd`
 
   // Detects whether `${name}.exe` is still running via the always-bundled
   // `nsExec` plugin plus Windows' built-in `tasklist`/`taskkill` (no external
@@ -928,8 +1051,12 @@ function nsiScript(opts: {
   Abort
   murasaki_uninst_notrunning:`
 
+  // Language detection runs BEFORE the running-app guard so the guard's own
+  // MessageBox (above) is shown in the detected language rather than
+  // whatever `$LANGUAGE` happened to default to.
   const unOnInit = `Function un.onInit
-${hasLanguagePicker ? '  !insertmacro MUI_UNGETLANGUAGE\n' : ''}${uninstRunningGuard}
+${nsisLanguageDetection(languages, 'unlang')}
+${uninstRunningGuard}
 FunctionEnd`
 
   // `ManifestSupportedOS all` embeds a modern-OS compatibility manifest. Without
@@ -953,7 +1080,12 @@ SetCompressor /SOLID lzma
   const installSection = `Section "Install"
   SetShellVarContext ${shellCtx}
   SetOutPath "$INSTDIR"
-  File /r "${sourceGlob}"
+  ; Everything except the dominant file (see findDominantFile) — that one is
+  ; extracted at the very bottom of this section. NSIS's InstFiles progress
+  ; bar advances one tick per File instruction, not per byte, so extracting a
+  ; huge file (e.g. the bundled node.exe) any earlier would park the bar
+  ; short of full for nearly the whole install instead of tracking progress.
+  ${installFilesInstructions(sourceGlob, dominant)}
 
   CreateDirectory "$SMPROGRAMS\\${name}"
   CreateShortcut "$SMPROGRAMS\\${name}\\${name}.lnk" "${exeRuntimePath}"
@@ -971,6 +1103,9 @@ SetCompressor /SOLID lzma
   WriteRegStr ${regRoot} "${uninstallRegKey}" "QuietUninstallString" '"$INSTDIR\\Uninstall.exe" /S'
   WriteRegDWORD ${regRoot} "${uninstallRegKey}" "NoModify" 1
   WriteRegDWORD ${regRoot} "${uninstallRegKey}" "NoRepair" 1
+
+  ; Dead last on purpose — see dominantFileInstructions.
+  ${dominantFileInstructions(dominant)}
 SectionEnd`
 
   const webview2Fn = `; Checks both the per-machine and per-user WebView2 Evergreen client
@@ -1010,14 +1145,12 @@ SectionEnd`
     [
       header,
       brandingDefines,
-      langDllDefines,
       pages,
       '!insertmacro MUI_UNPAGE_CONFIRM\n!insertmacro MUI_UNPAGE_INSTFILES',
       languageMacros,
       langStrings,
       uninstRunningLangStrings,
       uninstKillFailedLangStrings,
-      reserveLangDll,
       installSection,
       onInit,
       webview2Fn,
