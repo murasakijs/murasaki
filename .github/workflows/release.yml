@@ -81,50 +81,16 @@ jobs:
             echo "$pkg version OK: $PKG_VERSION"
           done
 
-      # `npm publish` (unlike `pnpm publish`) does not rewrite workspace:^
-      # dependencies. Replace EVERY one of them with the real published version
-      # before publishing — murasaki depends on both @murasakijs/native and
-      # @murasakijs/ui this way, and shipping either as the literal string
-      # "workspace:^" produces a package nobody can install. This mutation is
-      # CI-only: the committed packages/murasaki/package.json keeps workspace:^
-      # so the monorepo's local link keeps working.
+      # `npm publish` (unlike `pnpm publish`) ships `workspace:` specs verbatim,
+      # and "workspace:^" is not a version anyone can install. Rewrite them to
+      # the versions they resolve to — across every published manifest and every
+      # dependency field, preserving each workspace operator's meaning — and fail
+      # the release if any survive. See the script for the full rationale.
       #
-      # The loop (rather than naming @murasakijs/native alone) is the point: the
-      # ui dependency arrived with the updater and was silently left unresolved,
-      # so a new workspace:^ dep must not be able to slip through again. The
-      # guard below fails the release if any dependency is still a workspace:
-      # spec, whether or not this step knew to rewrite it.
-      - name: Resolve workspace:^ dependencies to real versions
-        run: |
-          node -e "
-          const fs = require('fs');
-          const pkgPath = 'packages/murasaki/package.json';
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-          const versions = {
-            '@murasakijs/native': require('./crates/native/package.json').version,
-            '@murasakijs/ui': require('./packages/ui/package.json').version,
-          };
-          for (const [name, spec] of Object.entries(pkg.dependencies || {})) {
-            if (!String(spec).startsWith('workspace:')) continue;
-            const v = versions[name];
-            if (!v) {
-              console.error('::error::no known version for workspace dependency ' + name);
-              process.exit(1);
-            }
-            pkg.dependencies[name] = '^' + v;
-            console.log('Resolved ' + name + ' -> ^' + v);
-          }
-          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-          "
-          node -e "
-          const deps = require('./packages/murasaki/package.json').dependencies || {};
-          const bad = Object.entries(deps).filter(([, v]) => String(v).startsWith('workspace:'));
-          if (bad.length) {
-            console.error('::error::unresolved workspace dependencies: ' + bad.map(([k]) => k).join(', '));
-            process.exit(1);
-          }
-          console.log('All workspace: dependencies resolved.');
-          "
+      # CI-only: the committed manifests keep their workspace: specs so the
+      # monorepo's local links keep working.
+      - name: Resolve workspace: dependencies to real versions
+        run: node scripts/resolve-workspace-deps.mjs
 
       # Keep the scaffolder template in sync with the release. create-murasaki's
       # default template pins `murasaki` in its package.json, and for a 0.x
