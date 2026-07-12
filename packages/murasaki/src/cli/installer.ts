@@ -816,6 +816,12 @@ function nsiScript(opts: {
     ? `Function un.onInit\n  !insertmacro MUI_UNGETLANGUAGE\nFunctionEnd`
     : ''
 
+  // `ManifestSupportedOS all` embeds a modern-OS compatibility manifest. Without
+  // it, NSIS ships only its Vista-era manifest, and our installer finishes fast
+  // enough that Windows' Program Compatibility Assistant flags it after the fact
+  // with "this program might not have installed correctly" — even on a perfectly
+  // good install. Declaring OS support opts the installer out of that PCA
+  // heuristic. See https://nsis.sourceforge.io/Reference/ManifestSupportedOS.
   const header = `Unicode true
 !include "MUI2.nsh"
 
@@ -823,6 +829,7 @@ Name "${name}"
 OutFile "${nsisEscape(setupPath)}"
 InstallDir "${installDir}"
 RequestExecutionLevel ${execLevel}
+ManifestSupportedOS all
 SetCompressor /SOLID lzma
 
 !define MUI_ABORTWARNING`
