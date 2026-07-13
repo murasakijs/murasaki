@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.26.0"
+version = "0.32.1"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
