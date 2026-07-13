@@ -182,9 +182,17 @@ we've benchmarked head-to-head:
   a no-op in production builds. Since `murasaki dev` serves over
   `http://localhost`, the standard **React DevTools browser extension** also
   works — just open the same URL in Chrome.
-- **Packaging on macOS (verified).** `murasaki bundle` → `.app`,
-  `murasaki installer` → `.dmg` (~43 MB compressed; the `.app` itself is
-  ~120 MB because it bundles Node + your app).
+- **Packaging.** `murasaki bundle` → a `.app` on macOS, a portable folder /
+  `.zip` on Windows. `murasaki installer` → a `.dmg` on macOS, an NSIS `.exe`
+  (and an `.msi`, where WiX is available) on Windows. The macOS `.dmg` is
+  ~43 MB compressed; the `.app` itself is ~120 MB because it bundles Node and
+  your app. See [Platform support](#platform-support) for what's covered.
+- **Automatic updates.** Set `updater: true`, drop a `<UpdateButton />` (or the
+  `useUpdate()` hook) in your UI, and publish with
+  `murasaki release --manifest --sign`. The app fetches the manifest, verifies
+  it against your **Ed25519** public key, checks the downloaded asset's
+  **SHA-256**, then replaces itself and relaunches. macOS and Windows x64 —
+  see [Automatic updates](https://murasaki.ichi10.com/en/docs/guides/auto-update).
 - **Trusted Publisher OIDC.** Tag-push triggers a signed
   `npm publish --provenance` — no long-lived npm tokens in CI.
 
@@ -203,16 +211,35 @@ murasaki release     Auto-update manifest helpers
 murasaki help        Show this help
 ```
 
-**Platform status:** `murasaki dev` works on macOS, Windows, and Linux.
-`murasaki bundle` ships **macOS** `.app` bundles and portable **Windows**
-folders / `.zip` archives today, including cross-architecture targets. On
-Windows targets, `murasaki installer` also produces an NSIS `.exe` when
-`makensis` is installed and an `.msi` when WiX v4 is available on Windows.
-macOS `.app` / `.dmg` artifacts must be built on macOS.
-[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native)
-itself already ships prebuilt binaries for macOS (arm64/x64), Windows (x64),
-and Linux (x64/arm64). Linux app packaging is tracked in the
-[Roadmap](#roadmap); `murasaki dev` already works there.
+### Platform support
+
+|                            | `dev` | `bundle`           | `installer`                       | auto-update |
+| -------------------------- | :---: | ------------------ | --------------------------------- | :---------: |
+| **macOS** (arm64, x64)     |  ✅   | `.app`             | `.dmg` — must be built on macOS   |     ✅      |
+| **Windows** (x64)          |  ✅   | folder / `.zip`    | NSIS `.exe`¹, `.msi`²             |     ✅      |
+| **Windows** (arm64)        |  ✅   | folder / `.zip`    | NSIS `.exe`¹                      |     ❌³     |
+| **Linux** (x64, arm64)     |  ✅   | —                  | —                                 |     ❌      |
+
+<sub>¹ needs `makensis` on the build machine — it cross-compiles from macOS/Linux.
+² needs WiX v4, and must be built on Windows.
+³ the Windows installer's filename doesn't encode the architecture yet, so the
+update manifest can't tell an arm64 build from an x64 one — tracked as a
+follow-up.</sub>
+
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) ships
+prebuilt binaries for all six targets, so none of this asks you to install a
+Rust toolchain.
+
+**Known limitations, stated plainly:**
+
+- **Linux app packaging isn't implemented.** `murasaki dev` works on Linux, but
+  there's no `bundle` or `installer` for it yet.
+- **Windows binaries are not Authenticode-signed.** murasaki doesn't wire that
+  up, so Windows will show a SmartScreen warning on first run.
+- **macOS signing and notarization need your own paid Apple Developer ID** — see
+  [Signing & distribution](#signing--distribution). Unsigned is the default.
+- **`mandatory` in the update manifest is advisory.** murasaki hands the flag to
+  your app; it does not force the update on the user's behalf.
 
 ---
 
@@ -434,14 +461,17 @@ They coexist.
 
 ## Roadmap
 
-murasaki is **pre-1.0** (currently `0.34.5`) — the API can still change
-before v1.0.
+murasaki is **pre-1.0** — the API can still change before v1.0.
 
 - ✅ **Phase B** — App Router essentially done: routing, Server Actions,
   metadata, middleware, and a dev error overlay all ship.
-- 🚧 **Phase C** — `@murasakijs/ui` component library, docs site, examples.
-- 🚧 **Phase D** — auto-update, Windows Authenticode signing, Linux packaging,
-  and v1.0 stabilization.
+- ✅ **Phase C** — `@murasakijs/ui` component library, docs site, examples.
+- ✅ **Windows packaging** — portable `.zip`, NSIS `.exe`, and `.msi`, all
+  cross-compiled from macOS/Linux.
+- ✅ **Auto-update** — signed manifests, SHA-256-verified downloads, and
+  in-place replacement + relaunch on macOS and Windows x64.
+- 🚧 **Next** — Linux packaging, Windows Authenticode signing, Windows arm64
+  auto-update, and v1.0 stabilization.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something

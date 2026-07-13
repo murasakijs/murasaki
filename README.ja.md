@@ -183,9 +183,19 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
   閉じるか、リロードできます。本番ビルドでは何もしません(no-op)。`murasaki dev`
   は `http://localhost` で配信されるため、標準の **React DevTools ブラウザ拡張**も
   同じ URL を Chrome で開けばそのまま使えます。
-- **macOS でのパッケージング(検証済み)** — `murasaki bundle` → `.app`、
-  `murasaki installer` → `.dmg`(圧縮後 ~43 MB。`.app` 自体は Node + アプリを
-  同梱するため ~120 MB)。
+- **パッケージング** — `murasaki bundle` は macOS では `.app`、Windows では
+  ポータブルなフォルダー / `.zip` を生成します。`murasaki installer` は macOS
+  では `.dmg`、Windows では NSIS `.exe`(WiX があれば `.msi` も)を生成します。
+  macOS の `.dmg` は圧縮後 ~43 MB、`.app` 自体は Node とアプリを同梱するため
+  ~120 MB です。対応範囲は [プラットフォーム対応状況](#プラットフォーム対応状況)
+  を参照してください。
+- **自動アップデート** — 設定で `updater: true` にし、UI に `<UpdateButton />`
+  (または `useUpdate()` フック)を置き、`murasaki release --manifest --sign` で
+  公開します。アプリはマニフェストを取得して **Ed25519** 公開鍵で検証し、
+  ダウンロードしたアセットの **SHA-256** を検証したうえで、自分自身を置き換えて
+  再起動します。対応は macOS と Windows x64 です —
+  [自動アップデート](https://murasaki.ichi10.com/ja/docs/guides/auto-update)
+  を参照してください。
 - **Trusted Publisher OIDC** — タグの push をトリガーに署名付きの
   `npm publish --provenance` を実行します。CI に長期有効な npm トークンを
   置く必要はありません。
@@ -205,16 +215,34 @@ murasaki release     自動アップデート用マニフェストのヘルパ�
 murasaki help        このヘルプを表示
 ```
 
-**プラットフォームの状況:** `murasaki dev` は macOS、Windows、Linux で動作します。
-`murasaki bundle` は現在、**macOS** の `.app` とポータブルな **Windows**
-フォルダー / `.zip` を、クロスアーキテクチャのターゲットを含めて生成できます。
-Windows ターゲットでは、`makensis` があれば NSIS `.exe`、Windows 上で WiX v4 が
-利用できれば `.msi` も `murasaki installer` で生成します。macOS の `.app` / `.dmg`
-は macOS 上でビルドする必要があります。
-[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 自体は
-すでに macOS(arm64/x64)、Windows(x64)、Linux(x64/arm64)向けのビルド済み
-バイナリを提供しています。Linux 向けアプリパッケージングは
-[ロードマップ](#ロードマップ) で管理しており、`murasaki dev` はすでに動作します。
+### プラットフォーム対応状況
+
+|                                | `dev` | `bundle`         | `installer`                       | 自動アップデート |
+| ------------------------------ | :---: | ---------------- | --------------------------------- | :--------------: |
+| **macOS**(arm64, x64)         |  ✅   | `.app`           | `.dmg` — macOS 上でビルドが必要   |       ✅         |
+| **Windows**(x64)              |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹、`.msi`²          |       ✅         |
+| **Windows**(arm64)            |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹                   |      ❌³         |
+| **Linux**(x64, arm64)         |  ✅   | —                | —                                 |       ❌         |
+
+<sub>¹ ビルドマシンに `makensis` が必要です(macOS / Linux からクロスコンパイルできます)。
+² WiX v4 が必要で、Windows 上でビルドする必要があります。
+³ Windows インストーラのファイル名がまだアーキテクチャを含んでいないため、更新マニフェストが
+arm64 ビルドと x64 ビルドを区別できません。フォローアップとして管理しています。</sub>
+
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) は
+6 ターゲットすべてのビルド済みバイナリを同梱しているため、Rust ツールチェーンの
+インストールは一切不要です。
+
+**既知の制限(隠さず明記します):**
+
+- **Linux のアプリパッケージングは未実装です。** `murasaki dev` は Linux でも
+  動作しますが、`bundle` / `installer` はまだありません。
+- **Windows バイナリは Authenticode 署名されていません。** murasaki 側で対応
+  していないため、初回起動時に SmartScreen の警告が出ます。
+- **macOS の署名と notarization には、ご自身の有料 Apple Developer ID が必要です** —
+  [署名と配布](#署名と配布) を参照してください。既定は未署名です。
+- **更新マニフェストの `mandatory` は助言的なフラグです。** murasaki はこのフラグを
+  アプリに渡すだけで、ユーザーに更新を強制することはしません。
 
 ---
 
@@ -437,15 +465,18 @@ prod(同梱の Node サーバー)でもサーバー側で動くので、ファ�
 
 ## ロードマップ
 
-murasaki は **pre-1.0**(現在 `0.34.5`)です——v1.0 までの間に API が変更される
-可能性があります。
+murasaki は **pre-1.0** です——v1.0 までの間に API が変更される可能性があります。
 
 - ✅ **Phase B** — App Router はほぼ完成: ルーティング・Server Actions・
   メタデータ・ミドルウェア・開発用エラーオーバーレイまで、すべて実装済みです。
-- 🚧 **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
+- ✅ **Phase C** — `@murasakijs/ui` コンポーネントライブラリ、ドキュメントサイト、
   サンプル集。
-- 🚧 **Phase D** — 自動アップデート、Windows Authenticode 署名、Linux
-  パッケージング、v1.0 の安定化。
+- ✅ **Windows パッケージング** — ポータブル `.zip`、NSIS `.exe`、`.msi`。
+  いずれも macOS / Linux からクロスコンパイルできます。
+- ✅ **自動アップデート** — 署名付きマニフェスト、SHA-256 検証付きダウンロード、
+  そのまま自分自身を置き換えて再起動。macOS と Windows x64 に対応しています。
+- 🚧 **次にやること** — Linux パッケージング、Windows Authenticode 署名、
+  Windows arm64 の自動アップデート、v1.0 の安定化。
 - 🔭 **検討中(post-1.0)**: サーバーサイドレンダリング + ストリーミング。現状の
   アーキテクチャはクライアント側で完結してレンダリングしているため、これは
   近いフェーズで計画しているものではなく、v1.0 以降に評価するより大きな
