@@ -303,16 +303,35 @@ async function copyTemplate(templateDir, targetDir, appName) {
   await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
 }
 
+const LINTERS = ['biome', 'eslint', 'none']
+
+/**
+ * `--yes` / `-y` takes every default without asking, and `--linter <name>`
+ * answers just that question — so the scaffolder can run unattended, from a
+ * script or from CI. Without one of these it prompts, and a piped stdin makes
+ * the prompt abort, which meant `npm create murasaki` simply couldn't be
+ * automated.
+ */
 function parseArgs(argv) {
   let name
   let skipInstall = false
   let noGit = false
-  for (const arg of argv) {
+  let yes = false
+  let linter
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
     if (arg === '--skip-install') skipInstall = true
     else if (arg === '--no-git') noGit = true
+    else if (arg === '--yes' || arg === '-y') yes = true
+    else if (arg === '--linter') linter = argv[++i]
+    else if (arg.startsWith('--linter=')) linter = arg.slice('--linter='.length)
     else if (!arg.startsWith('-') && name === undefined) name = arg
   }
-  return { name, skipInstall, noGit }
+  if (linter !== undefined && !LINTERS.includes(linter)) {
+    log(c(RED) + `  ✗ --linter must be one of: ${LINTERS.join(', ')}` + c(RESET))
+    process.exit(1)
+  }
+  return { name, skipInstall, noGit, yes, linter }
 }
 
 async function readCliVersion(dir) {
@@ -334,9 +353,11 @@ async function main() {
     `  ${c(DIM)}create-murasaki${c(RESET)}${version ? ` ${c(BRIGHT)}v${version}${c(RESET)}` : ''}\n\n`,
   )
 
-  const { name: argName, skipInstall, noGit } = parseArgs(process.argv.slice(2))
-  const name = argName && isValidPackageName(argName) ? argName : await promptForName()
-  const linter = await promptForLinter()
+  const { name: argName, skipInstall, noGit, yes, linter: linterArg } = parseArgs(process.argv.slice(2))
+
+  const validName = argName && isValidPackageName(argName) ? argName : undefined
+  const name = validName ?? (yes ? 'my-app' : await promptForName())
+  const linter = linterArg ?? (yes ? 'biome' : await promptForLinter())
 
   const target = resolve(process.cwd(), name)
   if (existsSync(target)) {
