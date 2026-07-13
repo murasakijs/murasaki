@@ -11,5 +11,10 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.10"
+    }
   }
 }
