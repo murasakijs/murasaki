@@ -421,6 +421,9 @@ fn apply_macos(args: &ApplyArgs) -> Result<(), String> {
 /// `--no-self-copy` guarantees that second run doesn't try to hop out again.
 #[cfg(target_os = "windows")]
 fn apply_windows(args: &ApplyArgs, raw_args: &[String]) -> Result<Outcome, String> {
+  // For `/D=` below: NSIS requires it unquoted, which `arg()` won't do.
+  use std::os::windows::process::CommandExt;
+
   let current_exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
 
   if !args.no_self_copy && current_exe.starts_with(&args.target) {
@@ -445,9 +448,26 @@ fn apply_windows(args: &ApplyArgs, raw_args: &[String]) -> Result<Outcome, Strin
     return Ok(Outcome::ReExeced);
   }
 
-  log!("running installer silently: {} /S", args.payload.display());
+  // `/S` alone would install to the *script's* InstallDir — `$LOCALAPPDATA\
+  // Programs\<name>` — no matter where this copy actually lives. Our installer
+  // offers a directory page, so anyone who changed it would have the update
+  // land in the default location while `--relaunch` restarted the old,
+  // untouched exe still sitting in their chosen directory: an update that
+  // silently didn't happen, plus a second install. `/D=` pins the silent
+  // install to where we're actually running from.
+  //
+  // NSIS parses `/D=` itself, and it is picky: it must be the LAST parameter
+  // and it must NOT be quoted, even when the path contains spaces. `arg()`
+  // would quote it, so this goes through `raw_arg` verbatim.
+  let target = args.target.display().to_string();
+  log!(
+    "running installer silently: {} /S /D={}",
+    args.payload.display(),
+    target
+  );
   let status = Command::new(&args.payload)
     .arg("/S")
+    .raw_arg(format!("/D={target}"))
     .status()
     .map_err(|e| format!("spawn installer {}: {e}", args.payload.display()))?;
   if !status.success() {
