@@ -202,11 +202,7 @@ export function PxHero({
           </div>
 
           <div className="mt-6 flex items-center justify-center gap-3 sm:justify-start">
-            <span
-              aria-hidden="true"
-              className="hidden h-[54px] w-1 bg-[#7c3aed] sm:block"
-            />
-            <ProductHuntBadge lang={lang} />
+            <ProductHuntBadge lang={lang} accent />
           </div>
         </div>
       </div>
