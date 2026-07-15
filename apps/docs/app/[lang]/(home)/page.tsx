@@ -116,6 +116,7 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
         <PxScroll />
 
         <PxHero
+          lang={lang}
           eyebrow={t.eyebrow}
           headline={t.headline}
           getStartedLabel={t.getStarted}

@@ -9,6 +9,7 @@ import { ProductHuntBadge } from "./product-hunt-badge";
 import { PixelButterfly } from "./px-pixel";
 
 interface PxHeroProps {
+  lang: string;
   eyebrow: string;
   headline: { prefix: string; highlight: string; suffix: string };
   getStartedLabel: string;
@@ -30,6 +31,7 @@ const BRAND = "Murasaki";
  * `gsap.from`, so no-JS / reduced-motion render the finished layout.
  */
 export function PxHero({
+  lang,
   eyebrow,
   headline,
   getStartedLabel,
@@ -183,7 +185,7 @@ export function PxHero({
             <div className="flex items-center justify-center gap-3">
               <Link
                 href={getStartedHref}
-                className="lp-sans group inline-flex h-12 items-center gap-2 bg-[#7c3aed] px-7 font-semibold text-white transition-colors hover:bg-[#6d28d9]"
+                className="lp-sans group inline-flex h-12 shrink-0 items-center gap-2 bg-[#7c3aed] px-5 font-semibold whitespace-nowrap text-white transition-colors hover:bg-[#6d28d9] sm:px-7"
               >
                 {getStartedLabel}
                 <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
@@ -192,7 +194,7 @@ export function PxHero({
                 href={githubHref}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="lp-sans inline-flex h-12 items-center border border-[#111014]/25 px-7 font-semibold text-[#111014] transition-colors hover:border-[#111014]/60"
+                className="lp-sans inline-flex h-12 shrink-0 items-center border border-[#111014]/25 px-5 font-semibold whitespace-nowrap text-[#111014] transition-colors hover:border-[#111014]/60 sm:px-7"
               >
                 {githubLabel}
               </a>
@@ -204,7 +206,7 @@ export function PxHero({
               aria-hidden="true"
               className="hidden h-[54px] w-1 bg-[#7c3aed] sm:block"
             />
-            <ProductHuntBadge />
+            <ProductHuntBadge lang={lang} />
           </div>
         </div>
       </div>
