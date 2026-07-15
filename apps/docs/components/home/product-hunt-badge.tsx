@@ -18,10 +18,10 @@ interface ProductHuntBadgeProps {
   className?: string;
 }
 
-function formatCountdown(remainingMs: number | null) {
-  if (remainingMs === null) return "-- : -- : --";
+function formatDuration(durationMs: number, round: "ceil" | "floor") {
+  const roundSeconds = round === "ceil" ? Math.ceil : Math.floor;
+  const totalSeconds = Math.max(0, roundSeconds(durationMs / 1000));
 
-  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
@@ -38,19 +38,32 @@ export function ProductHuntBadge({
   lazy = false,
   className,
 }: ProductHuntBadgeProps) {
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
-    const updateCountdown = () => {
-      setRemainingMs(Math.max(0, PRODUCT_HUNT_LAUNCH_AT - Date.now()));
+    const updateTimer = () => {
+      setNowMs(Date.now());
     };
 
-    updateCountdown();
-    const interval = window.setInterval(updateCountdown, 1000);
+    updateTimer();
+    const interval = window.setInterval(updateTimer, 1000);
     return () => window.clearInterval(interval);
   }, []);
 
-  const isLocked = remainingMs === null || remainingMs > 0;
+  const isLocked = nowMs === null || nowMs < PRODUCT_HUNT_LAUNCH_AT;
+  const timerValue =
+    nowMs === null
+      ? "-- : -- : --"
+      : isLocked
+        ? formatDuration(PRODUCT_HUNT_LAUNCH_AT - nowMs, "ceil")
+        : `+ ${formatDuration(nowMs - PRODUCT_HUNT_LAUNCH_AT, "floor")}`;
+  const timerLabel = isLocked
+    ? lang === "ja"
+      ? `Product Hunt 公開まで ${timerValue}`
+      : `Product Hunt launch in ${timerValue}`
+    : lang === "ja"
+      ? `Product Hunt 公開中 ${timerValue}`
+      : `Product Hunt live ${timerValue}`;
   const image = (
     <Image
       src={PRODUCT_HUNT_BADGE_URL}
@@ -64,9 +77,7 @@ export function ProductHuntBadge({
   );
 
   return (
-    <span
-      className={`inline-flex max-w-full ${isLocked ? "pt-10" : ""} ${className ?? ""}`}
-    >
+    <span className={`inline-flex max-w-full pt-10 ${className ?? ""}`}>
       <span className="flex items-center gap-3">
         {accent ? (
           <span
@@ -76,22 +87,20 @@ export function ProductHuntBadge({
         ) : null}
 
         <span className="relative inline-flex max-w-full">
-          {isLocked ? (
-            <span
-              role="timer"
-              aria-label={
-                lang === "ja"
-                  ? `Product Hunt 公開まで ${formatCountdown(remainingMs)}`
-                  : `Product Hunt launch in ${formatCountdown(remainingMs)}`
-              }
-              className="lp-pixel absolute bottom-[calc(100%+10px)] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap bg-[#111014] px-3 py-2 text-[9px] tracking-[0.12em] text-white uppercase shadow-lg after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-x-[6px] after:border-t-[6px] after:border-x-transparent after:border-t-[#111014]"
-            >
-              {lang === "ja" ? "公開まで" : "Launch in"}{" "}
-              <time dateTime="2026-07-16T00:01:00-07:00">
-                {formatCountdown(remainingMs)}
-              </time>
-            </span>
-          ) : null}
+          <span
+            role="timer"
+            aria-label={timerLabel}
+            className="lp-pixel absolute bottom-[calc(100%+10px)] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap bg-[#111014] px-3 py-2 text-[9px] tracking-[0.12em] text-white uppercase shadow-lg after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-x-[6px] after:border-t-[6px] after:border-x-transparent after:border-t-[#111014]"
+          >
+            {isLocked
+              ? lang === "ja"
+                ? "公開まで"
+                : "Launch in"
+              : lang === "ja"
+                ? "公開中"
+                : "Live"}{" "}
+            <time dateTime="2026-07-16T00:01:00-07:00">{timerValue}</time>
+          </span>
 
           {isLocked ? (
             <span
