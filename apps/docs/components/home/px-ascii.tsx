@@ -271,7 +271,7 @@ export function PxAscii({
     <section className="bg-[#0e0e10] py-24 text-white sm:py-32">
       <div className="mx-auto w-full max-w-6xl px-6">
         <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
-          <span className="text-[#a78bfa]">07</span> · {eyebrow}
+          <span className="text-[#a78bfa]">08</span> · {eyebrow}
         </p>
 
         <MaskReveal

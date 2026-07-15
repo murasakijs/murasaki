@@ -4,6 +4,7 @@ import { PxArtifacts } from "@/components/home/px-artifacts";
 import { PxAscii } from "@/components/home/px-ascii";
 import { PxConverge } from "@/components/home/px-converge";
 import { PxCta } from "@/components/home/px-cta";
+import { PxExamples } from "@/components/home/px-examples";
 import { PxFeatures } from "@/components/home/px-features";
 import { PxHero } from "@/components/home/px-hero";
 import { PxManifesto } from "@/components/home/px-manifesto";
@@ -162,6 +163,10 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           rows={t.comparisonRows}
           footnote={t.comparisonFootnote}
         />
+
+        <DitherDivider from={PAPER} to={PURPLE} />
+        <PxExamples content={x.examples} />
+        <DitherDivider from={PURPLE} to={PAPER} />
 
         <PxArtifacts
           heading={t.mockup.heading}

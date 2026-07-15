@@ -709,6 +709,28 @@ export interface LpExtra {
     };
     caption: string;
   };
+  /** Downloadable proof: the packaged default scaffold plus three independent
+   * sample products. These links intentionally point at immutable GitHub
+   * releases so the LP never serves a stale local installer. */
+  examples: {
+    eyebrow: string;
+    heading: string;
+    intro: string;
+    defaultDemo: {
+      label: string;
+      heading: string;
+      description: string;
+      macArm: string;
+      macIntel: string;
+      windows: string;
+      releaseNotes: string;
+      firstLaunch: string;
+    };
+    sampleLabel: string;
+    sourceLabel: string;
+    downloadsLabel: string;
+    apps: { name: string; description: string }[];
+  };
   /** The 360° ASCII butterfly — the brand's Sasakia charonda voxelized from
    * butterfly-rects and rendered as rotating text (three.js AsciiEffect),
    * bridging the LP back to create-murasaki's ASCII banner. */
@@ -719,7 +741,7 @@ export interface LpExtra {
     hint: string;
     caption: string;
   };
-  /** The DMG-installer easter egg tucked under Artifacts (06) — a faithful,
+  /** The DMG-installer easter egg tucked under Artifacts (07) — a faithful,
    * fully drag-and-droppable mock of the real macOS "drag app into
    * Applications" install window. Nothing actually installs; the caption
    * says so once you drop it, the same honesty beat as the playground's
@@ -805,6 +827,44 @@ const lpEn: LpExtra = {
     caption:
       "In a real Murasaki app this pops a native NSMenu / HMENU. On a website? Still just HTML — we had to be honest somewhere.",
   },
+  examples: {
+    eyebrow: "Runnable apps",
+    heading: "Try the result, not just the pitch.",
+    intro:
+      "Download the packaged default scaffold, or open three independent apps built to prove different product directions.",
+    defaultDemo: {
+      label: "Ready to run · v0.47.3",
+      heading: "The default scaffold, already packaged.",
+      description:
+        "The exact app created by create-murasaki, with native menus, file-based routes, Server Actions, API routes, and the bundled Node runtime.",
+      macArm: "macOS · Apple silicon",
+      macIntel: "macOS · Intel",
+      windows: "Windows · x64",
+      releaseNotes: "Release notes & checksums",
+      firstLaunch:
+        "Unsigned demo: on macOS, use right-click → Open once. Windows may show SmartScreen.",
+    },
+    sampleLabel: "Three apps. Three directions.",
+    sourceLabel: "Source",
+    downloadsLabel: "Downloads",
+    apps: [
+      {
+        name: "Violet Notes",
+        description:
+          "Local-first Markdown editing, live preview, import/export, and native menus.",
+      },
+      {
+        name: "Murasaki Focus",
+        description:
+          "Persistent timer state, keyboard controls, and a focused consumer desktop UI.",
+      },
+      {
+        name: "Local Signal",
+        description:
+          "API Routes, Server Actions, the bundled Node runtime, and live request monitoring.",
+      },
+    ],
+  },
   asciiButterfly: {
     eyebrow: "Say hi",
     heading: "Meet the Great Purple Emperor.",
@@ -889,6 +949,44 @@ const lpJa: LpExtra = {
     },
     caption:
       "本物の Murasaki アプリなら、ここでネイティブの NSMenu / HMENU が開きます。Web サイト上では……やっぱりただの HTML です。どこかで正直でいないと、ですね。",
+  },
+  examples: {
+    eyebrow: "実際に動くアプリ",
+    heading: "説明より先に、完成品を試す。",
+    intro:
+      "標準スキャフォールドのパッケージ版をダウンロードするか、異なる方向性を実証する3つの独立アプリを試せます。",
+    defaultDemo: {
+      label: "すぐに起動 · v0.47.3",
+      heading: "標準スキャフォールドを、そのままアプリに。",
+      description:
+        "create-murasakiが生成するアプリそのものです。ネイティブメニュー、ファイルベースルーティング、Server Actions、API Routes、同梱Nodeを確認できます。",
+      macArm: "macOS · Appleシリコン",
+      macIntel: "macOS · Intel",
+      windows: "Windows · x64",
+      releaseNotes: "リリースノートとチェックサム",
+      firstLaunch:
+        "未公証のDemoです。macOSでは初回のみ右クリック→「開く」、WindowsではSmartScreenの確認が必要な場合があります。",
+    },
+    sampleLabel: "3つのアプリ。3つの方向性。",
+    sourceLabel: "ソース",
+    downloadsLabel: "ダウンロード",
+    apps: [
+      {
+        name: "Violet Notes",
+        description:
+          "ローカルファーストなMarkdown編集、ライブプレビュー、入出力、ネイティブメニュー。",
+      },
+      {
+        name: "Murasaki Focus",
+        description:
+          "永続化するタイマー、キーボード操作、コンシューマー向けデスクトップUI。",
+      },
+      {
+        name: "Local Signal",
+        description:
+          "API Routes、Server Actions、同梱Node、リアルタイムなリクエスト監視。",
+      },
+    ],
   },
   asciiButterfly: {
     eyebrow: "ごあいさつ",
