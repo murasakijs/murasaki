@@ -66,6 +66,7 @@ export default function Page() {
 ## 目次
 
 - [クイックスタート](#クイックスタート)
+- [サンプルアプリ](#サンプルアプリ)
 - [なぜ murasaki なのか](#なぜ-murasaki-なのか)
 - [機能](#機能)
 - [CLI リファレンス](#cli-リファレンス)
@@ -104,6 +105,27 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
 不要です — アプリシェルとクライアント起動は murasaki が持ちます(HTML の head を
 カスタムしたい場合はプロジェクト直下に自分の `index.html` を置けます)。アプリの
 識別情報とウィンドウ設定は `murasaki.config.ts` に記述します。
+
+---
+
+## サンプルアプリ
+
+異なるプロダクト方向を示す、独立した3本のインストール可能なアプリです。それぞれが
+専用のソース、アプリID、アイコン、ネイティブbundle、インストーラーを持ちます。
+
+| アプリ | 実装例 | ソース |
+| --- | --- | --- |
+| **Violet Notes** | ローカルMarkdown編集、ライブプレビュー、入出力、ネイティブメニュー | [`examples/violet-notes`](./examples/violet-notes) |
+| **Murasaki Focus** | タイマー永続化、キーボード操作、コンシューマー向けデスクトップUI | [`examples/murasaki-focus`](./examples/murasaki-focus) |
+| **Local Signal** | API Routes、Server Actions、Node同梱、リクエスト監視 | [`examples/local-signal`](./examples/local-signal) |
+
+<p align="center">
+  <img src="./examples/violet-notes/design/implementation.png" alt="Violet Notes" width="31%">
+  <img src="./examples/murasaki-focus/design/implementation.png" alt="Murasaki Focus" width="31%">
+  <img src="./examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
+</p>
+
+[macOS／Windows向けサンプルインストーラーはsample-apps v0.47.2リリースからダウンロードできます。](https://github.com/murasakijs/murasaki/releases/tag/samples-v0.47.2)
 
 ---
 

@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  --violet: #6d35e8;
+  --violet-bright: #9a73ff;
+  --ink: #111113;
+  --paper: #faf9f7;
+  --line: rgba(130, 125, 145, 0.2);
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body { margin: 0; overflow: hidden; }
+button, textarea, input { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { color: inherit; }
+
+.showcase-root { width: 100%; height: 100%; background: #0c0c0f; color: #f7f5fb; }
+.pixel-butterfly {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  color: transparent;
+  flex: 0 0 auto;
+  background: url('../assets/icon.png') center / contain no-repeat;
+}
+.icon-button {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  color: inherit;
+  opacity: .72;
+  transition: opacity .16s ease, background .16s ease;
+}
+.icon-button:hover { opacity: 1; background: rgba(128, 91, 244, .1); }
+.sidebar-label { font-size: 10px; font-weight: 700; letter-spacing: .15em; opacity: .48; }
+
+/* Murasaki Focus */
+.focus-brand { display: flex; align-items: center; gap: 11px; }
+.focus-app { height: 100%; display: grid; grid-template-columns: 320px 1fr; background: var(--paper); color: var(--ink); }
+.focus-sidebar { min-height: 0; display: flex; flex-direction: column; padding: 20px 18px; border-right: 1px solid #dedbd6; background: #f7f6f3; }
+.focus-brand { height: 36px; }
+.focus-brand .icon-button { color: #37333e; border-color: #d9d5df; }
+.focus-brand strong { font-size: 14px; }
+.focus-sidebar h2 { margin: 48px 12px 18px; font-size: 25px; letter-spacing: -.04em; }
+.task-list { display: flex; flex-direction: column; }
+.task-row { min-height: 58px; display: flex; align-items: center; gap: 13px; padding: 0 13px; border: 0; border-bottom: 1px solid #e0ddd8; background: transparent; color: #19171c; font-size: 13px; text-align: left; cursor: pointer; }
+.task-row span { display: grid; place-items: center; color: #5b2dd5; }
+.task-row.is-selected { margin: 0 -5px; padding: 0 18px; border-left: 3px solid #6135df; border-radius: 7px; background: #eee9fc; color: #4e25c2; }
+.task-row.is-done { color: #8f8b93; text-decoration: line-through; }
+.notification-state { margin-top: auto; display: flex; align-items: center; gap: 9px; padding: 11px 12px; color: #6b6670; font-size: 11px; }
+.timer-stage { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 42px; outline: none; }
+.timer-mark { width: 32px; height: 32px; color: transparent; background: url('../assets/icon.png') center / contain no-repeat; margin-bottom: 8px; }
+.mode-tabs { display: flex; gap: 30px; border-bottom: 1px solid #ddd9d3; }
+.mode-tabs button { position: relative; padding: 9px 4px 12px; border: 0; background: transparent; color: #5f5b63; font-size: 14px; cursor: pointer; }
+.mode-tabs button.is-active { color: #5d2bd6; }
+.mode-tabs button.is-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: #6134df; }
+.timer-value { margin-top: 14px; font-size: clamp(104px, 14vw, 174px); font-weight: 350; line-height: .95; letter-spacing: -.075em; font-variant-numeric: tabular-nums; }
+.timer-task { margin: 15px 0 24px; color: #706b74; font-size: 13px; }
+.timer-actions { display: flex; gap: 12px; }
+.timer-actions button { width: 180px; height: 54px; display: inline-flex; align-items: center; justify-content: center; gap: 10px; border-radius: 8px; font-size: 14px; cursor: pointer; }
+.primary-control { border: 1px solid #5d2bd6; background: #5d2bd6; color: white; }
+.primary-control:hover { background: #4c21bd; }
+.secondary-control { border: 1px solid #aaa5ae; background: transparent; color: #262329; }
+.secondary-control:hover { background: #f0edeb; }
+.session-progress { margin-top: 30px; min-width: 360px; padding-top: 16px; border-top: 1px solid #ddd9d3; text-align: center; }
+.session-progress > span { font-size: 12px; }
+.session-progress > div { display: flex; justify-content: center; gap: 38px; margin-top: 18px; }
+.session-progress i { width: 15px; height: 15px; border: 1.5px solid #aaa5ae; border-radius: 50%; }
+.session-progress i.is-complete { border-color: #6031dc; background: #6031dc; }
+.shortcut-hint { margin-top: 25px; display: flex; align-items: center; gap: 9px; color: #5f5b63; font-size: 11px; }
+.shortcut-hint kbd { padding: 5px 9px; border: 1px solid #aaa5ae; border-radius: 5px; background: #fff; box-shadow: 0 1px 0 #c5c1bc; font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.native-hint { margin: 14px 0 0; color: #aaa5ae; font-size: 10px; }
+
+@media (max-width: 1050px) {
+  .focus-app { grid-template-columns: 270px 1fr; }
+  .timer-value { font-size: 116px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+

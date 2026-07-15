@@ -110,18 +110,6 @@ export default async function bundle(argv: string[]) {
   const launcherDest = join(macosDir, productName)
   await copyFile(launcherBinary, launcherDest)
   await chmod(launcherDest, 0o755)
-  // macOS (arm64 in particular) refuses to launch an unsigned main
-  // executable — ad-hoc sign it (no identity, no entitlements) since we
-  // don't have a Developer ID at bundle time. Best-effort: warn rather than
-  // fail if codesign is unavailable — it ships with Xcode Command Line
-  // Tools, which `murasaki bundle` already depends on for sips/iconutil.
-  const signResult = spawnSync('codesign', ['-s', '-', '-f', launcherDest])
-  if (signResult.status !== 0) {
-    process.stdout.write(
-      `\n${warn(`codesign failed for ${dim(launcherDest)} — the bundle may refuse to launch.`)}\n\n`,
-    )
-  }
-
   // Contents/Resources/node — a downloaded, target-specific Node runtime
   // (official nodejs.org macOS build, checksum-verified and cached under
   // ~/.murasaki/node/, see node-runtime.ts), not whatever node happens to be
@@ -200,9 +188,24 @@ export default async function bundle(argv: string[]) {
     infoPlist(config, productName, iconResource !== null),
   )
 
-  // Real Developer ID signing, on top of the ad-hoc launcher signature
-  // applied above — see signApp's doc comment for the full flow.
-  if (shouldSign) await signApp(appDir, config)
+  // Sign only after every resource and Info.plist entry is in place. Signing
+  // the launcher earlier makes codesign create a bundle resource seal before
+  // Resources/ is populated; the final .app then fails verification with
+  // "a sealed resource is missing or invalid". Developer ID builds use the
+  // explicit inner-to-outer flow below. Unsigned distributions still need a
+  // valid ad-hoc bundle signature so macOS can launch and verify the app.
+  if (shouldSign) {
+    await signApp(appDir, config)
+  } else {
+    const signResult = spawnSync('codesign', ['--force', '--sign', '-', appDir], { encoding: 'utf8' })
+    if (signResult.status !== 0) {
+      throw new Error(`murasaki: ad-hoc codesign failed for ${appDir}:\n${signResult.stderr.trim()}`)
+    }
+    const verify = spawnSync('codesign', ['--verify', '--deep', '--strict', appDir], { encoding: 'utf8' })
+    if (verify.status !== 0) {
+      throw new Error(`murasaki: ad-hoc codesign verification failed for ${appDir}:\n${verify.stderr.trim()}`)
+    }
+  }
 
   process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
 

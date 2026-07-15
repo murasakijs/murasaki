@@ -65,6 +65,7 @@ on macOS, HMENU on Windows, GtkMenu on Linux), not an HTML popup.
 ## Table of Contents
 
 - [Quick start](#quick-start)
+- [Example apps](#example-apps)
 - [Why murasaki?](#why-murasaki)
 - [Features](#features)
 - [CLI reference](#cli-reference)
@@ -103,6 +104,27 @@ layout — you only touch `src/app/` (pages, layouts, `globals.css`), `src/api/`
 file to maintain: murasaki owns the app shell and the client bootstrap (drop
 your own `index.html` in the project root if you want to customize the HTML
 head). `murasaki.config.ts` describes your app's identity and window.
+
+---
+
+## Example apps
+
+Three independent, installable apps show different product directions. Each
+has its own source tree, app identity, icon, native bundle, and installer.
+
+| App | What it demonstrates | Source |
+| --- | --- | --- |
+| **Violet Notes** | Local-first Markdown editing, live preview, import/export, native menus | [`examples/violet-notes`](./examples/violet-notes) |
+| **Murasaki Focus** | Persistent timer state, keyboard controls, consumer desktop UI | [`examples/murasaki-focus`](./examples/murasaki-focus) |
+| **Local Signal** | API Routes, Server Actions, bundled Node runtime, request monitoring | [`examples/local-signal`](./examples/local-signal) |
+
+<p align="center">
+  <img src="./examples/violet-notes/design/implementation.png" alt="Violet Notes" width="31%">
+  <img src="./examples/murasaki-focus/design/implementation.png" alt="Murasaki Focus" width="31%">
+  <img src="./examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
+</p>
+
+[Download the macOS and Windows sample installers from the sample-apps v0.47.2 release.](https://github.com/murasakijs/murasaki/releases/tag/samples-v0.47.2)
 
 ---
 
