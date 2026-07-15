@@ -174,10 +174,13 @@ export function PxHero({
           </span>
         </h1>
 
-        <div data-hero-actions className="mt-9">
-          <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
+        <div
+          data-hero-actions
+          className="mt-9 flex flex-col items-center sm:items-start"
+        >
+          <div className="flex flex-col items-center gap-5 sm:flex-row">
             <CopyCommand command={installCommand} />
-            <div className="flex items-center gap-3">
+            <div className="flex items-center justify-center gap-3">
               <Link
                 href={getStartedHref}
                 className="lp-sans group inline-flex h-12 items-center gap-2 bg-[#7c3aed] px-7 font-semibold text-white transition-colors hover:bg-[#6d28d9]"
@@ -196,7 +199,7 @@ export function PxHero({
             </div>
           </div>
 
-          <div className="mt-6 flex items-center gap-3">
+          <div className="mt-6 flex items-center justify-center gap-3 sm:justify-start">
             <span
               aria-hidden="true"
               className="hidden h-[54px] w-1 bg-[#7c3aed] sm:block"
