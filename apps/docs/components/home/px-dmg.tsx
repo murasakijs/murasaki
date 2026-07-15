@@ -69,11 +69,13 @@ export function PxDmgInstaller({
 
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [overFolder, setOverFolder] = useState(false);
   const [snapping, setSnapping] = useState(false);
   const [installed, setInstalled] = useState(false);
 
   const dropOnFolder = useCallback(() => {
     setPos({ x: 0, y: 0 });
+    setOverFolder(false);
     setInstalled(true);
     window.setTimeout(() => setInstalled(false), INSTALLED_MS);
   }, []);
@@ -85,6 +87,7 @@ export function PxDmgInstaller({
       startY: e.clientY - pos.y,
     };
     setDragging(true);
+    setOverFolder(false);
     setSnapping(false);
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -95,16 +98,32 @@ export function PxDmgInstaller({
 
   const onPointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
     if (!dragState.current) return;
-    setPos({
+    const nextPos = {
       x: e.clientX - dragState.current.startX,
       y: e.clientY - dragState.current.startY,
-    });
+    };
+    setPos(nextPos);
+
+    const icon = iconRef.current;
+    const folder = folderRef.current;
+    if (!icon || !folder) return;
+    const a = icon.getBoundingClientRect();
+    const b = folder.getBoundingClientRect();
+    const deltaX = nextPos.x - pos.x;
+    const deltaY = nextPos.y - pos.y;
+    setOverFolder(
+      a.left + deltaX < b.right &&
+        a.right + deltaX > b.left &&
+        a.top + deltaY < b.bottom &&
+        a.bottom + deltaY > b.top,
+    );
   };
 
   const endDrag = () => {
     if (!dragState.current) return;
     dragState.current = null;
     setDragging(false);
+    setOverFolder(false);
 
     const icon = iconRef.current;
     const folder = folderRef.current;
@@ -140,11 +159,11 @@ export function PxDmgInstaller({
     <div className="mt-16 border-t border-[#111014]/15 pt-12">
       <div className="relative mx-auto max-w-lg overflow-hidden rounded-lg border border-[#111014]/15 bg-white shadow-[0_20px_60px_-15px_rgba(17,16,20,0.25)]">
         {/* Title bar */}
-        <div className="flex h-9 items-center gap-1.5 border-b border-[#111014]/10 bg-[#ececec] px-3.5">
+        <div className="relative flex h-9 items-center gap-1.5 border-b border-[#111014]/10 bg-[#ececec] px-3.5">
           <span className="size-3 rounded-full bg-[#ff5f57]" />
           <span className="size-3 rounded-full bg-[#febc2e]" />
           <span className="size-3 rounded-full bg-[#28c840]" />
-          <p className="lp-sans -mt-px flex-1 text-center text-[12px] font-medium text-[#111014]/60">
+          <p className="lp-sans pointer-events-none absolute left-1/2 -mt-px -translate-x-1/2 text-center text-[12px] font-medium text-[#111014]/60">
             {appName}
           </p>
         </div>
@@ -185,7 +204,7 @@ export function PxDmgInstaller({
               dragging ? "cursor-grabbing" : "cursor-grab"
             } ${installed ? "pointer-events-none opacity-0" : ""}`}
           >
-            <span className="flex aspect-square w-full items-center justify-center rounded-[22%] bg-[#f4f2ed] p-3 shadow-[0_6px_16px_-4px_rgba(17,16,20,0.35)]">
+            <span className="flex aspect-square w-full items-center justify-center rounded-[22%] bg-[linear-gradient(180deg,#2b1248_0%,#13051f_100%)] p-2.5 shadow-[0_6px_16px_-4px_rgba(17,16,20,0.45)] ring-1 ring-white/10">
               <PixelButterfly className="h-full w-auto" />
             </span>
             <span className="lp-sans text-[11px] font-medium text-[#111014]/70">
@@ -194,10 +213,18 @@ export function PxDmgInstaller({
           </button>
 
           <div ref={folderRef} className="absolute" style={iconStyle(APPS_X)}>
+            <span
+              aria-hidden="true"
+              className={`pointer-events-none absolute -inset-2 rounded-xl border transition-opacity duration-150 ${
+                overFolder
+                  ? "border-[#7c3aed]/45 opacity-100"
+                  : "border-transparent opacity-0"
+              }`}
+            />
             <svg
               aria-hidden="true"
               viewBox="0 0 64 52"
-              className="aspect-square w-full drop-shadow-[0_6px_10px_rgba(17,16,20,0.2)]"
+              className="relative aspect-square w-full drop-shadow-[0_6px_10px_rgba(17,16,20,0.2)]"
             >
               <path
                 d="M2 10a4 4 0 0 1 4-4h16l6 6h30a4 4 0 0 1 4 4v30a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4Z"
@@ -208,7 +235,7 @@ export function PxDmgInstaller({
                 fill="#7ba4f4"
               />
             </svg>
-            <p className="lp-sans mt-1.5 text-center text-[11px] font-medium text-[#111014]/70">
+            <p className="lp-sans relative mt-1.5 text-center text-[11px] font-medium text-[#111014]/70">
               {folderLabel}
             </p>
           </div>
