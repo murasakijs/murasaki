@@ -6,6 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -35,11 +36,11 @@ const SHUFFLE_PALETTE = ["#7c3aed", "#a855f7", "#c026d3", "#5b21b6"];
 /** Approx menu footprint used to clamp its position inside the canvas. */
 const MENU_W = 248;
 const MENU_H = 168;
+const BUTTERFLY_COLS = 17;
 
-/** Grid offset where the seeded butterfly sits (left-aligned, like the
- * page's typography). */
+/** SSR fallback origin; the client centers the seed to the measured canvas. */
 const SEED_COL = 3;
-const SEED_ROW = 3;
+const SEED_ROW = 2;
 
 function stampInto(
   cells: ReadonlyMap<string, string>,
@@ -68,8 +69,28 @@ export function PxPlayground({
 }: LpExtra["playground"]) {
   const hostRef = useRef<HTMLDivElement>(null);
   const drawing = useRef(false);
+  const hasEditedCanvas = useRef(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [cells, setCells] = useState<ReadonlyMap<string, string>>(SEEDED);
+
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    const centerSeed = () => {
+      if (hasEditedCanvas.current) return;
+      const baseCol = Math.max(
+        0,
+        Math.round((host.clientWidth - BUTTERFLY_COLS * CELL) / (CELL * 2)),
+      );
+      setCells(stampInto(new Map(), baseCol, SEED_ROW));
+    };
+
+    centerSeed();
+    const observer = new ResizeObserver(centerSeed);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
 
   const openMenu = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -104,6 +125,7 @@ export function PxPlayground({
     }
     const col = Math.floor((clientX - rect.left) / CELL);
     const row = Math.floor((clientY - rect.top) / CELL);
+    hasEditedCanvas.current = true;
     setCells((prev) => {
       const key = `${col},${row}`;
       if (prev.get(key) === BRUSH) return prev;
@@ -143,11 +165,13 @@ export function PxPlayground({
     // Center the 17×12 mark on the click point, snapped to the grid.
     const baseCol = Math.round(menu.x / CELL) - 8;
     const baseRow = Math.round(menu.y / CELL) - 6;
+    hasEditedCanvas.current = true;
     setCells((prev) => stampInto(prev, baseCol, baseRow));
     setMenu(null);
   };
 
   const shufflePalette = () => {
+    hasEditedCanvas.current = true;
     setCells(
       (prev) =>
         new Map(
@@ -161,6 +185,7 @@ export function PxPlayground({
   };
 
   const clearCanvas = () => {
+    hasEditedCanvas.current = true;
     setCells(new Map());
     setMenu(null);
   };
@@ -204,7 +229,9 @@ export function PxPlayground({
             return (
               <m.div
                 key={key}
-                initial={SEEDED.has(key) ? false : { scale: 0.4, opacity: 0 }}
+                initial={
+                  hasEditedCanvas.current ? { scale: 0.4, opacity: 0 } : false
+                }
                 animate={{ scale: 1, opacity: 1, backgroundColor: color }}
                 transition={{ duration: 0.12 }}
                 className="pointer-events-none absolute"
@@ -219,9 +246,11 @@ export function PxPlayground({
             );
           })}
 
-          <p className="lp-mono pointer-events-none absolute bottom-4 right-4 text-[11px] uppercase tracking-[0.2em] text-[#111014]/35">
-            {hint}
-          </p>
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex min-h-12 items-center justify-center border-[#111014]/10 border-t bg-white/95 px-4 backdrop-blur-[2px]">
+            <p className="lp-mono text-center text-[10px] leading-normal tracking-[0.1em] text-[#111014]/65 uppercase">
+              {hint}
+            </p>
+          </div>
 
           {/* The (fake) context menu. */}
           <AnimatePresence>
