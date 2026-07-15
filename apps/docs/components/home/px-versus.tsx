@@ -89,7 +89,7 @@ export function PxVersus({
     >
       <div className="mx-auto grid w-full max-w-6xl gap-14 px-6 lg:grid-cols-[1fr_1.4fr]">
         {/* Sticky rail. */}
-        <div className="lg:sticky lg:top-28 lg:self-start">
+        <div className="min-w-0 lg:sticky lg:top-28 lg:self-start">
           <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-[#111014]/50">
             <span className="text-[#7c3aed]">05</span> · vs Electron / Tauri
           </p>
