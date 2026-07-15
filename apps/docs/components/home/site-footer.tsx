@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
 import { localizeDocsHref } from "@/lib/localize-href";
 import { localizedHomePath } from "@/lib/seo";
+import { ProductHuntBadge } from "./product-hunt-badge";
 
 interface FooterColumn {
   heading: string;
@@ -75,7 +76,7 @@ export function SiteFooter({
           </div>
         </div>
 
-        <div className="mt-16 flex flex-col items-center justify-between gap-6 border-t border-border pt-8 sm:flex-row">
+        <div className="mt-16 flex flex-col items-center justify-between gap-6 border-t border-border pt-8 lg:flex-row">
           <Link
             href={localizedHomePath(lang)}
             className="flex items-center gap-2"
@@ -86,6 +87,7 @@ export function SiteFooter({
               Murasaki
             </span>
           </Link>
+          <ProductHuntBadge lazy />
           <p className="text-xs text-muted-foreground">{license}</p>
         </div>
       </div>

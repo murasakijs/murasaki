@@ -5,6 +5,7 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { useLayoutEffect, useRef } from "react";
 import { CopyCommand } from "@/components/copy-command";
+import { ProductHuntBadge } from "./product-hunt-badge";
 import { PixelButterfly } from "./px-pixel";
 
 interface PxHeroProps {
@@ -173,27 +174,34 @@ export function PxHero({
           </span>
         </h1>
 
-        <div
-          data-hero-actions
-          className="mt-9 flex flex-col items-start gap-5 sm:flex-row sm:items-center"
-        >
-          <CopyCommand command={installCommand} />
-          <div className="flex items-center gap-3">
-            <Link
-              href={getStartedHref}
-              className="lp-sans group inline-flex h-12 items-center gap-2 bg-[#7c3aed] px-7 font-semibold text-white transition-colors hover:bg-[#6d28d9]"
-            >
-              {getStartedLabel}
-              <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
-            </Link>
-            <a
-              href={githubHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="lp-sans inline-flex h-12 items-center border border-[#111014]/25 px-7 font-semibold text-[#111014] transition-colors hover:border-[#111014]/60"
-            >
-              {githubLabel}
-            </a>
+        <div data-hero-actions className="mt-9">
+          <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-center">
+            <CopyCommand command={installCommand} />
+            <div className="flex items-center gap-3">
+              <Link
+                href={getStartedHref}
+                className="lp-sans group inline-flex h-12 items-center gap-2 bg-[#7c3aed] px-7 font-semibold text-white transition-colors hover:bg-[#6d28d9]"
+              >
+                {getStartedLabel}
+                <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+              <a
+                href={githubHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="lp-sans inline-flex h-12 items-center border border-[#111014]/25 px-7 font-semibold text-[#111014] transition-colors hover:border-[#111014]/60"
+              >
+                {githubLabel}
+              </a>
+            </div>
+          </div>
+
+          <div className="mt-6 flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="hidden h-[54px] w-1 bg-[#7c3aed] sm:block"
+            />
+            <ProductHuntBadge />
           </div>
         </div>
       </div>
