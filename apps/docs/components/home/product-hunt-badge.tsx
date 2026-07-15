@@ -90,7 +90,7 @@ export function ProductHuntBadge({
           <span
             role="timer"
             aria-label={timerLabel}
-            className="lp-pixel absolute bottom-[calc(100%+10px)] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap bg-[#111014] px-3 py-2 text-[9px] tracking-[0.12em] text-white uppercase shadow-lg after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-x-[6px] after:border-t-[6px] after:border-x-transparent after:border-t-[#111014]"
+            className="lp-pixel absolute bottom-[calc(100%+10px)] left-1/2 z-10 flex w-[184px] -translate-x-1/2 items-center justify-center whitespace-nowrap bg-[#111014] px-3 py-2 text-[9px] tracking-[0.12em] text-white uppercase shadow-lg after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-x-[6px] after:border-t-[6px] after:border-x-transparent after:border-t-[#111014]"
           >
             {isLocked
               ? lang === "ja"
@@ -99,7 +99,12 @@ export function ProductHuntBadge({
               : lang === "ja"
                 ? "公開中"
                 : "Live"}{" "}
-            <time dateTime="2026-07-16T00:01:00-07:00">{timerValue}</time>
+            <time
+              dateTime="2026-07-16T00:01:00-07:00"
+              className="inline-block w-24 shrink-0 text-center tabular-nums"
+            >
+              {timerValue}
+            </time>
           </span>
 
           {isLocked ? (
