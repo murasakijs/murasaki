@@ -82,7 +82,7 @@ export function ProductHuntBadge({
         {accent ? (
           <span
             aria-hidden="true"
-            className="hidden h-[54px] w-1 shrink-0 bg-[#7c3aed] sm:block"
+            className="hidden h-[54px] w-1 shrink-0 bg-[#7c3aed] md:block"
           />
         ) : null}
 

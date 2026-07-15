@@ -178,9 +178,9 @@ export function PxHero({
 
         <div
           data-hero-actions
-          className="mt-9 flex flex-col items-center sm:items-start"
+          className="mt-9 flex flex-col items-center md:items-start"
         >
-          <div className="flex flex-col items-center gap-5 sm:flex-row">
+          <div className="flex flex-col items-center gap-5 md:flex-row">
             <CopyCommand command={installCommand} />
             <div className="flex items-center justify-center gap-3">
               <Link
@@ -202,7 +202,7 @@ export function PxHero({
             </div>
           </div>
 
-          <div className="mt-6 flex items-center justify-center gap-3 sm:justify-start">
+          <div className="mt-6 flex items-center justify-center gap-3 md:justify-start">
             <ProductHuntBadge lang={lang} accent />
           </div>
         </div>
