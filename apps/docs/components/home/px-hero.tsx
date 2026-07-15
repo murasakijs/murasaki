@@ -1,7 +1,7 @@
 "use client";
 
 import { gsap } from "gsap";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Star } from "lucide-react";
 import Link from "next/link";
 import { useLayoutEffect, useRef } from "react";
 import { CopyCommand } from "@/components/copy-command";
@@ -194,8 +194,9 @@ export function PxHero({
                 href={githubHref}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="lp-sans inline-flex h-12 shrink-0 items-center border border-[#111014]/25 px-5 font-semibold whitespace-nowrap text-[#111014] transition-colors hover:border-[#111014]/60 sm:px-7"
+                className="lp-sans group inline-flex h-12 shrink-0 items-center gap-2 border border-[#111014]/25 px-5 font-semibold whitespace-nowrap text-[#111014] transition-colors hover:border-[#111014]/60 sm:px-7"
               >
+                <Star className="size-4 transition-colors group-hover:fill-current" />
                 {githubLabel}
               </a>
             </div>
