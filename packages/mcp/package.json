@@ -1,6 +1,6 @@
 {
   "name": "@murasakijs/mcp",
-  "version": "0.48.1",
+  "version": "0.48.2",
   "description": "Read-only Model Context Protocol server for Murasaki documentation and compatibility data.",
   "license": "MIT",
   "repository": {
