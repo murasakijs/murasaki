@@ -4,21 +4,7 @@ Read-only local [Model Context Protocol](https://modelcontextprotocol.io/) serve
 It searches the checked-in documentation, reports the canonical capability manifest, returns the
 configuration schema, and diagnoses the structure of a local Murasaki project without executing it.
 
-The server is implemented but has not been published yet. Until the first npm release, run it from
-a repository checkout after `pnpm install`:
-
-```json
-{
-  "mcpServers": {
-    "murasaki": {
-      "command": "node",
-      "args": ["/absolute/path/to/murasaki/packages/mcp/bin/murasaki-mcp.mjs"]
-    }
-  }
-}
-```
-
-After the package is published, the equivalent configuration is:
+Install or run the published package directly from npm. A typical MCP client configuration is:
 
 ```json
 {
