@@ -1399,6 +1399,7 @@ fn show_native_context_menu(
     .unwrap_or_default()
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn handle_native_menu_event(
   window_slot: &SharedWindow,
   webview_slot: &SharedWebview,

@@ -32,7 +32,7 @@
 /// code below it needs no per-OS duplicate — only the resources-dir
 /// resolution and the node binary's filename (`"node"` vs `"node.exe"`)
 /// differ, and callers pass those in.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub(crate) mod shared {
   use std::{
     collections::{HashMap, HashSet},

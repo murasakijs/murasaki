@@ -19,7 +19,7 @@ use tao::{
 };
 use tao::platform::run_return::EventLoopExtRunReturn;
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use crate::launcher::shared::{ShutdownCoordinator, ShutdownPoll};
 
 #[cfg(target_os = "macos")]
@@ -37,7 +37,7 @@ pub enum UserEvent {
   Wake,
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[derive(Clone)]
 struct DevShutdownEndpoint {
   port: u16,
@@ -63,7 +63,7 @@ pub struct Application {
   /// Webview IPC and the event loop share this registry so cross-window
   /// commands cannot escape the set of declared windows.
   windows: SharedWindowRegistry,
-  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
   shutdown_endpoint: Rc<RefCell<Option<DevShutdownEndpoint>>>,
 }
 
@@ -95,14 +95,14 @@ impl Application {
       #[cfg(target_os = "windows")]
       windows_menu_bar: Rc::new(RefCell::new(None)),
       windows: Rc::new(RefCell::new(WindowRegistry::default())),
-      #[cfg(any(target_os = "macos", target_os = "windows"))]
+      #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
       shutdown_endpoint: Rc::new(RefCell::new(None)),
     })
   }
 
   /// Configure the private dev-server endpoint used to run the same
   /// cancellable Node main shutdown lifecycle as the production launcher.
-  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
   #[napi(js_name = "configureShutdown")]
   pub fn configure_shutdown(
     &self,
@@ -313,11 +313,11 @@ impl Application {
     let app_menu_slot = self.app_menu.clone();
     #[cfg(target_os = "windows")]
     let app_menu_slot = self.windows_menu_bar.clone();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let shutdown_endpoint = self.shutdown_endpoint.clone();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let wake_proxy = event_loop.create_proxy();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     let mut shutdown = ShutdownCoordinator::new();
     let mut did_quit = false;
 
@@ -325,7 +325,7 @@ impl Application {
       *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
       let mut shutdown_reason = None;
 
-      #[cfg(any(target_os = "macos", target_os = "windows"))]
+      #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
       match shutdown.poll() {
         ShutdownPoll::Proceed { transport_error } => {
           if let Some(error) = transport_error {
@@ -443,7 +443,7 @@ impl Application {
       }
 
       if let Some(reason) = shutdown_reason {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         if let Some(endpoint) = shutdown_endpoint.borrow().clone() {
           let wake = wake_proxy.clone();
           shutdown.begin(

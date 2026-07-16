@@ -112,6 +112,44 @@ jobs:
           pnpm --dir "$APP_DIR" typecheck
           pnpm --dir "$APP_DIR" build
 
+  linux-native-build:
+    name: Linux x64 / native release build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/native
+
+      - name: Install native package dependencies
+        working-directory: crates/native
+        run: pnpm install --ignore-workspace
+
+      - name: Build Linux native binding
+        working-directory: crates/native
+        run: pnpm exec napi build --platform --release --target x86_64-unknown-linux-gnu
+
+      - name: Build Linux production launcher
+        working-directory: crates/native
+        run: cargo build --locked --release --bin murasaki-launcher --target x86_64-unknown-linux-gnu
+
   macos-framework-native:
     name: macOS arm64 / framework, native, bundle smoke
     runs-on: macos-14
