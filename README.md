@@ -109,8 +109,8 @@ head). `murasaki.config.ts` describes your app's identity and window.
 
 ## Example apps
 
-Three independent, installable apps show different product directions. Each
-has its own source tree, app identity, icon, native bundle, and installer.
+Three independent apps show different product directions. Each has its own
+source tree, app identity, icon, native bundle, and installer.
 
 | App | What it demonstrates | Source |
 | --- | --- | --- |
@@ -124,7 +124,19 @@ has its own source tree, app identity, icon, native bundle, and installer.
   <img src="./examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
 </p>
 
-[Download the macOS and Windows sample installers from the sample-apps v0.47.2 release.](https://github.com/murasakijs/murasaki/releases/tag/samples-v0.47.2)
+On macOS, run the checksum-verified developer previews from the CLI. It selects
+the correct Apple silicon or Intel build, verifies the published SHA256 and
+ad-hoc code signature, then explicitly removes quarantine before launch:
+
+```bash
+pnpm dlx murasaki@latest demo violet-notes
+pnpm dlx murasaki@latest demo murasaki-focus
+pnpm dlx murasaki@latest demo local-signal
+```
+
+These are developer previews, not notarized consumer downloads. The immutable
+build artifacts remain available in the
+[sample-apps v0.47.2 release](https://github.com/murasakijs/murasaki/releases/tag/samples-v0.47.2).
 
 ---
 
@@ -268,8 +280,10 @@ Rust toolchain.
 ## Signing & distribution
 
 By default, `murasaki bundle`/`murasaki installer` produce an **unsigned**
-(ad-hoc) `.app`/`.dmg` — recipients open it the first time with right-click →
-Open, or by running `xattr -dr com.apple.quarantine "<path>"`.
+(ad-hoc) `.app`/`.dmg`. macOS may block copies downloaded through a browser.
+Recipients must explicitly allow the app under System Settings → Privacy &
+Security, or run `xattr -dr com.apple.quarantine "<path>"` after verifying the
+source. Ad-hoc signing alone does not satisfy Gatekeeper distribution policy.
 
 For warning-free distribution, sign and notarize with your own Apple
 Developer ID — murasaki ships no certificate of its own:

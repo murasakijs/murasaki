@@ -87,8 +87,8 @@ export function error(msg: string): string {
  */
 export function unsignedNote(path: string): string {
   return (
-    `\n${warn('This build is unsigned (ad-hoc). Recipients open it the first time with')}\n` +
-    `${dim(`  right-click → Open (once), or:  xattr -dr com.apple.quarantine "${path}"`)}\n` +
+    `\n${warn('This build is unsigned (ad-hoc). macOS may block browser-downloaded copies.')}\n` +
+    `${dim(`  Allow it in System Settings → Privacy & Security, or:  xattr -dr com.apple.quarantine "${path}"`)}\n` +
     `${dim('  For warning-free distribution, sign + notarize:  murasaki installer --sign --notarize')}\n` +
     `${dim('  (needs a paid Apple Developer ID; see the README "Signing & distribution" section)')}\n`
   )

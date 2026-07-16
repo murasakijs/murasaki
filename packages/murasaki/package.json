@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.47.3",
+  "version": "0.47.4",
   "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
   "keywords": [
     "desktop",
@@ -41,7 +41,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsc -p tsconfig.build.json --watch"
+    "dev": "tsc -p tsconfig.build.json --watch",
+    "test": "pnpm build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "@murasakijs/native": "workspace:^",
