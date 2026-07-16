@@ -26,26 +26,8 @@ means a material limitation remains. See [Platform & Feature Status](/docs/core-
 `@murasakijs/mcp` is a local stdio MCP server. It is read-only: there are no
 shell, build, release, publish, or file-writing tools.
 
-<Callout type="warn">
-  The package is implemented in the repository but has not been published as
-  part of a stable npm release yet. Until its first release, run the checked-out
-  `packages/mcp/bin/murasaki-mcp.mjs` file rather than assuming `@latest` exists.
-</Callout>
-
-Configure an MCP client against a repository checkout:
-
-```json
-{
-  "mcpServers": {
-    "murasaki": {
-      "command": "node",
-      "args": ["/absolute/path/to/murasaki/packages/mcp/bin/murasaki-mcp.mjs"]
-    }
-  }
-}
-```
-
-After the package is released, the equivalent package configuration is:
+The package is published on npm. Configure an MCP client to run the latest
+stable version without a repository checkout:
 
 ```json
 {

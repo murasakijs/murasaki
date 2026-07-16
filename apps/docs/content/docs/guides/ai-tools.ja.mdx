@@ -26,26 +26,8 @@ Murasaki はコーディングエージェントや LLM クライアント向け
 `@murasakijs/mcp` はローカルで動作する stdio MCP サーバーです。完全な読み取り専用で、
 シェル実行、ビルド、リリース、公開、ファイル書き込みのツールは含みません。
 
-<Callout type="warn">
-  実装はリポジトリに含まれていますが、安定版の npm パッケージとしてはまだ公開されていません。
-  初回リリースまでは `@latest` が存在すると仮定せず、チェックアウトした
-  `packages/mcp/bin/murasaki-mcp.mjs` を実行してください。
-</Callout>
-
-リポジトリをチェックアウトした状態での MCP クライアント設定:
-
-```json
-{
-  "mcpServers": {
-    "murasaki": {
-      "command": "node",
-      "args": ["/absolute/path/to/murasaki/packages/mcp/bin/murasaki-mcp.mjs"]
-    }
-  }
-}
-```
-
-パッケージ公開後は、次の設定に置き換えられます:
+パッケージは npm で公開されています。リポジトリをチェックアウトせずに最新の安定版を
+実行する MCP クライアント設定は次のとおりです:
 
 ```json
 {
