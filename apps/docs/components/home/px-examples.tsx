@@ -18,12 +18,25 @@ const SAMPLE_RELEASE_URL = `${REPO_URL}/releases/tag/samples-v0.47.2`;
 
 const SAMPLE_META: {
   slug: string;
+  assetStem: string;
   image: StaticImageData;
   imagePosition?: string;
 }[] = [
-  { slug: "violet-notes", image: violetNotesImage },
-  { slug: "murasaki-focus", image: focusImage },
-  { slug: "local-signal", image: localSignalImage },
+  {
+    slug: "violet-notes",
+    assetStem: "Violet-Notes",
+    image: violetNotesImage,
+  },
+  {
+    slug: "murasaki-focus",
+    assetStem: "Murasaki-Focus",
+    image: focusImage,
+  },
+  {
+    slug: "local-signal",
+    assetStem: "Local-Signal",
+    image: localSignalImage,
+  },
 ];
 
 const DOWNLOADS = [
@@ -43,6 +56,10 @@ const DOWNLOADS = [
     icon: MonitorDown,
   },
 ];
+
+function sampleDownloadUrl(assetStem: string, target: string) {
+  return `${REPO_URL}/releases/download/samples-v0.47.2/${assetStem}-0.47.2-${target}`;
+}
 
 /**
  * Runnable proof — immutable release downloads for the default scaffold,
@@ -151,7 +168,7 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                 <p className="lp-sans mt-3 text-sm leading-relaxed text-white/65">
                   {app.description}
                 </p>
-                <div className="lp-mono mt-5 flex flex-wrap gap-x-5 gap-y-3 text-xs">
+                <div className="lp-mono mt-5 flex flex-wrap gap-x-5 gap-y-3 border-b border-white/15 pb-5 text-xs">
                   <a
                     href={`${REPO_URL}/tree/main/examples/${meta.slug}`}
                     className="inline-flex items-center gap-2 text-white/65 transition-colors hover:text-white"
@@ -166,6 +183,45 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                     <Download aria-hidden="true" className="size-3.5" />
                     {content.downloadsLabel}
                   </a>
+                </div>
+
+                <div className="mt-5 grid gap-2">
+                  <a
+                    href={sampleDownloadUrl(meta.assetStem, "darwin-arm64.dmg")}
+                    className="lp-sans group flex min-h-11 items-center justify-between gap-3 border border-white/30 bg-white/10 px-3 py-2.5 text-xs font-bold transition-colors hover:border-white hover:bg-white hover:text-[#17121f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Apple aria-hidden="true" className="size-3.5 shrink-0" />
+                      <span>{content.defaultDemo.macArm}</span>
+                    </span>
+                    <Download
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
+                    />
+                  </a>
+                  <div className="grid grid-cols-2 gap-2">
+                    <a
+                      href={sampleDownloadUrl(meta.assetStem, "darwin-x64.dmg")}
+                      className="lp-sans flex min-h-10 min-w-0 items-center gap-2 border border-white/20 px-3 py-2 text-[11px] font-medium text-white/65 transition-colors hover:border-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                    >
+                      <Apple aria-hidden="true" className="size-3 shrink-0" />
+                      <span className="truncate">
+                        {content.defaultDemo.macIntel}
+                      </span>
+                    </a>
+                    <a
+                      href={sampleDownloadUrl(meta.assetStem, "setup.exe")}
+                      className="lp-sans flex min-h-10 min-w-0 items-center gap-2 border border-white/20 px-3 py-2 text-[11px] font-medium text-white/65 transition-colors hover:border-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                    >
+                      <MonitorDown
+                        aria-hidden="true"
+                        className="size-3 shrink-0"
+                      />
+                      <span className="truncate">
+                        {content.defaultDemo.windows}
+                      </span>
+                    </a>
+                  </div>
                 </div>
               </article>
             );

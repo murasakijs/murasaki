@@ -842,7 +842,7 @@ const lpEn: LpExtra = {
       windows: "Windows · x64",
       releaseNotes: "Release notes & checksums",
       firstLaunch:
-        "Unsigned demo: on macOS, use right-click → Open once. Windows may show SmartScreen.",
+        "Not notarized yet: macOS may block the app. After copying it to Applications, allow it in System Settings → Privacy & Security → Open Anyway. Windows may show SmartScreen.",
     },
     sampleLabel: "Three apps. Three directions.",
     sourceLabel: "Source",
@@ -965,7 +965,7 @@ const lpJa: LpExtra = {
       windows: "Windows · x64",
       releaseNotes: "リリースノートとチェックサム",
       firstLaunch:
-        "未公証のDemoです。macOSでは初回のみ右クリック→「開く」、WindowsではSmartScreenの確認が必要な場合があります。",
+        "未公証のDemoです。macOSでブロックされた場合は、アプリケーションへコピー後、システム設定→プライバシーとセキュリティ→「このまま開く」で許可してください。WindowsではSmartScreenの確認が必要な場合があります。",
     },
     sampleLabel: "3つのアプリ。3つの方向性。",
     sourceLabel: "ソース",
