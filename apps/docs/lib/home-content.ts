@@ -709,9 +709,8 @@ export interface LpExtra {
     };
     caption: string;
   };
-  /** Downloadable proof: the packaged default scaffold plus three independent
-   * sample products. These links intentionally point at immutable GitHub
-   * releases so the LP never serves a stale local installer. */
+  /** Runnable proof: the packaged default scaffold plus three independent
+   * sample products, launched through the checksum-verifying developer CLI. */
   examples: {
     eyebrow: string;
     heading: string;
@@ -720,9 +719,6 @@ export interface LpExtra {
       label: string;
       heading: string;
       description: string;
-      macArm: string;
-      macIntel: string;
-      windows: string;
       releaseNotes: string;
       firstLaunch: string;
     };
@@ -837,25 +833,22 @@ const lpEn: LpExtra = {
     eyebrow: "Runnable apps",
     heading: "Try the result, not just the pitch.",
     intro:
-      "Download the packaged default scaffold, or open three independent apps built to prove different product directions.",
+      "Run the packaged default scaffold or three independent apps through the developer CLI—without presenting an unsigned build as a consumer download.",
     defaultDemo: {
-      label: "Ready to run · v0.47.3",
+      label: "Developer preview · CLI",
       heading: "The default scaffold, already packaged.",
       description:
         "The exact app created by create-murasaki, with native menus, file-based routes, Server Actions, API routes, and the bundled Node runtime.",
-      macArm: "macOS · Apple silicon",
-      macIntel: "macOS · Intel",
-      windows: "Windows · x64",
-      releaseNotes: "Release notes & checksums",
+      releaseNotes: "Build details & checksums",
       firstLaunch:
-        "Not notarized yet: macOS may block the app. After copying it to Applications, allow it in System Settings → Privacy & Security → Open Anyway. Windows may show SmartScreen.",
+        "The macOS CLI selects the correct CPU build, verifies its published SHA256 and ad-hoc code signature, then explicitly removes quarantine before launch.",
     },
     sampleLabel: "Three apps. Three directions.",
     sourceLabel: "Source",
-    downloadsLabel: "Downloads",
+    downloadsLabel: "Build details",
     runner: {
-      note: "macOS may block browser-downloaded ad-hoc builds. The command on each card verifies the published SHA256, caches the matching app, removes its quarantine marker, and opens it.",
-      label: "Verified macOS demo runner",
+      note: "These macOS developer previews run through Murasaki's CLI—no consumer download is presented as a signed app. Each command verifies the published SHA256 and ad-hoc code signature before removing quarantine and launching.",
+      label: "macOS developer preview",
       copy: "Copy demo command",
       copied: "Copied",
     },
@@ -966,25 +959,22 @@ const lpJa: LpExtra = {
     eyebrow: "実際に動くアプリ",
     heading: "説明より先に、完成品を試す。",
     intro:
-      "標準スキャフォールドのパッケージ版をダウンロードするか、異なる方向性を実証する3つの独立アプリを試せます。",
+      "未公証ビルドを一般向けダウンロードとして見せず、標準スキャフォールドと3つの独立アプリをDeveloper CLIから試せます。",
     defaultDemo: {
-      label: "すぐに起動 · v0.47.3",
+      label: "Developer Preview · CLI",
       heading: "標準スキャフォールドを、そのままアプリに。",
       description:
         "create-murasakiが生成するアプリそのものです。ネイティブメニュー、ファイルベースルーティング、Server Actions、API Routes、同梱Nodeを確認できます。",
-      macArm: "macOS · Appleシリコン",
-      macIntel: "macOS · Intel",
-      windows: "Windows · x64",
-      releaseNotes: "リリースノートとチェックサム",
+      releaseNotes: "ビルド詳細とチェックサム",
       firstLaunch:
-        "未公証のDemoです。macOSでブロックされた場合は、アプリケーションへコピー後、システム設定→プライバシーとセキュリティ→「このまま開く」で許可してください。WindowsではSmartScreenの確認が必要な場合があります。",
+        "macOS CLIがCPUに合うビルドを選択し、公開SHA256とad-hocコード署名を検証してから、隔離属性を明示的に解除して起動します。",
     },
     sampleLabel: "3つのアプリ。3つの方向性。",
     sourceLabel: "ソース",
-    downloadsLabel: "ダウンロード",
+    downloadsLabel: "ビルド詳細",
     runner: {
-      note: "ブラウザから取得したad-hoc版はmacOSにブロックされる場合があります。各カードのコマンドは公開SHA256を検証し、CPUに合うアプリをキャッシュへ展開して、隔離属性を解除して起動します。",
-      label: "検証付きmacOS Demoランナー",
+      note: "macOS向けDeveloper PreviewはMurasaki CLIから起動します。未公証アプリを一般向けダウンロードとして見せず、各コマンドが公開SHA256とad-hocコード署名を検証してから隔離属性を解除します。",
+      label: "macOS Developer Preview",
       copy: "Demoコマンドをコピー",
       copied: "コピーしました",
     },

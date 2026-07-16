@@ -1,10 +1,4 @@
-import {
-  Apple,
-  Code2,
-  Download,
-  ExternalLink,
-  MonitorDown,
-} from "lucide-react";
+import { Code2, ExternalLink } from "lucide-react";
 import Image, { type StaticImageData } from "next/image";
 import type { LpExtra } from "@/lib/home-content";
 import localSignalImage from "../../../../examples/local-signal/design/implementation.png";
@@ -14,62 +8,26 @@ import { SampleDemoCommand } from "./sample-demo-command";
 
 const REPO_URL = "https://github.com/murasakijs/murasaki";
 const DEMO_RELEASE_URL = `${REPO_URL}/releases/tag/v0.47.3`;
-const DEMO_ASSET_ROOT = `${REPO_URL}/releases/download/v0.47.3`;
 const SAMPLE_RELEASE_URL = `${REPO_URL}/releases/tag/samples-v0.47.2`;
 
 const SAMPLE_META: {
   slug: string;
-  assetStem: string;
   image: StaticImageData;
   imagePosition?: string;
 }[] = [
-  {
-    slug: "violet-notes",
-    assetStem: "Violet-Notes",
-    image: violetNotesImage,
-  },
-  {
-    slug: "murasaki-focus",
-    assetStem: "Murasaki-Focus",
-    image: focusImage,
-  },
-  {
-    slug: "local-signal",
-    assetStem: "Local-Signal",
-    image: localSignalImage,
-  },
+  { slug: "violet-notes", image: violetNotesImage },
+  { slug: "murasaki-focus", image: focusImage },
+  { slug: "local-signal", image: localSignalImage },
 ];
-
-const DOWNLOADS = [
-  {
-    key: "macArm" as const,
-    href: `${DEMO_ASSET_ROOT}/MurasakiDemo-0.47.3-darwin-arm64.dmg`,
-    icon: Apple,
-  },
-  {
-    key: "macIntel" as const,
-    href: `${DEMO_ASSET_ROOT}/MurasakiDemo-0.47.3-darwin-x64.dmg`,
-    icon: Apple,
-  },
-  {
-    key: "windows" as const,
-    href: `${DEMO_ASSET_ROOT}/MurasakiDemo-0.47.3-setup.exe`,
-    icon: MonitorDown,
-  },
-];
-
-function sampleDownloadUrl(assetStem: string, target: string) {
-  return `${REPO_URL}/releases/download/samples-v0.47.2/${assetStem}-0.47.2-${target}`;
-}
 
 function sampleRunnerCommand(slug: string) {
-  return `curl -fsSL https://raw.githubusercontent.com/murasakijs/murasaki/main/scripts/run-sample-demo.sh | sh -s -- ${slug}`;
+  return `pnpm dlx murasaki@latest demo ${slug}`;
 }
 
 /**
- * Runnable proof — immutable release downloads for the default scaffold,
- * followed by the three independent showcase products. Static image imports
- * let Next emit fingerprinted local assets without a runtime image service.
+ * Runnable proof — the default scaffold and three showcase products launch
+ * through the checksum-verifying CLI. Static image imports let Next emit
+ * fingerprinted local assets without a runtime image service.
  */
 export function PxExamples({ content }: { content: LpExtra["examples"] }) {
   return (
@@ -107,24 +65,12 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
           </div>
 
           <div className="mt-8 border-t border-white/15 pt-8 lg:mt-0 lg:border-l lg:border-t-0 lg:pl-10 lg:pt-0">
-            <div className="grid gap-3">
-              {DOWNLOADS.map(({ key, href, icon: Icon }) => (
-                <a
-                  key={key}
-                  href={href}
-                  className="lp-sans group flex min-h-12 items-center justify-between gap-4 border border-white/25 px-4 py-3 text-sm font-bold transition-colors hover:border-[#a78bfa] hover:bg-[#7c3aed] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <Icon aria-hidden="true" className="size-4 shrink-0" />
-                    <span>{content.defaultDemo[key]}</span>
-                  </span>
-                  <Download
-                    aria-hidden="true"
-                    className="size-4 shrink-0 transition-transform group-hover:translate-y-0.5"
-                  />
-                </a>
-              ))}
-            </div>
+            <SampleDemoCommand
+              command="pnpm dlx murasaki@latest demo"
+              label={content.runner.label}
+              copyLabel={content.runner.copy}
+              copiedLabel={content.runner.copied}
+            />
 
             <a
               href={DEMO_RELEASE_URL}
@@ -188,48 +134,9 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                     href={SAMPLE_RELEASE_URL}
                     className="inline-flex items-center gap-2 text-white/65 transition-colors hover:text-white"
                   >
-                    <Download aria-hidden="true" className="size-3.5" />
+                    <ExternalLink aria-hidden="true" className="size-3.5" />
                     {content.downloadsLabel}
                   </a>
-                </div>
-
-                <div className="mt-5 grid gap-2">
-                  <a
-                    href={sampleDownloadUrl(meta.assetStem, "darwin-arm64.dmg")}
-                    className="lp-sans group flex min-h-11 items-center justify-between gap-3 border border-white/30 bg-white/10 px-3 py-2.5 text-xs font-bold transition-colors hover:border-white hover:bg-white hover:text-[#17121f] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Apple aria-hidden="true" className="size-3.5 shrink-0" />
-                      <span>{content.defaultDemo.macArm}</span>
-                    </span>
-                    <Download
-                      aria-hidden="true"
-                      className="size-3.5 shrink-0"
-                    />
-                  </a>
-                  <div className="grid grid-cols-2 gap-2">
-                    <a
-                      href={sampleDownloadUrl(meta.assetStem, "darwin-x64.dmg")}
-                      className="lp-sans flex min-h-10 min-w-0 items-center gap-2 border border-white/20 px-3 py-2 text-[11px] font-medium text-white/65 transition-colors hover:border-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                    >
-                      <Apple aria-hidden="true" className="size-3 shrink-0" />
-                      <span className="truncate">
-                        {content.defaultDemo.macIntel}
-                      </span>
-                    </a>
-                    <a
-                      href={sampleDownloadUrl(meta.assetStem, "setup.exe")}
-                      className="lp-sans flex min-h-10 min-w-0 items-center gap-2 border border-white/20 px-3 py-2 text-[11px] font-medium text-white/65 transition-colors hover:border-white/60 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-                    >
-                      <MonitorDown
-                        aria-hidden="true"
-                        className="size-3 shrink-0"
-                      />
-                      <span className="truncate">
-                        {content.defaultDemo.windows}
-                      </span>
-                    </a>
-                  </div>
                 </div>
                 <SampleDemoCommand
                   command={sampleRunnerCommand(meta.slug)}
