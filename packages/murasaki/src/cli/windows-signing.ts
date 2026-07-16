@@ -234,7 +234,7 @@ try {
   }
   $status = [string]$signature.Status
   if (@('Valid', 'NotTrusted', 'UnknownError') -notcontains $status) {
-    throw "Authenticode integrity check failed with status $status: $($signature.StatusMessage)"
+    throw ('Authenticode integrity check failed with status {0}: {1}' -f $status, $signature.StatusMessage)
   }
   if ($signature.SignerCertificate.Thumbprint -ne $expected.Thumbprint) {
     throw 'The embedded signer does not match the configured PFX certificate.'
