@@ -642,16 +642,34 @@ jobs:
       - name: Create ephemeral trusted code-signing certificate
         shell: pwsh
         run: |
-          $certificate = New-SelfSignedCertificate `
-            -Type CodeSigningCert `
-            -Subject 'CN=Murasaki CI Authenticode' `
-            -CertStoreLocation 'Cert:\CurrentUser\My' `
-            -KeyExportPolicy Exportable `
-            -NotAfter (Get-Date).AddDays(2)
+          # New-SelfSignedCertificate may wait on the Windows runner's
+          # interactive certificate provider. OpenSSL + certutil keeps this
+          # fixture deterministic and fully non-interactive while exercising
+          # the same PFX path users configure in release CI.
+          $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
+          if (-not (Test-Path -LiteralPath $openssl -PathType Leaf)) {
+            throw "OpenSSL was not found at $openssl"
+          }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.key.pem'
+          $pemPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cert.pem'
           $cerPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cer'
-          Export-Certificate -Cert $certificate -FilePath $cerPath | Out-Null
-          Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-          "MURASAKI_WINDOWS_CERTIFICATE_SHA1=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $pfxPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.pfx'
+          $password = 'murasaki-ci-only'
+          & $openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes `
+            -subj '/CN=Murasaki CI Authenticode' `
+            -addext 'keyUsage=critical,digitalSignature' `
+            -addext 'extendedKeyUsage=codeSigning' `
+            -keyout $keyPath -out $pemPath
+          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL certificate generation failed' }
+          & $openssl x509 -in $pemPath -outform DER -out $cerPath
+          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL DER export failed' }
+          & $openssl pkcs12 -export -out $pfxPath -inkey $keyPath -in $pemPath `
+            -passout "pass:$password"
+          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PFX export failed' }
+          certutil -user -f -addstore Root $cerPath
+          if ($LASTEXITCODE -ne 0) { throw 'certutil failed to trust the CI certificate' }
+          "MURASAKI_WINDOWS_CERTIFICATE_FILE=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MURASAKI_WINDOWS_CERTIFICATE_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           # Keep PR CI independent of a public timestamp service. Unit tests
           # cover /tr + /td ordering; release users timestamp by default.
           'MURASAKI_WINDOWS_TIMESTAMP_URL=false' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
