@@ -646,7 +646,6 @@ jobs:
           # Generate the fixture entirely through .NET. This avoids the
           # interactive Windows certificate provider used by
           # New-SelfSignedCertificate and still exercises the release PFX path.
-          $cerPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cer'
           $pfxPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.pfx'
           $password = 'murasaki-ci-only'
           $rsa = [System.Security.Cryptography.RSA]::Create(2048)
@@ -686,12 +685,6 @@ jobs:
                   $password
                 )
               )
-              [System.IO.File]::WriteAllBytes(
-                $cerPath,
-                $certificate.Export(
-                  [System.Security.Cryptography.X509Certificates.X509ContentType]::Cert
-                )
-              )
             } finally {
               $certificate.Dispose()
             }
@@ -703,24 +696,10 @@ jobs:
           # Keep PR CI independent of a public timestamp service. Unit tests
           # cover /tr + /td ordering; release users timestamp by default.
           'MURASAKI_WINDOWS_TIMESTAMP_URL=false' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: Trust ephemeral code-signing certificate
-        shell: pwsh
-        timeout-minutes: 2
-        run: |
-          $cerPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cer'
-          $trustedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cerPath)
-          $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-          )
-          try {
-            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            $rootStore.Add($trustedCertificate)
-          } finally {
-            $rootStore.Close()
-            $trustedCertificate.Dispose()
-          }
+          # GitHub-hosted Windows blocks when a self-signed root is added to
+          # the trust store. This opt-in is hard-restricted to CI + PFX and
+          # verifies the Authenticode hash and exact signer instead of trust.
+          'MURASAKI_WINDOWS_CI_ALLOW_UNTRUSTED_CERTIFICATE=1' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install Windows installer toolchains
         shell: pwsh
@@ -741,26 +720,37 @@ jobs:
       - name: Verify signed artifacts and signed app startup
         shell: pwsh
         run: |
+          $expectedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $env:MURASAKI_WINDOWS_CERTIFICATE_FILE,
+            $env:MURASAKI_WINDOWS_CERTIFICATE_PASSWORD,
+            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          )
+          function Assert-CiAuthenticodeIntegrity {
+            param([Parameter(Mandatory = $true)][string]$Path)
+            $signature = Get-AuthenticodeSignature -LiteralPath $Path
+            $status = [string]$signature.Status
+            if ($null -eq $signature.SignerCertificate) {
+              throw "No embedded Authenticode signer on $Path"
+            }
+            if (@('Valid', 'NotTrusted', 'UnknownError') -notcontains $status) {
+              throw "Authenticode integrity check failed on $Path`: $status $($signature.StatusMessage)"
+            }
+            if ($signature.SignerCertificate.Thumbprint -ne $expectedCertificate.Thumbprint) {
+              throw "Unexpected Authenticode signer on $Path"
+            }
+          }
+
           $app = (Resolve-Path 'examples/ci-win-app/dist/bundle/Murasaki CI Windows/Murasaki CI Windows.exe').Path
           $setup = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0-setup.exe').Path
           $msi = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0.msi').Path
-          foreach ($artifact in @($app, $setup, $msi)) {
-            $signature = Get-AuthenticodeSignature -FilePath $artifact
-            if ($signature.Status -ne 'Valid') {
-              Write-Error "Invalid Authenticode signature on $artifact`: $($signature.Status) $($signature.StatusMessage)"
-              exit 1
-            }
-          }
+          @($app, $setup, $msi) | ForEach-Object { Assert-CiAuthenticodeIntegrity -Path $_ }
 
           $zip = (Resolve-Path 'examples/ci-win-app/dist/bundle/Murasaki CI Windows-win32-x64.zip').Path
           $expanded = Join-Path $env:RUNNER_TEMP 'murasaki-signed-portable'
           Expand-Archive -LiteralPath $zip -DestinationPath $expanded -Force
           $portableExe = Join-Path $expanded 'Murasaki CI Windows/Murasaki CI Windows.exe'
-          $portableSignature = Get-AuthenticodeSignature -FilePath $portableExe
-          if ($portableSignature.Status -ne 'Valid') {
-            Write-Error "Portable ZIP contains an invalid signature: $($portableSignature.Status)"
-            exit 1
-          }
+          Assert-CiAuthenticodeIntegrity -Path $portableExe
+          $expectedCertificate.Dispose()
 
           .github/scripts/win-smoke-test.ps1 `
             -ExePath $app `

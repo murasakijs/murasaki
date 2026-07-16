@@ -17,6 +17,7 @@ test('Windows signing defaults to a timestamped certificate-store signature', ()
   const options = resolveWindowsSigningOptions(baseConfig, process.cwd(), {})
   assert.equal(options.certificateStore, 'currentUser')
   assert.equal(options.timestampUrl, 'http://timestamp.digicert.com')
+  assert.equal(options.allowUntrustedCiCertificate, false)
   assert.deepEqual(
     windowsSignArgs('C:\\release\\Signed App.exe', 'Signed App', options),
     [
@@ -113,4 +114,33 @@ test('environment certificate selectors are mutually exclusive', async (t) => {
     }),
     /choose exactly one Windows signing source/,
   )
+})
+
+test('untrusted certificate verification is narrowly restricted to CI PFX fixtures', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'murasaki-signing-ci-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await writeFile(join(root, 'release.pfx'), 'test fixture')
+
+  assert.throws(
+    () => resolveWindowsSigningOptions(baseConfig, root, {
+      MURASAKI_WINDOWS_CERTIFICATE_FILE: 'release.pfx',
+      MURASAKI_WINDOWS_CI_ALLOW_UNTRUSTED_CERTIFICATE: '1',
+    }),
+    /restricted to CI/,
+  )
+  assert.throws(
+    () => resolveWindowsSigningOptions(baseConfig, root, {
+      CI: 'true',
+      MURASAKI_WINDOWS_CI_ALLOW_UNTRUSTED_CERTIFICATE: '1',
+    }),
+    /requires MURASAKI_WINDOWS_CERTIFICATE_FILE/,
+  )
+
+  const options = resolveWindowsSigningOptions(baseConfig, root, {
+    CI: 'true',
+    MURASAKI_WINDOWS_CERTIFICATE_FILE: 'release.pfx',
+    MURASAKI_WINDOWS_CI_ALLOW_UNTRUSTED_CERTIFICATE: '1',
+  })
+  assert.equal(options.allowUntrustedCiCertificate, true)
+  assert.equal(options.certificateFile, join(root, 'release.pfx'))
 })

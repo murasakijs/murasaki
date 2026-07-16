@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process'
 import type { MurasakiConfig } from '../config.js'
 import { dim, success } from './brand.js'
 
@@ -16,6 +16,7 @@ export interface ResolvedWindowsSigningOptions {
   certificateStore: 'currentUser' | 'localMachine'
   timestampUrl: string | false
   artifactSigning?: { dlib: string; metadata: string }
+  allowUntrustedCiCertificate: boolean
 }
 
 /**
@@ -82,6 +83,20 @@ export function resolveWindowsSigningOptions(
       ?? (artifactSigning ? ARTIFACT_SIGNING_TIMESTAMP_URL : DEFAULT_TIMESTAMP_URL))
   if (timestampUrl !== false) validateHttpUrl(timestampUrl, 'Windows timestamp URL')
 
+  const allowUntrustedCiCertificate = env.MURASAKI_WINDOWS_CI_ALLOW_UNTRUSTED_CERTIFICATE === '1'
+  if (allowUntrustedCiCertificate) {
+    if (env.CI !== 'true' && env.CI !== '1') {
+      throw new Error(
+        'murasaki: MURASAKI_WINDOWS_CI_ALLOW_UNTRUSTED_CERTIFICATE is restricted to CI.',
+      )
+    }
+    if (!certificateFile) {
+      throw new Error(
+        'murasaki: CI integrity-only verification requires MURASAKI_WINDOWS_CERTIFICATE_FILE.',
+      )
+    }
+  }
+
   return {
     signToolPath: optionalString(env.MURASAKI_SIGNTOOL_PATH ?? windows?.signToolPath),
     certificateFile,
@@ -91,6 +106,7 @@ export function resolveWindowsSigningOptions(
     certificateStore: windows?.certificateStore ?? 'currentUser',
     timestampUrl,
     artifactSigning,
+    allowUntrustedCiCertificate,
   }
 }
 
@@ -173,14 +189,16 @@ export function signWindowsArtifact(
     )
   }
 
-  const verified = spawnSync(
-    signTool,
-    windowsVerifyArgs(artifactPath, options),
-    { encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
-  )
+  const verified = options.allowUntrustedCiCertificate
+    ? verifyUntrustedCiSignature(artifactPath, options)
+    : spawnSync(
+      signTool,
+      windowsVerifyArgs(artifactPath, options),
+      { encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+    )
   if (verified.error || verified.status !== 0) {
     throw new Error(
-      `murasaki: SignTool verification failed for ${artifactPath}:\n${sanitizeOutput(
+      `murasaki: Windows signature verification failed for ${artifactPath}:\n${sanitizeOutput(
         verified.stderr || verified.stdout || verified.error?.message || '',
         options.certificatePassword,
       )}`,
@@ -188,6 +206,59 @@ export function signWindowsArtifact(
   }
 
   process.stdout.write(`\n${success(`signed and verified  ${dim(artifactPath)}`)}\n`)
+}
+
+/**
+ * GitHub-hosted Windows runners can block indefinitely when a test root is
+ * added to the trusted store. This narrowly scoped CI path still rejects an
+ * unsigned/tampered artifact and requires the embedded signer to match the
+ * configured PFX, but deliberately does not assert public chain trust.
+ * Production releases never enter this path and continue through SignTool
+ * `verify /pa` above.
+ */
+function verifyUntrustedCiSignature(
+  artifactPath: string,
+  options: ResolvedWindowsSigningOptions,
+): SpawnSyncReturns<string> {
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+$signature = Get-AuthenticodeSignature -LiteralPath $env:MURASAKI_VERIFY_ARTIFACT
+$expected = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+  $env:MURASAKI_WINDOWS_CERTIFICATE_FILE,
+  $env:MURASAKI_WINDOWS_CERTIFICATE_PASSWORD,
+  [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+)
+try {
+  if ($null -eq $signature.SignerCertificate) {
+    throw 'The artifact has no embedded Authenticode signer.'
+  }
+  $status = [string]$signature.Status
+  if (@('Valid', 'NotTrusted', 'UnknownError') -notcontains $status) {
+    throw "Authenticode integrity check failed with status $status: $($signature.StatusMessage)"
+  }
+  if ($signature.SignerCertificate.Thumbprint -ne $expected.Thumbprint) {
+    throw 'The embedded signer does not match the configured PFX certificate.'
+  }
+  Write-Output "integrity-only CI verification passed ($status)"
+} finally {
+  $expected.Dispose()
+}
+`
+  return spawnSync(
+    'powershell.exe',
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+      env: {
+        ...process.env,
+        MURASAKI_VERIFY_ARTIFACT: artifactPath,
+        MURASAKI_WINDOWS_CERTIFICATE_FILE: options.certificateFile,
+        MURASAKI_WINDOWS_CERTIFICATE_PASSWORD: options.certificatePassword ?? '',
+      },
+    },
+  )
 }
 
 /** Resolve an explicit tool, PATH entry, or the newest installed Windows SDK copy. */
