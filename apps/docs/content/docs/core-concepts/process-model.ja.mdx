@@ -15,6 +15,7 @@ launch
   → Node child が src/main.ts を読み込む
   → main.ready(context) が完了
   → local server が listen を開始
+  → cold start 時の登録済み URL / file を main.openRequested() へ配送
   → WebView が renderer を読み込む
 ```
 
@@ -24,8 +25,28 @@ DB の open、migration、アプリ所有 service の起動など、UI より先
 
 packaged macOS / Windows app では 2 回目の起動は別 backend を開始しません。その
 `argv` / working directory は `main.secondInstance()` に渡され、host が primary window
-を focus します。開発 mode と Linux には現状この lock がありません。URL scheme / file
-association registration は別機能で、まだ実装されていません。
+を focus します。開発 mode と Linux には現状この lock がありません。
+
+## Open request
+
+packaged macOS / Windows app は、`murasaki.config.ts` の `protocols` と
+`fileAssociations` で custom URL scheme と document extension を登録できます。
+`ready()` の完了後、一致した activation が normalize されて
+`main.openRequested()` へ渡されます。
+
+- `activation`: `cold-start` / `second-instance` / `os-event`
+- `transport`: `argv` / `open-url` / `open-file`
+- `targets`: `{ kind: 'url', url, scheme }` または `{ kind: 'file', path }`
+
+2 回目の起動では、`secondInstance()` は raw process argument を引き続き受け取り、
+`openRequested()` には登録済み URL / file だけが渡されます。cross-platform な
+open 処理は `openRequested()`、その他の secondary-launch argument は
+`secondInstance()` で扱ってください。
+
+<Callout type="warn">
+  URL / file activation は OS から届く untrusted input です。登録は hook に届く
+  input を選ぶだけで、送信元の認証や URL / file content の安全性を保証しません。
+</Callout>
 
 ## 終了シーケンス
 

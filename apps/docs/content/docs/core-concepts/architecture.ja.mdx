@@ -36,15 +36,16 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 
 | レイヤー | 担当 | 担当しないもの |
 | --- | --- | --- |
-| Rust ホスト | ネイティブイベントループ、単一ウィンドウ、ナビゲーション制御、メニュー、Node 子プロセス監視、更新の最終適用 | ビジネスロジック、React state |
-| ローカル Node | Main ライフサイクル、Action、API ルート、更新検証、アプリのリソースとデータ | ネイティブウィンドウ生成 API（現状は非公開） |
+| Rust ホスト | ネイティブイベントループ、単一ウィンドウ、ナビゲーション制御、OS open request の normalize、メニュー、Node 子プロセス監視、更新の最終適用 | ビジネスロジック、React state |
+| ローカル Node | Main ライフサイクル、登録済み URL / file の処理、Action、API ルート、更新検証、アプリのリソースとデータ | ネイティブウィンドウ生成 API（現状は非公開） |
 | レンダラー | UI、ルーティング、ブラウザー API、型付きバックエンド関数の呼び出し | ファイルシステム・Node・ネイティブモジュールへの直接アクセス |
 
 <Callout type="warn">
-  Murasaki は 1.0 未満です。マルチウィンドウ、トレイ / グローバルショートカット、
-  URL scheme / file association registration、window / origin 別 Capability policy は
-  まだ公開機能ではありません。packaged macOS / Windows app は single instance を強制し、
-  renderer native command には deny-by-default の型付き allowlist があります。本番設計を確定する前に
+  Murasaki は 1.0 未満です。マルチウィンドウと window / origin 別 Capability
+  policy はまだ公開機能ではありません。packaged macOS / Windows app は single
+  instance を強制し、URL scheme / file association を登録して、一致する activation を
+  Node Main の `openRequested()` へ渡せます。renderer native command には
+  deny-by-default の型付き allowlist があります。本番設計を確定する前に
   [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)を
   確認してください。
 </Callout>
@@ -60,6 +61,7 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 | ネイティブホスト | CLI が `@murasakijs/native` をロード | 単体の Rust launcher |
 | Main entry | Vite SSR で読み込み、entry の変更で hot reload | `server/main.mjs` にコンパイル |
 | バックエンド呼び出し | Vite middleware | 同梱 loopback HTTP server |
+| URL / file 登録 | dev mode では OS に登録しない | macOS app metadata または Windows installer registry |
 
 本番では `appId` から決めた loopback port を使うため、起動をまたいでレンダラーの
 origin が安定します。Windows の WebView2 profile も `appId` ごとに分離されます。

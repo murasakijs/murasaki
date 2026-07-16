@@ -46,7 +46,7 @@ mod shared {
     time::Duration,
   };
 
-  use serde::Deserialize;
+  use serde::{Deserialize, Serialize};
   use fs2::FileExt;
 
   use crate::types::MenuLabels;
@@ -101,6 +101,88 @@ mod shared {
     /// with.
     #[serde(default)]
     pub(super) console: bool,
+    #[serde(default)]
+    pub(super) protocols: Vec<ProtocolMeta>,
+    #[serde(default)]
+    pub(super) file_associations: Vec<FileAssociationMeta>,
+  }
+
+  #[derive(Deserialize)]
+  pub(super) struct ProtocolMeta {
+    pub(super) scheme: String,
+    #[serde(default)]
+    pub(super) name: Option<String>,
+  }
+
+  #[derive(Deserialize)]
+  pub(super) struct FileAssociationMeta {
+    #[serde(default)]
+    pub(super) extensions: Vec<String>,
+  }
+
+  #[derive(Clone, Debug, PartialEq, Serialize)]
+  #[serde(tag = "kind", rename_all = "lowercase")]
+  pub(super) enum OpenTarget {
+    Url { url: String, scheme: String },
+    File { path: String },
+  }
+
+  pub(super) fn open_targets_from_args(
+    meta: &Meta,
+    argv: &[String],
+    cwd: &Path,
+  ) -> Vec<OpenTarget> {
+    let schemes = meta.protocols.iter().map(|item| item.scheme.as_str()).collect::<Vec<_>>();
+    let extensions = meta.file_associations.iter()
+      .flat_map(|item| item.extensions.iter().map(String::as_str))
+      .collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    for raw in argv.iter().take(32) {
+      if raw.starts_with('-') || raw.len() > 32_768 { continue; }
+      if let Ok(parsed) = url::Url::parse(raw) {
+        let scheme = parsed.scheme().to_ascii_lowercase();
+        if scheme != "file" && schemes.iter().any(|allowed| allowed.eq_ignore_ascii_case(&scheme)) {
+          targets.push(OpenTarget::Url { url: parsed.to_string(), scheme });
+          continue;
+        }
+        if scheme == "file" {
+          if let Ok(path) = parsed.to_file_path() {
+            push_registered_file(&mut targets, path, &extensions);
+          }
+          continue;
+        }
+      }
+      let path = PathBuf::from(raw);
+      let absolute = if path.is_absolute() { path } else { cwd.join(path) };
+      push_registered_file(&mut targets, absolute, &extensions);
+    }
+    targets
+  }
+
+  pub(super) fn open_targets_from_urls(meta: &Meta, urls: &[url::Url]) -> Vec<OpenTarget> {
+    let schemes = meta.protocols.iter().map(|item| item.scheme.as_str()).collect::<Vec<_>>();
+    let extensions = meta.file_associations.iter()
+      .flat_map(|item| item.extensions.iter().map(String::as_str))
+      .collect::<Vec<_>>();
+    let mut targets = Vec::new();
+    for parsed in urls.iter().take(32) {
+      let scheme = parsed.scheme().to_ascii_lowercase();
+      if scheme == "file" {
+        if let Ok(path) = parsed.to_file_path() {
+          push_registered_file(&mut targets, path, &extensions);
+        }
+      } else if schemes.iter().any(|allowed| allowed.eq_ignore_ascii_case(&scheme)) {
+        targets.push(OpenTarget::Url { url: parsed.to_string(), scheme });
+      }
+    }
+    targets
+  }
+
+  fn push_registered_file(targets: &mut Vec<OpenTarget>, path: PathBuf, extensions: &[&str]) {
+    let Some(extension) = path.extension().and_then(|value| value.to_str()) else { return; };
+    if !extensions.iter().any(|allowed| allowed.eq_ignore_ascii_case(extension)) { return; }
+    let normalized = fs::canonicalize(&path).unwrap_or(path);
+    targets.push(OpenTarget::File { path: normalized.to_string_lossy().into_owned() });
   }
 
   /// Reads and parses `<resources_dir>/murasaki-meta.json`.
@@ -278,7 +360,7 @@ mod shared {
   }
 
   impl SecondaryInstance {
-    pub(super) fn activate_primary(&self) -> Result<(), String> {
+    pub(super) fn activate_primary(&self, meta: &Meta) -> Result<(), String> {
       // The primary owns the lock before Node has finished listening. Retry
       // briefly until it publishes the token/port rather than racing startup.
       let state = (0..60).find_map(|_| {
@@ -291,12 +373,26 @@ mod shared {
 
       fs::write(&self.activation_path, b"activate")
         .map_err(|e| format!("signal primary window activation: {e}"))?;
+      let argv: Vec<String> = std::env::args().skip(1).collect();
+      let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+      let targets = open_targets_from_args(meta, &argv, &cwd);
+      if !targets.is_empty() {
+        request_main_open(
+          state.port,
+          &state.runtime_token,
+          "second-instance",
+          "argv",
+          targets,
+          Some(cwd.clone()),
+        )?;
+      }
       request_main_second_instance(
         state.port,
         &state.runtime_token,
-        std::env::args().skip(1).collect(),
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-      )
+        argv,
+        cwd,
+      )?;
+      Ok(())
     }
   }
 
@@ -315,7 +411,7 @@ mod shared {
     stream.set_write_timeout(Some(timeout)).ok();
     let body = serde_json::json!({ "argv": argv, "cwd": cwd.to_string_lossy() }).to_string();
     let request = format!(
-      "POST /__murasaki/main/second-instance HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      "POST /__murasaki/main/second-instance HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
       body.len()
     );
     stream.write_all(request.as_bytes()).map_err(|e| format!("write activation: {e}"))?;
@@ -323,6 +419,40 @@ mod shared {
     stream.read_to_string(&mut response).map_err(|e| format!("read activation: {e}"))?;
     if !response.starts_with("HTTP/1.1 204") {
       return Err(format!("primary activation returned {}", response.lines().next().unwrap_or("an invalid response")));
+    }
+    Ok(())
+  }
+
+  pub(super) fn request_main_open(
+    port: u16,
+    runtime_token: &str,
+    activation: &str,
+    transport: &str,
+    targets: Vec<OpenTarget>,
+    cwd: Option<PathBuf>,
+  ) -> Result<(), String> {
+    let timeout = Duration::from_secs(5);
+    let mut stream = TcpStream::connect_timeout(
+      &format!("127.0.0.1:{port}").parse().map_err(|e| format!("parse open-request address: {e}"))?,
+      timeout,
+    ).map_err(|e| format!("connect main open request: {e}"))?;
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
+    let body = serde_json::json!({
+      "activation": activation,
+      "transport": transport,
+      "targets": targets,
+      "cwd": cwd.map(|value| value.to_string_lossy().into_owned()),
+    }).to_string();
+    let request = format!(
+      "POST /__murasaki/main/open-request HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      body.len()
+    );
+    stream.write_all(request.as_bytes()).map_err(|e| format!("write main open request: {e}"))?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).map_err(|e| format!("read main open request: {e}"))?;
+    if !response.starts_with("HTTP/1.1 204") {
+      return Err(format!("main open request returned {}", response.lines().next().unwrap_or("an invalid response")));
     }
     Ok(())
   }
@@ -356,7 +486,7 @@ mod shared {
 
     let body = serde_json::json!({ "reason": reason, "force": force }).to_string();
     let request = format!(
-      "POST /__murasaki/main/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      "POST /__murasaki/main/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
       body.len()
     );
     stream
@@ -635,9 +765,9 @@ mod shared {
 
   #[cfg(test)]
   mod tests {
-    use std::{io::{Read, Write}, net::TcpListener, thread};
+    use std::{fs, io::{Read, Write}, net::TcpListener, thread};
 
-    use super::{app_origin_port, request_main_shutdown, runtime_token};
+    use super::{app_origin_port, open_targets_from_args, request_main_shutdown, runtime_token, Meta, OpenTarget};
 
     #[test]
     fn app_origin_is_stable_and_private() {
@@ -667,6 +797,7 @@ mod shared {
         let request = String::from_utf8_lossy(&bytes[..read]);
         assert!(request.starts_with("POST /__murasaki/main/shutdown HTTP/1.1"));
         assert!(request.contains("Cookie: murasaki_runtime=secret"));
+        assert!(request.contains("X-Murasaki-Native-Token: secret"));
         assert!(request.contains("\"reason\":\"window-close\""));
         let body = r#"{"cancelled":true,"timedOut":false}"#;
         write!(
@@ -680,6 +811,36 @@ mod shared {
 
       assert!(request_main_shutdown(port, "secret", "window-close", false).unwrap());
       server.join().unwrap();
+    }
+
+    #[test]
+    fn normalizes_only_registered_open_arguments() {
+      let meta: Meta = serde_json::from_value(serde_json::json!({
+        "productName": "Violet",
+        "protocols": [{ "scheme": "violet" }],
+        "fileAssociations": [{ "extensions": ["vnote"] }]
+      })).unwrap();
+      let root = std::env::temp_dir().join(format!("murasaki-open-test-{}", std::process::id()));
+      fs::create_dir_all(&root).unwrap();
+      fs::write(root.join("hello.vnote"), b"hello").unwrap();
+      fs::write(root.join("ignored.txt"), b"ignored").unwrap();
+      let argv = vec![
+        "violet://open/42".to_string(),
+        "https://example.com".to_string(),
+        "hello.vnote".to_string(),
+        "ignored.txt".to_string(),
+        "--apply-update".to_string(),
+      ];
+      let targets = open_targets_from_args(&meta, &argv, &root);
+      assert_eq!(targets.len(), 2);
+      assert_eq!(targets[0], OpenTarget::Url {
+        url: "violet://open/42".to_string(),
+        scheme: "violet".to_string(),
+      });
+      assert_eq!(targets[1], OpenTarget::File {
+        path: fs::canonicalize(root.join("hello.vnote")).unwrap().to_string_lossy().into_owned(),
+      });
+      let _ = fs::remove_dir_all(root);
     }
   }
 }
@@ -704,7 +865,8 @@ mod imp_macos {
 
   use super::shared::{
     acquire_instance, app_origin_port, load_menu_locales, maybe_spawn_apply_helper, normalize_locale,
-    read_meta, request_main_shutdown, resolve_menu_labels, runtime_token, spawn_prod_server, InstanceRole,
+    open_targets_from_args, open_targets_from_urls, read_meta, request_main_open, request_main_shutdown,
+    resolve_menu_labels, runtime_token, spawn_prod_server, InstanceRole,
   };
 
   pub fn run() {
@@ -745,7 +907,7 @@ mod imp_macos {
     let mut primary_instance = match acquire_instance(app_id)? {
       InstanceRole::Primary(primary) => primary,
       InstanceRole::Secondary(secondary) => {
-        secondary.activate_primary()?;
+        secondary.activate_primary(&meta)?;
         return Ok(());
       }
     };
@@ -762,6 +924,12 @@ mod imp_macos {
       &runtime_token,
     )?;
     primary_instance.publish(port, &runtime_token)?;
+    let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+    let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
+    if !startup_targets.is_empty() {
+      request_main_open(port, &runtime_token, "cold-start", "argv", startup_targets, Some(startup_cwd))?;
+    }
 
     set_activation_policy_regular();
 
@@ -886,6 +1054,8 @@ mod imp_macos {
     // killed on window close, the latter two so both clean-exit paths can
     // check for a pending `.murasaki-apply.json` handoff (contract §7
     // REVISED step 6) on the way out.
+    let mut completed_initial_event_cycle = false;
+    let mut received_open_event = false;
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
 
@@ -896,6 +1066,32 @@ mod imp_macos {
           window.set_focus();
         }
         set_activation_policy_regular();
+      }
+
+      if let Event::Opened { urls } = &event {
+        let targets = open_targets_from_urls(&meta, urls);
+        if !targets.is_empty() {
+          let activation = if !received_open_event && !completed_initial_event_cycle {
+            "cold-start"
+          } else {
+            "os-event"
+          };
+          let transport = if targets.iter().any(|target| matches!(target, super::shared::OpenTarget::Url { .. })) {
+            "open-url"
+          } else {
+            "open-file"
+          };
+          let _ = request_main_open(port, &runtime_token, activation, transport, targets, None);
+          received_open_event = true;
+          if let Some(window) = shared_window.borrow().as_ref() {
+            window.set_visible(true);
+            window.set_minimized(false);
+            window.set_focus();
+          }
+        }
+      }
+      if matches!(event, Event::MainEventsCleared) {
+        completed_initial_event_cycle = true;
       }
 
       // Drain clicks on `useAppMenu`'s custom (non-role) items every tick —
@@ -1159,9 +1355,171 @@ mod imp_win {
 
   use super::shared::{
     acquire_instance, app_origin_port, load_menu_locales, maybe_spawn_apply_helper, normalize_locale,
-    read_meta, request_main_shutdown, resolve_menu_labels, runtime_token, spawn_prod_server, InstanceRole,
+    open_targets_from_args, open_targets_from_urls, read_meta, request_main_open, request_main_shutdown,
+    resolve_menu_labels, runtime_token, spawn_prod_server, InstanceRole,
   };
   use super::win_job::KillOnCloseJob;
+
+  enum AssociationMode {
+    Install,
+    Uninstall,
+    Notify,
+  }
+
+  pub(super) fn maybe_manage_associations() -> Option<Result<(), String>> {
+    let mode = std::env::args().find_map(|argument| match argument.as_str() {
+      "--murasaki-associations-install" => Some(AssociationMode::Install),
+      "--murasaki-associations-uninstall" => Some(AssociationMode::Uninstall),
+      "--murasaki-notify-associations" => Some(AssociationMode::Notify),
+      _ => None,
+    })?;
+    Some(manage_associations(mode))
+  }
+
+  fn manage_associations(mode: AssociationMode) -> Result<(), String> {
+    if matches!(mode, AssociationMode::Notify) {
+      notify_associations_changed();
+      return Ok(());
+    }
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let resources_dir = exe.parent()
+      .ok_or_else(|| "murasaki-launcher: executable has no parent directory".to_string())?
+      .join("resources");
+    let meta = read_meta(&resources_dir)?;
+    let app_id = meta.app_id.as_deref()
+      .ok_or_else(|| "murasaki-launcher: association metadata is missing appId".to_string())?;
+    let command = format!("\"{}\" \"%1\"", exe.to_string_lossy());
+    for protocol in &meta.protocols {
+      let key = format!("Software\\Classes\\{}", protocol.scheme);
+      let command_key = format!("{key}\\shell\\open\\command");
+      let current_command = read_registry_string(&command_key, None);
+      // The marker is diagnostic only. Another installer can legitimately
+      // replace the scheme command without knowing to remove our private
+      // marker, so only the live command proves ownership for overwrite or
+      // deletion decisions.
+      let command_owned_by_this_app = current_command.as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case(&command));
+      if matches!(mode, AssociationMode::Install)
+        && (current_command.is_none() || command_owned_by_this_app) {
+        set_registry_string(&key, None, &format!("URL:{}", protocol.name.as_deref().unwrap_or(&meta.product_name)))?;
+        set_registry_string(&key, Some("URL Protocol"), "")?;
+        set_registry_string(&key, Some("MurasakiAppId"), app_id)?;
+        set_registry_string(&format!("{key}\\DefaultIcon"), None, &format!("{},0", exe.to_string_lossy()))?;
+        set_registry_string(&command_key, None, &command)?;
+      } else if matches!(mode, AssociationMode::Uninstall) && command_owned_by_this_app {
+        delete_registry_tree(&key)?;
+      }
+    }
+    notify_associations_changed();
+    Ok(())
+  }
+
+  fn notify_associations_changed() {
+    // SAFETY: SHCNE_ASSOCCHANGED ignores both item pointers when paired with
+    // SHCNF_IDLIST. This headless installer mode exits before any GUI/runtime
+    // state is created.
+    unsafe {
+      windows::Win32::UI::Shell::SHChangeNotify(
+        windows::Win32::UI::Shell::SHCNE_ASSOCCHANGED,
+        windows::Win32::UI::Shell::SHCNF_IDLIST,
+        None,
+        None,
+      );
+    }
+  }
+
+  fn wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+  }
+
+  fn set_registry_string(path: &str, name: Option<&str>, value: &str) -> Result<(), String> {
+    use windows::{core::PCWSTR, Win32::{Foundation::ERROR_SUCCESS, System::Registry::{
+      HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ,
+      RegCloseKey, RegCreateKeyExW, RegSetValueExW,
+    }}};
+    let path_wide = wide(path);
+    let name_wide = name.map(wide);
+    let class = PCWSTR::null();
+    let mut key = HKEY(std::ptr::null_mut());
+    // SAFETY: all pointers reference null-terminated buffers for the duration
+    // of the calls; the returned key is closed before returning.
+    let created = unsafe {
+      RegCreateKeyExW(
+        HKEY_LOCAL_MACHINE,
+        PCWSTR(path_wide.as_ptr()),
+        None,
+        class,
+        REG_OPTION_NON_VOLATILE,
+        KEY_SET_VALUE,
+        None,
+        &mut key,
+        None,
+      )
+    };
+    if created != ERROR_SUCCESS {
+      return Err(format!("create association registry key {path}: {}", created.0));
+    }
+    let encoded = wide(value);
+    let bytes = unsafe {
+      std::slice::from_raw_parts(encoded.as_ptr().cast::<u8>(), encoded.len() * std::mem::size_of::<u16>())
+    };
+    let value_name = name_wide.as_ref().map_or(PCWSTR::null(), |item| PCWSTR(item.as_ptr()));
+    let written = unsafe { RegSetValueExW(key, value_name, None, REG_SZ, Some(bytes)) };
+    let _ = unsafe { RegCloseKey(key) };
+    if written != ERROR_SUCCESS {
+      return Err(format!("write association registry key {path}: {}", written.0));
+    }
+    Ok(())
+  }
+
+  fn read_registry_string(path: &str, name: Option<&str>) -> Option<String> {
+    use windows::{core::PCWSTR, Win32::{Foundation::ERROR_SUCCESS, System::Registry::{
+      HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW,
+    }}};
+    let path_wide = wide(path);
+    let name_wide = name.map(wide);
+    let value_name = name_wide.as_ref().map_or(PCWSTR::null(), |item| PCWSTR(item.as_ptr()));
+    let mut bytes = 0_u32;
+    let sized = unsafe {
+      RegGetValueW(
+        HKEY_LOCAL_MACHINE,
+        PCWSTR(path_wide.as_ptr()),
+        value_name,
+        RRF_RT_REG_SZ,
+        None,
+        None,
+        Some(&mut bytes),
+      )
+    };
+    if sized != ERROR_SUCCESS || bytes < 2 { return None; }
+    let mut buffer = vec![0_u16; bytes as usize / 2];
+    let read = unsafe {
+      RegGetValueW(
+        HKEY_LOCAL_MACHINE,
+        PCWSTR(path_wide.as_ptr()),
+        value_name,
+        RRF_RT_REG_SZ,
+        None,
+        Some(buffer.as_mut_ptr().cast()),
+        Some(&mut bytes),
+      )
+    };
+    if read != ERROR_SUCCESS { return None; }
+    while buffer.last() == Some(&0) { buffer.pop(); }
+    String::from_utf16(&buffer).ok()
+  }
+
+  fn delete_registry_tree(path: &str) -> Result<(), String> {
+    use windows::{core::PCWSTR, Win32::{Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS}, System::Registry::{
+      HKEY_LOCAL_MACHINE, RegDeleteTreeW,
+    }}};
+    let path_wide = wide(path);
+    let deleted = unsafe { RegDeleteTreeW(HKEY_LOCAL_MACHINE, PCWSTR(path_wide.as_ptr())) };
+    if deleted != ERROR_SUCCESS && deleted != ERROR_FILE_NOT_FOUND {
+      return Err(format!("delete association registry key {path}: {}", deleted.0));
+    }
+    Ok(())
+  }
 
   pub fn run() {
     if let Err(err) = run_inner() {
@@ -1196,7 +1554,7 @@ mod imp_win {
     let mut primary_instance = match acquire_instance(app_id)? {
       InstanceRole::Primary(primary) => primary,
       InstanceRole::Secondary(secondary) => {
-        secondary.activate_primary()?;
+        secondary.activate_primary(&meta)?;
         return Ok(());
       }
     };
@@ -1223,6 +1581,12 @@ mod imp_win {
       &runtime_token,
     )?;
     primary_instance.publish(port, &runtime_token)?;
+    let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+    let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
+    if !startup_targets.is_empty() {
+      request_main_open(port, &runtime_token, "cold-start", "argv", startup_targets, Some(startup_cwd))?;
+    }
 
     // Orphan protection (see `win_job`'s module doc comment) — assign the
     // freshly spawned node.exe to a KILL_ON_JOB_CLOSE job so it can't outlive
@@ -1358,6 +1722,8 @@ mod imp_win {
     // three so every clean-exit path below can check for a pending
     // `.murasaki-apply.json` handoff (contract §7 REVISED step 6) on the way
     // out.
+    let mut completed_initial_event_cycle = false;
+    let mut received_open_event = false;
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
 
@@ -1367,6 +1733,33 @@ mod imp_win {
           window.set_minimized(false);
           window.set_focus();
         }
+      }
+
+
+      if let Event::Opened { urls } = &event {
+        let targets = open_targets_from_urls(&meta, urls);
+        if !targets.is_empty() {
+          let activation = if !received_open_event && !completed_initial_event_cycle {
+            "cold-start"
+          } else {
+            "os-event"
+          };
+          let transport = if targets.iter().any(|target| matches!(target, super::shared::OpenTarget::Url { .. })) {
+            "open-url"
+          } else {
+            "open-file"
+          };
+          let _ = request_main_open(port, &runtime_token, activation, transport, targets, None);
+          received_open_event = true;
+          if let Some(window) = shared_window.borrow().as_ref() {
+            window.set_visible(true);
+            window.set_minimized(false);
+            window.set_focus();
+          }
+        }
+      }
+      if matches!(event, Event::MainEventsCleared) {
+        completed_initial_event_cycle = true;
       }
 
       // Native menu-bar clicks (Edit commands + Minimize) arrive
@@ -1504,6 +1897,15 @@ mod imp_win {
 pub fn run_launcher() {
   if let Some(code) = crate::updater::maybe_apply_update() {
     std::process::exit(code);
+  }
+
+  #[cfg(target_os = "windows")]
+  if let Some(result) = imp_win::maybe_manage_associations() {
+    if let Err(error) = result {
+      eprintln!("murasaki-launcher: {error}");
+      std::process::exit(1);
+    }
+    return;
   }
 
   #[cfg(target_os = "macos")]

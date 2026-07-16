@@ -37,16 +37,16 @@ database, socket, worker, and secret-bearing code in
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Rust host | Native event loop, one application window, navigation policy, menus, Node child supervision, final update handoff | Business logic and React state |
-| Local Node runtime | Long-lived main lifecycle, actions, API routes, update verification, application resources and data | Native window creation APIs (not public yet) |
+| Rust host | Native event loop, one application window, navigation policy, OS open-request normalization, menus, Node child supervision, final update handoff | Business logic and React state |
+| Local Node runtime | Long-lived main lifecycle, registered URL/file handling, actions, API routes, update verification, application resources and data | Native window creation APIs (not public yet) |
 | Renderer | UI, routing, browser APIs, calling typed backend functions | Direct filesystem/Node/native module access |
 
 <Callout type="warn">
-  Murasaki is pre-1.0. Multi-window management, tray menus/global shortcuts, URL
-  scheme/file-association registration, and per-window/per-origin capability
-  policies are not public features yet. Packaged macOS/Windows apps do enforce
-  a single instance, and renderer native commands have a deny-by-default typed
-  allowlist. Check [Platform & feature
+  Murasaki is pre-1.0. Multi-window management and per-window/per-origin
+  capability policies are not public features yet. Packaged macOS/Windows apps
+  enforce a single instance, can register URL schemes and file associations,
+  and expose matching activations to Node Main through `openRequested()`.
+  Renderer native commands have a deny-by-default typed allowlist. Check [Platform & feature
   status](/docs/core-concepts/platform-feature-status) before committing a
   production architecture to a feature.
 </Callout>
@@ -63,6 +63,7 @@ processes differ:
 | Native host | CLI process loads `@murasakijs/native` | Standalone Rust launcher |
 | Main entry | Loaded with Vite SSR; exact entry hot-reloads | Compiled to `server/main.mjs` |
 | Backend calls | Vite middleware | Bundled loopback HTTP server |
+| URL/file registration | Not installed by dev mode | macOS app metadata or Windows installer registry |
 
 Production uses a deterministic loopback port derived from `appId`, giving the
 renderer a stable origin across launches. The Windows WebView2 profile is also

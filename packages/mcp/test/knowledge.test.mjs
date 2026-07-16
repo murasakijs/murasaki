@@ -19,6 +19,21 @@ test('generated capability knowledge exactly matches the canonical manifest', as
     readFile(new URL('../content/capabilities.json', import.meta.url), 'utf8').then(JSON.parse),
   ])
   assert.deepEqual(generated, canonical)
+
+  const feature = canonical.features.find((candidate) => candidate.id === 'single-instance-and-deep-links')
+  assert.ok(feature)
+  assert.equal(feature.status, 'partial')
+  assert.deepEqual(feature.platforms, { macos: 'supported', windows: 'supported', linux: 'planned' })
+  for (const symbol of [
+    'ProtocolConfig',
+    'FileAssociationConfig',
+    'OpenRequestEvent',
+    'OpenTarget',
+    'MainDefinition.openRequested',
+  ]) {
+    assert.ok(feature.apiSymbols.includes(symbol), `missing API symbol ${symbol}`)
+  }
+  assert.match(feature.limitations.join('\n'), /portable/i)
 })
 
 test('configuration schema top-level properties track MurasakiConfig', async () => {
@@ -43,6 +58,12 @@ test('configuration schema top-level properties track MurasakiConfig', async () 
   const capabilitySource = source.slice(source.indexOf('export type NativeCapability ='))
   const capabilities = [...capabilitySource.matchAll(/^  \| '([^']+)'$/gm)].map((match) => match[1])
   assert.deepEqual(schema.properties.capabilities.items.enum, capabilities)
+
+  assert.deepEqual(schema.properties.protocols.items.required, ['scheme'])
+  assert.equal(schema.properties.protocols.items.properties.scheme.type, 'string')
+  assert.deepEqual(schema.properties.fileAssociations.items.required, ['extensions'])
+  assert.equal(schema.properties.fileAssociations.items.properties.extensions.minItems, 1)
+  assert.deepEqual(schema.properties.fileAssociations.items.properties.role.enum, ['viewer', 'editor', 'shell', 'none'])
 })
 
 test('search_docs returns canonical localized documentation', async () => {
@@ -58,6 +79,11 @@ test('API reference preserves canonical maturity and limitations', async () => {
   assert.equal(result.features[0].id, 'auto-update')
   assert.equal(result.features[0].maturity, 'partial')
   assert.ok(result.features[0].limitations.length > 0)
+
+  const openRequest = await getApiReference({ symbol: 'MainDefinition.openRequested' })
+  assert.equal(openRequest.features.length, 1)
+  assert.equal(openRequest.features[0].id, 'single-instance-and-deep-links')
+  assert.equal(openRequest.features[0].maturity, 'partial')
 })
 
 test('config schema supports dot paths and rejects unknown paths', async () => {
@@ -75,15 +101,32 @@ test('compatibility never upgrades planned features to supported', async () => {
   assert.equal(result.overall, 'planned')
   assert.equal(result.results[0].verdict, 'planned')
   assert.equal(result.results[1].verdict, 'limited')
+
+  const macos = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'macos' })
+  assert.equal(macos.overall, 'limited')
+  assert.equal(macos.results[0].platformStatus, 'supported')
+
+  const windows = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'windows' })
+  assert.equal(windows.overall, 'limited')
+  assert.equal(windows.results[0].platformStatus, 'supported')
+
+  const linux = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'linux' })
+  assert.equal(linux.overall, 'planned')
+  assert.equal(linux.results[0].platformStatus, 'planned')
 })
 
 test('recipes are sourced from localized documentation with English fallback', async () => {
   const listed = await listRecipes({ locale: 'ja' })
   assert.ok(listed.recipes.some((recipe) => recipe.id === 'routing'))
+  assert.ok(listed.recipes.some((recipe) => recipe.id === 'deep-links-and-file-associations'))
   const recipe = await getRecipe({ id: 'routing', locale: 'ja' })
   assert.equal(recipe.found, true)
   assert.equal(recipe.locale, 'ja')
   assert.match(recipe.content, /ルーティング|ルート/)
+
+  const openRequestRecipe = await getRecipe({ id: 'deep-links-and-file-associations', locale: 'en' })
+  assert.equal(openRequestRecipe.found, true)
+  assert.equal(openRequestRecipe.slug, 'guides/deep-links')
 })
 
 test('doctor inspects known project files without executing project code', async () => {

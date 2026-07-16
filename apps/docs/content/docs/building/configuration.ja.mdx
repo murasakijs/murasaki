@@ -47,6 +47,8 @@ export default defineConfig({
 | `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
 | `targets` | `Target[]?` | ビルドターゲット。デフォルトはホストプラットフォーム。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` のうち1つ以上。 |
 | `icon` | `string?` | ソースとなる PNG(理想は 1024px)へのパス。`murasaki icon` / `murasaki bundle` がこれを `.icns` / `.ico` / PNG セットに展開します。 |
+| `protocols` | `ProtocolConfig[]?` | packaged macOS app / Windows installer が登録する custom URL scheme — [下記](#protocols)を参照。 |
+| `fileAssociations` | `FileAssociationConfig[]?` | packaged macOS app / Windows installer が登録する document extension — [下記](#fileassociations)を参照。 |
 | `installer` | `object?` | macOS DMG / Windows installer option — [下記](#installer)を参照。 |
 | `sign` | `object?` | macOS のコード署名 — [下記](#sign)を参照。 |
 
@@ -105,6 +107,59 @@ main: {
 | `shutdownTimeoutMs` | `number?` | host exit 前の `shutdown()` 最大時間。既定 `10_000`。 |
 
 lifecycle hook と `'use main'` は [Node Main](/ja/docs/guides/node-main)を参照してください。
+
+## `protocols`
+
+custom URL scheme を登録し、一致する URL を Node Main の `openRequested()` hook で
+受け取ります。
+
+```ts
+protocols: [
+  { scheme: 'violet', name: 'Violet Link' },
+]
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `scheme` | `string` | **必須。** `violet://open/42` の `violet` のような RFC 3986-style scheme。trim 後 lowercase に正規化。1〜63文字の有効な scheme character が必要。`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki` などのbrowser/OS schemeは予約済み。 |
+| `name` | `string?` | package metadata に使う human-readable handler name。既定は `` `${productName} URL` ``。 |
+
+重複または不正な scheme は build error になります。macOS は packaged `.app` の
+`Info.plist` に登録情報を書き込みます。Windows は NSIS / MSI installer が OS へ登録し、
+portable Windows archive は登録しません。Linux registration は未実装です。
+
+## `fileAssociations`
+
+1つ以上の extension を document type として登録します。
+
+```ts
+fileAssociations: [
+  {
+    extensions: ['vnote', 'violet-note'],
+    name: 'Violet Note',
+    description: 'Violet で作成したノート',
+    role: 'editor',
+    mimeType: 'application/x-violet-note',
+  },
+]
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `extensions` | `string[]` | **必須。** 1つ以上の extension。先頭のドットは指定しても削除され、lowercase に正規化。各値は1〜32文字の英数字、underscore、hyphenで、先頭は英数字。 |
+| `name` | `string?` | document type name。既定は `` `${productName} document` ``。 |
+| `description` | `string?` | package / Windows registration metadata に保存する説明。既定は `name`。 |
+| `role` | `'viewer' \| 'editor' \| 'shell' \| 'none'` | macOS document role。既定 `viewer`。 |
+| `mimeType` | `string?` | document metadata に保存する任意の MIME type。 |
+
+extension は全 entry 間で一意である必要があり、不正な extension / MIME type は build
+error になります。一致した file は Node Main の `openRequested()` hook に届きます。
+artifact の制約は `protocols` と同じです。packaged macOS `.app` と install 済み Windows
+NSIS / MSI をサポートし、portable Windows archive、Linux、`murasaki dev` は
+association を install しません。
+
+delivery semantics、testing、untrusted-input requirement は
+[Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
 
 ## `bundle`
 
@@ -222,5 +277,6 @@ macOS のコード署名です。Murasaki は**あなた自身の**証明書で�
 <Cards>
   <Card title="CLI リファレンス" href="/ja/docs/building/cli" />
   <Card title="Node Main" href="/ja/docs/guides/node-main" />
+  <Card title="Deep Link" href="/ja/docs/guides/deep-links" />
   <Card title="配布" href="/ja/docs/building/distribution" />
 </Cards>

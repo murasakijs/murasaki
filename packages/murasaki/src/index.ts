@@ -7,7 +7,9 @@
 export { defineConfig } from './config.js'
 export type {
   MurasakiConfig,
+  FileAssociationConfig,
   NativeCapability,
+  ProtocolConfig,
   UpdaterConfig,
   WindowConfig,
 } from './config.js'

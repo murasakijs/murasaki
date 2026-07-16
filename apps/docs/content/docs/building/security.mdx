@@ -24,6 +24,7 @@ system.
 | Remote URL → app WebView | Exact app-origin navigation stays in-window; off-origin HTTP(S) opens in the system browser; `file:`, `data:`, and `javascript:` navigations are denied | Do not weaken navigation behavior or inject remote scripts into the renderer |
 | Renderer → Rust native commands | Exact-origin IPC check and typed, deny-by-default `capabilities` allowlist | Grant only the commands you use; validate app-level intent before calling broad operations |
 | Renderer → local Node | Privileged `/api/*` and `/__murasaki/*` endpoints require a random 256-bit HttpOnly, SameSite=Strict runtime cookie and validate Host/Origin; wire payloads are bounded | Validate arguments and authorize the requested operation inside every action/route/Main function |
+| OS URL/file activation → Node Main | Only configured schemes/extensions are normalized into `openRequested()` targets; delivery uses the authenticated app-local channel | Treat every URL and path as attacker-controlled; validate intent, identifiers, hosts, and file contents before acting |
 | App → update host | Ed25519 signature over raw manifest bytes, then SHA-256 verification of the selected payload | Protect the private update key and publish hashes/signatures together |
 | OS → installed app | macOS ad-hoc signature validates integrity locally; Developer ID + notarization establishes public trust | Sign and notarize public macOS releases; establish an external signing flow for Windows |
 
@@ -95,6 +96,37 @@ Likewise, allowlist protocols and hosts before a Node function calls `fetch()`
 or opens a URL. This prevents accidental local-network access and SSRF. Do not
 forward arbitrary request headers from the renderer to a remote service.
 
+The same rule applies to `openRequested()`. A registered scheme is a dispatch
+mechanism, not an authentication mechanism: any local process, browser, or
+document can attempt to open it. File associations also identify a path, not a
+trusted file.
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async openRequested(_context, event) {
+    for (const target of event.targets) {
+      if (target.kind === 'url') {
+        const url = new URL(target.url)
+        if (url.protocol !== 'example-notes:' || url.hostname !== 'open') continue
+        const id = url.pathname.slice(1)
+        if (!/^[a-z0-9_-]{1,64}$/i.test(id)) continue
+        // Resolve the validated identifier in application code.
+      } else {
+        // Check the expected extension, access policy, size, and file format
+        // before parsing target.path. Do not execute content based on its name.
+      }
+    }
+  },
+})
+```
+
+Do not automatically navigate the renderer to an arbitrary deep-link URL,
+interpolate its query values into HTML, or execute a file because it carries a
+registered extension. If the renderer needs the result, send a narrow,
+validated value through the Main event API.
+
 ## Content Security Policy
 
 Murasaki sets `X-Content-Type-Options: nosniff` and `Referrer-Policy:
@@ -132,6 +164,8 @@ OS artifact, plus Murasaki's manifest signature and payload hash.
 - No public per-window security policy because multi-window is not supported.
 - No built-in CSP generator.
 - Windows Authenticode and Linux package signing are not implemented.
+- Linux protocol/file-association registration is not implemented. Windows
+  portable archives intentionally do not self-register.
 - Public native utility APIs are not permission-scoped and therefore are not
   exposed from the main `murasaki` package yet.
 

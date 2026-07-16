@@ -157,6 +157,52 @@
       "uniqueItems": true
     },
     "icon": { "type": "string" },
+    "protocols": {
+      "type": "array",
+      "description": "URL schemes registered by packaged macOS apps and installed Windows apps.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scheme"],
+        "properties": {
+          "scheme": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9+.-]{0,62}$",
+            "description": "RFC 3986 scheme. Reserved and duplicate schemes are rejected during configuration resolution."
+          },
+          "name": { "type": "string", "minLength": 1 }
+        }
+      },
+      "uniqueItems": true
+    },
+    "fileAssociations": {
+      "type": "array",
+      "description": "File types registered by packaged macOS apps and installed Windows apps.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["extensions"],
+        "properties": {
+          "extensions": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
+            }
+          },
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 },
+          "role": { "enum": ["viewer", "editor", "shell", "none"], "default": "viewer" },
+          "mimeType": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$"
+          }
+        }
+      },
+      "uniqueItems": true
+    },
     "installer": {
       "type": "object",
       "additionalProperties": false,

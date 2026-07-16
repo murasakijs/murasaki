@@ -39,6 +39,47 @@ murasaki bundle --target win32-arm64   # arm64 の Windows バンドル
 `murasaki installer` も、同じ方法で `--arch` / `--target` を `bundle` に転送します。
 Windows は `win32-x64` / `win32-arm64`。
 
+## URL scheme と file association
+
+packaged app が扱う handler を `murasaki.config.ts` で宣言します。
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  protocols: [{ scheme: 'example-notes', name: 'Notes link' }],
+  fileAssociations: [{
+    extensions: ['enote'],
+    name: 'Notes document',
+    role: 'editor',
+    mimeType: 'application/x-example-note',
+  }],
+})
+```
+
+target ごとの登録結果は次のとおりです。
+
+| Artifact | 登録動作 |
+| --- | --- |
+| macOS `.app` / `.dmg` | signing 前に app の `Info.plist` へ `CFBundleURLTypes`、`CFBundleDocumentTypes`、exported document UTI を書き込む。DMG にはその app がそのまま入る |
+| Windows NSIS `.exe` | protocol、ProgID、Open With entry、Default Apps capability を既定で per-user、`installMode: 'perMachine'` で per-machine 登録 |
+| Windows WiX `.msi` | 同じ handler を per-machine 登録 |
+| Windows portable folder / `.zip` | registry を変更せず、自動登録しない |
+| Linux | 登録と app packaging は予定 |
+
+cold start、2 回目の起動、macOS open event のいずれでも、一致した URL / file は
+`ready()` 完了後に Node Main の `openRequested()` hook へ渡されます。Windows
+portable build でも URL / file を command line で直接渡せば受け取れますが、
+installation-free artifact が OS default を自動で取得することはありません。
+
+<Callout type="warn">
+  Windows への登録はアプリを選択可能な handler にしますが、user の protected
+  default-app choice を上書きしません。fresh install / upgrade の両方をテストし、
+  uninstall が自分の handler entry だけを削除することを確認してください。
+</Callout>
+
 ## 署名と公証
 
 <Callout type="info">
@@ -183,6 +224,7 @@ base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
 - clean checkout と lock 済み dependency graph から build
 - installer 化の前に bundle を launch
 - 公開する全 platform / architecture の clean target で install / update / uninstall
+- 設定した URL scheme / file association を cold start と primary app 起動中の両方で確認
 - Node Main shutdown、offline startup、network failure を確認
 - macOS signing / notarization、または外部 Windows signature を検証
 - 最終 payload が immutable になってから Murasaki update manifest を生成・署名

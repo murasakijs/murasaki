@@ -22,6 +22,7 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 | Remote URL → app WebView | app origin と完全一致する遷移だけを window 内で許可。off-origin HTTP(S) は system browser で開き、`file:` / `data:` / `javascript:` は拒否 | navigation behavior を弱めず、remote script を renderer に注入しない |
 | Renderer → Rust native command | exact-origin IPC check と typed / deny-by-default `capabilities` allowlist | 使用する command だけを grant。広い操作の app-level intent を検証 |
 | Renderer → local Node | `/api/*` と `/__murasaki/*` は random 256-bit HttpOnly / SameSite=Strict cookie を要求し Host / Origin を検証。wire payload に上限 | 各 action / route / Main function 内で引数を検証し操作を認可 |
+| OS URL / file activation → Node Main | 設定済み scheme / extension だけを normalize して `openRequested()` target にし、認証付き app-local channel で配送 | URL / path をすべて attacker-controlled として扱い、操作前に intent、identifier、host、file content を検証 |
 | App → update host | manifest raw bytes の Ed25519 signature、その後 payload の SHA-256 を検証 | private update key を保護し、hash/signature を同時に公開 |
 | OS → installed app | macOS ad-hoc signature はローカル整合性を検証。Developer ID + notarization は公開配布の信頼を確立 | macOS 公開版を署名・公証し、Windows は外部 signing flow を用意 |
 
@@ -90,6 +91,35 @@ Node 関数が `fetch()` / URL open を行う前には protocol と host を all
 これは意図しない local-network access と SSRF を防ぎます。renderer の request header
 をそのまま remote service に転送しないでください。
 
+同じ rule は `openRequested()` にも適用されます。登録済み scheme は dispatch の仕組みであり、
+認証の仕組みではありません。local process、browser、document のいずれからも open を
+試行できます。file association も path を示すだけで、trusted file を示すものではありません。
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async openRequested(_context, event) {
+    for (const target of event.targets) {
+      if (target.kind === 'url') {
+        const url = new URL(target.url)
+        if (url.protocol !== 'example-notes:' || url.hostname !== 'open') continue
+        const id = url.pathname.slice(1)
+        if (!/^[a-z0-9_-]{1,64}$/i.test(id)) continue
+        // 検証済み identifier を application code で解決する。
+      } else {
+        // target.path を parse する前に extension、access policy、size、
+        // file format を確認し、名前だけを根拠に content を実行しない。
+      }
+    }
+  },
+})
+```
+
+deep-link URL へ renderer を自動 navigation させたり、query 値を HTML に埋め込んだり、
+登録済み extension があるという理由で file を実行したりしないでください。renderer に
+結果が必要なら、Main event API から狭く検証済みの値だけを渡します。
+
 ## Content Security Policy
 
 Murasaki は document に `X-Content-Type-Options: nosniff` と `Referrer-Policy:
@@ -125,6 +155,7 @@ notarization（Windows は外部 Authenticode flow）、更新は Murasaki manif
 - multi-window 未対応のため window 別 security policy がない
 - CSP generator がない
 - Windows Authenticode / Linux package signing が未実装
+- Linux の protocol / file-association 登録は未実装。Windows portable archive は意図的に self-register しない
 - public native utility API は permission-scoped でないため main `murasaki` package から
   まだ公開されていない
 

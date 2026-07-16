@@ -92,6 +92,7 @@ const recipes = [
   ['native-context-menu', 'guides/context-menu'],
   ['application-menu', 'guides/app-menu'],
   ['auto-update', 'guides/auto-update'],
+  ['deep-links-and-file-associations', 'guides/deep-links'],
   ['configuration', 'building/configuration'],
   ['package-and-distribute', 'building/distribution'],
 ].map(([id, slug]) => ({ id, slug }))

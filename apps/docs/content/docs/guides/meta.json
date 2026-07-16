@@ -3,6 +3,7 @@
   "pages": [
     "routing",
     "node-main",
+    "deep-links",
     "server-actions",
     "api-routes",
     "metadata",

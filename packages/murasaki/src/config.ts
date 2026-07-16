@@ -18,6 +18,28 @@ export interface WindowConfig {
   console?: boolean
 }
 
+/** A custom URL scheme registered by packaged macOS/Windows applications. */
+export interface ProtocolConfig {
+  /** RFC 3986 scheme, for example `my-app` in `my-app://open/42`. */
+  scheme: string
+  /** Human-readable handler name shown by the operating system. */
+  name?: string
+}
+
+/** A document type the packaged application can open. */
+export interface FileAssociationConfig {
+  /** Extensions without a leading dot, for example `['note', 'mnote']`. */
+  extensions: string[]
+  /** Human-readable document type name. Defaults to `<productName> document`. */
+  name?: string
+  /** Optional document description used by Windows. */
+  description?: string
+  /** macOS document role. Defaults to `viewer`. */
+  role?: 'viewer' | 'editor' | 'shell' | 'none'
+  /** Optional MIME type used in Windows registration metadata. */
+  mimeType?: string
+}
+
 /**
  * `true` enables the updater with every default inferred (GitHub repo from
  * `package.json#repository`, public key from `.murasaki/update-key.pub`,
@@ -165,6 +187,18 @@ export interface MurasakiConfig {
 
   /** Icon source (PNG). `murasaki icon` fans this out to .icns/.ico/set. */
   icon?: string
+
+  /**
+   * Custom URL schemes registered by packaged macOS apps and Windows
+   * installers. Open requests are delivered to `defineMain({ openRequested })`.
+   */
+  protocols?: ProtocolConfig[]
+
+  /**
+   * File extensions registered by packaged macOS apps and Windows installers.
+   * Open requests are delivered to `defineMain({ openRequested })`.
+   */
+  fileAssociations?: FileAssociationConfig[]
 
   /** `murasaki installer` styling/options — macOS `.dmg` fields plus Windows `.exe`/`.msi` fields below. */
   installer?: {

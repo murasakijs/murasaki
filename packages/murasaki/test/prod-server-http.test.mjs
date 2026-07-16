@@ -25,6 +25,7 @@ export const registry = {
       return { value, node: process.version, nodeEnv: process.env.NODE_ENV }
     },
     async lastSecondInstance() { return globalThis.__secondInstance },
+    async lastOpenRequest() { return globalThis.__openRequest },
     async publish(channel, value) {
       const key = Symbol.for('murasaki.main.events.v1')
       const bus = globalThis[key] ??= { listeners: new Set() }
@@ -37,6 +38,7 @@ export const registry = {
 export default {
   ready(context) { globalThis.__mainReady = context.isPackaged },
   secondInstance(_context, event) { globalThis.__secondInstance = event },
+  openRequested(_context, event) { globalThis.__openRequest = event },
   beforeQuit({ reason }) { return reason === 'restart' ? false : undefined },
   shutdown() { globalThis.__mainShutdown = true },
 }
@@ -130,6 +132,10 @@ export const routes = [{
   const bootstrap = await fetch(`http://127.0.0.1:${port}/`)
   const runtimeCookie = bootstrap.headers.getSetCookie()[0].split(';', 1)[0]
   const runtimeHeaders = { cookie: runtimeCookie }
+  const nativeHeaders = {
+    ...runtimeHeaders,
+    'x-murasaki-native-token': runtimeCookie.slice(runtimeCookie.indexOf('=') + 1),
+  }
 
   const forbidden = await fetch(url)
   assert.equal(forbidden.status, 403)
@@ -170,7 +176,7 @@ export const routes = [{
 
   const secondInstance = await fetch(`http://127.0.0.1:${port}/__murasaki/main/second-instance`, {
     method: 'POST',
-    headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+    headers: { ...nativeHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({ argv: ['murasaki://open/42'], cwd: '/tmp' }),
   })
   assert.equal(secondInstance.status, 204)
@@ -186,6 +192,42 @@ export const routes = [{
     argv: ['murasaki://open/42'],
     cwd: '/tmp',
   })
+
+  const openRequest = {
+    activation: 'cold-start',
+    transport: 'argv',
+    targets: [{ kind: 'url', url: 'violet://open/42', scheme: 'violet' }],
+    cwd: '/tmp',
+  }
+  const opened = await fetch(`http://127.0.0.1:${port}/__murasaki/main/open-request`, {
+    method: 'POST',
+    headers: { ...nativeHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify(openRequest),
+  })
+  assert.equal(opened.status, 204)
+  const openState = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/call/${encodeURIComponent('src/services/main.ts')}/lastOpenRequest`,
+    {
+      method: 'POST',
+      headers: { ...runtimeHeaders, 'content-type': WIRE_CONTENT_TYPE },
+      body: await stringifyWire({ args: [] }),
+    },
+  )
+  assert.deepEqual(parseWire(await openState.text()).value, openRequest)
+
+  const invalidOpen = await fetch(`http://127.0.0.1:${port}/__murasaki/main/open-request`, {
+    method: 'POST',
+    headers: { ...nativeHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ ...openRequest, targets: [{ kind: 'url', url: 'not a url', scheme: 'violet' }] }),
+  })
+  assert.equal(invalidOpen.status, 400)
+
+  const rendererForgedOpen = await fetch(`http://127.0.0.1:${port}/__murasaki/main/open-request`, {
+    method: 'POST',
+    headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify(openRequest),
+  })
+  assert.equal(rendererForgedOpen.status, 403)
 
   const eventResponse = await fetch(
     `http://127.0.0.1:${port}/__murasaki/main/events?channel=relay.status`,
@@ -218,7 +260,7 @@ export const routes = [{
 
   const shutdown = await fetch(`http://127.0.0.1:${port}/__murasaki/main/shutdown`, {
     method: 'POST',
-    headers: { ...runtimeHeaders, 'content-type': 'application/json' },
+    headers: { ...nativeHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({ reason: 'app-quit' }),
   })
   assert.deepEqual(await shutdown.json(), { cancelled: false, timedOut: false })

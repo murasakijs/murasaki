@@ -37,6 +37,11 @@ export default defineMain({
     console.log('second launch:', { argv, cwd })
   },
 
+  async openRequested(_context, event) {
+    // Registered URL schemes and file types arrive here after ready().
+    console.log('open targets:', event.targets)
+  },
+
   async shutdown() {
     watcher?.close()
     watcher = undefined
@@ -90,10 +95,24 @@ launch is redirected to the primary app, Murasaki focuses its window and calls
 | `event.argv` | Arguments passed to the second launcher, including URL/file arguments supplied by the caller |
 | `event.cwd` | Working directory of the second launch |
 
-Validate every argument before use. Murasaki does not yet register URL schemes
-or file associations for you; the event only receives values when the OS or
-caller already launches the executable with them. This hook is not currently
-delivered by `murasaki dev` or Linux.
+Validate every argument before use. `secondInstance()` is the low-level process
+activation hook: it receives raw launch arguments whether or not they match a
+registered URL scheme or file type. It is not currently delivered by
+`murasaki dev` or Linux.
+
+### `openRequested(context, event)`
+
+Use `openRequested()` for configured URL schemes and file associations. It
+normalizes cold-start argv, second-instance argv, and native URL/file events
+into typed URL/file targets, and runs only after `ready()` has completed.
+
+On a second launch with a recognized target, both `secondInstance()` and
+`openRequested()` run. Do not open the same item in both hooks: keep generic
+activation behavior in `secondInstance()` and semantic URL/file handling in
+`openRequested()`.
+
+See [Deep links and file associations](/docs/guides/deep-links) for the event
+shape, configuration, packaging behavior, and security requirements.
 
 ## Call Node from the renderer with `'use main'`
 
@@ -213,9 +232,11 @@ the internal RPC endpoints.
 
 ## Current limits
 
-Node Main does not yet provide public multi-window, tray-menu, global shortcut, URL
-scheme registration, or file-association APIs. Packaged macOS/Windows
-single-instance delivery is available through `secondInstance()`.
+Node Main does not yet provide public multi-window, tray-menu, or global
+shortcut APIs. Packaged macOS/Windows single-instance delivery is available
+through `secondInstance()`; configured URL schemes and file associations are
+delivered through `openRequested()`. Windows portable archives, Linux, and
+`murasaki dev` do not install system association metadata.
 Renderer-safe dialogs, clipboard, notifications, shell, and basic window commands are separately available from
 `murasaki/native` behind the `capabilities` allowlist. Node packages may also
 require explicit `bundle.external` / `bundle.resources` entries when they use
@@ -226,6 +247,7 @@ test the installed artifact on a clean machine, not only `murasaki dev`.
 
 <Cards>
   <Card title="Process model" href="/docs/core-concepts/process-model" />
+  <Card title="Deep links" href="/docs/guides/deep-links" />
   <Card title="Security" href="/docs/building/security" />
   <Card title="API Routes" href="/docs/guides/api-routes" />
 </Cards>

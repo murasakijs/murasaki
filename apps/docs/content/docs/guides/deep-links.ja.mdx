@@ -1,0 +1,160 @@
+---
+title: Deep Link と File Association
+description: URL scheme と document type を登録し、すべての open request を Node Main で処理します。
+---
+
+Murasaki は packaged macOS / Windows app の custom URL scheme と document
+extension を登録できます。cold launch と起動済み app への request は、どちらも同じ
+Node Main の `openRequested()` hook に届きます。
+
+## Handler を設定する
+
+アプリが扱う scheme と extension を `murasaki.config.ts` に宣言します。
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.violet',
+  productName: 'Violet',
+
+  protocols: [
+    { scheme: 'violet', name: 'Violet Link' },
+  ],
+
+  fileAssociations: [
+    {
+      extensions: ['vnote'],
+      name: 'Violet Note',
+      description: 'Violet で作成したノート',
+      role: 'editor',
+      mimeType: 'application/x-violet-note',
+    },
+  ],
+})
+```
+
+extension は先頭のドットなしで指定します。scheme と extension は lowercase に
+正規化されます。重複値、予約済みbrowser/OS scheme (`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki`など)、
+不正な scheme / extension / MIME type は build 時に拒否されます。全 field と default は
+[設定リファレンス](/ja/docs/building/configuration#protocols)を参照してください。
+
+## Open request を処理する
+
+Node Main entry を作り、`openRequested(context, event)` を実装します。platform や
+transport ではなく、各 target の `kind` で分岐してください。
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ paths }) {
+    // 最初に DB や service を初期化する。
+    console.log('data directory:', paths.data)
+  },
+
+  async openRequested(_context, event) {
+    for (const target of event.targets) {
+      if (target.kind === 'url') {
+        const url = new URL(target.url)
+        if (url.hostname !== 'open') continue
+
+        // 実行前に route を検証し、認可する。
+        console.log('open link:', url.pathname)
+      } else {
+        // file を読む前に所有範囲、size、内容を検証する。
+        console.log('open document:', target.path)
+      }
+    }
+  },
+})
+```
+
+Murasaki は `ready()` の完了後に `openRequested()` を呼びます。DB などの長寿命
+resource を一度初期化してから、cold-start と running-app request を同じ handler で
+処理できます。
+
+## Event reference
+
+```ts
+type OpenTarget =
+  | { kind: 'url'; url: string; scheme: string }
+  | { kind: 'file'; path: string }
+
+interface OpenRequestEvent {
+  activation: 'cold-start' | 'second-instance' | 'os-event'
+  transport: 'argv' | 'open-url' | 'open-file'
+  targets: OpenTarget[]
+  cwd?: string
+}
+```
+
+| Field | 意味 |
+| --- | --- |
+| `activation` | 最初の launch に伴う request、2つ目の process から転送された request、native OS event のいずれか。 |
+| `transport` | native delivery mechanism。診断用であり、通常の app logic は `target.kind` を使います。 |
+| `targets` | 設定済み scheme / extension と一致した URL / file のみ。1 event に複数 file が入る場合があります。 |
+| `cwd` | argv-based launch の working directory。native OS event ではありません。 |
+
+2つ目の executable launch では、`secondInstance()` に raw `argv` / `cwd` が届き、
+`openRequested()` には認識済み URL / file target が届きます。同じ open operation を
+両方の hook で実行しないでください。一般的な activation behavior は
+`secondInstance()`、link / file の意味的な処理は `openRequested()` に置きます。
+
+## Packaging の動作
+
+| Artifact | 登録と delivery |
+| --- | --- |
+| macOS `.app` | `murasaki bundle` が URL / document metadata を app の `Info.plist` に書き込みます。Launch Services は起動済み app を含めて URL / file open を配送します。`.dmg` はこの `.app` を収録します。最終テスト前に Applications へ移動してください。 |
+| Windows NSIS `.exe` | installer が `installer.windows.installMode` に従い per-user / per-machine の protocol / file association を登録します。起動された URL / file は argv から正規化されます。 |
+| Windows MSI | MSI が per-machine の protocol / file association を登録します。起動された URL / file は argv から正規化されます。 |
+| Windows portable archive | registry entry を作りません。`protocols` / `fileAssociations` を設定しても OS handler にはなりません。 |
+| Linux | protocol / MIME registration は未実装です。Linux の Deep Link / file association 対応を告知しないでください。 |
+| `murasaki dev` | system handler metadata を install しません。OS integration は install/package 済み artifact でテストしてください。 |
+
+Windows の登録は app を利用可能な handler に追加しますが、user の現在の default app を
+勝手に変更しません。release 間で `appId` を維持し、installer ownership と association
+identifier を安定させてください。
+
+## Packaged handler をテストする
+
+installer を実行するか packaged app を Applications へ移動した後、cold launch と
+起動済み app の両方をテストします。
+
+```bash title="macOS"
+open 'violet://open/note-42'
+open -a Violet ./example.vnote
+```
+
+```powershell title="Windows PowerShell"
+Start-Process 'violet://open/note-42'
+Start-Process '.\example.vnote'
+```
+
+clean machine で NSIS / MSI の実際の uninstall / upgrade path もテストしてください。
+実行ファイルへ argument を直接渡す方法は handler code の確認には使えますが、OS registration
+が正しく install されたことの確認にはなりません。
+
+## Security
+
+<Callout type="warn">
+  URL、file path、launch argument はすべて信頼できない input です。任意の local process が
+  偽の URL / path で executable を起動できます。custom scheme は送信元を証明しません。
+</Callout>
+
+- 期待する URL host、path、action、parameter shape を allowlist で検証する
+- bearer token や長期 credential を Deep Link URL に入れない。sign-in callback には
+  one-time code、`state`、PKCE を使う
+- query string、fragment、機密性のある path を log / crash report から除外する
+- file parse 前に size、permission、format、content を確認する。期待した extension だけでは
+  安全性を証明できない
+- symlink と、検証から使用までの間に file が変化する可能性を考慮する
+- 処理は Node Main に置き、検証済みの最小限の data だけを renderer へ送る
+
+## 次へ
+
+<Cards>
+  <Card title="Node Main" href="/ja/docs/guides/node-main" />
+  <Card title="設定" href="/ja/docs/building/configuration" />
+  <Card title="配布" href="/ja/docs/building/distribution" />
+</Cards>

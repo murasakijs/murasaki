@@ -15,6 +15,7 @@ launch
   → Node child loads src/main.ts
   → main.ready(context) finishes
   → local server begins listening
+  → registered cold-start URLs/files are delivered to main.openRequested()
   → WebView loads the renderer
 ```
 
@@ -26,8 +27,30 @@ service.
 In packaged macOS and Windows apps, a second launch does not start another
 backend. Its `argv` / working directory are delivered to
 `main.secondInstance()`, and the host focuses the primary window. Development
-mode and Linux do not currently provide this lock. URL-scheme and file
-association registration are separate features and are not implemented yet.
+mode and Linux do not currently provide this lock.
+
+## Open requests
+
+Packaged macOS and Windows apps can register custom URL schemes and document
+extensions with `protocols` and `fileAssociations` in
+`murasaki.config.ts`. After `ready()` has completed, matching activations are
+normalized and delivered to `main.openRequested()`:
+
+- `activation` is `cold-start`, `second-instance`, or `os-event`.
+- `transport` is `argv`, `open-url`, or `open-file`.
+- `targets` contains `{ kind: 'url', url, scheme }` or
+  `{ kind: 'file', path }` values.
+
+On a second launch, `secondInstance()` still receives the raw process
+arguments while `openRequested()` receives only registered URLs and files.
+Use `openRequested()` for cross-platform open behavior and
+`secondInstance()` for other secondary-launch arguments.
+
+<Callout type="warn">
+  URL and file activations are untrusted operating-system input. Registration
+  selects which inputs reach the hook; it does not authenticate the sender or
+  make the URL contents or file contents safe.
+</Callout>
 
 ## Quit sequence
 

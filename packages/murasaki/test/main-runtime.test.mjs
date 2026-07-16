@@ -114,3 +114,74 @@ test('delivers second-launch arguments to the running main instance', async (t) 
     { argv: ['murasaki://open/42'], cwd: '/tmp' },
   ]])
 })
+
+test('delivers normalized open requests after ready', async (t) => {
+  const events = []
+  const runtime = await fixture(t)
+  await runtime.start(async () => ({
+    default: {
+      ready() { events.push('ready') },
+      openRequested(context, event) { events.push([context.appId, event]) },
+    },
+  }))
+  const request = {
+    activation: 'cold-start',
+    transport: 'argv',
+    targets: [{ kind: 'url', url: 'violet://open/42', scheme: 'violet' }],
+    cwd: '/tmp',
+  }
+  await runtime.openRequested(request)
+  assert.deepEqual(events, ['ready', ['com.example.test', request]])
+})
+
+test('serializes open requests in arrival order', async (t) => {
+  const events = []
+  let releaseFirst
+  const firstCanFinish = new Promise((resolve) => { releaseFirst = resolve })
+  const runtime = await fixture(t)
+  await runtime.start(async () => ({
+    default: {
+      async openRequested(_context, event) {
+        events.push(`start:${event.targets[0].path}`)
+        if (event.targets[0].path === '/tmp/first.vnote') await firstCanFinish
+        events.push(`end:${event.targets[0].path}`)
+      },
+    },
+  }))
+
+  const first = runtime.openRequested({
+    activation: 'cold-start',
+    transport: 'argv',
+    targets: [{ kind: 'file', path: '/tmp/first.vnote' }],
+  })
+  const second = runtime.openRequested({
+    activation: 'second-instance',
+    transport: 'argv',
+    targets: [{ kind: 'file', path: '/tmp/second.vnote' }],
+  })
+
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(events, ['start:/tmp/first.vnote'])
+  releaseFirst()
+  await Promise.all([first, second])
+  assert.deepEqual(events, [
+    'start:/tmp/first.vnote',
+    'end:/tmp/first.vnote',
+    'start:/tmp/second.vnote',
+    'end:/tmp/second.vnote',
+  ])
+})
+
+test('rejects an open request synchronously when the bounded queue is full', async (t) => {
+  const runtime = await fixture(t)
+  await runtime.start(async () => ({
+    default: { openRequested: () => new Promise(() => {}) },
+  }))
+  const request = {
+    activation: 'second-instance',
+    transport: 'argv',
+    targets: [{ kind: 'file', path: '/tmp/example.vnote' }],
+  }
+  for (let index = 0; index < 32; index++) runtime.openRequested(request)
+  assert.throws(() => runtime.openRequested(request), /queue is full/)
+})

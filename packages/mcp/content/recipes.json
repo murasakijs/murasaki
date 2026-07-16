@@ -26,6 +26,10 @@
       "slug": "guides/auto-update"
     },
     {
+      "id": "deep-links-and-file-associations",
+      "slug": "guides/deep-links"
+    },
+    {
       "id": "configuration",
       "slug": "building/configuration"
     },

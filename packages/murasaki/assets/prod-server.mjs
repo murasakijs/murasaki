@@ -53,6 +53,7 @@ const API_PATH_PREFIX = '/api/'
 const UPDATE_PATH_PREFIX = '/__murasaki/update/'
 const MAIN_SHUTDOWN_PATH = '/__murasaki/main/shutdown'
 const MAIN_SECOND_INSTANCE_PATH = '/__murasaki/main/second-instance'
+const MAIN_OPEN_REQUEST_PATH = '/__murasaki/main/open-request'
 const MAIN_EVENTS_PATH = '/__murasaki/main/events'
 const RUNTIME_COOKIE = 'murasaki_runtime'
 
@@ -157,12 +158,23 @@ async function handleRequest(req, res) {
     || pathname.startsWith(UPDATE_PATH_PREFIX)
     || pathname === MAIN_SHUTDOWN_PATH
     || pathname === MAIN_SECOND_INSTANCE_PATH
+    || pathname === MAIN_OPEN_REQUEST_PATH
     || pathname === MAIN_EVENTS_PATH
   if (isPrivileged && !isAuthorizedRuntimeRequest(req)) {
     res.statusCode = 403
     res.setHeader('content-type', 'application/json')
     res.setHeader('cache-control', 'no-store')
     res.end(JSON.stringify({ error: 'forbidden runtime request' }))
+    return
+  }
+  const isNativeOnly = pathname === MAIN_SHUTDOWN_PATH
+    || pathname === MAIN_SECOND_INSTANCE_PATH
+    || pathname === MAIN_OPEN_REQUEST_PATH
+  if (isNativeOnly && !isAuthorizedNativeRequest(req)) {
+    res.statusCode = 403
+    res.setHeader('content-type', 'application/json')
+    res.setHeader('cache-control', 'no-store')
+    res.end(JSON.stringify({ error: 'forbidden native request' }))
     return
   }
   if (req.method === 'POST' && req.url?.startsWith(ACTION_PATH_PREFIX)) {
@@ -176,6 +188,9 @@ async function handleRequest(req, res) {
   }
   if (req.method === 'POST' && pathname === MAIN_SECOND_INSTANCE_PATH) {
     return handleSecondInstance(req, res)
+  }
+  if (req.method === 'POST' && pathname === MAIN_OPEN_REQUEST_PATH) {
+    return handleOpenRequest(req, res)
   }
   if (req.method === 'GET' && pathname === MAIN_EVENTS_PATH) {
     return handleMainEvents(req, res)
@@ -242,7 +257,67 @@ async function handleSecondInstance(req, res) {
     res.end(JSON.stringify({ error: 'invalid second-instance event' }))
     return
   }
-  await mainRuntime.secondInstance({ argv: body.argv, cwd: body.cwd })
+  void mainRuntime.secondInstance({ argv: body.argv, cwd: body.cwd }).catch((error) => {
+    console.error('murasaki: secondInstance handler failed:', error)
+  })
+  res.statusCode = 204
+  res.setHeader('cache-control', 'no-store')
+  res.end()
+}
+
+async function handleOpenRequest(req, res) {
+  let body
+  try {
+    body = JSON.parse(await readBody(req))
+  } catch {
+    body = null
+  }
+  const allowedActivations = new Set(['cold-start', 'second-instance', 'os-event'])
+  const allowedTransports = new Set(['argv', 'open-url', 'open-file'])
+  const targetsValid = Array.isArray(body?.targets)
+    && body.targets.length > 0
+    && body.targets.length <= 32
+    && body.targets.every((target) => {
+      if (!target || typeof target !== 'object') return false
+      if (target.kind === 'url') {
+        if (typeof target.url !== 'string' || target.url.length === 0 || target.url.length > 8192
+          || typeof target.scheme !== 'string' || target.scheme.length === 0 || target.scheme.length > 64) return false
+        try {
+          return new URL(target.url).protocol.slice(0, -1).toLowerCase() === target.scheme.toLowerCase()
+        } catch {
+          return false
+        }
+      }
+      return target.kind === 'file'
+        && typeof target.path === 'string'
+        && target.path.length > 0
+        && target.path.length <= 32_768
+    })
+  if (!body || !allowedActivations.has(body.activation) || !allowedTransports.has(body.transport)
+    || !targetsValid || (body.cwd !== undefined && typeof body.cwd !== 'string')) {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid open request' }))
+    return
+  }
+  let delivery
+  try {
+    delivery = mainRuntime.openRequested({
+      activation: body.activation,
+      transport: body.transport,
+      targets: body.targets,
+      ...(body.cwd === undefined ? {} : { cwd: body.cwd }),
+    })
+  } catch (error) {
+    res.statusCode = 503
+    res.setHeader('content-type', 'application/json')
+    res.setHeader('cache-control', 'no-store')
+    res.end(JSON.stringify({ error: error?.message ?? 'open request queue unavailable' }))
+    return
+  }
+  void delivery.catch((error) => {
+    console.error('murasaki: openRequested handler failed:', error)
+  })
   res.statusCode = 204
   res.setHeader('cache-control', 'no-store')
   res.end()
@@ -288,6 +363,14 @@ function isAuthorizedRuntimeRequest(req) {
     ?.slice(RUNTIME_COOKIE.length + 1)
   if (!token) return false
 
+  const received = Buffer.from(token)
+  const expected = Buffer.from(runtimeToken)
+  return received.length === expected.length && timingSafeEqual(received, expected)
+}
+
+function isAuthorizedNativeRequest(req) {
+  const token = req.headers['x-murasaki-native-token']
+  if (typeof token !== 'string') return false
   const received = Buffer.from(token)
   const expected = Buffer.from(runtimeToken)
   return received.length === expected.length && timingSafeEqual(received, expected)
