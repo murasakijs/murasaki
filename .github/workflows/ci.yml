@@ -642,32 +642,73 @@ jobs:
       - name: Create ephemeral trusted code-signing certificate
         shell: pwsh
         run: |
-          # New-SelfSignedCertificate may wait on the Windows runner's
-          # interactive certificate provider. OpenSSL + certutil keeps this
-          # fixture deterministic and fully non-interactive while exercising
-          # the same PFX path users configure in release CI.
-          $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
-          if (-not (Test-Path -LiteralPath $openssl -PathType Leaf)) {
-            throw "OpenSSL was not found at $openssl"
-          }
-          $keyPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.key.pem'
-          $pemPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cert.pem'
+          # Generate the fixture entirely through .NET. This avoids the
+          # interactive Windows certificate provider used by
+          # New-SelfSignedCertificate and still exercises the release PFX path.
           $cerPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cer'
           $pfxPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.pfx'
           $password = 'murasaki-ci-only'
-          & $openssl req -x509 -newkey rsa:2048 -sha256 -days 2 -nodes `
-            -subj '/CN=Murasaki CI Authenticode' `
-            -addext 'keyUsage=critical,digitalSignature' `
-            -addext 'extendedKeyUsage=codeSigning' `
-            -keyout $keyPath -out $pemPath
-          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL certificate generation failed' }
-          & $openssl x509 -in $pemPath -outform DER -out $cerPath
-          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL DER export failed' }
-          & $openssl pkcs12 -export -out $pfxPath -inkey $keyPath -in $pemPath `
-            -passout "pass:$password"
-          if ($LASTEXITCODE -ne 0) { throw 'OpenSSL PFX export failed' }
-          certutil -user -f -addstore Root $cerPath
-          if ($LASTEXITCODE -ne 0) { throw 'certutil failed to trust the CI certificate' }
+          $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+          try {
+            $subject = [System.Security.Cryptography.X509Certificates.X500DistinguishedName]::new(
+              'CN=Murasaki CI Authenticode'
+            )
+            $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new(
+              $subject,
+              $rsa,
+              [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+              [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+            )
+            $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new(
+                [System.Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature,
+                $true
+              )
+            )
+            $oids = [System.Security.Cryptography.OidCollection]::new()
+            [void]$oids.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
+            $request.CertificateExtensions.Add(
+              [System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new(
+                $oids,
+                $false
+              )
+            )
+            $certificate = $request.CreateSelfSigned(
+              [System.DateTimeOffset]::UtcNow.AddMinutes(-5),
+              [System.DateTimeOffset]::UtcNow.AddDays(2)
+            )
+            try {
+              [System.IO.File]::WriteAllBytes(
+                $pfxPath,
+                $certificate.Export(
+                  [System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx,
+                  $password
+                )
+              )
+              [System.IO.File]::WriteAllBytes(
+                $cerPath,
+                $certificate.Export(
+                  [System.Security.Cryptography.X509Certificates.X509ContentType]::Cert
+                )
+              )
+            } finally {
+              $certificate.Dispose()
+            }
+          } finally {
+            $rsa.Dispose()
+          }
+          $trustedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cerPath)
+          $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+          )
+          try {
+            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            $rootStore.Add($trustedCertificate)
+          } finally {
+            $rootStore.Close()
+            $trustedCertificate.Dispose()
+          }
           "MURASAKI_WINDOWS_CERTIFICATE_FILE=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MURASAKI_WINDOWS_CERTIFICATE_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           # Keep PR CI independent of a public timestamp service. Unit tests
