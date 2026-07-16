@@ -151,6 +151,9 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
             <ExternalLink aria-hidden="true" className="size-3.5" />
           </a>
         </div>
+        <p className="lp-sans mt-5 max-w-3xl text-sm leading-relaxed text-white/60">
+          {content.runner.note}
+        </p>
 
         <div className="mt-8 grid gap-8 md:grid-cols-3">
           {SAMPLE_META.map((meta, index) => {

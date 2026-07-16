@@ -730,6 +730,7 @@ export interface LpExtra {
     sourceLabel: string;
     downloadsLabel: string;
     runner: {
+      note: string;
       label: string;
       copy: string;
       copied: string;
@@ -853,6 +854,7 @@ const lpEn: LpExtra = {
     sourceLabel: "Source",
     downloadsLabel: "Downloads",
     runner: {
+      note: "macOS may block browser-downloaded ad-hoc builds. The command on each card verifies the published SHA256, caches the matching app, removes its quarantine marker, and opens it.",
       label: "Verified macOS demo runner",
       copy: "Copy demo command",
       copied: "Copied",
@@ -981,6 +983,7 @@ const lpJa: LpExtra = {
     sourceLabel: "ソース",
     downloadsLabel: "ダウンロード",
     runner: {
+      note: "ブラウザから取得したad-hoc版はmacOSにブロックされる場合があります。各カードのコマンドは公開SHA256を検証し、CPUに合うアプリをキャッシュへ展開して、隔離属性を解除して起動します。",
       label: "検証付きmacOS Demoランナー",
       copy: "Demoコマンドをコピー",
       copied: "コピーしました",
