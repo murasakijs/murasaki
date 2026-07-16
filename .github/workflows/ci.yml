@@ -639,8 +639,9 @@ jobs:
           -TimeoutSeconds 60
           -ExpectedMarker "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
 
-      - name: Create ephemeral trusted code-signing certificate
+      - name: Generate ephemeral code-signing PFX
         shell: pwsh
+        timeout-minutes: 2
         run: |
           # Generate the fixture entirely through .NET. This avoids the
           # interactive Windows certificate provider used by
@@ -697,6 +698,17 @@ jobs:
           } finally {
             $rsa.Dispose()
           }
+          "MURASAKI_WINDOWS_CERTIFICATE_FILE=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MURASAKI_WINDOWS_CERTIFICATE_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Keep PR CI independent of a public timestamp service. Unit tests
+          # cover /tr + /td ordering; release users timestamp by default.
+          'MURASAKI_WINDOWS_TIMESTAMP_URL=false' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Trust ephemeral code-signing certificate
+        shell: pwsh
+        timeout-minutes: 2
+        run: |
+          $cerPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cer'
           $trustedCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($cerPath)
           $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
             [System.Security.Cryptography.X509Certificates.StoreName]::Root,
@@ -709,11 +721,6 @@ jobs:
             $rootStore.Close()
             $trustedCertificate.Dispose()
           }
-          "MURASAKI_WINDOWS_CERTIFICATE_FILE=$pfxPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "MURASAKI_WINDOWS_CERTIFICATE_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          # Keep PR CI independent of a public timestamp service. Unit tests
-          # cover /tr + /td ordering; release users timestamp by default.
-          'MURASAKI_WINDOWS_TIMESTAMP_URL=false' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install Windows installer toolchains
         shell: pwsh
