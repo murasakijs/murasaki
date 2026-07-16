@@ -33,13 +33,16 @@ function formatDuration(durationMs: number, round: "ceil" | "floor") {
   const roundSeconds = round === "ceil" ? Math.ceil : Math.floor;
   const totalSeconds = Math.max(0, roundSeconds(durationMs / 1000));
 
-  const hours = Math.floor(totalSeconds / 3600);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  return [hours, minutes, seconds]
+  const time = [hours, minutes, seconds]
     .map((value) => String(value).padStart(2, "0"))
     .join(" : ");
+
+  return days > 0 ? `${days}d ${time}` : time;
 }
 
 /** Official Product Hunt follow/review cards used by the hero and footer. */
@@ -120,7 +123,7 @@ export function ProductHuntBadge({
                   : "Live"}{" "}
               <time
                 dateTime="2026-07-16T00:01:00-07:00"
-                className="inline-block w-24 shrink-0 text-center tabular-nums"
+                className="inline-block w-28 shrink-0 text-center normal-case tabular-nums"
               >
                 {timerValue}
               </time>
