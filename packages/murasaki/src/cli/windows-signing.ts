@@ -245,7 +245,7 @@ try {
 }
 `
   return spawnSync(
-    'powershell.exe',
+    'pwsh.exe',
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
     {
       encoding: 'utf8',
