@@ -1,14 +1,9 @@
-import { getLLMText, source } from "@/lib/source";
+import { buildLlmsFull } from "@/lib/llms";
 
 export const revalidate = false;
 
-// ja has no translated content yet (it falls back to the English MDX), so
-// this stays English-only for now rather than emitting duplicate entries.
 export async function GET() {
-  const scan = source.getPages("en").map(getLLMText);
-  const scanned = await Promise.all(scan);
-
-  return new Response(scanned.join("\n\n"), {
+  return new Response(await buildLlmsFull(), {
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Robots-Tag": "noindex, follow",

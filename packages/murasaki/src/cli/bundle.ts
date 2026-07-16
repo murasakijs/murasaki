@@ -15,6 +15,7 @@ import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import type { MurasakiConfig } from '../config.js'
 import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
+import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
 
 export type Arch = 'arm64' | 'x64'
 export type Platform = NodePlatform
@@ -60,7 +61,7 @@ export default async function bundle(argv: string[]) {
   if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await build(argv)
   // Always (re)built — cheap relative to the client build, and must exist
   // before packaging even if dist/client was already up to date.
-  await buildServer(cwd, resolve(cwd, 'src'))
+  await buildServer(cwd, resolve(cwd, 'src'), config)
 
   // The win32 folder layout below has no macOS-only dependency (no
   // codesign/sips/iconutil/plist), so unlike the darwin path it can be
@@ -141,6 +142,17 @@ export default async function bundle(argv: string[]) {
   const updaterEngineSrc = resolve(__dirname, '../runtime/updater.js')
   await copyFile(updaterEngineSrc, join(resourcesDir, 'updater-engine.mjs'))
 
+  // Contents/Resources/wire.mjs — the exact same versioned Server Action
+  // codec used by Vite in dev. Keeping this as one compiled implementation
+  // prevents supported values from changing between `murasaki dev` and a
+  // packaged app.
+  const wireCodecSrc = resolve(__dirname, '../runtime/wire.js')
+  await copyFile(wireCodecSrc, join(resourcesDir, 'wire.mjs'))
+
+  // Contents/Resources/main-runtime.mjs — lifecycle runner shared by dev and prod.
+  const mainRuntimeSrc = resolve(__dirname, '../runtime/main-runtime.js')
+  await copyFile(mainRuntimeSrc, join(resourcesDir, 'main-runtime.mjs'))
+
   // Contents/Resources/menu-locales.json — read by the launcher binary at
   // runtime to localize the default app menu for the end user's locale (see
   // crates/native/src/launcher.rs).
@@ -171,6 +183,14 @@ export default async function bundle(argv: string[]) {
   await cp(resolve(cwd, 'dist/server'), join(resourcesDir, 'server'), {
     recursive: true,
   })
+
+  // Node main/server dependencies are deliberately externalized during the
+  // SSR build so native add-ons, dynamic loaders, package data, and packages
+  // such as ws retain their normal Node behavior. Stage the detected package
+  // graph as real directories (portable even when the project uses pnpm
+  // symlinks), then copy developer-declared non-code resources.
+  await stageServerDependencies(cwd, resolve(cwd, 'dist/server'), resourcesDir, config, target)
+  await stageBundleResources(cwd, resourcesDir, config)
 
   // Contents/Resources/node_modules/@murasakijs/native — external native
   // binding, copied as-is since its .node binary is arch-specific and
@@ -266,6 +286,14 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   const updaterEngineSrc = resolve(__dirname, '../runtime/updater.js')
   await copyFile(updaterEngineSrc, join(resourcesDir, 'updater-engine.mjs'))
 
+  // resources/wire.mjs — shared dev/prod Server Action wire codec.
+  const wireCodecSrc = resolve(__dirname, '../runtime/wire.js')
+  await copyFile(wireCodecSrc, join(resourcesDir, 'wire.mjs'))
+
+  // resources/main-runtime.mjs — lifecycle runner shared by dev and prod.
+  const mainRuntimeSrc = resolve(__dirname, '../runtime/main-runtime.js')
+  await copyFile(mainRuntimeSrc, join(resourcesDir, 'main-runtime.mjs'))
+
   // resources/menu-locales.json — read by the launcher binary at runtime to
   // localize the default app menu for the end user's locale.
   const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
@@ -303,6 +331,17 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   // (dist/server/actions.mjs), built self-contained (see build-server.ts) so
   // no project node_modules need to ship alongside it.
   await cp(resolve(cwd, 'dist/server'), join(resourcesDir, 'server'), { recursive: true })
+
+  // Keep the Windows runtime layout equivalent to macOS: external Node
+  // packages and developer resources live beside server/ under resources/.
+  await stageServerDependencies(
+    cwd,
+    resolve(cwd, 'dist/server'),
+    resourcesDir,
+    config,
+    { platform: 'win32', arch },
+  )
+  await stageBundleResources(cwd, resourcesDir, config)
 
   // resources/node_modules/@murasakijs/native — external native binding,
   // copied as-is since its .node binary is arch-specific and can't go
@@ -430,6 +469,12 @@ function metaJson(
       locales: config.locales,
       width: config.window?.width,
       height: config.window?.height,
+      minWidth: config.window?.minWidth,
+      minHeight: config.window?.minHeight,
+      resizable: config.window?.resizable,
+      transparent: config.window?.transparent,
+      capabilities: config.capabilities,
+      mainShutdownTimeoutMs: config.main === false ? undefined : config.main?.shutdownTimeoutMs,
       vibrancy: config.window?.vibrancy,
       console: config.window?.console,
       icon: iconResource ?? undefined,

@@ -32,6 +32,8 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
   `loading` / `error` / `not-found`、`middleware.ts`。詳しくは[ルーティング](/docs/guides/routing)を参照してください。
 - **Server Actions** — `'use server'` + `defineAction` / `useAction`、おなじみの React
   19 の形そのままです。詳しくは[Server Actions](/docs/guides/server-actions)を参照してください。
+- **Node Main** — DB、socket、worker、background work のための長寿命 Node lifecycle と
+  型付き `'use main'` call。[Node Main](/ja/docs/guides/node-main)を参照してください。
 - **API Routes** — Next.js 風の `src/api/**/route.ts` による HTTP エンドポイント。詳しくは
   [API Routes](/docs/guides/api-routes)を参照してください。
 - **ネイティブウィンドウ & メニュー** — 本物のネイティブウィンドウ、ネイティブメニューバー、
@@ -49,11 +51,19 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
   コア自体はすでに 5 つのターゲットすべてでビルド可能です。
 </Callout>
 
+<Callout type="warn">
+  Murasaki は 1.0 未満です。multi-window、tray menu / global shortcut、Linux packaging、
+  signing coverage などの本番 blocker は
+  [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)で
+  確認してください。
+</Callout>
+
 ## 次のステップ
 
 <Cards>
   <Card title="クイックスタート" href="/docs/getting-started/quick-start" description="最初のアプリをスキャフォールドし、実行し、出荷しましょう。" />
   <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="Murasaki アプリの中で何がどこにあるか。" />
+  <Card title="アーキテクチャ" href="/ja/docs/core-concepts/architecture" description="native host、Node Main、renderer、security boundary。" />
   <Card title="コンポーネント" href="/docs/components" description="@murasakijs/ui のすべてのコンポーネントを、ライブプレビュー付きで。" />
   <Card title="ガイド" href="/docs/guides/routing" description="ルーティング、サーバーアクション、API ルート、メタデータなど。" />
 </Cards>

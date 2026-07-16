@@ -2,6 +2,8 @@ import type { Connect, Plugin, ViteDevServer } from 'vite'
 import { readdir } from 'node:fs/promises'
 import type { ServerResponse } from 'node:http'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 interface Options {
   srcDir: string
@@ -15,13 +17,19 @@ type HttpMethod = (typeof HTTP_METHODS)[number]
 /** Handler shape a `src/api/**\/route.ts` module exports, one per HTTP method. */
 export type RouteHandler = (
   request: Request,
-  context: { params: Record<string, string> },
+  context: { params: RouteParams },
 ) => Response | Promise<Response>
+
+export type RouteParams = Record<string, string | string[] | undefined>
+export type ApiRouteParamKind = 'dynamic' | 'catchAll' | 'optionalCatchAll'
 
 export interface ApiRouteSource {
   /** URL pattern, e.g. `/api/users/:id` — same `:name` convention as file routing (vite-plugin/routing.ts). */
   pattern: string
   paramNames: string[]
+  paramKinds: ApiRouteParamKind[]
+  /** Higher values match before less-specific dynamic/catch-all routes. */
+  specificity: number
   /** Regex source (no flags) matching a request pathname and capturing param values in declaration order. */
   regexSource: string
   /** Absolute path to the route.ts module. */
@@ -30,14 +38,14 @@ export interface ApiRouteSource {
 
 export interface ApiRouteMatch {
   route: ApiRouteSource
-  params: Record<string, string>
+  params: RouteParams
 }
 
 /**
  * File-based API routing over `src/api/**\/route.ts`.
  *
- * Mirrors vite-plugin/routing.ts's segment convention (a `[name]` folder is a
- * dynamic param — catch-all `[...x]` isn't supported yet) but, unlike the
+ * Mirrors Next's dynamic segment convention (`[name]`, `[...name]`, and
+ * `[[...name]]`) but, unlike the
  * page router, compiles each entry to a regex: the prod counterpart
  * (cli/build-server.ts) has to bake the route table into a generated module
  * ahead of time, and a regex source string serializes into that module
@@ -73,29 +81,48 @@ async function walk(dir: string, segments: string[], acc: ApiRouteSource[]): Pro
 
 function toRouteSource(segments: string[], filePath: string): ApiRouteSource {
   const paramNames: string[] = []
+  const paramKinds: ApiRouteParamKind[] = []
   const patternParts: string[] = []
-  const regexParts: string[] = []
+  let regexSource = '^/api'
+  let specificity = 0
   for (const seg of segments) {
-    if (isDynamicSegment(seg)) {
+    const optionalCatchAll = /^\[\[\.\.\.([^/\]]+)\]\]$/.exec(seg)
+    const catchAll = /^\[\.\.\.([^/\]]+)\]$/.exec(seg)
+    const dynamic = /^\[([^/\]]+)\]$/.exec(seg)
+    if (optionalCatchAll) {
+      const name = optionalCatchAll[1]
+      paramNames.push(name)
+      paramKinds.push('optionalCatchAll')
+      patternParts.push(`:${name}?*`)
+      regexSource += '(?:/(.*))?'
+    } else if (catchAll) {
+      const name = catchAll[1]
+      paramNames.push(name)
+      paramKinds.push('catchAll')
+      patternParts.push(`:${name}*`)
+      regexSource += '/(.+)'
+      specificity += 1
+    } else if (dynamic) {
       const name = seg.slice(1, -1)
       paramNames.push(name)
+      paramKinds.push('dynamic')
       patternParts.push(`:${name}`)
-      regexParts.push('([^/]+)')
+      regexSource += '/([^/]+)'
+      specificity += 10
     } else {
       patternParts.push(seg)
-      regexParts.push(escapeRegExp(seg))
+      regexSource += `/${escapeRegExp(seg)}`
+      specificity += 100
     }
   }
   return {
     pattern: `/api/${patternParts.join('/')}`,
     paramNames,
-    regexSource: `^/api/${regexParts.join('/')}/?$`,
+    paramKinds,
+    specificity,
+    regexSource: `${regexSource}/?$`,
     filePath,
   }
-}
-
-function isDynamicSegment(seg: string): boolean {
-  return seg.startsWith('[') && seg.endsWith(']')
 }
 
 function escapeRegExp(s: string): string {
@@ -109,16 +136,20 @@ function escapeRegExp(s: string): string {
  * pattern has.
  */
 export function matchApiRoute(routes: ApiRouteSource[], pathname: string): ApiRouteMatch | null {
-  let best: { route: ApiRouteSource; params: Record<string, string>; score: number } | null = null
+  let best: { route: ApiRouteSource; params: RouteParams; score: number } | null = null
   for (const route of routes) {
     const match = new RegExp(route.regexSource).exec(pathname)
     if (!match) continue
-    const params: Record<string, string> = {}
+    const params: RouteParams = {}
     route.paramNames.forEach((name, i) => {
-      params[name] = decodeURIComponent(match[i + 1] ?? '')
+      const value = match[i + 1]
+      const kind = route.paramKinds[i] ?? 'dynamic'
+      if (kind === 'optionalCatchAll' && (value === undefined || value === '')) return
+      params[name] = kind === 'dynamic'
+        ? decodeURIComponent(value ?? '')
+        : (value ?? '').split('/').map((segment) => decodeURIComponent(segment))
     })
-    const totalSegments = route.pattern.split('/').filter(Boolean).length
-    const score = totalSegments - route.paramNames.length
+    const score = route.specificity
     if (!best || score > best.score) best = { route, params, score }
   }
   return best ? { route: best.route, params: best.params } : null
@@ -176,7 +207,7 @@ function handleApiRequest(server: ViteDevServer, apiDir: string): Connect.NextHa
 
       const request = await toWebRequest(req)
       const response: Response = await handler(request, { params: match.params })
-      await sendWebResponse(res, response)
+      await sendWebResponse(res, response, method === 'HEAD')
     } catch (err) {
       res.statusCode = 500
       res.setHeader('content-type', 'application/json')
@@ -201,35 +232,43 @@ async function toWebRequest(req: Connect.IncomingMessage): Promise<Request> {
 
   const method = (req.method ?? 'GET').toUpperCase()
   const hasBody = method !== 'GET' && method !== 'HEAD'
-  const body = hasBody ? await readBodyBuffer(req) : undefined
-  return new Request(url, { method, headers, body })
-}
+  if (!hasBody) return new Request(url, { method, headers })
 
-// An `ArrayBuffer` (unlike Node's `Buffer`/`Uint8Array`, whose @types/node
-// generic form doesn't unify with DOM lib's `BufferSource` in `BodyInit`)
-// fits `Request`'s body option with no cast needed.
-function readBodyBuffer(req: Connect.IncomingMessage): Promise<ArrayBuffer> {
-  return new Promise((resolveOk, rejectFail) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk) => chunks.push(chunk))
-    req.on('end', () => {
-      const buf = Buffer.concat(chunks)
-      resolveOk(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer)
-    })
-    req.on('error', rejectFail)
-  })
+  // Node's fetch implementation requires `duplex: 'half'` for streamed
+  // request bodies. Keeping the IncomingMessage as a stream avoids buffering
+  // uploads in memory and lets route handlers consume multipart/large bodies
+  // incrementally, just like a regular Node HTTP server.
+  const init = {
+    method,
+    headers,
+    body: Readable.toWeb(req) as ReadableStream<Uint8Array>,
+    duplex: 'half',
+  } as RequestInit & { duplex: 'half' }
+  return new Request(url, init)
 }
 
 /** Web `Response` → Node `ServerResponse`. Mirrored in assets/prod-server.mjs's `sendWebResponse`. */
-async function sendWebResponse(res: ServerResponse, response: Response): Promise<void> {
+async function sendWebResponse(
+  res: ServerResponse,
+  response: Response,
+  headOnly = false,
+): Promise<void> {
   res.statusCode = response.status
+  const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie
   response.headers.forEach((value, key) => {
+    if (key.toLowerCase() === 'set-cookie') return
     res.setHeader(key, value)
   })
-  if (!response.body) {
+  const setCookies = getSetCookie?.call(response.headers) ?? []
+  if (setCookies.length > 0) res.setHeader('set-cookie', setCookies)
+
+  if (headOnly || !response.body) {
     res.end()
     return
   }
-  const buf = Buffer.from(await response.arrayBuffer())
-  res.end(buf)
+
+  // `pipeline` preserves backpressure and cancels the Web stream if the
+  // client disconnects. Buffering with response.arrayBuffer() would make
+  // SSE and other indefinite/large responses impossible.
+  await pipeline(Readable.fromWeb(response.body as never), res)
 }

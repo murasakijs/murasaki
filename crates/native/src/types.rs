@@ -70,6 +70,13 @@ pub struct WebviewOptions {
   pub html: Option<String>,
   pub devtools: Option<bool>,
   pub transparent: Option<bool>,
+  /// Stable application identifier used to isolate WebView runtime data
+  /// (notably WebView2 profiles on Windows) between Murasaki applications.
+  pub app_id: Option<String>,
+  /// Exact renderer-native command permissions. Missing/empty is deny-all.
+  pub capabilities: Option<Vec<String>>,
+  /// Default packaged/development PNG used when creating a tray icon.
+  pub tray_icon: Option<String>,
   /// When set, static files under this directory are served via wry's custom
   /// protocol (`murasaki://localhost/…`) instead of `url`/`html` — used in
   /// production, where an in-process HTTP server can't work because
@@ -112,14 +119,16 @@ pub struct Position {
 }
 
 #[napi(object)]
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DialogFilter {
   pub name: String,
   pub extensions: Vec<String>,
 }
 
 #[napi(object)]
-#[derive(Clone)]
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct OpenFileOptions {
   pub title: Option<String>,
   pub default_path: Option<String>,
@@ -128,7 +137,8 @@ pub struct OpenFileOptions {
 }
 
 #[napi(object)]
-#[derive(Clone)]
+#[derive(Clone, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct SaveFileOptions {
   pub title: Option<String>,
   pub default_path: Option<String>,
@@ -137,7 +147,8 @@ pub struct SaveFileOptions {
 }
 
 #[napi(object)]
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotificationOptions {
   pub title: String,
   pub body: Option<String>,

@@ -1,0 +1,73 @@
+---
+title: AI ツール
+description: llms.txt、ページ単位の Markdown、読み取り専用 MCP サーバーをコーディングエージェントから利用します。
+---
+
+Murasaki はコーディングエージェントや LLM クライアント向けに、構造化されたドキュメントを
+公開します。互換性に関する回答は、リポジトリの正規マニフェスト
+`packages/murasaki/capabilities.json` を根拠にするため、計画中の API を実装済みとして
+案内しません。
+
+## LLM テキストエンドポイント
+
+| エンドポイント | 用途 |
+| --- | --- |
+| [`/llms.txt`](/llms.txt) | 重要なドキュメントを絶対 URL で示す簡潔な索引。 |
+| [`/llms-full.txt`](/llms-full.txt) | 英語・日本語の処理済みドキュメント全文。 |
+| [`/llms-api.txt`](/llms-api.txt) | 機能の成熟度、プラットフォーム対応、制約、公開シンボル、根拠、設定スキーマを含む JSON。 |
+| `/llms.mdx/{lang}/docs/{slug}/content.md` | 1ページ分の Markdown。例: `/llms.mdx/ja/docs/guides/routing/content.md`。 |
+
+ラベルには明確な意味があります。**planned** は未提供、**experimental** は API やワイヤー契約が
+変更される可能性あり、**partial** は重要な制約が残っている状態です。詳しくは
+[プラットフォームと機能の対応状況](/ja/docs/core-concepts/platform-feature-status)を参照してください。
+
+## MCP サーバー
+
+`@murasakijs/mcp` はローカルで動作する stdio MCP サーバーです。完全な読み取り専用で、
+シェル実行、ビルド、リリース、公開、ファイル書き込みのツールは含みません。
+
+<Callout type="warn">
+  実装はリポジトリに含まれていますが、安定版の npm パッケージとしてはまだ公開されていません。
+  初回リリースまでは `@latest` が存在すると仮定せず、チェックアウトした
+  `packages/mcp/bin/murasaki-mcp.mjs` を実行してください。
+</Callout>
+
+リポジトリをチェックアウトした状態での MCP クライアント設定:
+
+```json
+{
+  "mcpServers": {
+    "murasaki": {
+      "command": "node",
+      "args": ["/absolute/path/to/murasaki/packages/mcp/bin/murasaki-mcp.mjs"]
+    }
+  }
+}
+```
+
+パッケージ公開後は、次の設定に置き換えられます:
+
+```json
+{
+  "mcpServers": {
+    "murasaki": {
+      "command": "npx",
+      "args": ["-y", "@murasakijs/mcp@latest"]
+    }
+  }
+}
+```
+
+## ツール
+
+- `search_docs` — 英語・日本語のドキュメントを検索し、正規 URL と短い抜粋を返します。
+- `get_api_reference` — 公開シンボルの成熟度、対応 OS、制約、Docs、テスト根拠を返します。
+- `get_config_schema` — 設定全体、またはドットパス / JSON Pointer で選んだ項目の JSON Schema を返します。
+- `doctor` — 既知のプロジェクトメタデータとエントリーパスだけを読み取ります。設定の import、
+  プロジェクトコードの実行、ファイル変更は行いません。
+- `list_recipes` / `get_recipe` — チェックイン済み Docs に基づく作業別ガイドを返します。
+- `check_compatibility` — macOS、Windows、Linux に対して正規の機能 ID を照合し、partial や
+  planned を「対応済み」に格上げしません。
+
+互換性を検討するときは、まず `get_api_reference` をシンボル未指定で呼び出して有効な機能 ID を
+確認し、必要な ID を `check_compatibility` に渡してください。

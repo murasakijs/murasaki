@@ -8,6 +8,20 @@ description: Shipping real native installers — cross-arch builds, signing, not
 MSI `.msi`), cross-arch (arm64 / x64) on both. `@murasakijs/native` also ships
 prebuilt binaries for Linux (x64/arm64); Linux app packaging is on the roadmap.
 
+| Target | Bundle | Installer | Public code signing |
+| --- | --- | --- | --- |
+| macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization built in |
+| Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Not implemented; use a separate Authenticode step |
+| Linux | — | — | Planned |
+
+<Callout type="warn">
+  A generated file is not automatically distribution-ready. Test the
+  installed artifact on a clean machine, validate its signature, and verify
+  every production dependency/resource. Murasaki is pre-1.0 and its Node
+  dependency packaging does not cover every dynamic native addon or
+  runtime-discovered asset layout yet.
+</Callout>
+
 ## Cross-arch builds
 
 The bundle carries a portable, target-specific Node runtime (a checksum-verified
@@ -33,13 +47,18 @@ Windows targets are `win32-x64` / `win32-arm64`.
   `.msi` is a separate flow, tracked for a later release.
 </Callout>
 
-By default, `murasaki bundle` / `murasaki installer` produce an **unsigned**
-(ad-hoc) `.app` / `.dmg` — recipients open it the first time with right-click →
-**Open**, or by running:
+By default, `murasaki bundle` produces an **ad-hoc signed** `.app`, and
+`murasaki installer` puts that app in a `.dmg`. This lets macOS verify local
+bundle integrity, but it does not identify a trusted developer and the result
+is not notarizable. For your own downloaded development artifact, you can
+remove quarantine with:
 
 ```bash
 xattr -dr com.apple.quarantine "<path>"
 ```
+
+Do not make that command the installation path for end users. Public,
+warning-free distribution requires Developer ID signing and notarization.
 
 For warning-free distribution, sign and notarize with your own Apple
 Developer ID — Murasaki ships no certificate of its own:
@@ -63,6 +82,44 @@ murasaki installer --sign --notarize   # + submit the .dmg to Apple, staple the 
   result, then staples the ticket so Gatekeeper can verify it offline.
 
 Both require a paid Apple Developer Program membership.
+
+### Validate the macOS artifact
+
+Run these against the final `.app` after signing and the final `.dmg` after
+notarization:
+
+```bash
+codesign --verify --strict --verbose=2 "dist/bundle/My App.app"
+codesign -dvvv --entitlements :- "dist/bundle/My App.app"
+spctl -a -t open --context context:primary-signature -vv "dist/My App-1.0.0.dmg"
+xcrun stapler validate "dist/My App-1.0.0.dmg"
+```
+
+`codesign --verify` checks the app's code/resource seal. `spctl` evaluates the
+distributed DMG against Gatekeeper policy. `stapler validate` checks that its
+notarization ticket is attached. These answer different questions; run all of
+them for a public release.
+
+## Windows installers and signing
+
+`murasaki bundle --target win32-x64` produces a portable folder and `.zip`.
+`murasaki installer` additionally invokes tools already available on the build
+host:
+
+- `makensis` produces the NSIS `.exe` and may run on macOS or Windows.
+- WiX v4 produces the `.msi` and runs on Windows.
+
+The NSIS installer can be `perUser` (the default, no elevation) or
+`perMachine`; MSI is always per-machine. See
+[Configuration](/docs/building/configuration#installer) for branding and
+upgrade identity.
+
+Murasaki currently does not Authenticode-sign the application executable,
+NSIS installer, or MSI. Sign final Windows artifacts in your release pipeline
+with your certificate/provider and verify them on Windows before publication.
+Do not treat the updater's Ed25519 manifest signature as an Authenticode
+replacement: it protects Murasaki's update channel, not Windows SmartScreen's
+publisher identity.
 
 ### Signed releases with GitHub Actions
 
@@ -126,9 +183,29 @@ Add these repository secrets to sign + notarize (omit them all for an unsigned
   only reads them from the environment.
 </Callout>
 
+## Release checklist
+
+- Build from a clean checkout with a locked dependency graph.
+- Launch the bundle before wrapping it in an installer.
+- Install, update, and uninstall on clean target machines for every
+  platform/architecture you publish.
+- Exercise Node Main shutdown, offline startup, and failed network requests.
+- Verify macOS signatures/notarization or your external Windows signatures.
+- Generate and sign the Murasaki update manifest only after final payloads are
+  immutable.
+- Publish payloads, `latest.json`, and `latest.json.sig` together.
+- Keep signing credentials and `MURASAKI_UPDATE_KEY` in CI secrets; never in
+  `murasaki.config.ts`.
+
+Code-signing and update signing are independent. See
+[Security](/docs/building/security#signing-and-update-keys-are-different) and
+[Auto-update](/docs/guides/auto-update) before enabling in-app updates.
+
 ## Next
 
 <Cards>
   <Card title="CLI reference" href="/docs/building/cli" />
   <Card title="Configuration" href="/docs/building/configuration" />
+  <Card title="Security" href="/docs/building/security" />
+  <Card title="Troubleshooting" href="/docs/building/troubleshooting" />
 </Cards>

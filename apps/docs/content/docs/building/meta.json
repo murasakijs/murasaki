@@ -1,4 +1,10 @@
 {
   "title": "Building & Distribution",
-  "pages": ["cli", "configuration", "distribution"]
+  "pages": [
+    "cli",
+    "configuration",
+    "security",
+    "distribution",
+    "troubleshooting"
+  ]
 }

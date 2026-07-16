@@ -64,7 +64,13 @@ export default async function dev(_argv: string[]) {
       authors: config.authors,
       menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
     },
-    { url, devtools: true },
+    {
+      url,
+      devtools: true,
+      appId: config.appId,
+      capabilities: config.capabilities,
+      trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,
+    },
   )
 
   // Context menus are handled natively on the Rust side (see

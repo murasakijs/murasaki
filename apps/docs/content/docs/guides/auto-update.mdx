@@ -98,10 +98,11 @@ presentation for it:
 
 `channel` changes which manifest URL gets resolved (see
 [Self-hosting the manifest](#self-hosting-the-manifest)). `checkOnStart` and
-`checkInterval` are also resolved from config, but nothing consumes them yet
-to actually schedule a check — today the only thing calling `check()` is
-`<UpdateButton />`'s own mount effect. Call `useUpdate().check()` yourself
-(e.g. on your own timer) if you want checks beyond that.
+`checkInterval` drive the updater engine's scheduler. The engine checks once
+at startup by default and then every six hours; overlapping checks are
+coalesced. `<UpdateButton />` also checks when it mounts, and that call joins an
+in-flight scheduled check instead of starting a duplicate. Set
+`checkOnStart: false` and/or `checkInterval: false` for fully manual checks.
 
 In dev, `check()` works — so you can validate a manifest/key pair without a
 full bundle — but `download()` / `install()` fail fast with `status:

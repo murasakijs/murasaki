@@ -1,0 +1,77 @@
+---
+title: AI tooling
+description: Use llms.txt, page-level Markdown, and Murasaki's read-only MCP server with coding agents.
+---
+
+Murasaki publishes structured documentation for coding agents and other LLM
+clients. All compatibility answers are grounded in the repository's canonical
+`packages/murasaki/capabilities.json` manifest, so planned APIs are not
+presented as shipping features.
+
+## LLM text endpoints
+
+| Endpoint | Use it for |
+| --- | --- |
+| [`/llms.txt`](/llms.txt) | A compact, absolute-URL index of the important documentation. |
+| [`/llms-full.txt`](/llms-full.txt) | The complete processed English and Japanese documentation corpus. |
+| [`/llms-api.txt`](/llms-api.txt) | JSON containing feature maturity, platform support, limitations, public symbols, evidence, and the configuration schema. |
+| `/llms.mdx/{lang}/docs/{slug}/content.md` | One documentation page as Markdown, for example `/llms.mdx/en/docs/guides/routing/content.md`. |
+
+The feature labels are deliberate: **planned** means unavailable,
+**experimental** means the API or wire contract may change, and **partial**
+means a material limitation remains. See [Platform & Feature Status](/docs/core-concepts/platform-feature-status).
+
+## MCP server
+
+`@murasakijs/mcp` is a local stdio MCP server. It is read-only: there are no
+shell, build, release, publish, or file-writing tools.
+
+<Callout type="warn">
+  The package is implemented in the repository but has not been published as
+  part of a stable npm release yet. Until its first release, run the checked-out
+  `packages/mcp/bin/murasaki-mcp.mjs` file rather than assuming `@latest` exists.
+</Callout>
+
+Configure an MCP client against a repository checkout:
+
+```json
+{
+  "mcpServers": {
+    "murasaki": {
+      "command": "node",
+      "args": ["/absolute/path/to/murasaki/packages/mcp/bin/murasaki-mcp.mjs"]
+    }
+  }
+}
+```
+
+After the package is released, the equivalent package configuration is:
+
+```json
+{
+  "mcpServers": {
+    "murasaki": {
+      "command": "npx",
+      "args": ["-y", "@murasakijs/mcp@latest"]
+    }
+  }
+}
+```
+
+## Tools
+
+- `search_docs` — searches checked-in English and Japanese documentation and
+  returns bounded excerpts with canonical URLs.
+- `get_api_reference` — finds public symbols and returns their maturity,
+  platform status, limitations, docs, and test evidence.
+- `get_config_schema` — returns the full Murasaki configuration JSON Schema or
+  one property selected by dot path or JSON Pointer.
+- `doctor` — reads known project metadata and entry paths. It does not import
+  the config, execute project code, or change files.
+- `list_recipes` / `get_recipe` — returns task-oriented guides backed by the
+  checked-in docs.
+- `check_compatibility` — checks canonical feature IDs for macOS, Windows, or
+  Linux without upgrading partial or planned work to “supported.”
+
+For compatibility planning, call `get_api_reference` without a symbol to list
+the valid feature IDs, then pass the required IDs to `check_compatibility`.

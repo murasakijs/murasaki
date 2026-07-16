@@ -1,0 +1,154 @@
+---
+title: Security
+description: Murasaki's trust boundaries, built-in runtime protections, and application responsibilities.
+---
+
+Desktop security starts with process boundaries. Murasaki keeps Node out of the
+renderer, restricts the application WebView to its own origin, and protects
+privileged loopback endpoints with an app-session token. These controls reduce
+the impact of ordinary renderer bugs, but they are not a complete permission
+system.
+
+<Callout type="warn">
+  Native renderer commands are deny-by-default and granted with the typed
+  `capabilities` list. Murasaki does not yet provide per-window allow/deny
+  rules, path/URL scopes, or different policies for multiple app origins.
+  Treat every renderer-to-Node function as privileged application code and
+  keep its surface small.
+</Callout>
+
+## Trust boundaries
+
+| Boundary | Built-in protection | Your responsibility |
+| --- | --- | --- |
+| Remote URL → app WebView | Exact app-origin navigation stays in-window; off-origin HTTP(S) opens in the system browser; `file:`, `data:`, and `javascript:` navigations are denied | Do not weaken navigation behavior or inject remote scripts into the renderer |
+| Renderer → Rust native commands | Exact-origin IPC check and typed, deny-by-default `capabilities` allowlist | Grant only the commands you use; validate app-level intent before calling broad operations |
+| Renderer → local Node | Privileged `/api/*` and `/__murasaki/*` endpoints require a random 256-bit HttpOnly, SameSite=Strict runtime cookie and validate Host/Origin; wire payloads are bounded | Validate arguments and authorize the requested operation inside every action/route/Main function |
+| App → update host | Ed25519 signature over raw manifest bytes, then SHA-256 verification of the selected payload | Protect the private update key and publish hashes/signatures together |
+| OS → installed app | macOS ad-hoc signature validates integrity locally; Developer ID + notarization establishes public trust | Sign and notarize public macOS releases; establish an external signing flow for Windows |
+
+Production listens on `127.0.0.1`, not all interfaces. Development accepts
+loopback `localhost`, `127.0.0.1`, or `[::1]` hosts and rejects cross-site Fetch
+Metadata. Static document responses install the session cookie; it is not
+readable from JavaScript.
+
+## Grant native commands explicitly
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  capabilities: [
+    'dialog:openFile',
+    'clipboard:writeText',
+    'shell:openExternal',
+  ],
+})
+```
+
+Omitting `capabilities` grants nothing. Unknown strings grant nothing, and the
+bridge accepts calls only from the exact trusted application origin. The
+allowlist is command-level: it cannot yet constrain a dialog to one directory,
+an external URL to one host, or a command to one of several windows. Enforce
+those narrower rules in application code as well.
+
+## Keep secrets in Node
+
+Anything imported by renderer code can become public client JavaScript. Keep
+API tokens, private keys, database credentials, and license validation in
+`src/main.ts`, `'use main'`, `'use server'`, or server-only API route modules.
+
+```ts title="src/backend/account.ts"
+'use main'
+
+export async function loadAccount(accountId: string) {
+  if (!/^[a-z0-9_-]{1,64}$/i.test(accountId)) {
+    throw new TypeError('invalid account id')
+  }
+
+  const token = process.env.ACCOUNT_API_TOKEN
+  if (!token) throw new Error('account service is not configured')
+
+  // Call the remote service from Node. Return only what the renderer needs.
+  const response = await fetch(`https://api.example.com/accounts/${accountId}`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`account service returned ${response.status}`)
+  return response.json()
+}
+```
+
+<Callout type="info">
+  The runtime session proves that a request came through the app's renderer
+  origin. It does not prove that the renderer is uncompromised. XSS can still
+  invoke any function that your client bundle can invoke.
+</Callout>
+
+## Validate paths and URLs
+
+Never concatenate renderer input into an unrestricted filesystem path. Resolve
+it beneath an application-owned directory and verify that the result stays
+inside that directory. Prefer opaque IDs over raw paths.
+
+Likewise, allowlist protocols and hosts before a Node function calls `fetch()`
+or opens a URL. This prevents accidental local-network access and SSRF. Do not
+forward arbitrary request headers from the renderer to a remote service.
+
+## Content Security Policy
+
+Murasaki sets `X-Content-Type-Options: nosniff` and `Referrer-Policy:
+no-referrer` on the document, but it does not currently generate a Content
+Security Policy for your app. Avoid `dangerouslySetInnerHTML`, sanitize any
+user-authored HTML, pin third-party scripts, and add a CSP at the application
+layer when your renderer loads externally controlled content.
+
+## Exposing a real network service
+
+Murasaki API routes are app-local by design and are not reachable as a public
+service. A Main process can create TCP, WebSocket, or HTTP listeners using Node,
+but doing so creates a new security boundary outside Murasaki's runtime-session
+protection.
+
+- Bind to `127.0.0.1` unless remote clients are an explicit product feature.
+- Authenticate before processing messages.
+- Define message and payload limits.
+- Rate-limit expensive operations.
+- Close the listener in `shutdown()`.
+- Never reuse the Murasaki runtime token as your protocol credential.
+
+## Signing and update keys are different
+
+Code signing answers “who produced this executable?” to the operating system.
+The Ed25519 update signature answers “did the holder of this app's update key
+authorize this manifest?” to Murasaki. A production updater should use both:
+Developer ID/notarization (or an external Windows Authenticode process) for the
+OS artifact, plus Murasaki's manifest signature and payload hash.
+
+## Known security gaps
+
+- Native capabilities are command-level only; there are no path/URL scopes or
+  per-window/per-origin policy files.
+- No public per-window security policy because multi-window is not supported.
+- No built-in CSP generator.
+- Windows Authenticode and Linux package signing are not implemented.
+- Public native utility APIs are not permission-scoped and therefore are not
+  exposed from the main `murasaki` package yet.
+
+Track exact status on [Platform & feature
+status](/docs/core-concepts/platform-feature-status).
+
+## Report a vulnerability
+
+Do not open a public issue. Use a [private GitHub Security
+Advisory](https://github.com/murasakijs/murasaki/security/advisories/new) or
+email `murasaki@ichi10.com`. The latest published minor is the supported
+pre-1.0 line.
+
+## Next
+
+<Cards>
+  <Card title="Node Main" href="/docs/guides/node-main" />
+  <Card title="Auto-update" href="/docs/guides/auto-update" />
+  <Card title="Distribution" href="/docs/building/distribution" />
+</Cards>

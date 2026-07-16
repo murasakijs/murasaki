@@ -1,0 +1,44 @@
+---
+title: Platform & Feature Status
+description: The canonical, evidence-backed status of Murasaki features on macOS, Windows, and Linux.
+---
+
+import { CapabilityStatusTable } from "@/components/capability-status-table";
+
+Murasaki is pre-1.0 software. Some parts are ready to use, some have meaningful
+platform gaps, and others are designs rather than shipping APIs. This page is
+generated from [`packages/murasaki/capabilities.json`](https://github.com/murasakijs/murasaki/blob/main/packages/murasaki/capabilities.json),
+the repository's canonical capability manifest.
+
+<Callout type="warn">
+  **Planned does not mean available.** A dependency, Rust module, type, or
+  roadmap entry is not marked as shipping until Murasaki exposes a supported
+  path and records its limitations here.
+</Callout>
+
+## Status definitions
+
+- **Stable** — shipping public surface with a compatibility commitment for the
+  current release line.
+- **Experimental** — shipping and tested, but its API or wire contract may
+  change before 1.0.
+- **Partial** — usable today, with a material API or platform gap described in
+  the table.
+- **Planned** — no supported implementation is available.
+
+Platform labels are separate from feature maturity. **Dev only** means the
+development runtime exists on that platform but there is no production
+packaging claim. **Unavailable** means that feature does not apply or has no
+implementation there.
+
+<CapabilityStatusTable locale="en" />
+
+## Reading the evidence
+
+Open **API and evidence** in any row to see the supported public symbols and
+the automated test or workflow used as evidence. A build-only workflow proves
+that the code compiles on that platform; it does not turn an unexposed native
+helper into a supported framework API.
+
+If implementation and this manifest disagree, treat the lower capability as
+the safe assumption and [report the mismatch](https://github.com/murasakijs/murasaki/issues).

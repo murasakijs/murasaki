@@ -7,6 +7,10 @@ import { fileRouterPlugin } from './routing.js'
 import { serverActionsPlugin } from './server-actions.js'
 import { appShellPlugin } from './shell.js'
 import { updaterPlugin } from './updater.js'
+import { mainProcessPlugin } from './main-process.js'
+import { runtimeSecurityPlugin } from './runtime-security.js'
+import { mainModulesPlugin } from './main-modules.js'
+import { mainEventsPlugin } from './main-events.js'
 
 export interface MurasakiPluginOptions {
   config: MurasakiConfig
@@ -22,8 +26,12 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     // still resolve to a URL.
     svgr(),
     fileRouterPlugin({ srcDir: opts.srcDir }),
+    runtimeSecurityPlugin(),
+    mainEventsPlugin(),
+    mainModulesPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),
     apiRoutesPlugin({ srcDir: opts.srcDir }),
+    mainProcessPlugin({ config: opts.config, projectRoot: process.cwd() }),
     updaterPlugin({ config: opts.config }),
     appShellPlugin(),
     {
@@ -36,6 +44,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
         // config() over inline), pinning every run back to the default and
         // defeating the auto-free-port probe. dev-server.mjs owns the port.
         return {
+          envPrefix: opts.config.build?.envPrefix ?? ['VITE_', 'NEXT_PUBLIC_'],
           define: {
             __MURASAKI_APP_ID__: JSON.stringify(opts.config.appId),
             __MURASAKI_PRODUCT_NAME__: JSON.stringify(opts.config.productName),

@@ -19,6 +19,7 @@ export default defineConfig({
     width: 1000,
     height: 700,
   },
+  capabilities: ['dialog:openFile', 'clipboard:writeText'],
 })
 ```
 
@@ -37,12 +38,16 @@ nothing to await or configure beyond the object you pass it.
 | `homepage` | `string?` | Homepage URL shown in the About panel. |
 | `authors` | `string[]?` | Author names shown in the About panel (Windows/Linux only). |
 | `window` | `WindowConfig?` | Window shape — see [below](#window). |
+| `capabilities` | `NativeCapability[]?` | Native renderer commands to grant. Default is deny-all — see [Native APIs](/docs/guides/native-apis). |
+| `main` | `false \| object?` | Long-lived Node Main entry and shutdown bound — see [below](#main). |
+| `bundle` | `object?` | Node dependency and non-code resource packaging — see [below](#bundle). |
+| `build` | `object?` | Pre-build command and public client env prefixes — see [below](#build). |
 | `updater` | `UpdaterConfig?` | Auto-update source — see [below](#updater). |
 | `locales` | `string[]?` | BCP-47 UI languages your app supports (e.g. `['en', 'ja']`). Feeds the macOS bundle's `CFBundleLocalizations` and constrains Murasaki's default native menu translations. Defaults to every language Murasaki ships menu translations for: `en`, `ja`, `zh-Hans`, `ko`, `es`, `fr`, `de`. |
 | `devPort` | `number?` | Vite dev server port during `murasaki dev`. Defaults to `5178` (auto-increments if taken). |
 | `targets` | `Target[]?` | Build targets. Defaults to the host platform. One or more of `darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, `linux-arm64`. |
 | `icon` | `string?` | Path to a source PNG (ideally 1024px). `murasaki icon` / `murasaki bundle` fan it out to `.icns` / `.ico` / a PNG set. |
-| `installer` | `object?` | `.dmg` styling — see [below](#installer). |
+| `installer` | `object?` | macOS DMG and Windows installer options — see [below](#installer). |
 | `sign` | `object?` | macOS code-signing — see [below](#sign). |
 
 ## `window`
@@ -55,11 +60,97 @@ nothing to await or configure beyond the object you pass it.
 | `resizable` | `boolean?` | Whether the window can be resized. |
 | `transparent` | `boolean?` | Transparent window background. |
 | `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS translucent window vibrancy. |
+| `console` | `boolean?` | Windows only: show the backend Node console window. Defaults to `false`. |
 
 <Callout type="warn">
   `vibrancy` is declared but not yet applied by the native binding — setting
   it is currently a no-op (support is planned).
 </Callout>
+
+## `capabilities`
+
+Native renderer APIs are deny-by-default. Add only the commands your app
+uses; unknown permissions do not grant anything:
+
+```ts
+capabilities: [
+  'dialog:openFile',
+  'clipboard:readText',
+  'clipboard:writeText',
+  'notification:show',
+  'shell:openExternal',
+  'window:setTitle',
+]
+```
+
+The complete typed list is `NativeCapability`. A grant applies only to the
+trusted app origin; off-origin pages cannot use the native bridge.
+
+## `main`
+
+Murasaki loads `src/main.ts` when it exists. Use `main` to choose another
+entry, change the graceful cleanup deadline, or disable Main discovery:
+
+```ts
+main: {
+  entry: 'src/backend/main.ts',
+  shutdownTimeoutMs: 15_000,
+}
+// main: false
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `entry` | `string?` | Path relative to the project root. Defaults to `src/main.ts`. |
+| `shutdownTimeoutMs` | `number?` | Maximum `shutdown()` time before the host exits. Defaults to `10_000`. |
+
+See [Node Main](/docs/guides/node-main) for lifecycle hooks and `'use main'`.
+
+## `bundle`
+
+Server/Main code is compiled for production. Static bare npm imports are
+detected and staged automatically; use these options for dependencies and
+assets whose runtime behavior cannot be discovered statically:
+
+```ts
+bundle: {
+  external: ['computed-plugin'],
+  noExternal: ['small-js-only-package'],
+  resources: [
+    'prisma/schema.prisma',
+    { from: 'prisma/migrations', to: 'database/migrations' },
+  ],
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `external` | `string[]?` | Stage packages in the app's `node_modules`. Add computed/dynamic package loads here. Prefer this for native addons and packages with runtime data. |
+| `noExternal` | `string[]?` | Force packages into the compiled server bundle. Use for JS-only packages without runtime assets. |
+| `resources` | `Array<string \| { from: string; to?: string }>?` | Copy files/directories into packaged resources. String entries use the source basename; object entries choose a relative destination. |
+
+Do not place secrets in `resources`; everything in an app bundle is readable by
+the user. Test native addons on every target architecture.
+
+## `build`
+
+```ts
+build: {
+  before: 'pnpm --filter @acme/database build && pnpm prisma generate',
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `before` | `string?` | Shell command run once before the client and Node builds. A non-zero exit stops packaging. Use it for workspace prerequisites and code generation. |
+| `envPrefix` | `string[]?` | Environment prefixes that Vite may expose to renderer code. Defaults to `VITE_` and `NEXT_PUBLIC_`. |
+
+Only prefixed variables are client-public, but never put secrets under those
+prefixes: Vite replaces their values into shipped JavaScript. Packaged Node
+Main inherits the environment of the launcher; Murasaki does not copy `.env`
+files into the app. Put end-user runtime settings under `context.paths.data`
+or provide them through your deployment environment.
 
 ## `updater`
 
@@ -98,14 +189,26 @@ format, signing, and publishing releases.
 
 ## `installer`
 
-Styling for the `.dmg` produced by `murasaki installer`. Omit entirely to use
-Murasaki's default background.
+macOS DMG styling and Windows NSIS/MSI installer options. Omit entirely to use
+Murasaki's defaults.
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `background` | `string?` | Path (relative to the project root) to a custom DMG background PNG. Overrides Murasaki's default. |
 | `window` | `{ width: number; height: number }?` | DMG window content size in points. Default `{ width: 640, height: 420 }` (matches the default background). |
 | `iconSize` | `number?` | Icon size in the DMG window. Default `128`. |
+
+### `installer.windows`
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `installMode` | `'perUser' \| 'perMachine'` | NSIS installation scope. Defaults to `perUser`; MSI is always per-machine. |
+| `publisher` | `string?` | Installer/Add-Remove Programs publisher. Falls back to `authors`, `copyright`, then `productName`. |
+| `upgradeCode` | `string?` | Stable MSI GUID. Defaults to a deterministic value derived from `appId`; do not change it after release. |
+| `icon` | `string?` | `.ico` for installer/uninstaller and Add/Remove Programs. Defaults to the generated app icon. |
+| `banner` | `string?` | Wizard header BMP. NSIS expects 150×57; MSI expects 493×58. |
+| `sidebar` | `string?` | Welcome/finish BMP. NSIS expects 164×314; MSI expects 493×312. |
+| `license` | `string?` | NSIS `.txt`/`.rtf` or MSI `.rtf` license file. |
 
 ## `sign`
 
@@ -123,5 +226,6 @@ never from this config — see
 
 <Cards>
   <Card title="CLI reference" href="/docs/building/cli" />
+  <Card title="Node Main" href="/docs/guides/node-main" />
   <Card title="Distribution" href="/docs/building/distribution" />
 </Cards>

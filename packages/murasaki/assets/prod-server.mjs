@@ -26,14 +26,35 @@
 // which reads the assigned port off a `MURASAKI_PORT=<n>` line printed to
 // stdout once the server is listening (see prod-launcher.mjs's waitForPort).
 import http from 'node:http'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { extname, join, resolve } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
 import { createUpdateRequestHandler, createUpdaterEngine } from './updater-engine.mjs'
+import { MainRuntime } from './main-runtime.mjs'
+import {
+  MAX_WIRE_PAYLOAD_BYTES,
+  parseWire,
+  stringifyWire,
+  WIRE_CONTENT_TYPE,
+} from './wire.mjs'
+
+// Match normal production Node frameworks. The packaged launcher inherits
+// user-defined environment variables, but apps and external dependencies
+// still need a reliable mode even when launched from Finder/Explorer rather
+// than a shell that set NODE_ENV.
+if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production'
 
 const ACTION_PATH_PREFIX = '/__murasaki/action/'
+const MAIN_CALL_PREFIX = '/__murasaki/main/call/'
 const API_PATH_PREFIX = '/api/'
 const UPDATE_PATH_PREFIX = '/__murasaki/update/'
+const MAIN_SHUTDOWN_PATH = '/__murasaki/main/shutdown'
+const MAIN_SECOND_INSTANCE_PATH = '/__murasaki/main/second-instance'
+const MAIN_EVENTS_PATH = '/__murasaki/main/events'
+const RUNTIME_COOKIE = 'murasaki_runtime'
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -55,7 +76,9 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 }
 
-const { clientDir, registryPath, routesPath, port } = parseArgs()
+const { clientDir, registryPath, mainRegistryPath, routesPath, mainPath, port } = parseArgs()
+let listeningPort = port
+const runtimeToken = process.env.MURASAKI_RUNTIME_TOKEN ?? randomBytes(32).toString('hex')
 
 let registryPromise
 function loadRegistry() {
@@ -63,6 +86,14 @@ function loadRegistry() {
     registryPromise = import(pathToFileURL(registryPath).href).then((m) => m.registry ?? {})
   }
   return registryPromise
+}
+
+let mainRegistryPromise
+function loadMainRegistry() {
+  if (!mainRegistryPromise) {
+    mainRegistryPromise = import(pathToFileURL(mainRegistryPath).href).then((m) => m.registry ?? {})
+  }
+  return mainRegistryPromise
 }
 
 let routesPromise
@@ -100,6 +131,17 @@ const updateEngine = createUpdaterEngine({
 })
 const handleUpdateRequest = createUpdateRequestHandler(updateEngine)
 
+const mainRuntime = new MainRuntime({
+  appId: meta.appId ?? meta.productName ?? 'murasaki-app',
+  productName: meta.productName ?? 'Murasaki',
+  version: meta.version ?? '0.0.0',
+  projectRoot: process.cwd(),
+  resourcesPath: process.cwd(),
+  isPackaged: true,
+  shutdownTimeoutMs: meta.mainShutdownTimeoutMs,
+})
+await mainRuntime.start(() => import(pathToFileURL(mainPath).href))
+
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((err) => {
     if (!res.headersSent) res.statusCode = 500
@@ -108,10 +150,36 @@ const server = http.createServer((req, res) => {
 })
 
 async function handleRequest(req, res) {
+  const pathname = (req.url ?? '/').split('?')[0]
+  const isPrivileged = pathname.startsWith(ACTION_PATH_PREFIX)
+    || pathname.startsWith(MAIN_CALL_PREFIX)
+    || pathname.startsWith(API_PATH_PREFIX)
+    || pathname.startsWith(UPDATE_PATH_PREFIX)
+    || pathname === MAIN_SHUTDOWN_PATH
+    || pathname === MAIN_SECOND_INSTANCE_PATH
+    || pathname === MAIN_EVENTS_PATH
+  if (isPrivileged && !isAuthorizedRuntimeRequest(req)) {
+    res.statusCode = 403
+    res.setHeader('content-type', 'application/json')
+    res.setHeader('cache-control', 'no-store')
+    res.end(JSON.stringify({ error: 'forbidden runtime request' }))
+    return
+  }
   if (req.method === 'POST' && req.url?.startsWith(ACTION_PATH_PREFIX)) {
     return handleAction(req, res)
   }
-  const pathname = (req.url ?? '/').split('?')[0]
+  if (req.method === 'POST' && req.url?.startsWith(MAIN_CALL_PREFIX)) {
+    return handleRegistryCall(req, res, MAIN_CALL_PREFIX, loadMainRegistry, 'main function')
+  }
+  if (req.method === 'POST' && pathname === MAIN_SHUTDOWN_PATH) {
+    return handleMainShutdown(req, res)
+  }
+  if (req.method === 'POST' && pathname === MAIN_SECOND_INSTANCE_PATH) {
+    return handleSecondInstance(req, res)
+  }
+  if (req.method === 'GET' && pathname === MAIN_EVENTS_PATH) {
+    return handleMainEvents(req, res)
+  }
   if (pathname.startsWith(UPDATE_PATH_PREFIX)) {
     await handleUpdateRequest(req, res)
     return
@@ -122,9 +190,116 @@ async function handleRequest(req, res) {
   return serveStatic(req, res)
 }
 
+function handleMainEvents(req, res) {
+  const url = new URL(req.url, `http://127.0.0.1:${listeningPort}`)
+  const channel = url.searchParams.get('channel') ?? ''
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(channel)) {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid main event channel' }))
+    return
+  }
+  res.statusCode = 200
+  res.setHeader('content-type', 'text/event-stream')
+  res.setHeader('cache-control', 'no-store')
+  res.setHeader('connection', 'keep-alive')
+  res.write(': connected\n\n')
+
+  const key = Symbol.for('murasaki.main.events.v1')
+  const bus = globalThis[key] ??= { listeners: new Set() }
+  let writes = Promise.resolve()
+  const listener = (event) => {
+    if (event.channel !== channel) return
+    writes = writes.then(async () => {
+      if (!res.destroyed) {
+        const payload = await stringifyWire(event.value)
+        res.write(`data: ${JSON.stringify({ payload })}\n\n`)
+      }
+    }).catch(() => {})
+  }
+  bus.listeners.add(listener)
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed) res.write(': heartbeat\n\n')
+  }, 15_000)
+  heartbeat.unref?.()
+  req.on('close', () => {
+    clearInterval(heartbeat)
+    bus.listeners.delete(listener)
+  })
+}
+
+async function handleSecondInstance(req, res) {
+  let body
+  try {
+    body = JSON.parse(await readBody(req))
+  } catch {
+    body = null
+  }
+  if (!body || !Array.isArray(body.argv) || !body.argv.every((value) => typeof value === 'string')
+    || typeof body.cwd !== 'string') {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid second-instance event' }))
+    return
+  }
+  await mainRuntime.secondInstance({ argv: body.argv, cwd: body.cwd })
+  res.statusCode = 204
+  res.setHeader('cache-control', 'no-store')
+  res.end()
+}
+
+async function handleMainShutdown(req, res) {
+  let body
+  try {
+    body = JSON.parse(await readBody(req))
+  } catch {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid shutdown request' }))
+    return
+  }
+  const allowedReasons = new Set([
+    'window-close', 'app-quit', 'signal', 'restart', 'dev-reload', 'startup-failure',
+  ])
+  if (!allowedReasons.has(body?.reason) || (body.force !== undefined && typeof body.force !== 'boolean')) {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid shutdown options' }))
+    return
+  }
+  const result = await mainRuntime.shutdown({ reason: body.reason, force: body.force === true })
+  res.statusCode = 200
+  res.setHeader('content-type', 'application/json')
+  res.setHeader('cache-control', 'no-store')
+  res.end(JSON.stringify(result))
+}
+
+function isAuthorizedRuntimeRequest(req) {
+  const expectedHost = `127.0.0.1:${listeningPort}`
+  if (req.headers.host !== expectedHost) return false
+  const origin = req.headers.origin
+  if (origin !== undefined && origin !== `http://${expectedHost}`) return false
+
+  const cookieHeader = req.headers.cookie ?? ''
+  const token = cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${RUNTIME_COOKIE}=`))
+    ?.slice(RUNTIME_COOKIE.length + 1)
+  if (!token) return false
+
+  const received = Buffer.from(token)
+  const expected = Buffer.from(runtimeToken)
+  return received.length === expected.length && timingSafeEqual(received, expected)
+}
+
 /** Mirrors the dev middleware's contract exactly (src/vite-plugin/server-actions.ts). */
 async function handleAction(req, res) {
-  const rest = req.url.slice(ACTION_PATH_PREFIX.length)
+  return handleRegistryCall(req, res, ACTION_PATH_PREFIX, loadRegistry, 'server action')
+}
+
+async function handleRegistryCall(req, res, prefix, load, label) {
+  const rest = req.url.slice(prefix.length)
   const sepIndex = rest.lastIndexOf('/')
   if (sepIndex === -1) {
     res.statusCode = 404
@@ -139,47 +314,80 @@ async function handleAction(req, res) {
   let args
   try {
     const body = await readBody(req)
-    const parsed = JSON.parse(body)
-    if (!Array.isArray(parsed?.args)) throw new Error('missing "args" array')
+    const parsed = parseWire(body)
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.args)) {
+      throw new Error('missing "args" array')
+    }
     args = parsed.args
-  } catch {
-    res.statusCode = 400
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ error: 'invalid request body' }))
+  } catch (err) {
+    await sendWireResponse(res, 400, { ok: false, error: ensureError(err, 'Invalid request body') })
     return
   }
 
   try {
-    const registry = await loadRegistry()
+    const registry = await load()
     const mod = registry[actionId]
     const fn = mod && mod[name]
     if (typeof fn !== 'function') {
-      res.statusCode = 404
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ error: `no such server action: ${name}` }))
+      await sendWireResponse(res, 404, {
+        ok: false,
+        error: new Error(`No such ${label}: ${name}`),
+      })
       return
     }
 
     const result = await fn(...args)
-    res.statusCode = 200
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify(result))
+    await sendWireResponse(res, 200, { ok: true, value: result })
   } catch (err) {
-    res.statusCode = 500
-    res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ error: String(err?.message ?? err) }))
+    await sendWireResponse(res, 500, { ok: false, error: ensureError(err) })
   }
 }
 
 function readBody(req) {
   return new Promise((resolveOk, rejectFail) => {
-    let data = ''
+    const chunks = []
+    let size = 0
+    let settled = false
     req.on('data', (chunk) => {
-      data += chunk
+      if (settled) return
+      const bytes = Buffer.from(chunk)
+      size += bytes.byteLength
+      if (size > MAX_WIRE_PAYLOAD_BYTES) {
+        settled = true
+        rejectFail(new Error(`Action payload exceeds ${MAX_WIRE_PAYLOAD_BYTES} bytes`))
+        return
+      }
+      chunks.push(bytes)
     })
-    req.on('end', () => resolveOk(data))
-    req.on('error', rejectFail)
+    req.on('end', () => {
+      if (!settled) resolveOk(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', (error) => {
+      if (!settled) rejectFail(error)
+    })
   })
+}
+
+async function sendWireResponse(res, status, payload) {
+  res.statusCode = status
+  res.setHeader('content-type', WIRE_CONTENT_TYPE)
+  res.setHeader('cache-control', 'no-store')
+  try {
+    res.end(await stringifyWire(payload))
+  } catch (err) {
+    res.statusCode = 500
+    res.end(await stringifyWire({
+      ok: false,
+      error: ensureError(err, 'Failed to encode action response'),
+    }))
+  }
+}
+
+function ensureError(value, fallback = 'Server action failed') {
+  if (value instanceof Error) return value
+  const error = new Error(value === undefined ? fallback : String(value))
+  Object.defineProperty(error, 'cause', { value, enumerable: false, configurable: true })
+  return error
 }
 
 /** Mirrors the dev middleware's contract exactly (src/vite-plugin/api-routes.ts). */
@@ -204,7 +412,7 @@ async function handleApiRoute(req, res, pathname) {
   try {
     const request = await toWebRequest(req)
     const response = await handler(request, { params: match.params })
-    await sendWebResponse(res, response)
+    await sendWebResponse(res, response, method === 'HEAD')
   } catch (err) {
     res.statusCode = 500
     res.setHeader('content-type', 'application/json')
@@ -224,10 +432,15 @@ function matchApiRoute(routes, pathname) {
     if (!match) continue
     const params = {}
     route.paramNames.forEach((name, i) => {
-      params[name] = decodeURIComponent(match[i + 1] ?? '')
+      const value = match[i + 1]
+      const kind = route.paramKinds?.[i] ?? 'dynamic'
+      if (kind === 'optionalCatchAll' && (value === undefined || value === '')) return
+      params[name] = kind === 'dynamic'
+        ? decodeURIComponent(value ?? '')
+        : (value ?? '').split('/').map((segment) => decodeURIComponent(segment))
     })
-    const totalSegments = route.pattern.split('/').filter(Boolean).length
-    const score = totalSegments - route.paramNames.length
+    const score = route.specificity
+      ?? (route.pattern.split('/').filter(Boolean).length - route.paramNames.length)
     if (!best || score > best.score) best = { route, params, score }
   }
   return best ? { route: best.route, params: best.params } : null
@@ -249,31 +462,33 @@ async function toWebRequest(req) {
 
   const method = (req.method ?? 'GET').toUpperCase()
   const hasBody = method !== 'GET' && method !== 'HEAD'
-  const body = hasBody ? await readBodyBuffer(req) : undefined
-  return new Request(url, { method, headers, body })
-}
-
-function readBodyBuffer(req) {
-  return new Promise((resolveOk, rejectFail) => {
-    const chunks = []
-    req.on('data', (chunk) => chunks.push(chunk))
-    req.on('end', () => resolveOk(Buffer.concat(chunks)))
-    req.on('error', rejectFail)
+  if (!hasBody) return new Request(url, { method, headers })
+  return new Request(url, {
+    method,
+    headers,
+    body: Readable.toWeb(req),
+    duplex: 'half',
   })
 }
 
 /** Web `Response` → Node `ServerResponse`. Mirrors vite-plugin/api-routes.ts's `sendWebResponse`. */
-async function sendWebResponse(res, response) {
+async function sendWebResponse(res, response, headOnly = false) {
   res.statusCode = response.status
+  const getSetCookie = response.headers.getSetCookie
   response.headers.forEach((value, key) => {
+    if (key.toLowerCase() === 'set-cookie') return
     res.setHeader(key, value)
   })
-  if (!response.body) {
+  const setCookies = typeof getSetCookie === 'function'
+    ? getSetCookie.call(response.headers)
+    : []
+  if (setCookies.length > 0) res.setHeader('set-cookie', setCookies)
+
+  if (headOnly || !response.body) {
     res.end()
     return
   }
-  const buf = Buffer.from(await response.arrayBuffer())
-  res.end(buf)
+  await pipeline(Readable.fromWeb(response.body), res)
 }
 
 /** Static files out of clientDir; any other GET falls back to index.html (SPA routing survives reload/deep links). */
@@ -302,6 +517,15 @@ async function serveStatic(req, res) {
 
   const data = await readFile(target)
   res.statusCode = 200
+  res.setHeader('x-content-type-options', 'nosniff')
+  res.setHeader('referrer-policy', 'no-referrer')
+  if (target === join(clientDir, 'index.html')) {
+    res.setHeader(
+      'set-cookie',
+      `${RUNTIME_COOKIE}=${runtimeToken}; HttpOnly; SameSite=Strict; Path=/`,
+    )
+    res.setHeader('cache-control', 'no-store')
+  }
   res.setHeader('content-type', MIME_TYPES[extname(target)] ?? 'application/octet-stream')
   res.end(req.method === 'HEAD' ? undefined : data)
 }
@@ -323,23 +547,31 @@ function parseArgs() {
   return {
     clientDir: resolve(get('--client', 'client')),
     registryPath: resolve(get('--registry', 'server/actions.mjs')),
+    mainRegistryPath: resolve(get('--main-registry', 'server/main-actions.mjs')),
     routesPath: resolve(get('--routes', 'server/routes.mjs')),
+    mainPath: resolve(get('--main', 'server/main.mjs')),
     port: Number(get('--port', '0')),
   }
 }
 
 server.listen(port, '127.0.0.1', () => {
-  process.stdout.write(`MURASAKI_PORT=${server.address().port}\n`)
+  listeningPort = server.address().port
+  process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
 })
 
-process.on('SIGINT', () => {
-  updateEngine.dispose()
-  process.exit(0)
-})
-process.on('SIGTERM', () => {
-  updateEngine.dispose()
-  process.exit(0)
-})
+let processShutdown
+function shutdownProcess() {
+  if (processShutdown) return processShutdown
+  processShutdown = (async () => {
+    await mainRuntime.shutdown({ reason: 'signal', force: true })
+    updateEngine.dispose()
+    await new Promise((resolveOk) => server.close(resolveOk))
+    process.exit(0)
+  })()
+  return processShutdown
+}
+process.on('SIGINT', () => void shutdownProcess())
+process.on('SIGTERM', () => void shutdownProcess())
 
 // Safety net against orphaned servers on macOS/Linux: if the launcher (our
 // parent) dies without running its shutdown handler — a force-quit or a

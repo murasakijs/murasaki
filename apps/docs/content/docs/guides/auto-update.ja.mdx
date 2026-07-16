@@ -99,11 +99,11 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
 
 `channel` は、どのマニフェスト URL が解決されるかを変えます(
 [マニフェストのセルフホスティング](#self-hosting-the-manifest)を参照)。
-`checkOnStart` と `checkInterval` も設定から解決されますが、現時点ではそれらから実際
-にチェックをスケジュールする仕組みはありません — 今日 `check()` を呼び出しているの
-は、`<UpdateButton />` 自身のマウント時の効果だけです。それ以上のチェックが必要な場
-合は、`useUpdate().check()` を(たとえば自分のタイマーから)自分で呼び出してくださ
-い。
+`checkOnStart` と `checkInterval` は updater engine の scheduler を動かします。既定では
+起動時に 1 回、その後 6 時間ごとに確認し、重複する check は 1 つにまとめられます。
+`<UpdateButton />` も mount 時に確認しますが、scheduled check の実行中なら新規処理を
+開始せず同じ処理に合流します。完全に手動にするには `checkOnStart: false` と
+`checkInterval: false` を設定してください。
 
 開発時には `check()` は動作します — フルバンドルなしでマニフェストと鍵の組を検証でき
 ます — が、`download()` / `install()` は `status: 'error'` と

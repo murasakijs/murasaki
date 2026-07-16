@@ -4,6 +4,7 @@ import { copyFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
+import { spawn } from 'node:child_process'
 import { murasaki } from '../vite-plugin/index.js'
 import { SHELL_HTML_PATH } from '../vite-plugin/shell.js'
 import type { MurasakiConfig } from '../config.js'
@@ -17,6 +18,7 @@ export default async function build(_argv: string[]) {
   const srcDir = resolve(cwd, 'src')
 
   process.stdout.write(`\n${banner({ mode: 'build' })}\n\n`)
+  await runBeforeBuild(config.build?.before, cwd)
 
   // Escape hatch (kept in sync with vite-plugin/shell.ts): if the project has
   // its own index.html, build with it as Vite normally would. Otherwise use
@@ -80,6 +82,26 @@ export default async function build(_argv: string[]) {
   }
 
   process.stdout.write(`${success(`built in ${(ms / 1000).toFixed(2)}s`)}\n\n`)
+}
+
+export async function runBeforeBuild(command: string | undefined, cwd: string): Promise<void> {
+  if (!command?.trim()) return
+  process.stdout.write(`  ${dim('before build')}  ${command}\n\n`)
+  await new Promise<void>((resolveOk, rejectFail) => {
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      stdio: 'inherit',
+      env: process.env,
+    })
+    child.once('error', rejectFail)
+    child.once('exit', (code, signal) => {
+      if (code === 0) resolveOk()
+      else rejectFail(new Error(
+        `murasaki: build.before failed${signal ? ` (${signal})` : ` with exit code ${code ?? 'unknown'}`}`,
+      ))
+    })
+  })
 }
 
 function collectOutputFiles(result: unknown): EmittedFile[] {

@@ -1,0 +1,97 @@
+---
+title: Process model
+description: Startup, development reloads, graceful shutdown, and app-owned resources.
+---
+
+Murasaki separates the native event loop from Node's event loop. In a packaged
+application the Rust launcher starts and supervises the bundled Node child;
+the Node child starts your Main lifecycle and local HTTP server; only then does
+the host load the renderer.
+
+```txt
+launch
+  → Rust host acquires the per-user app lock
+  → host chooses the app-local origin and creates a runtime token
+  → Node child loads src/main.ts
+  → main.ready(context) finishes
+  → local server begins listening
+  → WebView loads the renderer
+```
+
+If `ready()` rejects, startup fails instead of showing a renderer attached to a
+half-initialized backend. Use it for resources that must exist before the UI is
+usable: opening a database, running migrations, or starting an app-owned
+service.
+
+In packaged macOS and Windows apps, a second launch does not start another
+backend. Its `argv` / working directory are delivered to
+`main.secondInstance()`, and the host focuses the primary window. Development
+mode and Linux do not currently provide this lock. URL-scheme and file
+association registration are separate features and are not implemented yet.
+
+## Quit sequence
+
+Normal window-close and app-quit requests use the lifecycle below:
+
+```txt
+quit request
+  → beforeQuit(context)       may return false
+  → context.signal aborts
+  → shutdown(context)         bounded by shutdownTimeoutMs
+  → Node child exits
+  → native host exits or applies an update
+```
+
+`beforeQuit()` may cancel a normal close—for example while a document has
+unsaved changes. Forced shutdown paths, including process signals and dev Main
+reloads, ignore cancellation. `shutdown()` defaults to a 10-second limit; it
+should stop accepting work first, then flush and close resources.
+
+<Callout type="warn">
+  Cancellation is application-wide. Murasaki currently has one supported
+  window and does not expose per-window close lifecycle events.
+</Callout>
+
+## Development reloads
+
+During `murasaki dev`, a change to the configured Main entry triggers:
+
+1. the current `shutdown({ reason: 'dev-reload' })`,
+2. Vite invalidation of that module,
+3. construction of a fresh lifecycle,
+4. a new `ready()` call.
+
+Changes imported by Main still follow Vite's module graph, but only the exact
+configured entry currently triggers the lifecycle restart. Avoid module-level
+timers or sockets: create them inside `ready()` and close them inside
+`shutdown()` so reloads do not leak work.
+
+## Application paths
+
+`MainContext.paths` gives stable, per-`appId` locations:
+
+| Path | Intended data |
+| --- | --- |
+| `data` | Databases, user documents owned by the app, durable state |
+| `cache` | Re-creatable caches |
+| `logs` | Application logs |
+| `temp` | Ephemeral staging files |
+
+Use these instead of writing beside the executable. Packaged resources may be
+read-only, app locations vary by OS, and updates may replace the application
+bundle.
+
+## Process failures
+
+The host owns the Node child lifetime. On macOS/Linux the bundled server exits
+if it becomes orphaned; on Windows it is assigned to a Job Object that is
+closed with the launcher. Murasaki does not yet expose a public crash-restart
+policy, health-check hook, or multiple supervised worker processes. If you
+spawn workers or child processes from Main, you own their shutdown behavior.
+
+## Next
+
+<Cards>
+  <Card title="Node Main" href="/docs/guides/node-main" description="Lifecycle and typed renderer calls." />
+  <Card title="Troubleshooting" href="/docs/building/troubleshooting" description="Diagnose startup and shutdown failures." />
+</Cards>

@@ -1,11 +1,21 @@
 import type { Connect, Plugin, ViteDevServer } from 'vite'
-import { relative, resolve } from 'node:path'
+import type { ServerResponse } from 'node:http'
+import { dirname, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  MAX_WIRE_PAYLOAD_BYTES,
+  parseWire,
+  stringifyWire,
+  WIRE_CONTENT_TYPE,
+} from '../runtime/wire.js'
 
 interface Options {
   srcDir: string
 }
 
 const ACTION_PATH_PREFIX = '/__murasaki/action/'
+const WIRE_VIRTUAL_ID = 'virtual:murasaki/wire'
+const wireModulePath = resolve(dirname(fileURLToPath(import.meta.url)), '../runtime/wire.js')
 
 /**
  * Stable id for a `'use server'` module: a project-root-relative POSIX path
@@ -39,6 +49,10 @@ export function serverActionsPlugin({ srcDir }: Options): Plugin {
   return {
     name: 'murasaki:server-actions',
     enforce: 'pre',
+    resolveId(id) {
+      if (id === WIRE_VIRTUAL_ID) return wireModulePath
+      return null
+    },
     async transform(code, id, options) {
       if (options?.ssr) return null
       if (!id.startsWith(srcDir)) return null
@@ -51,17 +65,33 @@ export function serverActionsPlugin({ srcDir }: Options): Plugin {
           (name) => `export async function ${name}(...args) {
   const res = await fetch('/__murasaki/action/${encodeURIComponent(actionId)}/${name}', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ args }),
+    headers: { 'content-type': __murasakiWireContentType },
+    body: await __murasakiStringifyWire({ args }),
   })
+  let payload
+  try {
+    payload = __murasakiParseWire(await res.text())
+  } catch (cause) {
+    throw new Error('Invalid server action response (' + res.status + ')', { cause })
+  }
+  if (!payload || typeof payload !== 'object' || typeof payload.ok !== 'boolean') {
+    throw new Error('Invalid server action response (' + res.status + ')')
+  }
+  if (!payload.ok) {
+    if (payload.error instanceof Error) throw payload.error
+    throw new Error(String(payload.error ?? 'server action failed: ' + res.status))
+  }
   if (!res.ok) throw new Error('server action failed: ' + res.status)
-  return res.json()
+  return payload.value
 }`,
         )
         .join('\n')
 
       return {
-        code: `// murasaki: use-server proxy\n${stubs}\n`,
+        code: `// murasaki: use-server proxy
+import { stringifyWire as __murasakiStringifyWire, parseWire as __murasakiParseWire, WIRE_CONTENT_TYPE as __murasakiWireContentType } from '${WIRE_VIRTUAL_ID}'
+${stubs}
+`,
         map: null,
       }
     },
@@ -90,13 +120,13 @@ function handleActionRequest(server: ViteDevServer): Connect.NextHandleFunction 
     let args: unknown[]
     try {
       const body = await readBody(req)
-      const parsed = JSON.parse(body)
-      if (!Array.isArray(parsed?.args)) throw new Error('missing "args" array')
-      args = parsed.args
-    } catch {
-      res.statusCode = 400
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ error: 'invalid request body' }))
+      const parsed = parseWire(body)
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray((parsed as { args?: unknown }).args)) {
+        throw new Error('missing "args" array')
+      }
+      args = (parsed as { args: unknown[] }).args
+    } catch (err) {
+      await sendWireResponse(res, 400, { ok: false, error: ensureError(err, 'Invalid request body') })
       return
     }
 
@@ -104,32 +134,66 @@ function handleActionRequest(server: ViteDevServer): Connect.NextHandleFunction 
       const mod = await server.ssrLoadModule(id)
       const fn = mod[name]
       if (typeof fn !== 'function') {
-        res.statusCode = 404
-        res.setHeader('content-type', 'application/json')
-        res.end(JSON.stringify({ error: `no such server action: ${name}` }))
+        await sendWireResponse(res, 404, {
+          ok: false,
+          error: new Error(`No such server action: ${name}`),
+        })
         return
       }
 
       const result = await fn(...args)
-      res.statusCode = 200
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify(result))
+      await sendWireResponse(res, 200, { ok: true, value: result })
     } catch (err) {
-      res.statusCode = 500
-      res.setHeader('content-type', 'application/json')
-      res.end(JSON.stringify({ error: String((err as Error)?.message ?? err) }))
+      await sendWireResponse(res, 500, { ok: false, error: ensureError(err) })
     }
   }
 }
 
+async function sendWireResponse(
+  res: ServerResponse,
+  status: number,
+  payload: unknown,
+): Promise<void> {
+  res.statusCode = status
+  res.setHeader('content-type', WIRE_CONTENT_TYPE)
+  res.setHeader('cache-control', 'no-store')
+  try {
+    res.end(await stringifyWire(payload))
+  } catch (err) {
+    res.statusCode = 500
+    res.end(await stringifyWire({ ok: false, error: ensureError(err, 'Failed to encode action response') }))
+  }
+}
+
+function ensureError(value: unknown, fallback = 'Server action failed'): Error {
+  if (value instanceof Error) return value
+  const error = new Error(value === undefined ? fallback : String(value))
+  Object.defineProperty(error, 'cause', { value, enumerable: false, configurable: true })
+  return error
+}
+
 function readBody(req: Connect.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    let data = ''
+    const chunks: Uint8Array[] = []
+    let size = 0
+    let settled = false
     req.on('data', (chunk) => {
-      data += chunk
+      if (settled) return
+      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk)
+      size += bytes.byteLength
+      if (size > MAX_WIRE_PAYLOAD_BYTES) {
+        settled = true
+        reject(new Error(`Action payload exceeds ${MAX_WIRE_PAYLOAD_BYTES} bytes`))
+        return
+      }
+      chunks.push(bytes)
     })
-    req.on('end', () => resolve(data))
-    req.on('error', reject)
+    req.on('end', () => {
+      if (!settled) resolve(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', (error) => {
+      if (!settled) reject(error)
+    })
   })
 }
 
