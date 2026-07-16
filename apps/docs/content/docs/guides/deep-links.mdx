@@ -1,0 +1,167 @@
+---
+title: Deep links and file associations
+description: Register URL schemes and document types, then handle every open request in Node Main.
+---
+
+Murasaki can register custom URL schemes and document extensions for packaged
+macOS and Windows applications. Both a cold launch and a request delivered to
+an already-running app arrive at the same `openRequested()` Node Main hook.
+
+## Configure handlers
+
+Declare the schemes and extensions your application owns in
+`murasaki.config.ts`:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.violet',
+  productName: 'Violet',
+
+  protocols: [
+    { scheme: 'violet', name: 'Violet Link' },
+  ],
+
+  fileAssociations: [
+    {
+      extensions: ['vnote'],
+      name: 'Violet Note',
+      description: 'A note created with Violet',
+      role: 'editor',
+      mimeType: 'application/x-violet-note',
+    },
+  ],
+})
+```
+
+Use extensions without a leading dot. Schemes and extensions are normalized to
+lowercase. Murasaki rejects duplicate values and reserved browser/OS schemes
+(including `blob`, `file`, `http`, `https`, `javascript`, `mailto`, `ms-settings`,
+`tel`, and `murasaki`), and
+malformed schemes, extensions, or MIME types at
+build time. See the [configuration reference](/docs/building/configuration#protocols)
+for every field and default.
+
+## Handle open requests
+
+Create a Node Main entry and implement `openRequested(context, event)`. Branch
+on each target's `kind`, not on the platform or transport:
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ paths }) {
+    // Open databases and initialize services first.
+    console.log('data directory:', paths.data)
+  },
+
+  async openRequested(_context, event) {
+    for (const target of event.targets) {
+      if (target.kind === 'url') {
+        const url = new URL(target.url)
+        if (url.hostname !== 'open') continue
+
+        // Validate and authorize the route before acting on it.
+        console.log('open link:', url.pathname)
+      } else {
+        // Validate ownership, size, and contents before reading the file.
+        console.log('open document:', target.path)
+      }
+    }
+  },
+})
+```
+
+Murasaki waits for `ready()` before calling `openRequested()`. This lets you
+initialize databases and other long-lived resources once, then use the same
+handler for cold-start and running-app requests.
+
+## Event reference
+
+```ts
+type OpenTarget =
+  | { kind: 'url'; url: string; scheme: string }
+  | { kind: 'file'; path: string }
+
+interface OpenRequestEvent {
+  activation: 'cold-start' | 'second-instance' | 'os-event'
+  transport: 'argv' | 'open-url' | 'open-file'
+  targets: OpenTarget[]
+  cwd?: string
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `activation` | Whether this request accompanied the first launch, was forwarded from a second process, or came from a native OS event. |
+| `transport` | Native delivery mechanism. It is useful for diagnostics; normal application logic should use `target.kind`. |
+| `targets` | Only URLs and files matching configured schemes/extensions. An event can contain more than one file. |
+| `cwd` | Working directory for an argv-based launch. Absent for native OS events. |
+
+On a second executable launch, `secondInstance()` still receives the raw
+`argv`/`cwd`, while `openRequested()` receives the recognized URL/file targets.
+Do not perform the same open action in both hooks. Use `secondInstance()` for
+generic activation behavior and `openRequested()` for semantic link/file
+handling.
+
+## Packaging behavior
+
+| Artifact | Registration and delivery |
+| --- | --- |
+| macOS `.app` | `murasaki bundle` writes URL and document metadata into the app's `Info.plist`. Launch Services delivers URL/file opens, including opens sent to an already-running app. The `.dmg` carries this `.app`; move the app to Applications before final testing. |
+| Windows NSIS `.exe` | The installer writes per-user or per-machine protocol and file-association registration according to `installer.windows.installMode`. A launched URL/file is normalized from argv. |
+| Windows MSI | The MSI writes per-machine protocol and file-association registration. A launched URL/file is normalized from argv. |
+| Windows portable archive | No registry entries are installed. `protocols` and `fileAssociations` do not make the archive an OS handler. |
+| Linux | Protocol and MIME registration is not implemented yet. Do not advertise Linux deep-link/file-association support. |
+| `murasaki dev` | Does not install system handler metadata. Test the installed/package artifact for OS integration. |
+
+Windows registration makes the app an available handler; it does not silently
+override the user's current default application. Keep `appId` stable between
+releases so installer ownership and association identifiers remain stable.
+
+## Test packaged handlers
+
+After installing or moving the packaged app to Applications, test both a cold
+launch and an already-running app.
+
+```bash title="macOS"
+open 'violet://open/note-42'
+open -a Violet ./example.vnote
+```
+
+```powershell title="Windows PowerShell"
+Start-Process 'violet://open/note-42'
+Start-Process '.\example.vnote'
+```
+
+Also test the real NSIS/MSI uninstall and upgrade paths on a clean machine.
+Launching the executable manually with an argument is useful for handler code,
+but it does not verify that the OS registration was installed correctly.
+
+## Security
+
+<Callout type="warn">
+  Every URL, file path, and launch argument is untrusted input. Any local
+  process can launch your executable with a forged URL or path; a custom scheme
+  does not prove who sent it.
+</Callout>
+
+- Allowlist expected URL hosts, paths, actions, and parameter shapes.
+- Do not put bearer tokens or long-lived credentials in a deep-link URL. For
+  sign-in callbacks, use a one-time code plus `state` and PKCE.
+- Redact query strings, fragments, and sensitive paths from logs and crash
+  reports.
+- Check file size, permissions, format, and content before parsing. An expected
+  extension is not proof of a safe file.
+- Account for symlinks and files changing between validation and use.
+- Keep handling in Node Main. Send only validated, minimal data to the renderer.
+
+## Next
+
+<Cards>
+  <Card title="Node Main" href="/docs/guides/node-main" />
+  <Card title="Configuration" href="/docs/building/configuration" />
+  <Card title="Distribution" href="/docs/building/distribution" />
+</Cards>

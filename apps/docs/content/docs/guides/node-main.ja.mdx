@@ -37,6 +37,11 @@ export default defineMain({
     console.log('second launch:', { argv, cwd })
   },
 
+  async openRequested(_context, event) {
+    // 登録済み URL scheme / file type は ready() の完了後に届く。
+    console.log('open targets:', event.targets)
+  },
+
   async shutdown() {
     watcher?.close()
     watcher = undefined
@@ -89,9 +94,24 @@ primary app に転送されると、Murasaki は window を focus して次の�
 | `event.argv` | 2 回目の launcher に渡された argument。caller が渡した URL / file argument を含む |
 | `event.cwd` | 2 回目の launch の working directory |
 
-使用前にすべての argument を検証してください。Murasaki は URL scheme / file
-association をまだ登録しません。OS / caller が executable をその値で起動した場合だけ
-event に届きます。`murasaki dev` と Linux では現状この hook は配信されません。
+使用前にすべての argument を検証してください。`secondInstance()` は low-level の
+process activation hook です。登録済み URL scheme / file type と一致するかに関係なく、
+raw launch argument を受け取ります。`murasaki dev` と Linux では現状この hook は
+配信されません。
+
+### `openRequested(context, event)`
+
+設定済み URL scheme / file association には `openRequested()` を使います。cold-start
+argv、second-instance argv、native URL / file event を型付き URL / file target に
+正規化し、`ready()` の完了後にだけ実行します。
+
+認識済み target を伴う2回目の launch では、`secondInstance()` と
+`openRequested()` の両方が実行されます。同じ item を両方で開かないでください。
+一般的な activation behavior は `secondInstance()`、URL / file の意味的な処理は
+`openRequested()` に置きます。
+
+event shape、設定、packaging behavior、security requirement は
+[Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
 
 ## `'use main'` で renderer から Node を呼ぶ
 
@@ -207,9 +227,11 @@ version 付き wire codec は primitive、`undefined`、`bigint`、`Date`、`Map
 
 ## 現在の制限
 
-Node Main には public な multi-window、tray menu、global shortcut、URL scheme registration、
-file association API がまだありません。packaged macOS / Windows の single-instance
-delivery は `secondInstance()` で利用できます。renderer-safe な dialog、clipboard、notification、shell、
+Node Main には public な multi-window、tray menu、global shortcut API がまだありません。
+packaged macOS / Windows の single-instance delivery は `secondInstance()`、設定済み
+URL scheme / file association は `openRequested()` で利用できます。Windows portable
+archive、Linux、`murasaki dev` は system association metadata を install しません。
+renderer-safe な dialog、clipboard、notification、shell、
 基本 window command は `capabilities` allowlist の下で別途 `murasaki/native` から利用
 できます。computed import、dynamic native addon、runtime-discovered asset を使う Node
 package は明示的な `bundle.external` / `bundle.resources` が必要な場合があります。
@@ -219,6 +241,7 @@ package は明示的な `bundle.external` / `bundle.resources` が必要な場�
 
 <Cards>
   <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" />
+  <Card title="Deep Link" href="/ja/docs/guides/deep-links" />
   <Card title="セキュリティ" href="/ja/docs/building/security" />
   <Card title="API Routes" href="/ja/docs/guides/api-routes" />
 </Cards>

@@ -39,6 +39,49 @@ murasaki bundle --target win32-arm64   # an arm64 Windows bundle
 `murasaki installer` forwards `--arch` / `--target` to `bundle` the same way.
 Windows targets are `win32-x64` / `win32-arm64`.
 
+## URL schemes and file associations
+
+Declare packaged-app handlers in `murasaki.config.ts`:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  protocols: [{ scheme: 'example-notes', name: 'Notes link' }],
+  fileAssociations: [{
+    extensions: ['enote'],
+    name: 'Notes document',
+    role: 'editor',
+    mimeType: 'application/x-example-note',
+  }],
+})
+```
+
+The packaging result differs by target:
+
+| Artifact | Registration behavior |
+| --- | --- |
+| macOS `.app` / `.dmg` | `CFBundleURLTypes`, `CFBundleDocumentTypes`, and exported document UTIs are written to the app's `Info.plist` before signing. The DMG contains that app unchanged. |
+| Windows NSIS `.exe` | Registers protocols, ProgIDs, Open With entries, and Default Apps capabilities per-user by default, or per-machine with `installMode: 'perMachine'`. |
+| Windows WiX `.msi` | Registers the same handlers per-machine. |
+| Windows portable folder / `.zip` | Does not modify the registry or register itself automatically. |
+| Linux | Registration and application packaging are planned. |
+
+Matching cold-start, second-instance, and macOS open events are delivered to
+Node Main's `openRequested()` hook after `ready()`. The Windows portable build
+can still receive a registered-looking URL or file when it is passed directly
+on its command line, but installation-free artifacts intentionally do not
+claim operating-system defaults.
+
+<Callout type="warn">
+  Windows registration makes the app an available handler; it does not
+  overwrite the user's protected default-app choice. Test both a fresh
+  install and an upgrade, and verify that uninstall removes only your app's
+  handler entries.
+</Callout>
+
 ## Signing & notarization
 
 <Callout type="info">
@@ -189,6 +232,8 @@ Add these repository secrets to sign + notarize (omit them all for an unsigned
 - Launch the bundle before wrapping it in an installer.
 - Install, update, and uninstall on clean target machines for every
   platform/architecture you publish.
+- Test configured URL schemes and file associations for cold start and while
+  the primary app instance is already running.
 - Exercise Node Main shutdown, offline startup, and failed network requests.
 - Verify macOS signatures/notarization or your external Windows signatures.
 - Generate and sign the Murasaki update manifest only after final payloads are

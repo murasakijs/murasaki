@@ -218,6 +218,12 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
   再起動します。対応は macOS と Windows x64 です —
   [自動アップデート](https://murasaki.ichi10.com/ja/docs/guides/auto-update)
   を参照してください。
+- **Deep Link とファイル関連付け** — `murasaki.config.ts` にカスタム URL scheme
+  とドキュメント拡張子を宣言すると、macOS のパッケージと Windows の NSIS/MSI
+  インストーラが OS に登録します。cold start と起動中の open は、型付きの Node Main
+  `openRequested()` フックに統一して届きます。詳しくは
+  [Deep Link とファイル関連付け](https://murasaki.ichi10.com/ja/docs/guides/deep-links)
+  を参照してください。
 - **Trusted Publisher OIDC** — タグの push をトリガーに署名付きの
   `npm publish --provenance` を実行します。CI に長期有効な npm トークンを
   置く必要はありません。
@@ -365,11 +371,14 @@ export default defineConfig({
     width: 1000,
     height: 700,
   },
+  protocols: [{ scheme: 'murasaki-app' }],
+  fileAssociations: [{ extensions: ['murasaki'], role: 'editor' }],
 })
 ```
 
 `MurasakiConfig` はほかにも、オプションの `devPort`(Vite 開発サーバーのポート、
-デフォルトは `5178`)、`targets`(ビルドターゲットの配列)、`updater`
+デフォルトは `5178`)、`targets`(ビルドターゲットの配列)、`protocols`、
+`fileAssociations`、`updater`
 — `useUpdate()` と `<UpdateButton />`(いずれも `murasaki` から)が参照する
 自動更新の設定 — を受け付けます。
 

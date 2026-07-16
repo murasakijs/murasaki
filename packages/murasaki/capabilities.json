@@ -317,15 +317,25 @@
         "linux": "planned"
       },
       "limitations": [
-        "Packaged macOS and Windows apps enforce a per-user app lock, focus the primary window, and deliver second-launch argv/cwd to src/main.ts.",
-        "URL scheme and file-association registration are not implemented, so deep-link URLs only arrive when the OS or caller already launches the executable with them."
+        "Packaged macOS apps and installed Windows apps register declared URL schemes and file associations, preserve the per-user single-instance lock, and deliver normalized startup, second-instance, and system open requests to src/main.ts.",
+        "Windows portable .zip and bare executable distributions do not register protocols or file associations automatically; registration is supplied by the NSIS and MSI installers, while Linux support remains planned."
       ],
-      "apiSymbols": ["MainDefinition.secondInstance", "SecondInstanceEvent"],
+      "apiSymbols": [
+        "ProtocolConfig",
+        "FileAssociationConfig",
+        "OpenRequestEvent",
+        "OpenTarget",
+        "MainDefinition.openRequested",
+        "MainDefinition.secondInstance",
+        "SecondInstanceEvent"
+      ],
       "testEvidence": [
+        "packages/murasaki/test/associations.test.mjs",
         "packages/murasaki/test/main-runtime.test.mjs",
-        "packages/murasaki/test/prod-server-http.test.mjs"
+        "packages/murasaki/test/prod-server-http.test.mjs",
+        "crates/native/src/launcher.rs"
       ],
-      "docsSlug": "/docs/guides/node-main"
+      "docsSlug": "/docs/guides/deep-links"
     },
     {
       "id": "capability-permissions",

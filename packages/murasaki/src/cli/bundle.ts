@@ -16,6 +16,7 @@ import type { MurasakiConfig } from '../config.js'
 import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
+import { resolveAssociations } from '../associations.js'
 
 export type Arch = 'arm64' | 'x64'
 export type Platform = NodePlatform
@@ -457,6 +458,7 @@ function metaJson(
   // throws on a broken updater config, which surfaces as a bundle failure
   // here rather than a silent runtime no-op.
   const updater = resolveUpdater(config.updater, { projectRoot: cwd })
+  const associations = resolveAssociations(config)
   return JSON.stringify(
     {
       appId: config.appId,
@@ -478,6 +480,8 @@ function metaJson(
       vibrancy: config.window?.vibrancy,
       console: config.window?.console,
       icon: iconResource ?? undefined,
+      protocols: associations.protocols,
+      fileAssociations: associations.files,
       ...(updater ? { updater } : {}),
     },
     null,
@@ -1100,12 +1104,52 @@ function resolveWindowsPublisher(config: MurasakiConfig): string {
   )
 }
 
-function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean): string {
+export function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean): string {
   const appId = escapeXml(config.appId)
   const name = escapeXml(productName)
   const version = escapeXml(config.version ?? '0.0.0')
   const locales = config.locales ?? DEFAULT_LOCALES
   const localizationsXml = locales.map((l) => `    <string>${escapeXml(l)}</string>`).join('\n')
+  const associations = resolveAssociations(config)
+  const protocolsXml = associations.protocols.length === 0 ? '' : `
+  <key>CFBundleURLTypes</key>
+  <array>
+${associations.protocols.map((protocol) => `    <dict>
+      <key>CFBundleURLName</key><string>${escapeXml(`${config.appId}.url.${protocol.scheme}`)}</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>${escapeXml(protocol.scheme)}</string></array>
+    </dict>`).join('\n')}
+  </array>`
+  const documentTypesXml = associations.files.length === 0 ? '' : `
+  <key>CFBundleDocumentTypes</key>
+  <array>
+${associations.files.map((file) => `    <dict>
+      <key>CFBundleTypeName</key><string>${escapeXml(file.name)}</string>
+      <key>CFBundleTypeRole</key><string>${macDocumentRole(file.role)}</string>
+      <key>LSHandlerRank</key><string>Owner</string>
+      <key>LSItemContentTypes</key>
+      <array><string>${escapeXml(macTypeIdentifier(config.appId, file.extensions[0]))}</string></array>
+      <key>CFBundleTypeExtensions</key>
+      <array>${file.extensions.map((extension) => `<string>${escapeXml(extension)}</string>`).join('')}</array>${file.mimeType ? `
+      <key>CFBundleTypeMIMETypes</key>
+      <array><string>${escapeXml(file.mimeType)}</string></array>` : ''}
+    </dict>`).join('\n')}
+  </array>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+${associations.files.map((file) => `    <dict>
+      <key>UTTypeIdentifier</key><string>${escapeXml(macTypeIdentifier(config.appId, file.extensions[0]))}</string>
+      <key>UTTypeDescription</key><string>${escapeXml(file.description)}</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>${file.extensions.map((extension) => `<string>${escapeXml(extension)}</string>`).join('')}</array>${file.mimeType ? `
+        <key>public.mime-type</key><string>${escapeXml(file.mimeType)}</string>` : ''}
+      </dict>
+    </dict>`).join('\n')}
+  </array>`
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1129,10 +1173,19 @@ function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean
   <key>CFBundleLocalizations</key>
   <array>
 ${localizationsXml}
-  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}
+  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}${protocolsXml}${documentTypesXml}
 </dict>
 </plist>
 `
+}
+
+function macDocumentRole(role: 'viewer' | 'editor' | 'shell' | 'none'): string {
+  return role[0].toUpperCase() + role.slice(1)
+}
+
+function macTypeIdentifier(appId: string, extension: string): string {
+  const safeAppId = appId.toLowerCase().replace(/[^a-z0-9.-]/g, '-').replace(/^-+|-+$/g, '') || 'murasaki.app'
+  return `${safeAppId}.file.${extension}`
 }
 
 function escapeXml(s: string): string {

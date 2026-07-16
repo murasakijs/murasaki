@@ -47,6 +47,8 @@ nothing to await or configure beyond the object you pass it.
 | `devPort` | `number?` | Vite dev server port during `murasaki dev`. Defaults to `5178` (auto-increments if taken). |
 | `targets` | `Target[]?` | Build targets. Defaults to the host platform. One or more of `darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, `linux-arm64`. |
 | `icon` | `string?` | Path to a source PNG (ideally 1024px). `murasaki icon` / `murasaki bundle` fan it out to `.icns` / `.ico` / a PNG set. |
+| `protocols` | `ProtocolConfig[]?` | Custom URL schemes registered by packaged macOS apps and Windows installers — see [below](#protocols). |
+| `fileAssociations` | `FileAssociationConfig[]?` | Document extensions registered by packaged macOS apps and Windows installers — see [below](#fileassociations). |
 | `installer` | `object?` | macOS DMG and Windows installer options — see [below](#installer). |
 | `sign` | `object?` | macOS code-signing — see [below](#sign). |
 
@@ -105,6 +107,60 @@ main: {
 | `shutdownTimeoutMs` | `number?` | Maximum `shutdown()` time before the host exits. Defaults to `10_000`. |
 
 See [Node Main](/docs/guides/node-main) for lifecycle hooks and `'use main'`.
+
+## `protocols`
+
+Register custom URL schemes and receive matching URLs through Node Main's
+`openRequested()` hook:
+
+```ts
+protocols: [
+  { scheme: 'violet', name: 'Violet Link' },
+]
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `scheme` | `string` | **Required.** RFC 3986-style scheme, such as `violet` in `violet://open/42`. It is trimmed and normalized to lowercase. Must be 1–63 valid scheme characters. Browser/OS schemes including `blob`, `file`, `http`, `https`, `javascript`, `mailto`, `ms-settings`, `tel`, and `murasaki` are reserved. |
+| `name` | `string?` | Human-readable handler name used in package metadata. Defaults to `` `${productName} URL` ``. |
+
+Duplicate or invalid schemes fail the build. macOS writes the registration into
+the packaged `.app`'s `Info.plist`. Windows NSIS/MSI installers write the OS
+registration; a portable Windows archive does not. Linux registration is not
+implemented.
+
+## `fileAssociations`
+
+Register one or more extensions as a document type:
+
+```ts
+fileAssociations: [
+  {
+    extensions: ['vnote', 'violet-note'],
+    name: 'Violet Note',
+    description: 'A note created with Violet',
+    role: 'editor',
+    mimeType: 'application/x-violet-note',
+  },
+]
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `extensions` | `string[]` | **Required.** At least one extension. A leading dot is accepted and removed; values are normalized to lowercase. Each extension must be 1–32 letters, digits, underscores, or hyphens and must start with a letter or digit. |
+| `name` | `string?` | Document type name. Defaults to `` `${productName} document` ``. |
+| `description` | `string?` | Description stored in package/Windows registration metadata. Defaults to `name`. |
+| `role` | `'viewer' \| 'editor' \| 'shell' \| 'none'` | macOS document role. Defaults to `viewer`. |
+| `mimeType` | `string?` | Optional MIME type stored with the document metadata. |
+
+Extensions must be unique across all entries; invalid extensions and MIME types
+fail the build. Matching files are delivered to Node Main's `openRequested()`
+hook. The same artifact limits as `protocols` apply: packaged macOS `.app` and
+installed Windows NSIS/MSI are supported, while portable Windows archives,
+Linux, and `murasaki dev` do not install associations.
+
+See [Deep links and file associations](/docs/guides/deep-links) for delivery
+semantics, testing, and untrusted-input requirements.
 
 ## `bundle`
 
@@ -227,5 +283,6 @@ never from this config — see
 <Cards>
   <Card title="CLI reference" href="/docs/building/cli" />
   <Card title="Node Main" href="/docs/guides/node-main" />
+  <Card title="Deep links" href="/docs/guides/deep-links" />
   <Card title="Distribution" href="/docs/building/distribution" />
 </Cards>

@@ -36,11 +36,28 @@ export interface SecondInstanceEvent {
   cwd: string
 }
 
+export type OpenTarget =
+  | { kind: 'url'; url: string; scheme: string }
+  | { kind: 'file'; path: string }
+
+export interface OpenRequestEvent {
+  /** How this activation reached the primary application instance. */
+  activation: 'cold-start' | 'second-instance' | 'os-event'
+  /** Native delivery mechanism, useful for diagnostics. */
+  transport: 'argv' | 'open-url' | 'open-file'
+  /** Normalized registered URLs/files. Treat every value as untrusted input. */
+  targets: OpenTarget[]
+  /** Working directory for argv-based activations. */
+  cwd?: string
+}
+
 export interface MainDefinition {
   /** Runs once after the Node main process is ready, before the renderer is shown. */
   ready?(context: MainContext): void | Promise<void>
   /** Runs in the primary instance when another launch is redirected to it. */
   secondInstance?(context: MainContext, event: SecondInstanceEvent): void | Promise<void>
+  /** Receives registered URL schemes and files after `ready()` has completed. */
+  openRequested?(context: MainContext, event: OpenRequestEvent): void | Promise<void>
   /** Return `false` to cancel a normal quit request. Ignored for forced shutdown. */
   beforeQuit?(context: QuitContext): boolean | void | Promise<boolean | void>
   /** Flush databases, sockets, workers, and other owned resources. */

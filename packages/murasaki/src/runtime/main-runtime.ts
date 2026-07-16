@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import type {
   MainContext,
   MainDefinition,
+  OpenRequestEvent,
   QuitContext,
   QuitReason,
   SecondInstanceEvent,
@@ -40,6 +41,8 @@ export class MainRuntime {
   #abortController = new AbortController()
   #startPromise: Promise<MainContext> | null = null
   #shutdownPromise: Promise<ShutdownResult> | null = null
+  #openRequestQueue: Promise<void> = Promise.resolve()
+  #queuedOpenRequests = 0
 
   constructor(private readonly options: MainRuntimeOptions) {}
 
@@ -89,6 +92,25 @@ export class MainRuntime {
       throw new Error(`main runtime cannot receive a second instance from ${this.#state}`)
     }
     await this.#definition.secondInstance?.(this.#context, event)
+  }
+
+  openRequested(event: OpenRequestEvent): Promise<void> {
+    if (this.#queuedOpenRequests >= 32) {
+      throw new Error('main runtime open request queue is full')
+    }
+    this.#queuedOpenRequests++
+    const run = async () => {
+      await this.#startPromise
+      if (this.#state !== 'running' || !this.#definition || !this.#context) {
+        throw new Error(`main runtime cannot receive an open request from ${this.#state}`)
+      }
+      await this.#definition.openRequested?.(this.#context, event)
+    }
+    const result = this.#openRequestQueue.then(run)
+    this.#openRequestQueue = result.catch(() => {}).finally(() => {
+      this.#queuedOpenRequests--
+    })
+    return result
   }
 
   async #shutdown(options: ShutdownOptions): Promise<ShutdownResult> {
@@ -145,7 +167,7 @@ export function unwrapMainDefinition(loaded: unknown): MainDefinition {
   if (!candidate || typeof candidate !== 'object') {
     throw new TypeError('src/main.ts must default-export defineMain({ ... })')
   }
-  for (const hook of ['ready', 'secondInstance', 'beforeQuit', 'shutdown'] as const) {
+  for (const hook of ['ready', 'secondInstance', 'openRequested', 'beforeQuit', 'shutdown'] as const) {
     const value = (candidate as MainDefinition)[hook]
     if (value !== undefined && typeof value !== 'function') {
       throw new TypeError(`main lifecycle hook ${hook} must be a function`)

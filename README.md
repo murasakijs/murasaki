@@ -227,6 +227,11 @@ we've benchmarked head-to-head:
   it against your **Ed25519** public key, checks the downloaded asset's
   **SHA-256**, then replaces itself and relaunches. macOS and Windows x64 —
   see [Automatic updates](https://murasaki.ichi10.com/en/docs/guides/auto-update).
+- **Deep links and file associations.** Declare custom URL schemes and document
+  extensions in `murasaki.config.ts`; packaged macOS apps and Windows NSIS/MSI
+  installers register them with the OS. Cold starts and running-app opens reach
+  one typed Node Main `openRequested()` hook. See
+  [Deep links and file associations](https://murasaki.ichi10.com/en/docs/guides/deep-links).
 - **Trusted Publisher OIDC.** Tag-push triggers a signed
   `npm publish --provenance` — no long-lived npm tokens in CI.
 
@@ -374,13 +379,15 @@ export default defineConfig({
     width: 1000,
     height: 700,
   },
+  protocols: [{ scheme: 'murasaki-app' }],
+  fileAssociations: [{ extensions: ['murasaki'], role: 'editor' }],
 })
 ```
 
 `MurasakiConfig` also accepts an optional `devPort` (Vite dev server port,
-default `5178`), `targets` (build targets array), and `updater` — auto-update
-config consumed by `useUpdate()` and `<UpdateButton />` (both from
-`murasaki`).
+default `5178`), `targets` (build targets array), `protocols`,
+`fileAssociations`, and `updater` — auto-update config consumed by
+`useUpdate()` and `<UpdateButton />` (both from `murasaki`).
 
 ---
 

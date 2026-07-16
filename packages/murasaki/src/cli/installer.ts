@@ -1,4 +1,4 @@
-import { resolve, join, dirname } from 'node:path'
+import { resolve, join, dirname, basename } from 'node:path'
 import { existsSync } from 'node:fs'
 import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { success, warn, error, dim, unsignedNote } from './brand.js'
 import bundle, { parseTarget, type Arch } from './bundle.js'
 import type { MurasakiConfig } from '../config.js'
+import { resolveAssociations, windowsProgId, type ResolvedAssociations } from '../associations.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -770,7 +771,9 @@ async function buildNsisInstaller(opts: {
     // with "Bad text encoding". `Unicode true` inside the script controls the
     // *output* installer's encoding, not how the *source* file is read.
     const nsi = await nsiScript({
+      appId: config.appId,
       productName,
+      description: config.description,
       version,
       publisher,
       bundleDir,
@@ -778,6 +781,7 @@ async function buildNsisInstaller(opts: {
       installMode,
       locales: config.locales,
       branding,
+      associations: resolveAssociations(config),
     })
     await writeFile(nsiPath, `\uFEFF${nsi}`)
 
@@ -910,8 +914,117 @@ function dominantFileInstructions(
  * through `nsisEscape` first so a stray `$`/`"` in config text (product name,
  * publisher, …) can't corrupt the script.
  */
-async function nsiScript(opts: {
+export function nsisAssociationRegistry(opts: {
+  appId: string
   productName: string
+  description?: string
+  executableName: string
+  regRoot: 'HKCU' | 'HKLM'
+  associations: ResolvedAssociations
+}): { install: string; uninstall: string } {
+  const { appId, productName, description, executableName, regRoot, associations } = opts
+  if (associations.protocols.length === 0 && associations.files.length === 0) {
+    return { install: '', uninstall: '' }
+  }
+  const appKey = windowsProgId(appId, 'Application')
+  const capabilitiesKey = `Software\\${appKey}\\Capabilities`
+  const registeredName = `${productName} (${appId})`
+  const applicationDescription = description?.trim() || `${productName} desktop application`
+  const install: string[] = [
+    `  WriteRegStr ${regRoot} "${nsisEscape(capabilitiesKey)}" "ApplicationDescription" "${nsisEscape(applicationDescription)}"`,
+    `  WriteRegStr ${regRoot} "${nsisEscape(capabilitiesKey)}" "ApplicationName" "${nsisEscape(registeredName)}"`,
+    `  WriteRegStr ${regRoot} "${nsisEscape(capabilitiesKey)}" "MurasakiInstallPath" "$INSTDIR"`,
+  ]
+  const uninstall: string[] = []
+
+  associations.protocols.forEach((protocol, index) => {
+    const scheme = nsisEscape(protocol.scheme)
+    const schemeKey = `Software\\Classes\\${scheme}`
+    const progId = windowsProgId(appId, `Url.${protocol.scheme}`)
+    const progIdKey = `Software\\Classes\\${progId}`
+    const command = `'"$INSTDIR\\${executableName}.exe" "%1"'`
+    const schemeWrite = `murasaki_protocol_${index}_scheme_write`
+    const schemeDone = `murasaki_protocol_${index}_scheme_done`
+    install.push(
+      `  ReadRegStr $0 ${regRoot} "${schemeKey}\\shell\\open\\command" ""`,
+      `  StrCmp $0 "" ${schemeWrite}`,
+      `  ReadRegStr $1 ${regRoot} "${schemeKey}" "MurasakiAppId"`,
+      `  StrCmp $1 "${nsisEscape(appId)}" ${schemeWrite}`,
+      `  StrCmp $0 ${command} ${schemeWrite} ${schemeDone}`,
+      `  ${schemeWrite}:`,
+      `  WriteRegStr ${regRoot} "${schemeKey}" "" "URL:${nsisEscape(protocol.name)}"`,
+      `  WriteRegStr ${regRoot} "${schemeKey}" "URL Protocol" ""`,
+      `  WriteRegStr ${regRoot} "${schemeKey}" "MurasakiAppId" "${nsisEscape(appId)}"`,
+      `  WriteRegStr ${regRoot} "${schemeKey}\\DefaultIcon" "" "$INSTDIR\\${executableName}.exe,0"`,
+      `  WriteRegStr ${regRoot} "${schemeKey}\\shell\\open\\command" "" ${command}`,
+      `  ${schemeDone}:`,
+      `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}" "" "URL:${nsisEscape(protocol.name)}"`,
+      `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}" "URL Protocol" ""`,
+      `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}\\DefaultIcon" "" "$INSTDIR\\${executableName}.exe,0"`,
+      `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}\\shell\\open\\command" "" ${command}`,
+      `  WriteRegStr ${regRoot} "${nsisEscape(capabilitiesKey)}\\URLAssociations" "${scheme}" "${nsisEscape(progId)}"`,
+    )
+    const schemeNotOwned = `murasaki_protocol_${index}_scheme_not_owned`
+    const progIdNotOwned = `murasaki_protocol_${index}_progid_not_owned`
+    uninstall.push(
+      `  ReadRegStr $0 ${regRoot} "${schemeKey}\\shell\\open\\command" ""`,
+      `  StrCmp $0 ${command} 0 ${schemeNotOwned}`,
+      `  DeleteRegKey ${regRoot} "${schemeKey}"`,
+      `  ${schemeNotOwned}:`,
+      `  ReadRegStr $0 ${regRoot} "${nsisEscape(progIdKey)}\\shell\\open\\command" ""`,
+      `  StrCmp $0 ${command} 0 ${progIdNotOwned}`,
+      `  DeleteRegKey ${regRoot} "${nsisEscape(progIdKey)}"`,
+      `  ${progIdNotOwned}:`,
+    )
+  })
+
+  associations.files.forEach((file, fileIndex) => {
+    file.extensions.forEach((extension, extensionIndex) => {
+      const progId = windowsProgId(appId, extension)
+      const dotExtension = `.${extension}`
+      const openWithKey = `Software\\Classes\\${dotExtension}\\OpenWithProgids`
+      const progIdKey = `Software\\Classes\\${progId}`
+      const command = `'"$INSTDIR\\${executableName}.exe" "%1"'`
+      install.push(
+        `  WriteRegStr ${regRoot} "${nsisEscape(openWithKey)}" "${nsisEscape(progId)}" ""`,
+        `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}" "" "${nsisEscape(file.description)}"`,
+        `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}\\DefaultIcon" "" "$INSTDIR\\${executableName}.exe,0"`,
+        `  WriteRegStr ${regRoot} "${nsisEscape(progIdKey)}\\shell\\open\\command" "" ${command}`,
+        `  WriteRegStr ${regRoot} "${nsisEscape(capabilitiesKey)}\\FileAssociations" "${dotExtension}" "${nsisEscape(progId)}"`,
+        ...(file.mimeType && extensionIndex === 0
+          ? [`  WriteRegStr ${regRoot} "${nsisEscape(capabilitiesKey)}\\MIMEAssociations" "${nsisEscape(file.mimeType)}" "${nsisEscape(progId)}"`]
+          : []),
+      )
+      const skip = `murasaki_file_${fileIndex}_${extensionIndex}_not_owned`
+      uninstall.push(
+        `  ReadRegStr $0 ${regRoot} "${nsisEscape(progIdKey)}\\shell\\open\\command" ""`,
+        `  StrCmp $0 ${command} 0 ${skip}`,
+        `  DeleteRegValue ${regRoot} "${nsisEscape(openWithKey)}" "${nsisEscape(progId)}"`,
+        `  DeleteRegKey ${regRoot} "${nsisEscape(progIdKey)}"`,
+        `  ${skip}:`,
+      )
+    })
+  })
+
+  install.push(
+    `  WriteRegStr ${regRoot} "Software\\RegisteredApplications" "${nsisEscape(registeredName)}" "${nsisEscape(capabilitiesKey)}"`,
+    `  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'`,
+  )
+  const capabilitiesNotOwned = 'murasaki_capabilities_not_owned'
+  uninstall.push(
+    `  ReadRegStr $0 ${regRoot} "${nsisEscape(capabilitiesKey)}" "MurasakiInstallPath"`,
+    `  StrCmp $0 "$INSTDIR" 0 ${capabilitiesNotOwned}`,
+    `  DeleteRegValue ${regRoot} "Software\\RegisteredApplications" "${nsisEscape(registeredName)}"`,
+    `  DeleteRegKey ${regRoot} "${nsisEscape(capabilitiesKey)}"`,
+    `  ${capabilitiesNotOwned}:`,
+  )
+  return { install: install.join('\n'), uninstall: uninstall.join('\n') }
+}
+
+export async function nsiScript(opts: {
+  appId: string
+  productName: string
+  description?: string
   version: string
   publisher: string
   bundleDir: string
@@ -919,8 +1032,9 @@ async function nsiScript(opts: {
   installMode: 'perUser' | 'perMachine'
   locales?: string[]
   branding: WindowsBranding
+  associations: ResolvedAssociations
 }): Promise<string> {
-  const { productName, version, publisher, bundleDir, setupPath, installMode, locales, branding } = opts
+  const { appId, productName, description, version, publisher, bundleDir, setupPath, installMode, locales, branding, associations } = opts
   const name = nsisEscape(productName)
   const pub = nsisEscape(publisher)
   const perMachine = installMode === 'perMachine'
@@ -934,6 +1048,10 @@ async function nsiScript(opts: {
   // `makensis`.
   const installDir = perMachine ? `$PROGRAMFILES64\\${name}` : `$LOCALAPPDATA\\Programs\\${name}`
   const uninstallRegKey = `Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${name}`
+  // Stable across product-name/config changes so an upgrade can run the old
+  // embedded uninstaller before writing the new association set. Without
+  // this, protocols or extensions removed from config survive indefinitely.
+  const installStateKey = `Software\\${nsisEscape(windowsProgId(appId, 'Application'))}\\Install`
   const exeRuntimePath = `$INSTDIR\\${name}.exe`
   // NSIS's `File /r "dir\*.*"` is the standard idiom for "everything under
   // dir, recursively" — despite the name, `*.*` matches extension-less files
@@ -943,6 +1061,7 @@ async function nsiScript(opts: {
   // findDominantFile), extracted LAST by installFilesInstructions below
   // instead of being lumped into the `/r` extraction.
   const dominant = await findDominantFile(bundleDir)
+  const associationRegistry = nsisAssociationRegistry({ appId, productName, description, regRoot, executableName: name, associations })
 
   const languages = nsisLanguages(locales)
   const languageNames = languages.map((l) => l.name)
@@ -1010,6 +1129,21 @@ async function nsiScript(opts: {
   const onInit = `Function .onInit
 ${nsisLanguageDetection(languages, 'instlang')}
 FunctionEnd`
+
+  // Run only after the user crosses the Install confirmation page. Doing
+  // this in .onInit would remove the working version merely by opening the
+  // setup and then cancelling on Welcome/license/directory selection.
+  const removePreviousInstall = `ReadRegStr $0 ${regRoot} "${installStateKey}" "Uninstaller"
+  StrCmp $0 "" murasaki_upgrade_done
+  IfFileExists "$0" 0 murasaki_upgrade_stale
+  DetailPrint "Removing the previous version..."
+  ExecWait '"$0" /S' $1
+  StrCmp $1 "0" murasaki_upgrade_done
+  DetailPrint "Previous-version removal failed with exit code $1."
+  Abort
+  murasaki_upgrade_stale:
+  DeleteRegKey ${regRoot} "${installStateKey}"
+  murasaki_upgrade_done:`
 
   // Detects whether `${name}.exe` is still running via the always-bundled
   // `nsExec` plugin plus Windows' built-in `tasklist`/`taskkill` (no external
@@ -1079,6 +1213,7 @@ SetCompressor /SOLID lzma
 
   const installSection = `Section "Install"
   SetShellVarContext ${shellCtx}
+  ${removePreviousInstall}
   SetOutPath "$INSTDIR"
   ; Everything except the dominant file (see findDominantFile) — that one is
   ; extracted at the very bottom of this section. NSIS's InstFiles progress
@@ -1094,6 +1229,10 @@ SetCompressor /SOLID lzma
   Call CheckWebView2
 
   WriteUninstaller "$INSTDIR\\Uninstall.exe"
+  WriteRegStr ${regRoot} "${installStateKey}" "InstallPath" "$INSTDIR"
+  WriteRegStr ${regRoot} "${installStateKey}" "Uninstaller" "$INSTDIR\\Uninstall.exe"
+
+${associationRegistry.install}
 
   WriteRegStr ${regRoot} "${uninstallRegKey}" "DisplayName" "${name}"
   WriteRegStr ${regRoot} "${uninstallRegKey}" "DisplayVersion" "${nsisEscape(version)}"
@@ -1138,7 +1277,13 @@ FunctionEnd`
   Delete "$SMPROGRAMS\\${name}\\${name}.lnk"
   RMDir "$SMPROGRAMS\\${name}"
   Delete "$DESKTOP\\${name}.lnk"
+${associationRegistry.uninstall}
+  ReadRegStr $0 ${regRoot} "${installStateKey}" "InstallPath"
+  StrCmp $0 "$INSTDIR" 0 murasaki_install_state_not_owned
+  DeleteRegKey ${regRoot} "${installStateKey}"
+  murasaki_install_state_not_owned:
   DeleteRegKey ${regRoot} "${uninstallRegKey}"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd`
 
   return (
@@ -1241,7 +1386,9 @@ async function buildMsiInstaller(opts: {
     await writeFile(
       wxsPath,
       await wxsScript({
+        appId: config.appId,
         displayName: productName,
+        description: config.description,
         version: wixVersion,
         publisher,
         upgradeCode,
@@ -1249,6 +1396,7 @@ async function buildMsiInstaller(opts: {
         bundleDir,
         branding,
         licenseRtf,
+        associations: resolveAssociations(config),
       }),
     )
 
@@ -1283,8 +1431,85 @@ async function buildMsiInstaller(opts: {
  * plain default imagery is used; `branding.icon` backs `ARPPRODUCTICON` (Add/
  * Remove Programs) when configured.
  */
-async function wxsScript(opts: {
+export function wixAssociationComponents(opts: {
+  appId: string
   displayName: string
+  description?: string
+  associations: ResolvedAssociations
+}): { components: string; featureRefs: string } {
+  const { appId, displayName, description, associations } = opts
+  if (associations.protocols.length === 0 && associations.files.length === 0) {
+    return { components: '', featureRefs: '' }
+  }
+  const components: string[] = []
+  const ids: string[] = []
+  const appKey = windowsProgId(appId, 'Application')
+  const capabilitiesKey = `Software\\${appKey}\\Capabilities`
+  const registeredName = `${displayName} (${appId})`
+  const applicationDescription = description?.trim() || `${displayName} desktop application`
+  const formattedDisplayName = escapeXmlAttr(escapeMsiFormatted(displayName))
+  const command = `&quot;[INSTALLFOLDER]${formattedDisplayName}.exe&quot; &quot;%1&quot;`
+
+  associations.protocols.forEach((protocol) => {
+    const id = associationWixId('Protocol', protocol.scheme)
+    ids.push(id)
+    const progId = windowsProgId(appId, `Url.${protocol.scheme}`)
+    const progIdKey = `Software\\Classes\\${progId}`
+    components.push(`    <Component Id="${id}" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(progIdKey)}" Type="string" Value="URL:${escapeXmlAttr(protocol.name)}" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(progIdKey)}" Name="URL Protocol" Type="string" Value="" />
+      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(progIdKey)}\\DefaultIcon" Type="string" Value="[INSTALLFOLDER]${formattedDisplayName}.exe,0" />
+      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(progIdKey)}\\shell\\open\\command" Type="string" Value="${command}" />
+    </Component>`)
+  })
+
+  associations.files.forEach((file) => {
+    file.extensions.forEach((extension) => {
+      const id = associationWixId('File', extension)
+      ids.push(id)
+      const progId = windowsProgId(appId, extension)
+      const dotExtension = `.${extension}`
+      components.push(`    <Component Id="${id}" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="Software\\Classes\\${dotExtension}\\OpenWithProgids" Name="${escapeXmlAttr(progId)}" Type="string" Value="" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="Software\\Classes\\${escapeXmlAttr(progId)}" Type="string" Value="${escapeXmlAttr(file.description)}" />
+      <RegistryValue Root="HKLM" Key="Software\\Classes\\${escapeXmlAttr(progId)}\\DefaultIcon" Type="string" Value="[INSTALLFOLDER]${formattedDisplayName}.exe,0" />
+      <RegistryValue Root="HKLM" Key="Software\\Classes\\${escapeXmlAttr(progId)}\\shell\\open\\command" Type="string" Value="${command}" />
+    </Component>`)
+    })
+  })
+
+  const capabilitiesId = associationWixId('Capabilities', appId)
+  ids.push(capabilitiesId)
+  const capabilityValues = [
+    ...associations.protocols.map((protocol) =>
+      `      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(capabilitiesKey)}\\URLAssociations" Name="${escapeXmlAttr(protocol.scheme)}" Type="string" Value="${escapeXmlAttr(windowsProgId(appId, `Url.${protocol.scheme}`))}" />`),
+    ...associations.files.flatMap((file) => file.extensions.map((extension) =>
+      `      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(capabilitiesKey)}\\FileAssociations" Name=".${escapeXmlAttr(extension)}" Type="string" Value="${escapeXmlAttr(windowsProgId(appId, extension))}" />`)),
+    ...associations.files.flatMap((file) => file.mimeType
+      ? [`      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(capabilitiesKey)}\\MIMEAssociations" Name="${escapeXmlAttr(file.mimeType)}" Type="string" Value="${escapeXmlAttr(windowsProgId(appId, file.extensions[0]))}" />`]
+      : []),
+  ].join('\n')
+  components.push(`    <Component Id="${capabilitiesId}" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(capabilitiesKey)}" Name="ApplicationDescription" Type="string" Value="${escapeXmlAttr(applicationDescription)}" KeyPath="yes" />
+      <RegistryValue Root="HKLM" Key="${escapeXmlAttr(capabilitiesKey)}" Name="ApplicationName" Type="string" Value="${escapeXmlAttr(registeredName)}" />
+${capabilityValues}
+      <RegistryValue Root="HKLM" Key="Software\\RegisteredApplications" Name="${escapeXmlAttr(registeredName)}" Type="string" Value="${escapeXmlAttr(capabilitiesKey)}" />
+    </Component>`)
+
+  return {
+    components: components.join('\n\n'),
+    featureRefs: ids.map((id) => `      <ComponentRef Id="${id}" />`).join('\n'),
+  }
+}
+
+function associationWixId(prefix: string, value: string): string {
+  return `Association${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 16)}`
+}
+
+export async function wxsScript(opts: {
+  appId: string
+  displayName: string
+  description?: string
   version: string
   publisher: string
   upgradeCode: string
@@ -1292,14 +1517,30 @@ async function wxsScript(opts: {
   bundleDir: string
   branding: WindowsBranding
   licenseRtf: string
+  associations: ResolvedAssociations
 }): Promise<string> {
-  const { displayName, version, publisher, upgradeCode, productCode, bundleDir, branding, licenseRtf } = opts
+  const { appId, displayName, description, version, publisher, upgradeCode, productCode, bundleDir, branding, licenseRtf, associations } = opts
   const name = escapeXmlAttr(displayName)
   const manufacturer = escapeXmlAttr(publisher)
 
   const { dirTree, files } = await collectWxsTree(bundleDir)
   const dirTreeXml = renderWxsDirTree(dirTree, '        ')
   const filesXml = renderWxsFileComponents(files)
+  const associationComponents = wixAssociationComponents({ appId, displayName, description, associations })
+  const hasAssociations = associations.protocols.length > 0 || associations.files.length > 0
+  const launcherFile = files.find((file) =>
+    file.parentId === 'INSTALLFOLDER'
+      && basename(file.absPath).toLowerCase() === `${displayName}.exe`.toLowerCase())
+  if (hasAssociations && !launcherFile) {
+    throw new Error(`murasaki: MSI bundle is missing ${displayName}.exe`)
+  }
+  const associationNotifyXml = !hasAssociations || !launcherFile ? '' : `
+    <CustomAction Id="ManageAssociationsInstall" FileRef="${launcherFile.id}" ExeCommand="--murasaki-associations-install" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManageAssociationsUninstall" FileRef="${launcherFile.id}" ExeCommand="--murasaki-associations-uninstall" Execute="deferred" Impersonate="no" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="ManageAssociationsInstall" After="WriteRegistryValues" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+      <Custom Action="ManageAssociationsUninstall" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>`
 
   const iconXml = branding.icon
     ? `\n    <Icon Id="ProductIcon" SourceFile="${escapeXmlAttr(branding.icon)}" />\n    <Property Id="ARPPRODUCTICON" Value="ProductIcon" />`
@@ -1333,10 +1574,12 @@ ${iconXml}
 
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 ${uiVariablesXml}
+${associationNotifyXml}
 
     <Feature Id="Main" Title="${name}" Level="1">
       <ComponentGroupRef Id="Files" />
       <ComponentRef Id="StartMenuShortcut" />
+${associationComponents.featureRefs}
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -1352,6 +1595,8 @@ ${dirTreeXml}
     <ComponentGroup Id="Files">
 ${filesXml}
     </ComponentGroup>
+
+${associationComponents.components}
 
     <Component Id="StartMenuShortcut" Directory="AppProgramMenuFolder" Guid="*">
       <Shortcut
@@ -1469,6 +1714,15 @@ function escapeXmlAttr(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+/** Escape literal brackets in Windows Installer Formatted fields. */
+function escapeMsiFormatted(s: string): string {
+  return Array.from(s, (character) => {
+    if (character === '[') return '[\\[]'
+    if (character === ']') return '[\\]]'
+    return character
+  }).join('')
 }
 
 async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {

@@ -172,7 +172,8 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "public frameworkにはtray iconやsystem-wide shortcut APIがありません。依存packageや内部moduleがあるだけではshipping featureとして扱いません。",
   ],
   "single-instance-and-deep-links": [
-    "single-instance lock、second-launch event、URL scheme登録、file association eventの正式なAPIはありません。",
+    "packaged macOS appとinstaller経由のWindows appは、設定したURL schemeとfile associationを登録し、single-instanceを維持したままOpenRequestEventをsrc/main.tsへ渡します。",
+    "Windows portable .zip／bare executableは自動登録を行いません。protocolとfile associationの登録はNSIS／MSI installerが担い、Linux対応はplannedです。",
   ],
   "capability-permissions": [
     "window/origin単位のpermission、command scope、deny rule、監査可能なcapability manifestはまだ提供していません。",
