@@ -71,6 +71,7 @@ jobs:
           mkdir -p "$PACK_DIR"
 
           pnpm --dir packages/ui pack --pack-destination "$PACK_DIR"
+          pnpm --dir crates/native pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/murasaki pack --pack-destination "$PACK_DIR"
 
           (
@@ -80,22 +81,29 @@ jobs:
           )
 
           UI_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'murasakijs-ui-*.tgz' -print -quit)
+          NATIVE_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'murasakijs-native-*.tgz' -print -quit)
           MURASAKI_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'murasaki-[0-9]*.tgz' -print -quit)
           test -n "$UI_TARBALL"
+          test -n "$NATIVE_TARBALL"
           test -n "$MURASAKI_TARBALL"
 
-          APP_DIR="$APP_DIR" UI_TARBALL="$UI_TARBALL" MURASAKI_TARBALL="$MURASAKI_TARBALL" node <<'NODE'
+          APP_DIR="$APP_DIR" UI_TARBALL="$UI_TARBALL" NATIVE_TARBALL="$NATIVE_TARBALL" MURASAKI_TARBALL="$MURASAKI_TARBALL" node <<'NODE'
           const fs = require('node:fs')
           const path = require('node:path')
           const manifestPath = path.join(process.env.APP_DIR, 'package.json')
           const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
           manifest.dependencies.murasaki = `file:${process.env.MURASAKI_TARBALL}`
           manifest.dependencies['@murasakijs/ui'] = `file:${process.env.UI_TARBALL}`
+          // The framework's matching native version is intentionally not on
+          // npm until the native-v* release workflow passes. Install the
+          // locally-packed manifest/types so pre-release CI remains hermetic.
+          manifest.dependencies['@murasakijs/native'] = `file:${process.env.NATIVE_TARBALL}`
           fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
           NODE
 
           pnpm --dir "$APP_DIR" install --no-frozen-lockfile
           pnpm --dir "$APP_DIR" typecheck
+          pnpm --dir "$APP_DIR" build
 
   macos-framework-native:
     name: macOS arm64 / framework, native, bundle smoke
