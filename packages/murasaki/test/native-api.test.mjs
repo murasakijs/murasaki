@@ -15,6 +15,10 @@ test('renderer native API uses request-correlated bridge calls', async () => {
       const values = {
         'dialog.openFile': ['/tmp/example.txt'],
         'clipboard.readText': 'copied',
+        'window.isVisible': true,
+        'window.isFocused': true,
+        'window.isMaximized': false,
+        'window.isMinimized': false,
       }
       queueMicrotask(() => fakeWindow.dispatchEvent(new CustomEvent('murasaki:nativeresponse', {
         detail: {
@@ -32,6 +36,15 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   await notification.show({ title: 'Ready' })
   await shell.openExternal('https://example.com')
   await appWindow.setSize(900, 600)
+  await appWindow.show()
+  await appWindow.hide()
+  await appWindow.focus()
+  await appWindow.setAlwaysOnTop(true)
+  assert.equal(await appWindow.isVisible(), true)
+  assert.equal(await appWindow.isFocused(), true)
+  assert.equal(await appWindow.isMaximized(), false)
+  assert.equal(await appWindow.isMinimized(), false)
+  await appWindow.close()
   await tray.create({ tooltip: 'Murasaki' })
   await tray.setTooltip('Ready')
   let trayClick
@@ -49,6 +62,15 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'notification.show',
     'shell.openExternal',
     'window.setSize',
+    'window.show',
+    'window.hide',
+    'window.focus',
+    'window.setAlwaysOnTop',
+    'window.isVisible',
+    'window.isFocused',
+    'window.isMaximized',
+    'window.isMinimized',
+    'window.close',
     'tray.create',
     'tray.setTooltip',
     'tray.remove',

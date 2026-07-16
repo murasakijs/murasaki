@@ -35,6 +35,14 @@ export declare class BrowserWindow {
   setSize(width: number, height: number): void
   minimize(): void
   toggleMaximize(): void
+  show(): void
+  hide(): void
+  focus(): void
+  setAlwaysOnTop(enabled: boolean): void
+  isVisible(): boolean
+  isFocused(): boolean
+  isMaximized(): boolean
+  isMinimized(): boolean
   close(): void
 }
 
@@ -86,10 +94,12 @@ export interface MenuItemOptions {
 }
 
 /**
- * macOS only. Localized labels for the predefined items in the standard
- * application menu bar — muda hardcodes English for these, so murasaki
- * resolves per-locale labels in JS and passes them through here. Any field
- * left `None` falls back to muda's English default.
+ * Localized labels for the standard menu bar's items — macOS's
+ * `PredefinedMenuItem`s hardcode English, and Windows's custom `MenuItem`s
+ * have no localization of their own either, so murasaki resolves per-locale
+ * labels in JS (or, for the production launcher, in Rust — see
+ * `launcher.rs`'s `shared::resolve_menu_labels`) and passes them through
+ * here. Any field left `None` falls back to the English literal.
  */
 export interface MenuLabels {
   about?: string
@@ -159,11 +169,14 @@ export interface WebviewOptions {
   html?: string
   devtools?: boolean
   transparent?: boolean
-  /** Stable application identifier used to isolate native WebView profile data. */
+  /**
+   * Stable application identifier used to isolate WebView runtime data
+   * (notably WebView2 profiles on Windows) between Murasaki applications.
+   */
   appId?: string
-  /** Exact native renderer command allowlist. Omitted means deny-all. */
-  capabilities?: string[]
-  /** Default PNG path used by the renderer tray API. */
+  /** Exact renderer-native command permissions. Missing/empty is deny-all. */
+  capabilities?: Array<string>
+  /** Default packaged/development PNG used when creating a tray icon. */
   trayIcon?: string
   /**
    * When set, static files under this directory are served via wry's custom
@@ -202,9 +215,10 @@ export interface WindowOptions {
   /** Populates the authors field of the native "About <app>" panel. */
   authors?: Array<string>
   /**
-   * macOS only. Localized labels for the standard App/Edit/Window menu bar
-   * (see `crate::menu::build_default_app_menu`). Falls back to English when
-   * absent.
+   * Localized labels for the standard menu bar — macOS's App/Edit/Window
+   * (see `crate::menu::build_default_app_menu`) and Windows's File/Edit/Window
+   * (see `crate::menu::build_windows_menu_bar`). Falls back to English when
+   * absent. Unused on Linux (no default menu bar there yet).
    */
   menuLabels?: MenuLabels
 }

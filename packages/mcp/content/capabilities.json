@@ -153,7 +153,7 @@
       },
       "limitations": [
         "Murasaki launches one application window; a supported multi-window manager and per-window lifecycle events are not available.",
-        "Window vibrancy remains a declared no-op, and the public renderer surface exposes only a subset of native window operations."
+        "Window vibrancy remains a declared no-op."
       ],
       "apiSymbols": [
         "App",
