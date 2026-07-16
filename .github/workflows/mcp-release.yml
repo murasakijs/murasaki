@@ -1,0 +1,150 @@
+name: Publish @murasakijs/mcp
+
+on:
+  push:
+    tags:
+      - 'mcp-v*.*.*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-mcp-publish
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate MCP release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Upgrade npm to latest
+        run: npm install -g npm@latest
+
+      - name: Verify tag, package, and version
+        id: meta
+        shell: bash
+        run: |
+          NAME=$(node -p "require('./packages/mcp/package.json').name")
+          VERSION=$(node -p "require('./packages/mcp/package.json').version")
+          EXPECTED_TAG="mcp-v${VERSION}"
+
+          if [ "$NAME" != "@murasakijs/mcp" ]; then
+            echo "::error::Unexpected package name: $NAME"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "$EXPECTED_TAG" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match $EXPECTED_TAG"
+            exit 1
+          fi
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Only stable SemVer releases are accepted: $VERSION"
+            exit 1
+          fi
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::$NAME@$VERSION is already published"
+            exit 1
+          fi
+
+          LATEST=$(npm view "$NAME@latest" version)
+          VERSION="$VERSION" LATEST="$LATEST" node <<'NODE'
+          const current = process.env.VERSION.split('.').map(Number)
+          const latest = process.env.LATEST.split('.').map(Number)
+          let comparison = 0
+          for (let index = 0; index < 3; index += 1) {
+            if (current[index] === latest[index]) continue
+            comparison = current[index] > latest[index] ? 1 : -1
+            break
+          }
+          if (comparison <= 0) {
+            console.error(`::error::${process.env.VERSION} must be newer than latest ${process.env.LATEST}`)
+            process.exit(1)
+          }
+          NODE
+
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release tag must point to a commit contained in main"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Test MCP
+        run: pnpm --filter @murasakijs/mcp test
+
+      - name: Verify generated knowledge is committed
+        run: git diff --exit-code -- packages/mcp/content
+
+      - name: Inspect npm payload
+        working-directory: packages/mcp
+        run: npm pack --dry-run --json
+
+  publish:
+    name: Publish MCP with provenance
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: npm-mcp
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Upgrade npm to latest
+        run: npm install -g npm@latest
+
+      - name: Prevent duplicate publication
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          if npm view "@murasakijs/mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::@murasakijs/mcp@$VERSION was already published"
+            exit 1
+          fi
+
+      - name: Publish
+        working-directory: packages/mcp
+        run: npm publish --access public --tag latest --provenance
+
+      - name: Verify registry publication and provenance
+        shell: bash
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+          NAME="@murasakijs/mcp"
+          for attempt in {1..12}; do
+            if [ "$(npm view "$NAME@$VERSION" version 2>/dev/null)" = "$VERSION" ]; then
+              break
+            fi
+            if [ "$attempt" = 12 ]; then
+              echo "::error::$NAME@$VERSION did not become visible in the registry"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          test "$(npm view "$NAME@$VERSION" gitHead)" = "$GITHUB_SHA"
+          PREDICATE=$(npm view "$NAME@$VERSION" dist.attestations.provenance.predicateType)
+          test "$PREDICATE" = 'https://slsa.dev/provenance/v1'
