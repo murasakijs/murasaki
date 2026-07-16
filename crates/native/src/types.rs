@@ -6,6 +6,14 @@ use napi_derive::napi;
 #[napi(object)]
 #[derive(Clone)]
 pub struct WindowOptions {
+  /// Stable label used by cross-window APIs. `main` is reserved for the
+  /// primary window.
+  pub label: Option<String>,
+  /// Whether this is the primary application window. Defaults to true only
+  /// for the reserved `main` label.
+  pub primary: Option<bool>,
+  /// Initial visibility. Defaults to true.
+  pub visible: Option<bool>,
   pub title: Option<String>,
   pub width: Option<i32>,
   pub height: Option<i32>,

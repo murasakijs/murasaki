@@ -23,8 +23,8 @@ export default defineConfig({
 })
 ```
 
-`defineConfig` is just an identity function for type inference — there's
-nothing to await or configure beyond the object you pass it.
+`defineConfig` returns the same object for type inference and validates
+declarative window labels/routes synchronously. There is nothing to await.
 
 ## Top-level fields
 
@@ -38,10 +38,12 @@ nothing to await or configure beyond the object you pass it.
 | `homepage` | `string?` | Homepage URL shown in the About panel. |
 | `authors` | `string[]?` | Author names shown in the About panel (Windows/Linux only). |
 | `window` | `WindowConfig?` | Window shape — see [below](#window). |
-| `capabilities` | `NativeCapability[]?` | Native renderer commands to grant. Default is deny-all — see [Native APIs](/docs/guides/native-apis). |
+| `windows` | `Record<string, SecondaryWindowConfig>?` | Secondary windows keyed by stable label — see [below](#windows). |
+| `capabilities` | `NativeCapability[]?` | Primary-window native renderer commands. Used only when `window.capabilities` is omitted. Default is deny-all. |
 | `main` | `false \| object?` | Long-lived Node Main entry and shutdown bound — see [below](#main). |
 | `bundle` | `object?` | Node dependency and non-code resource packaging — see [below](#bundle). |
 | `build` | `object?` | Pre-build command and public client env prefixes — see [below](#build). |
+| `security` | `object?` | Renderer Content Security Policy — see [below](#security). |
 | `updater` | `UpdaterConfig?` | Auto-update source — see [below](#updater). |
 | `locales` | `string[]?` | BCP-47 UI languages your app supports (e.g. `['en', 'ja']`). Feeds the macOS bundle's `CFBundleLocalizations` and constrains Murasaki's default native menu translations. Defaults to every language Murasaki ships menu translations for: `en`, `ja`, `zh-Hans`, `ko`, `es`, `fr`, `de`. |
 | `devPort` | `number?` | Vite dev server port during `murasaki dev`. Defaults to `5178` (auto-increments if taken). |
@@ -63,11 +65,42 @@ nothing to await or configure beyond the object you pass it.
 | `transparent` | `boolean?` | Transparent window background. |
 | `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS translucent window vibrancy. |
 | `console` | `boolean?` | Windows only: show the backend Node console window. Defaults to `false`. |
+| `route` | `string?` | Same-origin path loaded in this window. Defaults to `/`; full/protocol-relative URLs are rejected. |
+| `visible` | `boolean?` | Initial visibility. Defaults to `true` for `main`, `false` for secondary windows. |
+| `capabilities` | `NativeCapability[]?` | Per-window native command allowlist. Secondary windows default to deny-all. |
 
 <Callout type="warn">
   `vibrancy` is declared but not yet applied by the native binding — setting
   it is currently a no-op (support is planned).
 </Callout>
+
+## `windows`
+
+`window` is the primary window with the reserved label `main`. Declare
+secondary windows in `windows`; each entry accepts the same shape except for
+the primary-only `console` option and gets its own route, initial visibility,
+and command allowlist:
+
+```ts
+window: {
+  route: '/',
+  capabilities: ['window:open', 'window:list', 'window:manage'],
+},
+windows: {
+  settings: {
+    route: '/settings',
+    width: 720,
+    height: 560,
+    capabilities: [],
+  },
+},
+```
+
+Labels are 1–64 safe characters and `main` is reserved. Secondary windows are
+created hidden and inherit no top-level permissions. A secondary `console`
+field is rejected because that option controls the Windows backend console for
+the whole application. See [Windows & permissions](/docs/guides/windows) for
+lifecycle and renderer APIs.
 
 ## `capabilities`
 
@@ -76,6 +109,7 @@ uses; unknown permissions do not grant anything:
 
 ```ts
 capabilities: [
+  'app:quit',
   'dialog:openFile',
   'clipboard:readText',
   'clipboard:writeText',
@@ -85,8 +119,13 @@ capabilities: [
 ]
 ```
 
-The complete typed list is `NativeCapability`. A grant applies only to the
-trusted app origin; off-origin pages cannot use the native bridge.
+The complete typed list is `NativeCapability`. The primary window uses
+`window.capabilities ?? capabilities ?? []`; each secondary uses its own list
+or `[]`. Grants are evaluated for the calling renderer, and off-origin pages
+cannot use the native bridge. Window management adds `window:getLabel`,
+`window:open`, `window:list`, and `window:manage`. Programmatic application
+shutdown requires `app:quit`; enabling the built-in updater grants it to the
+primary window for the verified restart handshake.
 
 ## `main`
 
@@ -104,7 +143,7 @@ main: {
 | Field | Type | Description |
 | --- | --- | --- |
 | `entry` | `string?` | Path relative to the project root. Defaults to `src/main.ts`. |
-| `shutdownTimeoutMs` | `number?` | Maximum `shutdown()` time before the host exits. Defaults to `10_000`. |
+| `shutdownTimeoutMs` | `number?` | End-to-end limit for `beforeQuit()` plus `shutdown()` before host exit. Defaults to `10_000`. |
 
 See [Node Main](/docs/guides/node-main) for lifecycle hooks and `'use main'`.
 
@@ -207,6 +246,35 @@ prefixes: Vite replaces their values into shipped JavaScript. Packaged Node
 Main inherits the environment of the launcher; Murasaki does not copy `.env`
 files into the app. Put end-user runtime settings under `context.paths.data`
 or provide them through your deployment environment.
+
+## `security`
+
+Murasaki injects one environment-specific Content Security Policy into both
+the framework shell and a user-owned `index.html`. Configure a complete
+replacement, or explicitly opt out:
+
+```ts
+security: {
+  csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; object-src 'none'; base-uri 'none'; frame-src 'none'",
+},
+
+// Escape hatch when another layer owns the policy:
+// security: { csp: false },
+```
+
+| Value | Behavior |
+| --- | --- |
+| omitted | Use Murasaki's production or development default. |
+| `string` | Completely replace the default; directives are not merged. |
+| `false` | Disable framework injection. An existing user-authored CSP is left untouched. |
+
+If `index.html` already contains a CSP `<meta http-equiv>` tag, Murasaki keeps
+that user-owned policy and moves it to the beginning of `<head>` so it applies
+before scripts or resources. Configure the policy in exactly one place:
+combining an existing tag with a `security.csp` string is a build error.
+Configured policies must be non-empty, single-line strings without control
+characters, double quotes, `<`, or `>`. See [Security](/docs/building/security)
+for defaults, migration guidance, and limitations of meta-delivered CSP.
 
 ## `updater`
 

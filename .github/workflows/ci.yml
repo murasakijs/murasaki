@@ -1,0 +1,594 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  NODE_VERSION: 22.12.0
+
+jobs:
+  ubuntu-quality:
+    name: Ubuntu / build, test, docs, scaffold
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify supported Node floor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./packages/murasaki/package.json').engines.node")" = ">=22.12.0"
+          test "$(node -p "require('./crates/native/package.json').engines.node")" = ">=22.12.0"
+          test "$(node -p "require('./packages/create-murasaki/templates/default/package.json').engines.node")" = ">=22.12.0"
+          node -e "const [major, minor] = process.versions.node.split('.').map(Number); if (major < 22 || (major === 22 && minor < 12)) process.exit(1)"
+
+      - name: Build workspace packages
+        run: pnpm build
+
+      - name: Test Murasaki framework
+        run: pnpm --filter murasaki test
+
+      - name: Test MCP server and generated knowledge
+        run: |
+          pnpm --filter @murasakijs/mcp test
+          git diff --exit-code -- packages/mcp/content
+
+      - name: Type-check documentation site
+        run: pnpm --filter murasaki-docs types:check
+
+      - name: Build documentation site
+        run: pnpm --filter murasaki-docs build
+
+      - name: Fresh scaffold install and type-check
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACK_DIR="$RUNNER_TEMP/murasaki-packs"
+          APP_DIR="$RUNNER_TEMP/fresh-murasaki"
+          mkdir -p "$PACK_DIR"
+
+          pnpm --dir packages/ui pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/murasaki pack --pack-destination "$PACK_DIR"
+
+          (
+            cd "$RUNNER_TEMP"
+            node "$GITHUB_WORKSPACE/packages/create-murasaki/index.mjs" fresh-murasaki \
+              --yes --linter none --skip-install --no-git
+          )
+
+          UI_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'murasakijs-ui-*.tgz' -print -quit)
+          MURASAKI_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'murasaki-[0-9]*.tgz' -print -quit)
+          test -n "$UI_TARBALL"
+          test -n "$MURASAKI_TARBALL"
+
+          APP_DIR="$APP_DIR" UI_TARBALL="$UI_TARBALL" MURASAKI_TARBALL="$MURASAKI_TARBALL" node <<'NODE'
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const manifestPath = path.join(process.env.APP_DIR, 'package.json')
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+          manifest.dependencies.murasaki = `file:${process.env.MURASAKI_TARBALL}`
+          manifest.dependencies['@murasakijs/ui'] = `file:${process.env.UI_TARBALL}`
+          fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+          NODE
+
+          pnpm --dir "$APP_DIR" install --no-frozen-lockfile
+          pnpm --dir "$APP_DIR" typecheck
+
+  macos-framework-native:
+    name: macOS arm64 / framework, native, bundle smoke
+    runs-on: macos-14
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/native
+
+      - name: Add a branch-local scaffold to the workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p examples/ci-mac-app
+          cp -r packages/create-murasaki/templates/default/. examples/ci-mac-app/
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = 'examples/ci-mac-app/package.json'
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'))
+          manifest.name = 'ci-mac-app'
+          manifest.dependencies.murasaki = 'workspace:*'
+          manifest.dependencies['@murasakijs/ui'] = 'workspace:*'
+          fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`)
+
+          fs.writeFileSync('examples/ci-mac-app/murasaki.config.ts', `import { defineConfig } from 'murasaki'
+
+          export default defineConfig({
+            appId: 'app.murasaki.ci.mac',
+            productName: 'Murasaki CI macOS',
+            version: '0.0.0',
+            icon: 'src/assets/icon.png',
+            locales: ['en'],
+            window: {
+              title: 'Murasaki CI',
+              width: 800,
+              height: 600,
+              capabilities: ['window:list', 'window:open'],
+            },
+            windows: {
+              probe: {
+                route: '/probe',
+                title: 'Murasaki multi-window probe',
+                width: 640,
+                height: 480,
+                visible: false,
+                capabilities: ['window:getLabel', 'window:list'],
+              },
+            },
+          })
+          `)
+
+          fs.writeFileSync('examples/ci-mac-app/src/app/page.tsx', `'use client'
+
+          import { useEffect } from 'react'
+          import { windows } from 'murasaki/native'
+
+          let started = false
+
+          export default function PrimaryProbe() {
+            useEffect(() => {
+              if (started) return
+              started = true
+              void (async () => {
+                const before = await windows.list()
+                const labels = before.map((window) => window.label).sort()
+                const probe = before.find((window) => window.label === 'probe')
+                if (labels.join(',') !== 'main,probe') throw new Error('window list is incomplete')
+                if (!probe || probe.visible) throw new Error('probe did not start hidden')
+
+                const staged = await fetch('/api/multiwindow-probe', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ stage: 'primary', labels, initiallyHidden: true }),
+                })
+                if (!staged.ok) throw new Error('primary probe stage was rejected')
+                await windows.open('probe')
+              })().catch((error) => console.error('MURASAKI_MULTIWINDOW_PRIMARY_FAIL', error))
+            }, [])
+
+            return <main>Primary multi-window probe</main>
+          }
+          `)
+
+          fs.mkdirSync('examples/ci-mac-app/src/app/probe', { recursive: true })
+          fs.writeFileSync('examples/ci-mac-app/src/app/probe/page.tsx', `'use client'
+
+          import { useEffect } from 'react'
+          import { appWindow, windows } from 'murasaki/native'
+
+          let started = false
+
+          export default function MultiWindowProbe() {
+            useEffect(() => {
+              if (started) return
+              started = true
+              void (async () => {
+                const label = await appWindow.getLabel()
+                let after = await windows.list()
+                for (let attempt = 0; attempt < 100; attempt++) {
+                  if (after.find((window) => window.label === 'probe')?.visible) break
+                  await new Promise((resolve) => setTimeout(resolve, 50))
+                  after = await windows.list()
+                }
+                const labels = after.map((window) => window.label).sort()
+                const probe = after.find((window) => window.label === 'probe')
+
+                if (label !== 'probe') throw new Error('secondary renderer has the wrong label')
+                if (labels.join(',') !== 'main,probe') throw new Error('window list is incomplete')
+                if (!probe?.visible) throw new Error('probe did not open')
+
+                let denied = false
+                try {
+                  await appWindow.isVisible()
+                } catch {
+                  denied = true
+                }
+                if (!denied) throw new Error('ungranted window:isVisible call was allowed')
+
+                const response = await fetch('/api/multiwindow-probe', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    stage: 'secondary',
+                    label,
+                    labels,
+                    denied,
+                    opened: true,
+                  }),
+                })
+                if (!response.ok) throw new Error('probe API rejected the renderer result')
+              })().catch((error) => {
+                const message = error instanceof Error ? error.message : String(error)
+                console.error('MURASAKI_MULTIWINDOW_CLIENT_FAIL', message)
+                void fetch('/api/multiwindow-probe', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ stage: 'error', message }),
+                })
+              })
+            }, [])
+
+            return <main>Multi-window probe</main>
+          }
+          `)
+
+          fs.mkdirSync('examples/ci-mac-app/src/api/multiwindow-probe', { recursive: true })
+          fs.writeFileSync('examples/ci-mac-app/src/api/multiwindow-probe/route.ts', `import type { RouteHandler } from 'murasaki'
+
+          const marker = 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened'
+          let primaryReady = false
+
+          export const POST: RouteHandler = async (request) => {
+            const body = await request.json() as Record<string, unknown>
+            if (body.stage === 'error') {
+              console.error('MURASAKI_MULTIWINDOW_CLIENT_FAIL=' + String(body.message))
+              return Response.json({ ok: false }, { status: 500 })
+            }
+            if (body.stage === 'primary') {
+              const valid = JSON.stringify(body.labels) === JSON.stringify(['main', 'probe'])
+                && body.initiallyHidden === true
+              if (!valid) return Response.json({ ok: false }, { status: 400 })
+              primaryReady = true
+              return Response.json({ ok: true }, { status: 202 })
+            }
+
+            const valid = primaryReady
+              && body.stage === 'secondary'
+              && body.label === 'probe'
+              && JSON.stringify(body.labels) === JSON.stringify(['main', 'probe'])
+              && body.denied === true
+              && body.opened === true
+            if (!valid) return Response.json({ ok: false }, { status: 400 })
+
+            console.log(marker)
+            return Response.json({ ok: true, marker })
+          }
+          `)
+          NODE
+
+      - name: Install workspace dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build UI dependency
+        run: pnpm --filter @murasakijs/ui build
+
+      - name: Test Murasaki framework
+        run: pnpm --filter murasaki test
+
+      - name: Test native crate
+        working-directory: crates/native
+        run: cargo test --locked
+
+      - name: Verify generated native loader and declarations
+        working-directory: crates/native
+        run: |
+          pnpm exec napi build --platform --release
+          git diff --exit-code -- index.js index.d.ts
+
+      - name: Build production native launcher
+        working-directory: crates/native
+        run: cargo build --locked --release --bin murasaki-launcher
+
+      - name: Build scaffolded app
+        working-directory: examples/ci-mac-app
+        run: pnpm exec murasaki build
+
+      - name: Bundle scaffolded app
+        working-directory: examples/ci-mac-app
+        run: pnpm exec murasaki bundle --target darwin-arm64
+
+      - name: Locate bundled application
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find examples/ci-mac-app/dist/bundle -maxdepth 2 -type d -name '*.app' -print -quit)
+          test -n "$APP_PATH"
+          printf 'appPath=%s\n' "$APP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Launch bundled app and verify backend
+        shell: bash
+        run: >-
+          bash .github/scripts/mac-smoke-test.sh
+          "${{ steps.bundle.outputs.appPath }}"
+          "$RUNNER_TEMP/murasaki-mac-smoke"
+          60
+          "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: macos-arm64-bundle-failure
+          path: |
+            ${{ runner.temp }}/murasaki-mac-smoke/**
+            examples/ci-mac-app/dist/bundle/**/*.app/**
+          if-no-files-found: warn
+
+  windows-bundle-smoke:
+    name: Windows x64 / native and bundle smoke
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/native
+
+      - name: Add a branch-local scaffold to the workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p examples/ci-win-app
+          cp -r packages/create-murasaki/templates/default/. examples/ci-win-app/
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = 'examples/ci-win-app/package.json'
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'))
+          manifest.name = 'ci-win-app'
+          manifest.dependencies.murasaki = 'workspace:*'
+          manifest.dependencies['@murasakijs/ui'] = 'workspace:*'
+          fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`)
+
+          fs.writeFileSync('examples/ci-win-app/murasaki.config.ts', `import { defineConfig } from 'murasaki'
+
+          export default defineConfig({
+            appId: 'app.murasaki.ci.win',
+            productName: 'Murasaki CI Windows',
+            version: '0.0.0',
+            icon: 'src/assets/icon.png',
+            locales: ['en'],
+            window: {
+              title: 'Murasaki CI',
+              width: 800,
+              height: 600,
+              capabilities: ['window:list', 'window:open'],
+            },
+            windows: {
+              probe: {
+                route: '/probe',
+                title: 'Murasaki multi-window probe',
+                width: 640,
+                height: 480,
+                visible: false,
+                capabilities: ['window:getLabel', 'window:list'],
+              },
+            },
+          })
+          `)
+
+          fs.writeFileSync('examples/ci-win-app/src/app/page.tsx', `'use client'
+
+          import { useEffect } from 'react'
+          import { windows } from 'murasaki/native'
+
+          let started = false
+
+          export default function PrimaryProbe() {
+            useEffect(() => {
+              if (started) return
+              started = true
+              void (async () => {
+                const before = await windows.list()
+                const labels = before.map((window) => window.label).sort()
+                const probe = before.find((window) => window.label === 'probe')
+                if (labels.join(',') !== 'main,probe') throw new Error('window list is incomplete')
+                if (!probe || probe.visible) throw new Error('probe did not start hidden')
+
+                const staged = await fetch('/api/multiwindow-probe', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ stage: 'primary', labels, initiallyHidden: true }),
+                })
+                if (!staged.ok) throw new Error('primary probe stage was rejected')
+                await windows.open('probe')
+              })().catch((error) => console.error('MURASAKI_MULTIWINDOW_PRIMARY_FAIL', error))
+            }, [])
+
+            return <main>Primary multi-window probe</main>
+          }
+          `)
+
+          fs.mkdirSync('examples/ci-win-app/src/app/probe', { recursive: true })
+          fs.writeFileSync('examples/ci-win-app/src/app/probe/page.tsx', `'use client'
+
+          import { useEffect } from 'react'
+          import { appWindow, windows } from 'murasaki/native'
+
+          let started = false
+
+          export default function MultiWindowProbe() {
+            useEffect(() => {
+              if (started) return
+              started = true
+              void (async () => {
+                const label = await appWindow.getLabel()
+                let after = await windows.list()
+                for (let attempt = 0; attempt < 100; attempt++) {
+                  if (after.find((window) => window.label === 'probe')?.visible) break
+                  await new Promise((resolve) => setTimeout(resolve, 50))
+                  after = await windows.list()
+                }
+                const labels = after.map((window) => window.label).sort()
+                const probe = after.find((window) => window.label === 'probe')
+
+                if (label !== 'probe') throw new Error('secondary renderer has the wrong label')
+                if (labels.join(',') !== 'main,probe') throw new Error('window list is incomplete')
+                if (!probe?.visible) throw new Error('probe did not open')
+
+                let denied = false
+                try {
+                  await appWindow.isVisible()
+                } catch {
+                  denied = true
+                }
+                if (!denied) throw new Error('ungranted window:isVisible call was allowed')
+
+                const response = await fetch('/api/multiwindow-probe', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    stage: 'secondary',
+                    label,
+                    labels,
+                    denied,
+                    opened: true,
+                  }),
+                })
+                if (!response.ok) throw new Error('probe API rejected the renderer result')
+              })().catch((error) => {
+                const message = error instanceof Error ? error.message : String(error)
+                console.error('MURASAKI_MULTIWINDOW_CLIENT_FAIL', message)
+                void fetch('/api/multiwindow-probe', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ stage: 'error', message }),
+                })
+              })
+            }, [])
+
+            return <main>Multi-window probe</main>
+          }
+          `)
+
+          fs.mkdirSync('examples/ci-win-app/src/api/multiwindow-probe', { recursive: true })
+          fs.writeFileSync('examples/ci-win-app/src/api/multiwindow-probe/route.ts', `import type { RouteHandler } from 'murasaki'
+
+          const marker = 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened'
+          let primaryReady = false
+
+          export const POST: RouteHandler = async (request) => {
+            const body = await request.json() as Record<string, unknown>
+            if (body.stage === 'error') {
+              console.error('MURASAKI_MULTIWINDOW_CLIENT_FAIL=' + String(body.message))
+              return Response.json({ ok: false }, { status: 500 })
+            }
+            if (body.stage === 'primary') {
+              const valid = JSON.stringify(body.labels) === JSON.stringify(['main', 'probe'])
+                && body.initiallyHidden === true
+              if (!valid) return Response.json({ ok: false }, { status: 400 })
+              primaryReady = true
+              return Response.json({ ok: true }, { status: 202 })
+            }
+
+            const valid = primaryReady
+              && body.stage === 'secondary'
+              && body.label === 'probe'
+              && JSON.stringify(body.labels) === JSON.stringify(['main', 'probe'])
+              && body.denied === true
+              && body.opened === true
+            if (!valid) return Response.json({ ok: false }, { status: 400 })
+
+            console.log(marker)
+            return Response.json({ ok: true, marker })
+          }
+          `)
+          NODE
+
+      - name: Install workspace dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build framework packages
+        run: |
+          pnpm --filter @murasakijs/ui build
+          pnpm --filter murasaki build
+
+      - name: Test native crate
+        working-directory: crates/native
+        run: cargo test --locked
+
+      - name: Build native Node binding
+        working-directory: crates/native
+        run: pnpm exec napi build --platform --release
+
+      - name: Build production native launcher
+        working-directory: crates/native
+        run: cargo build --locked --release --bin murasaki-launcher
+
+      - name: Build scaffolded app
+        working-directory: examples/ci-win-app
+        run: pnpm exec murasaki build
+
+      - name: Bundle scaffolded app
+        working-directory: examples/ci-win-app
+        run: pnpm exec murasaki bundle --target win32-x64
+
+      - name: Locate bundled executable
+        id: bundle
+        shell: pwsh
+        run: |
+          $exePath = Join-Path (Resolve-Path 'examples/ci-win-app/dist/bundle') 'Murasaki CI Windows/Murasaki CI Windows.exe'
+          if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
+            Write-Error "Bundled application executable was not produced at the expected path: $exePath"
+            exit 1
+          }
+          "exePath=$exePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Launch bundled app and verify backend
+        shell: pwsh
+        run: >-
+          .github/scripts/win-smoke-test.ps1
+          -ExePath "${{ steps.bundle.outputs.exePath }}"
+          -TimeoutSeconds 60
+          -ExpectedMarker "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-x64-bundle-failure
+          path: examples/ci-win-app/dist/bundle/**
+          if-no-files-found: warn

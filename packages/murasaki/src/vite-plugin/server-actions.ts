@@ -8,6 +8,12 @@ import {
   stringifyWire,
   WIRE_CONTENT_TYPE,
 } from '../runtime/wire.js'
+import {
+  fileHasRpcDirective,
+  isSafeRpcExportName,
+  resolveRpcSource,
+  sourceHasRpcDirective,
+} from './rpc-source.js'
 
 interface Options {
   srcDir: string
@@ -27,8 +33,8 @@ const wireModulePath = resolve(dirname(fileURLToPath(import.meta.url)), '../runt
  * be used here) doesn't work since it's dev-machine-specific and wouldn't
  * match a module bundled into a prod registry anyway.
  */
-export function toActionId(absPath: string): string {
-  return relative(process.cwd(), absPath).replace(/\\/g, '/')
+export function toActionId(absPath: string, projectRoot = process.cwd()): string {
+  return relative(projectRoot, absPath).replace(/\\/g, '/')
 }
 
 /**
@@ -46,9 +52,13 @@ export function toActionId(absPath: string): string {
  * public shape is stable from day one.
  */
 export function serverActionsPlugin({ srcDir }: Options): Plugin {
+  let projectRoot = process.cwd()
   return {
     name: 'murasaki:server-actions',
     enforce: 'pre',
+    configResolved(config) {
+      projectRoot = config.root
+    },
     resolveId(id) {
       if (id === WIRE_VIRTUAL_ID) return wireModulePath
       return null
@@ -56,9 +66,9 @@ export function serverActionsPlugin({ srcDir }: Options): Plugin {
     async transform(code, id, options) {
       if (options?.ssr) return null
       if (!id.startsWith(srcDir)) return null
-      if (!/^\s*(['"])use server\1\s*;?/m.test(code)) return null
+      if (!sourceHasRpcDirective(code, 'use server')) return null
 
-      const actionId = toActionId(id)
+      const actionId = toActionId(id, projectRoot)
       const exports = extractExportNames(code)
       const stubs = exports
         .map(
@@ -96,12 +106,16 @@ ${stubs}
       }
     },
     configureServer(server) {
-      server.middlewares.use(handleActionRequest(server))
+      server.middlewares.use(handleActionRequest(server, srcDir, projectRoot))
     },
   }
 }
 
-function handleActionRequest(server: ViteDevServer): Connect.NextHandleFunction {
+function handleActionRequest(
+  server: ViteDevServer,
+  srcDir: string,
+  projectRoot: string,
+): Connect.NextHandleFunction {
   return async (req, res, next) => {
     if (req.method !== 'POST' || !req.url?.startsWith(ACTION_PATH_PREFIX)) {
       return next()
@@ -113,9 +127,17 @@ function handleActionRequest(server: ViteDevServer): Connect.NextHandleFunction 
 
     const encodedId = rest.slice(0, sepIndex)
     const name = rest.slice(sepIndex + 1)
-    // The client sent back the project-root-relative id (see toActionId
-    // above) — resolve it to the absolute path ssrLoadModule needs.
-    const id = resolve(process.cwd(), decodeURIComponent(encodedId))
+    // Renderer input is untrusted even after the loopback session check. Only
+    // load a source below this app's srcDir that explicitly opted into the RPC
+    // surface; production enforces the same boundary through its registry.
+    const id = resolveRpcSource(encodedId, projectRoot, srcDir)
+    if (!id || !isSafeRpcExportName(name) || !(await fileHasRpcDirective(id, 'use server'))) {
+      await sendWireResponse(res, 404, {
+        ok: false,
+        error: new Error('No such server action module'),
+      })
+      return
+    }
 
     let args: unknown[]
     try {

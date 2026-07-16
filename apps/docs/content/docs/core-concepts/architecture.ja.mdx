@@ -11,7 +11,7 @@ Murasaki は 3 層のデスクトップランタイムです。React は OS の 
 ┌─────────────── ネイティブアプリ ────────────────┐
 │                                                 │
 │  Rust host (tao / wry / muda)                   │
-│  window · WebView · native menu · update handoff│
+│  windows · WebViews · native menu · update handoff│
 │                      │                          │
 │                      │ 起動 / 監視              │
 │                      ▼                          │
@@ -36,16 +36,15 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 
 | レイヤー | 担当 | 担当しないもの |
 | --- | --- | --- |
-| Rust ホスト | ネイティブイベントループ、単一ウィンドウ、ナビゲーション制御、OS open request の normalize、メニュー、Node 子プロセス監視、更新の最終適用 | ビジネスロジック、React state |
-| ローカル Node | Main ライフサイクル、登録済み URL / file の処理、Action、API ルート、更新検証、アプリのリソースとデータ | ネイティブウィンドウ生成 API（現状は非公開） |
-| レンダラー | UI、ルーティング、ブラウザー API、型付きバックエンド関数の呼び出し | ファイルシステム・Node・ネイティブモジュールへの直接アクセス |
+| Rust ホスト | native event loop、宣言済みapp window、window別navigation / capability policy、OS open request normalize、menu、Node子process監視、更新の最終適用 | business logic、React state |
+| ローカル Node | Main lifecycle、登録済みURL / file処理、Action、API route、更新検証、app resource / data | 任意native windowの動的生成 |
+| レンダラー | UI、routing、browser API、型付きbackend call、許可済み宣言windowの操作 | filesystem・Node・native moduleへの直接access |
 
 <Callout type="warn">
-  Murasaki は 1.0 未満です。マルチウィンドウと window / origin 別 Capability
-  policy はまだ公開機能ではありません。packaged macOS / Windows app は single
-  instance を強制し、URL scheme / file association を登録して、一致する activation を
-  Node Main の `openRequested()` へ渡せます。renderer native command には
-  deny-by-default の型付き allowlist があります。本番設計を確定する前に
+  Murasaki は 1.0 未満です。宣言windowには独立したdeny-by-default command allowlistが
+  ありますが、capability argumentやpath / URL scopeはpolicy制御されません。packaged
+  macOS / Windows appはsingle instanceを強制し、URL scheme / file associationを登録して、
+  一致するactivationをNode Mainの`openRequested()`へ渡せます。本番設計を確定する前に
   [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)を
   確認してください。
 </Callout>
@@ -59,6 +58,7 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 | Web アセット | HMR 付き Vite dev server | 同梱 Node が `dist/client` を配信 |
 | Node バックエンド | Vite 子プロセス | アプリ内のポータブル Node |
 | ネイティブホスト | CLI が `@murasakijs/native` をロード | 単体の Rust launcher |
+| 宣言window | 個別dev WebViewとして全routeを作成 | resolved bundle metadataから全routeを作成 |
 | Main entry | Vite SSR で読み込み、entry の変更で hot reload | `server/main.mjs` にコンパイル |
 | バックエンド呼び出し | Vite middleware | 同梱 loopback HTTP server |
 | URL / file 登録 | dev mode では OS に登録しない | macOS app metadata または Windows installer registry |

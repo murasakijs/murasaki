@@ -3,6 +3,9 @@
 # ship native binaries too — without this, `pnpm install` reports
 # ERR_PNPM_IGNORED_BUILDS and exits non-zero. `onlyBuiltDependencies` is the
 # pnpm-10 key, `allowBuilds` the pnpm-11 one; listing both covers either.
+packages:
+  - '.'
+
 onlyBuiltDependencies:
   - esbuild
   - '@murasakijs/native'

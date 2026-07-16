@@ -19,12 +19,15 @@ test('scans and matches dynamic, catch-all, and optional catch-all API routes', 
   })
 
   await route(root, ['users', '[id]'])
+  await route(root, [])
   await route(root, ['files', '[...path]'])
   await route(root, ['proxy', '[[...path]]'])
   await route(root, ['proxy', 'health'])
 
   const routes = await scanApiRoutes(root)
 
+  assert.deepEqual(matchApiRoute(routes, '/api')?.params, {})
+  assert.deepEqual(matchApiRoute(routes, '/api/')?.params, {})
   assert.deepEqual(matchApiRoute(routes, '/api/users/a%20b')?.params, { id: 'a b' })
   assert.deepEqual(matchApiRoute(routes, '/api/files/a/b%20c')?.params, {
     path: ['a', 'b c'],

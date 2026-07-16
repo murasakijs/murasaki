@@ -9,7 +9,7 @@ React 19 · Vite · OS WebView · Rust-native · No Chromium
 [![npm version](https://img.shields.io/npm/v/murasaki?color=A855F7&label=npm)](https://www.npmjs.com/package/murasaki)
 [![npm downloads](https://img.shields.io/npm/dm/murasaki?color=A855F7)](https://www.npmjs.com/package/murasaki)
 [![license](https://img.shields.io/npm/l/murasaki?color=A855F7)](https://github.com/murasakijs/murasaki/blob/main/LICENSE)
-[![CI](https://github.com/murasakijs/murasaki/actions/workflows/release.yml/badge.svg)](https://github.com/murasakijs/murasaki/actions)
+[![CI](https://github.com/murasakijs/murasaki/actions/workflows/ci.yml/badge.svg)](https://github.com/murasakijs/murasaki/actions/workflows/ci.yml)
 
 [English](https://github.com/murasakijs/murasaki/blob/main/README.md) · [日本語](https://github.com/murasakijs/murasaki/blob/main/README.ja.md)
 
@@ -23,7 +23,8 @@ built on **React 19 + Vite**, rendered through the **OS WebView already
 installed on your machine** — no bundled Chromium. The native window, menus,
 and OS integrations are powered by a self-authored Rust binding,
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
-you write TypeScript; you never write Rust. Targets **macOS / Windows / Linux**.
+you write TypeScript; you never write Rust. Production targets **macOS and
+Windows**; Linux currently has a development runtime but no packaging claim.
 
 ```bash
 npm create murasaki@latest my-app
@@ -56,9 +57,13 @@ export default function Page() {
 }
 ```
 
+Grant that renderer `menu:context` and `clipboard:writeText` in
+`murasaki.config.ts`; native menu roles are denied unless their matching
+capability is present.
+
 That's a real Vite dev server with React Fast Refresh, rendered in a native
 window — and right-clicking anywhere shows a **real OS context menu** (NSMenu
-on macOS, HMENU on Windows, GtkMenu on Linux), not an HTML popup.
+on macOS and HMENU on Windows), not an HTML popup.
 
 ---
 
@@ -200,7 +205,7 @@ we've benchmarked head-to-head:
   `<Action.* />` element or your own function. No id is the
   whole-window menu; give it an id and tag a region with `<ContextMenuTrigger
   id>` to scope it. It posts to the Rust side, which pops a real OS menu (NSMenu
-  / HMENU / GtkMenu). No HTML popup involved.
+  / HMENU). No HTML popup involved.
 - **Native menus, dialogs, clipboard, notifications, shell.** Built on
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native):
   open/save/directory dialogs, clipboard read/write, OS notifications, and
@@ -225,7 +230,9 @@ we've benchmarked head-to-head:
   `useUpdate()` hook) in your UI, and publish with
   `murasaki release --manifest --sign`. The app fetches the manifest, verifies
   it against your **Ed25519** public key, checks the downloaded asset's
-  **SHA-256**, then replaces itself and relaunches. macOS and Windows x64 —
+  **SHA-256**, then replaces itself and relaunches. The primary update UI gets
+  the internal `app:quit` grant required for that restart; a secondary update
+  window must opt in explicitly. macOS and Windows x64 —
   see [Automatic updates](https://murasaki.ichi10.com/en/docs/guides/auto-update).
 - **Deep links and file associations.** Declare custom URL schemes and document
   extensions in `murasaki.config.ts`; packaged macOS apps and Windows NSIS/MSI

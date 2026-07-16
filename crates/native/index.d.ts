@@ -2,6 +2,11 @@
 /* eslint-disable */
 export declare class Application {
   constructor()
+  /**
+   * Configure the private dev-server endpoint used to run the same
+   * cancellable Node main shutdown lifecycle as the production launcher.
+   */
+  configureShutdown(port: number, runtimeToken: string, timeoutMs: number): void
   /** Create a native window bound to this Application's event loop. */
   createWindow(opts?: WindowOptions | undefined | null): BrowserWindow
   /** Sugar: create a window + attach a webview in one call. */
@@ -189,6 +194,18 @@ export interface WebviewOptions {
 }
 
 export interface WindowOptions {
+  /**
+   * Stable label used by cross-window APIs. `main` is reserved for the
+   * primary window.
+   */
+  label?: string
+  /**
+   * Whether this is the primary application window. Defaults to true only
+   * for the reserved `main` label.
+   */
+  primary?: boolean
+  /** Initial visibility. Defaults to true. */
+  visible?: boolean
   title?: string
   width?: number
   height?: number

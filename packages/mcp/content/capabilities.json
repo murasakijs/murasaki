@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.49.0",
+  "frameworkVersion": "0.50.0",
   "features": [
     {
       "id": "file-routing",
@@ -124,8 +124,8 @@
         "linux": "development-only"
       },
       "limitations": [
-        "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, and typed live events to renderers.",
-        "It does not yet expose a production-ready multi-window manager, crash-restart policy, or process supervision API."
+        "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, and typed live events to renderers in development and packaged apps.",
+        "Window management is renderer-facing rather than exposed from src/main.ts; crash-restart policy and process supervision APIs are not implemented. On macOS, external Dock Quit and OS logout cannot guarantee cancellable beforeQuit through tao, although host resources and the Node child are cleaned up best-effort."
       ],
       "apiSymbols": [
         "murasaki/main",
@@ -152,18 +152,22 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Murasaki launches one application window; a supported multi-window manager and per-window lifecycle events are not available.",
+        "Primary and secondary windows can be declared, identified, shown, hidden, focused, listed, opened, and explicitly closed; runtime creation and per-window lifecycle subscriptions are not available.",
         "Window vibrancy remains a declared no-op."
       ],
       "apiSymbols": [
         "App",
         "WindowConfig",
-        "murasaki/native.appWindow"
+        "SecondaryWindowConfig",
+        "murasaki/native.appWindow",
+        "murasaki/native.windows"
       ],
       "testEvidence": [
-        "packages/murasaki/test/native-api.test.mjs"
+        "packages/murasaki/test/native-api.test.mjs",
+        "packages/murasaki/test/windows.test.mjs",
+        "crates/native/src/window.rs"
       ],
-      "docsSlug": "/docs/building/configuration"
+      "docsSlug": "/docs/guides/windows"
     },
     {
       "id": "application-menu",
@@ -175,15 +179,18 @@
         "linux": "unsupported"
       },
       "limitations": [
-        "Native application menus ship on macOS and Windows, with platform-specific role behavior.",
-        "Linux has no default or custom application menu implementation."
+        "Native application menus ship on macOS and Windows; replacement is process-global, restricted to the primary renderer, and requires menu:application plus the capabilities of privileged roles.",
+        "Linux has no default or custom application menu implementation. Missing role capabilities reject the whole replacement and keep the current menu."
       ],
       "apiSymbols": [
         "useAppMenu",
         "AppMenu",
         "AppMenuItemSpec"
       ],
-      "testEvidence": [],
+      "testEvidence": [
+        "crates/native/src/webview.rs",
+        "crates/native/src/menu.rs"
+      ],
       "docsSlug": "/docs/guides/app-menu"
     },
     {
@@ -196,8 +203,8 @@
         "linux": "unsupported"
       },
       "limitations": [
-        "Native whole-window and scoped context menus ship on macOS and Windows.",
-        "The Linux IPC path reports that native context menus are not implemented."
+        "Native whole-window and scoped context menus ship on macOS and Windows behind menu:context; privileged native roles additionally require their matching capability.",
+        "Menu IPC is bounded by payload, item-count, depth, and string limits. Linux has no native context-menu implementation."
       ],
       "apiSymbols": [
         "useContextMenu",
@@ -205,7 +212,10 @@
         "Action",
         "createActions"
       ],
-      "testEvidence": [],
+      "testEvidence": [
+        "crates/native/src/webview.rs",
+        "crates/native/src/menu.rs"
+      ],
       "docsSlug": "/docs/guides/context-menu"
     },
     {
@@ -218,15 +228,17 @@
         "linux": "partial"
       },
       "limitations": [
-        "Dialogs, clipboard, notifications, shell helpers, and basic window controls are exposed to trusted renderer code through the same-origin native bridge.",
-        "The API is a fixed allowlist but does not yet have declarative per-window permissions; it is not available directly inside src/main.ts."
+        "Dialogs, clipboard, notifications, shell helpers, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
+        "Capabilities are command-level rather than argument/path-scoped, and the native renderer API is not available directly inside src/main.ts."
       ],
       "apiSymbols": [
         "murasaki/native.dialog",
         "murasaki/native.clipboard",
         "murasaki/native.notification",
         "murasaki/native.shell",
-        "murasaki/native.appWindow"
+        "murasaki/native.appWindow",
+        "murasaki/native.app",
+        "murasaki/native.windows"
       ],
       "testEvidence": [
         "packages/murasaki/test/native-api.test.mjs",
@@ -313,27 +325,63 @@
       },
       "limitations": [
         "Development privileged endpoints require an HttpOnly same-site runtime session and validate loopback Host, Origin, and Fetch Metadata.",
-        "Renderer native commands have a deny-by-default app-level allowlist, but per-window, path/URL-scoped, and multi-origin policies are not implemented."
+        "Renderer native commands have a deny-by-default per-window allowlist, but argument/path/URL-scoped and multi-origin policies are not implemented."
       ],
       "apiSymbols": [],
       "testEvidence": [],
       "docsSlug": "/docs/building/security"
     },
     {
-      "id": "multi-window",
-      "category": "application-model",
-      "status": "planned",
+      "id": "content-security-policy",
+      "category": "security",
+      "status": "partial",
       "platforms": {
-        "macos": "planned",
-        "windows": "planned",
-        "linux": "planned"
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
       },
       "limitations": [
-        "There is no supported public API for creating, identifying, restoring, or independently closing multiple application windows."
+        "Murasaki injects environment-specific default CSP into framework and user-owned HTML, supports a complete security.csp override or explicit opt-out, and normalizes a user-owned CSP tag to the beginning of head.",
+        "The policy is delivered by meta tag, so header-only directives such as frame-ancestors, sandbox, and reporting are not enforced; CSP does not sanitize HTML or authorize Node functions, and inline styles remain enabled for compatibility."
       ],
-      "apiSymbols": [],
-      "testEvidence": [],
-      "docsSlug": "/docs/core-concepts/platform-feature-status"
+      "apiSymbols": [
+        "MurasakiConfig.security",
+        "security.csp"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/csp.test.mjs",
+        "packages/murasaki/src/vite-plugin/shell.ts"
+      ],
+      "docsSlug": "/docs/building/security"
+    },
+    {
+      "id": "multi-window",
+      "category": "application-model",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "unsupported"
+      },
+      "limitations": [
+        "Windows must be declared in configuration and are created eagerly; arbitrary runtime creation and recreation after explicit destruction are not implemented.",
+        "Secondary OS/self close hides for later reopening, while an explicit parent close destroys the window until restart; the application menu remains process-global and primary-owned."
+      ],
+      "apiSymbols": [
+        "MurasakiConfig.windows",
+        "SecondaryWindowConfig",
+        "WindowInfo",
+        "murasaki/native.appWindow.getLabel",
+        "murasaki/native.windows"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/windows.test.mjs",
+        "packages/murasaki/test/native-api.test.mjs",
+        "crates/native/src/window.rs",
+        "crates/native/src/launcher.rs",
+        ".github/workflows/ci.yml"
+      ],
+      "docsSlug": "/docs/guides/windows"
     },
     {
       "id": "tray-and-global-shortcuts",
@@ -345,8 +393,8 @@
         "linux": "planned"
       },
       "limitations": [
-        "A one-icon tray API with tooltip and click events ships on macOS and Windows.",
-        "Tray menus, dynamic icon replacement, global shortcuts, and Linux tray support are not implemented yet."
+        "One process-wide tray icon with tooltip and owner-routed click events ships on macOS and Windows; the latest successful create replaces the previous owner.",
+        "Closing or disposing the owning renderer removes the icon. Tray menus, dynamic icon replacement, global shortcuts, and Linux tray support are not implemented yet."
       ],
       "apiSymbols": [
         "murasaki/native.tray",
@@ -399,16 +447,18 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Renderer native commands are deny-by-default and granted through a typed app-level capability allowlist; sender origin and command names are validated in Rust.",
-        "Per-window grants, argument/path scopes, explicit deny overrides, and generated JSON schemas are not implemented yet."
+        "Renderer native commands are deny-by-default and granted through a runtime-validated per-window capability allowlist; sender origin and command names are validated in Rust.",
+        "Argument/path scopes and explicit deny overrides are not implemented; secondary windows intentionally inherit no top-level grants, and privileged menu roles require their corresponding command capability."
       ],
       "apiSymbols": [
         "MurasakiConfig.capabilities",
+        "WindowConfig.capabilities",
         "NativeCapability"
       ],
       "testEvidence": [
         "crates/native/src/webview.rs",
-        "packages/murasaki/test/native-api.test.mjs"
+        "packages/murasaki/test/native-api.test.mjs",
+        "packages/murasaki/test/windows.test.mjs"
       ],
       "docsSlug": "/docs/building/security"
     },

@@ -1,12 +1,18 @@
 import type { Connect, Plugin, ViteDevServer } from 'vite'
 import type { ServerResponse } from 'node:http'
-import { relative, resolve } from 'node:path'
+import { relative } from 'node:path'
 import {
   MAX_WIRE_PAYLOAD_BYTES,
   parseWire,
   stringifyWire,
   WIRE_CONTENT_TYPE,
 } from '../runtime/wire.js'
+import {
+  fileHasRpcDirective,
+  isSafeRpcExportName,
+  resolveRpcSource,
+  sourceHasRpcDirective,
+} from './rpc-source.js'
 
 interface Options {
   srcDir: string
@@ -15,20 +21,24 @@ interface Options {
 const MAIN_CALL_PREFIX = '/__murasaki/main/call/'
 const WIRE_VIRTUAL_ID = 'virtual:murasaki/wire'
 
-export function toMainModuleId(absPath: string): string {
-  return relative(process.cwd(), absPath).replace(/\\/g, '/')
+export function toMainModuleId(absPath: string, projectRoot = process.cwd()): string {
+  return relative(projectRoot, absPath).replace(/\\/g, '/')
 }
 
 /** Turns a top-level `'use main'` module into typed renderer→Node RPC stubs. */
 export function mainModulesPlugin({ srcDir }: Options): Plugin {
+  let projectRoot = process.cwd()
   return {
     name: 'murasaki:main-modules',
     enforce: 'pre',
+    configResolved(config) {
+      projectRoot = config.root
+    },
     transform(code, id, options) {
       if (options?.ssr || !id.startsWith(srcDir)) return null
-      if (!/^\s*(['"])use main\1\s*;?/m.test(code)) return null
+      if (!sourceHasRpcDirective(code, 'use main')) return null
 
-      const moduleId = toMainModuleId(id)
+      const moduleId = toMainModuleId(id, projectRoot)
       const stubs = extractExportNames(code).map((name) => `
 export async function ${name}(...args) {
   const res = await fetch('${MAIN_CALL_PREFIX}${encodeURIComponent(moduleId)}/${name}', {
@@ -59,19 +69,30 @@ ${stubs}
       }
     },
     configureServer(server) {
-      server.middlewares.use(handleMainCall(server))
+      server.middlewares.use(handleMainCall(server, srcDir, projectRoot))
     },
   }
 }
 
-function handleMainCall(server: ViteDevServer): Connect.NextHandleFunction {
+function handleMainCall(
+  server: ViteDevServer,
+  srcDir: string,
+  projectRoot: string,
+): Connect.NextHandleFunction {
   return async (req, res, next) => {
     if (req.method !== 'POST' || !req.url?.startsWith(MAIN_CALL_PREFIX)) return next()
     const rest = req.url.slice(MAIN_CALL_PREFIX.length)
     const separator = rest.lastIndexOf('/')
     if (separator === -1) return next()
-    const id = resolve(process.cwd(), decodeURIComponent(rest.slice(0, separator)))
+    const id = resolveRpcSource(rest.slice(0, separator), projectRoot, srcDir)
     const name = rest.slice(separator + 1)
+    if (!id || !isSafeRpcExportName(name) || !(await fileHasRpcDirective(id, 'use main'))) {
+      await sendResponse(res, 404, {
+        ok: false,
+        error: new Error('No such main module'),
+      })
+      return
+    }
 
     let args: unknown[]
     try {

@@ -16,6 +16,28 @@ export interface WindowConfig {
    * CLI/debug logs). Default `false` (standalone GUI, no console).
    */
   console?: boolean
+
+  /** Same-origin renderer route loaded into this window. Defaults to `/`. */
+  route?: string
+  /** Whether the window is initially visible. The primary window defaults to true. */
+  visible?: boolean
+  /**
+   * Native renderer command allowlist. The primary window falls back to the
+   * top-level list; a secondary window with no list remains deny-all.
+   */
+  capabilities?: NativeCapability[]
+}
+
+/** A declaratively-created non-primary application window. */
+export type SecondaryWindowConfig = Omit<WindowConfig, 'console'>
+
+/** Fully-resolved window declaration written to bundle metadata. */
+export interface ResolvedWindowConfig extends WindowConfig {
+  label: string
+  primary: boolean
+  route: string
+  visible: boolean
+  capabilities: NativeCapability[]
 }
 
 /** A custom URL scheme registered by packaged macOS/Windows applications. */
@@ -110,6 +132,12 @@ export interface MurasakiConfig {
   window?: WindowConfig
 
   /**
+   * Declarative secondary windows keyed by their stable native label.
+   * `main` is reserved for the primary `window` declaration.
+   */
+  windows?: Record<string, SecondaryWindowConfig>
+
+  /**
    * Native commands exposed to trusted renderer code through `murasaki/native`.
    * Default is deny-all; grant only the capabilities the app uses.
    */
@@ -119,7 +147,7 @@ export interface MurasakiConfig {
   main?: false | {
     /** Entry relative to the project root. Default `src/main.ts`. */
     entry?: string
-    /** Maximum graceful cleanup time before the native host exits. Default 10s. */
+    /** End-to-end limit for `beforeQuit` plus `shutdown` before host exit. Default 10s. */
     shutdownTimeoutMs?: number
   }
 
@@ -155,10 +183,23 @@ export interface MurasakiConfig {
     envPrefix?: string[]
   }
 
+  /** Renderer security policy applied to framework- and user-owned HTML. */
+  security?: {
+    /**
+     * Content Security Policy injected as a single `<meta http-equiv>` tag.
+     * A string completely replaces Murasaki's environment-specific default;
+     * `false` opts out of framework injection. A user-owned CSP meta tag is
+     * normalized to the start of `<head>`; setting both sources is an error.
+     */
+    csp?: string | false
+  }
+
   /**
    * Auto-update config. `true` is a complete, working setup for a normal OSS
    * app (GitHub repo inferred from `package.json`, public key from
-   * `.murasaki/update-key.pub`). See `UpdaterConfig`/`resolveUpdater`.
+   * `.murasaki/update-key.pub`). Enabling it also grants the primary renderer
+   * `app:quit` for the verified restart handshake. See
+   * `UpdaterConfig`/`resolveUpdater`.
    */
   updater?: UpdaterConfig
 
@@ -277,32 +318,371 @@ export interface MurasakiConfig {
   }
 }
 
-export type NativeCapability =
-  | 'dialog:openFile'
-  | 'dialog:openDirectory'
-  | 'dialog:saveFile'
-  | 'clipboard:readText'
-  | 'clipboard:writeText'
-  | 'notification:show'
-  | 'shell:openExternal'
-  | 'shell:showItemInFolder'
-  | 'window:setTitle'
-  | 'window:setSize'
-  | 'window:minimize'
-  | 'window:toggleMaximize'
-  | 'window:show'
-  | 'window:hide'
-  | 'window:focus'
-  | 'window:close'
-  | 'window:setAlwaysOnTop'
-  | 'window:isVisible'
-  | 'window:isFocused'
-  | 'window:isMaximized'
-  | 'window:isMinimized'
-  | 'tray:create'
-  | 'tray:remove'
-  | 'tray:setTooltip'
+/** Canonical runtime allowlist. Keep native permission dispatch in sync with this list. */
+export const NATIVE_CAPABILITIES = [
+  'app:quit',
+  'dialog:openFile',
+  'dialog:openDirectory',
+  'dialog:saveFile',
+  'clipboard:readText',
+  'clipboard:writeText',
+  'menu:application',
+  'menu:context',
+  'notification:show',
+  'shell:openExternal',
+  'shell:showItemInFolder',
+  'window:setTitle',
+  'window:setSize',
+  'window:minimize',
+  'window:toggleMaximize',
+  'window:show',
+  'window:hide',
+  'window:focus',
+  'window:close',
+  'window:setAlwaysOnTop',
+  'window:isVisible',
+  'window:isFocused',
+  'window:isMaximized',
+  'window:isMinimized',
+  'window:getLabel',
+  'window:open',
+  'window:list',
+  'window:manage',
+  'tray:create',
+  'tray:remove',
+  'tray:setTooltip',
+] as const
+
+export type NativeCapability = (typeof NATIVE_CAPABILITIES)[number]
+
+const NATIVE_CAPABILITY_SET: ReadonlySet<string> = new Set(NATIVE_CAPABILITIES)
+
+/** Default end-to-end bound for Node main quit hooks. */
+export const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS = 10_000
+
+/**
+ * Keep native-host shutdown waits bounded. Five minutes is deliberately well
+ * above normal cleanup while still preventing a malformed config from
+ * turning application exit into an effectively unbounded socket wait.
+ */
+export const MAX_MAIN_SHUTDOWN_TIMEOUT_MS = 300_000
+
+export function validateMainShutdownTimeoutMs(
+  value: unknown,
+): asserts value is number | undefined {
+  if (value === undefined) return
+  if (!Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > MAX_MAIN_SHUTDOWN_TIMEOUT_MS) {
+    throw new TypeError(
+      `main.shutdownTimeoutMs must be a positive safe integer no greater than ${MAX_MAIN_SHUTDOWN_TIMEOUT_MS}`,
+    )
+  }
+}
 
 export function defineConfig(config: MurasakiConfig): MurasakiConfig {
+  validateConfig(config)
   return config
+}
+
+/**
+ * Runtime validation used by every CLI config loader as well as defineConfig().
+ * Config files are executable JavaScript, so their exports cannot be trusted to
+ * have passed TypeScript checking (and users are not required to call
+ * defineConfig()).
+ */
+export function validateConfig(config: unknown): asserts config is MurasakiConfig {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new TypeError('murasaki config must export an object')
+  }
+  const candidate = config as MurasakiConfig
+  for (const field of ['appId', 'productName'] as const) {
+    if (typeof candidate[field] !== 'string' || candidate[field].trim().length === 0) {
+      throw new TypeError(`${field} must be a non-empty string`)
+    }
+  }
+  validateArtifactComponent(candidate.productName, 'productName')
+  if (candidate.version !== undefined) {
+    if (typeof candidate.version !== 'string' || candidate.version.trim().length === 0) {
+      throw new TypeError('version must be a non-empty string')
+    }
+    validateArtifactComponent(candidate.version, 'version')
+  }
+  validateMainConfig((config as { main?: unknown }).main)
+  validateSecurityConfig(candidate.security)
+  validateDevPort(candidate.devPort)
+  validateUpdaterConfig(candidate.updater)
+  resolveWindowDeclarations(candidate)
+}
+
+// productName and version are interpolated into bundle/installer paths before
+// destructive cleanup. Keep each value a portable single path component so a
+// typo cannot make `resolve(...); rm(...)` target a parent/sibling directory.
+const UNSAFE_ARTIFACT_COMPONENT_RE = /[<>:"/\\|?*\u0000-\u001F\u007F]/
+
+function validateArtifactComponent(value: string, field: string): void {
+  if (UNSAFE_ARTIFACT_COMPONENT_RE.test(value)) {
+    throw new TypeError(`${field} must be a portable file name without reserved path or control characters`)
+  }
+}
+
+function validateMainConfig(main: unknown): void {
+  if (main === undefined || main === false) return
+  if (!main || typeof main !== 'object' || Array.isArray(main)) {
+    throw new TypeError('main must be false or a main process configuration object')
+  }
+  const candidate = main as { entry?: unknown; shutdownTimeoutMs?: unknown }
+  if (candidate.entry !== undefined
+    && (typeof candidate.entry !== 'string' || candidate.entry.trim().length === 0)) {
+    throw new TypeError('main.entry must be a non-empty string')
+  }
+  validateMainShutdownTimeoutMs(candidate.shutdownTimeoutMs)
+}
+
+function validateDevPort(value: unknown): void {
+  if (value === undefined) return
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 65_535) {
+    throw new TypeError('devPort must be an integer between 1 and 65535')
+  }
+}
+
+function validateUpdaterConfig(value: unknown): void {
+  if (value === undefined || typeof value === 'boolean') return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('updater must be a boolean or an updater configuration object')
+  }
+  const updater = value as Record<string, unknown>
+  for (const field of ['repo', 'endpoint', 'channel', 'publicKey'] as const) {
+    const candidate = updater[field]
+    if (candidate !== undefined
+      && (typeof candidate !== 'string' || candidate.trim().length === 0)) {
+      throw new TypeError(`updater.${field} must be a non-empty string`)
+    }
+  }
+  if (updater.repo !== undefined && updater.endpoint !== undefined) {
+    throw new TypeError('updater.repo and updater.endpoint are mutually exclusive')
+  }
+  if (typeof updater.endpoint === 'string') {
+    let endpoint: URL
+    try {
+      endpoint = new URL(updater.endpoint)
+    } catch {
+      throw new TypeError('updater.endpoint must be an absolute HTTP or HTTPS URL')
+    }
+    if (endpoint.protocol !== 'https:' && endpoint.protocol !== 'http:') {
+      throw new TypeError('updater.endpoint must be an absolute HTTP or HTTPS URL')
+    }
+  }
+  if (updater.checkOnStart !== undefined && typeof updater.checkOnStart !== 'boolean') {
+    throw new TypeError('updater.checkOnStart must be a boolean')
+  }
+  if (updater.checkInterval !== undefined && updater.checkInterval !== false) {
+    if (typeof updater.checkInterval !== 'string'
+      || !/^[1-9]\d*(m|h|d)$/.test(updater.checkInterval)) {
+      throw new TypeError(
+        'updater.checkInterval must look like "30m", "6h", or "1d" (or false)',
+      )
+    }
+    const amount = Number.parseInt(updater.checkInterval, 10)
+    const unit = updater.checkInterval.at(-1)
+    const multiplier = unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000
+    if (!Number.isSafeInteger(amount * multiplier)) {
+      throw new TypeError('updater.checkInterval is too large')
+    }
+  }
+}
+
+const UNSAFE_CSP_VALUE_RE = /[\u0000-\u001F\u007F"<>]/
+
+/** Shared runtime validation for defineConfig() and the Vite HTML transform. */
+export function validateContentSecurityPolicy(value: unknown): asserts value is string | false | undefined {
+  if (value === undefined || value === false) return
+  if (typeof value !== 'string') {
+    throw new TypeError('security.csp must be a string or false')
+  }
+  if (value.trim().length === 0) {
+    throw new TypeError('security.csp must not be empty; use false to disable CSP injection')
+  }
+  if (UNSAFE_CSP_VALUE_RE.test(value)) {
+    throw new TypeError(
+      'security.csp must be a single-line policy without control characters, double quotes, <, or >',
+    )
+  }
+}
+
+function validateSecurityConfig(security: MurasakiConfig['security'] | unknown): void {
+  if (security === undefined) return
+  if (!security || typeof security !== 'object' || Array.isArray(security)) {
+    throw new TypeError('security must be an object')
+  }
+  validateContentSecurityPolicy((security as { csp?: unknown }).csp)
+}
+
+const WINDOW_LABEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+const WINDOW_ROUTE_BASE = 'http://murasaki.local'
+
+/** Validate and resolve primary and secondary declarative windows. */
+export function resolveWindowDeclarations(
+  config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'updater'>,
+): ResolvedWindowConfig[] {
+  if (config.window !== undefined
+    && (!config.window || typeof config.window !== 'object' || Array.isArray(config.window))) {
+    throw new TypeError('window must be a window configuration object')
+  }
+  if (config.windows !== undefined
+    && (!config.windows || typeof config.windows !== 'object' || Array.isArray(config.windows))) {
+    throw new TypeError('windows must be an object keyed by window label')
+  }
+
+  // Validate the legacy top-level list even when window.capabilities overrides
+  // it. A stale typo must not silently become a real grant in a future release.
+  const fallbackCapabilities = resolveCapabilities(config.capabilities, 'capabilities')
+  const primaryCapabilities = config.window?.capabilities !== undefined
+    ? resolveCapabilities(config.window.capabilities, 'window.capabilities')
+    : fallbackCapabilities
+  // The built-in updater must be able to complete its verified
+  // install -> graceful quit -> apply handshake without making every existing
+  // updater app add a new permission. This implicit grant is limited to main;
+  // an updater UI hosted by a secondary renderer must opt in explicitly.
+  if (config.updater && !primaryCapabilities.includes('app:quit')) {
+    primaryCapabilities.push('app:quit')
+  }
+  const primary = resolveWindowDeclaration(
+    'main',
+    config.window ?? {},
+    true,
+    primaryCapabilities,
+  )
+  const secondary = Object.entries(config.windows ?? {}).map(([label, declaration]) => {
+    if (label.toLowerCase() === 'main') {
+      throw new TypeError('windows.main is reserved for the primary window')
+    }
+    if (!declaration || typeof declaration !== 'object' || Array.isArray(declaration)) {
+      throw new TypeError(`windows.${label} must be a window configuration object`)
+    }
+    if ('console' in declaration) {
+      throw new TypeError(`windows.${label}.console is not supported; configure the process console on window.console`)
+    }
+    const capabilities = declaration.capabilities !== undefined
+      ? resolveCapabilities(declaration.capabilities, `windows.${label}.capabilities`)
+      : []
+    return resolveWindowDeclaration(label, declaration, false, capabilities)
+  })
+  return [primary, ...secondary]
+}
+
+function resolveWindowDeclaration(
+  label: string,
+  declaration: WindowConfig,
+  primary: boolean,
+  capabilities: NativeCapability[],
+): ResolvedWindowConfig {
+  if (!WINDOW_LABEL_RE.test(label)) {
+    throw new TypeError(
+      `window label ${JSON.stringify(label)} must be 1-64 characters using letters, numbers, dot, underscore, or hyphen`,
+    )
+  }
+  validateWindowDeclaration(declaration, label)
+  const minimumSize = resolveMinimumSize(declaration, label)
+  return {
+    ...declaration,
+    ...minimumSize,
+    label,
+    primary,
+    route: resolveWindowRoute(declaration.route, label),
+    visible: declaration.visible ?? primary,
+    capabilities: [...capabilities],
+  }
+}
+
+function validateWindowDeclaration(declaration: WindowConfig, label: string): void {
+  for (const [name, value] of [
+    ['width', declaration.width],
+    ['height', declaration.height],
+  ] as const) {
+    if (value !== undefined
+      && (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647)) {
+      throw new TypeError(`window ${label} ${name} must be a positive 32-bit integer`)
+    }
+  }
+  if (declaration.title !== undefined && typeof declaration.title !== 'string') {
+    throw new TypeError(`window ${label} title must be a string`)
+  }
+  for (const [name, value] of [
+    ['resizable', declaration.resizable],
+    ['transparent', declaration.transparent],
+    ['visible', declaration.visible],
+    ['console', declaration.console],
+  ] as const) {
+    if (value !== undefined && typeof value !== 'boolean') {
+      throw new TypeError(`window ${label} ${name} must be a boolean`)
+    }
+  }
+  if (declaration.vibrancy !== undefined
+    && declaration.vibrancy !== null
+    && !['hud', 'sidebar', 'popover'].includes(declaration.vibrancy)) {
+    throw new TypeError(`window ${label} vibrancy must be hud, sidebar, popover, or null`)
+  }
+}
+
+function resolveCapabilities(value: unknown, path: string): NativeCapability[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${path} must be an array of known native capabilities`)
+  }
+  const unique: NativeCapability[] = []
+  const seen = new Set<NativeCapability>()
+  for (const capability of value) {
+    if (typeof capability !== 'string' || !NATIVE_CAPABILITY_SET.has(capability)) {
+      throw new TypeError(`${path} contains unknown native capability ${JSON.stringify(capability)}`)
+    }
+    const known = capability as NativeCapability
+    // Preserve first occurrence/order for backwards compatibility while
+    // ensuring metadata never contains duplicate grants.
+    if (!seen.has(known)) {
+      seen.add(known)
+      unique.push(known)
+    }
+  }
+  return unique
+}
+
+function resolveMinimumSize(
+  declaration: WindowConfig,
+  label: string,
+): Pick<WindowConfig, 'minWidth' | 'minHeight'> {
+  const hasWidth = declaration.minWidth !== undefined
+  const hasHeight = declaration.minHeight !== undefined
+  if (!hasWidth && !hasHeight) return {}
+  for (const [name, value] of [
+    ['minWidth', declaration.minWidth],
+    ['minHeight', declaration.minHeight],
+  ] as const) {
+    if (value !== undefined
+      && (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647)) {
+      throw new TypeError(`window ${label} ${name} must be a positive 32-bit integer`)
+    }
+  }
+  // tao accepts one two-dimensional minimum. Zero leaves the unspecified axis
+  // unconstrained instead of silently discarding the configured axis.
+  return {
+    minWidth: declaration.minWidth ?? 0,
+    minHeight: declaration.minHeight ?? 0,
+  }
+}
+
+function resolveWindowRoute(route: string | undefined, label: string): string {
+  if (route === undefined) return '/'
+  if (typeof route !== 'string' || route.length === 0 || route !== route.trim()
+    || !route.startsWith('/') || route.startsWith('//') || route.includes('\\')) {
+    throw new TypeError(`window ${label} route must be a same-origin absolute path beginning with /`)
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(route, WINDOW_ROUTE_BASE)
+  } catch {
+    throw new TypeError(`window ${label} route must be a valid same-origin relative path`)
+  }
+  if (parsed.origin !== WINDOW_ROUTE_BASE) {
+    throw new TypeError(`window ${label} route must stay on the application origin`)
+  }
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`
 }

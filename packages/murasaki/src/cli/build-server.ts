@@ -67,7 +67,7 @@ export default async function buildServer(
       await writeFile(join(outDir, 'actions.mjs'), 'export const registry = {}\n')
     } else {
       const entryPath = join(tmpRoot, 'actions-entry.js')
-      await writeFile(entryPath, buildActionsEntrySource(actionModules))
+      await writeFile(entryPath, buildActionsEntrySource(actionModules, cwd))
       input.actions = entryPath
     }
 
@@ -85,7 +85,10 @@ export default async function buildServer(
       await writeFile(join(outDir, 'main-actions.mjs'), 'export const registry = {}\n')
     } else {
       const entryPath = join(tmpRoot, 'main-actions-entry.js')
-      await writeFile(entryPath, buildRegistryEntrySource(mainModules, toMainModuleId))
+      await writeFile(
+        entryPath,
+        buildRegistryEntrySource(mainModules, (path) => toMainModuleId(path, cwd)),
+      )
       input['main-actions'] = entryPath
     }
 
@@ -138,8 +141,8 @@ export default async function buildServer(
   }
 }
 
-function buildActionsEntrySource(modules: string[]): string {
-  return buildRegistryEntrySource(modules, toActionId)
+function buildActionsEntrySource(modules: string[], projectRoot = process.cwd()): string {
+  return buildRegistryEntrySource(modules, (path) => toActionId(path, projectRoot))
 }
 
 function buildRegistryEntrySource(modules: string[], toId: (path: string) => string): string {

@@ -1,0 +1,170 @@
+---
+title: Windows & permissions
+description: Declare multiple native windows and give each renderer only the commands it needs.
+---
+
+Murasaki creates application windows from `murasaki.config.ts`. The primary
+window is the existing `window` field and always has the label `main`.
+Additional entries live in `windows`, keyed by a stable label:
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+
+  capabilities: ['clipboard:readText'], // fallback for main only
+  window: {
+    route: '/',
+    width: 1100,
+    height: 760,
+    capabilities: ['window:getLabel', 'window:open', 'window:list', 'window:manage'],
+  },
+
+  windows: {
+    settings: {
+      route: '/settings',
+      title: 'Settings',
+      width: 720,
+      height: 560,
+      // visible defaults to false for secondary windows
+      capabilities: [],
+    },
+    preview: {
+      route: '/preview',
+      visible: false,
+      capabilities: ['clipboard:readText'],
+    },
+  },
+})
+```
+
+All declared windows are created by the host. Secondary windows start hidden
+unless `visible: true` is set. A secondary window with no `capabilities` is
+deny-all; it never inherits the top-level list. For backwards compatibility,
+the primary window resolves permissions as
+`window.capabilities ?? capabilities ?? []`.
+
+Open a hidden secondary from a visible renderer, normally `main`. WebKit and
+WebView2 may either run that renderer before it is shown or defer its
+JavaScript until after it becomes visible, so do not depend on either timing
+and do not make the hidden renderer responsible for calling `windows.open()`
+on itself. Native visibility is applied by the OS event loop; when code must
+observe the post-open state through `windows.list()`, wait for `visible` to
+become `true` instead of assuming the first read is synchronous with the
+compositor.
+
+The Windows backend `console` option is primary-only because it controls the
+application backend console, not an individual native window. Putting
+`console` on a secondary declaration is rejected during configuration
+resolution.
+
+Labels must be 1–64 characters, start with a letter or number, and contain
+only letters, numbers, `.`, `_`, or `-`. `main` is reserved. A `route` must be
+a same-origin path beginning with `/`; full URLs, protocol-relative URLs, and
+backslashes are rejected during configuration resolution.
+
+## Identify and manage windows
+
+Use `appWindow` for the renderer's own native window and `windows` for a
+declared window by label:
+
+```tsx
+'use client'
+
+import { appWindow, windows } from 'murasaki/native'
+
+const current = await appWindow.getLabel()
+await windows.open('settings')
+await windows.focus('settings')
+
+const all = await windows.list()
+const settings = all.find((item) => item.label === 'settings')
+console.log({ current, settings })
+
+await windows.hide('settings')
+```
+
+`windows.list()` returns `WindowInfo[]`:
+
+```ts
+interface WindowInfo {
+  label: string
+  primary: boolean
+  visible: boolean
+  focused: boolean
+  minimized: boolean
+  maximized: boolean
+}
+```
+
+| API | Capability | Behavior |
+| --- | --- | --- |
+| `appWindow.getLabel()` | `window:getLabel` | Returns the current renderer's label. |
+| `windows.open(label)` | `window:open` | Shows, restores, and focuses a live declared window. |
+| `windows.list()` | `window:list` | Returns state for all live declared windows. |
+| `windows.show(label)` / `hide(label)` / `focus(label)` / `close(label)` | `window:manage` | Manages another declared window. |
+
+Only labels declared in configuration are available. These APIs do not create
+an arbitrary route or a new runtime window.
+
+<Callout type="warn">
+  The OS close control and `appWindow.close()` hide a secondary window, so
+  `windows.open(label)` can show that same declared window again. In contrast,
+  `windows.close(label)` explicitly destroys a secondary target; a destroyed
+  secondary cannot be recreated in the current release. Closing `main` remains
+  an application quit request.
+</Callout>
+
+## Primary close and application lifecycle
+
+Using the OS close control or `appWindow.close()` on a secondary hides that
+window and affects no other window. Closing `main` is an application quit
+request: it runs `beforeQuit()`, can be cancelled there, and then runs bounded
+`shutdown()` before the native host exits. Murasaki does not currently expose
+a separate per-window close hook. Use `windows.close(label)` only when the
+secondary should be destroyed for the rest of the process lifetime.
+
+## Per-window least privilege
+
+Permissions belong to the renderer that makes the call. A settings window
+that only edits React state can use `capabilities: []`; a preview that reads
+the clipboard can receive only `clipboard:readText`. Management permissions
+should normally live on the trusted primary renderer:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    route: '/',
+    capabilities: ['window:open', 'window:list', 'window:manage'],
+  },
+  windows: {
+    settings: { route: '/settings', capabilities: [] },
+    importer: { route: '/import', capabilities: ['dialog:openFile'] },
+  },
+})
+```
+
+Per-window capability lists limit which native command names a compromised
+renderer can call. They do not scope arguments: `window:manage` is broad, and
+`dialog:openFile` cannot yet be limited to one directory. Do not load remote
+or user-authored executable content into any privileged renderer, and validate
+app-level intent before broad operations.
+
+This is a native-command boundary, not a complete renderer sandbox. Declared
+windows currently share the same application origin and authenticated local
+Node session, so Server Actions, `'use main'`, API routes, and updater HTTP
+endpoints are not separated by these lists. Authenticate and authorize
+application operations inside those handlers; do not treat a deny-all window
+as safe for untrusted executable content.
+
+## Next
+
+<Cards>
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="Renderer-safe dialogs, shell, tray, and window controls." />
+  <Card title="Security" href="/docs/building/security" description="Trust boundaries and least-privilege guidance." />
+  <Card title="Process model" href="/docs/core-concepts/process-model" description="Primary close, Main, and shutdown ordering." />
+</Cards>

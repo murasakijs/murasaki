@@ -6,7 +6,15 @@ description: useContextMenu で本物の OS コンテキストメニューを宣
 Murasaki のコンテキストメニューは、マークアップではなくフックで宣言するため、あなたの
 state のすぐ隣で使えます — その `action` は `useState` のセッターをクロージャできます。
 HTML は一切レンダーされません。項目は Rust 側に投げられ、本物の OS メニュー(macOS で
-は `NSMenu`、Windows では `HMENU`、Linux では `GtkMenu`)がポップアップします。
+は `NSMenu`、Windows では `HMENU`)がポップアップします。宣言する各rendererへ
+`menu:context` を付与します。
+
+```ts title="murasaki.config.ts"
+window: { capabilities: ['menu:context', 'clipboard:writeText'] }
+```
+
+native roleには対応するcapabilityも必要です。この例の `clipboard:writeText` は
+`<Action.Copy />` 用で、plain custom callbackなら `menu:context` だけで足ります。
 
 ## ウィンドウ全体のメニュー
 
@@ -77,6 +85,19 @@ type ContextMenuItemSpec = ContextMenuEntry | { separator: true }
 ます — ネイティブ OS のロール(`Copy`、`Paste`、`Cut`、`SelectAll`、`Undo`、`Redo`、
 `Quit`)、またはクライアントの挙動(`Reload`、`Navigate`、`Run`)です。全リストは
 [Native APIs](/docs/guides/native-apis#built-in-menu-actions)を参照してください。
+
+native context menuには常に`menu:context`が必要です。native role actionには、直接native
+APIを呼ぶ場合と同じpermissionも必要です。
+
+| action | 追加で必要なcapability |
+| --- | --- |
+| `Copy`, `Cut` | `clipboard:writeText` |
+| `Paste` | `clipboard:readText` |
+| `Quit` | `app:quit` |
+| `SelectAll`, `Undo`, `Redo` | `menu:context` 以外は不要 |
+
+必要なrole capabilityが欠ける場合、Murasakiはmenu payload全体を拒否します。client
+behaviorと自作callbackには追加のnative capabilityは不要です。
 
 ## `createActions` による再利用可能な Actions
 

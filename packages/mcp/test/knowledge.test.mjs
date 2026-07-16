@@ -9,6 +9,7 @@ import {
   getApiReference,
   getConfigSchema,
   getRecipe,
+  isSupportedMurasakiNodeVersion,
   listRecipes,
   searchDocs,
 } from '../src/knowledge.mjs'
@@ -55,9 +56,16 @@ test('configuration schema top-level properties track MurasakiConfig', async () 
   }
   assert.deepEqual(Object.keys(schema.properties).sort(), fields.sort())
 
-  const capabilitySource = source.slice(source.indexOf('export type NativeCapability ='))
-  const capabilities = [...capabilitySource.matchAll(/^  \| '([^']+)'$/gm)].map((match) => match[1])
+  const capabilityStart = source.indexOf('export const NATIVE_CAPABILITIES = [')
+  assert.notEqual(capabilityStart, -1)
+  const capabilitySource = source.slice(capabilityStart, source.indexOf('] as const', capabilityStart))
+  const capabilities = [...capabilitySource.matchAll(/^  '([^']+)',?$/gm)].map((match) => match[1])
   assert.deepEqual(schema.properties.capabilities.items.enum, capabilities)
+  assert.deepEqual(schema.$defs.nativeCapability.enum, capabilities)
+
+  const cspPattern = new RegExp(schema.properties.security.properties.csp.oneOf[0].pattern)
+  assert.equal(cspPattern.test('   '), false)
+  assert.equal(cspPattern.test("default-src 'self'"), true)
 
   assert.deepEqual(schema.properties.protocols.items.required, ['scheme'])
   assert.equal(schema.properties.protocols.items.properties.scheme.type, 'string')
@@ -97,7 +105,7 @@ test('config schema supports dot paths and rejects unknown paths', async () => {
 })
 
 test('compatibility never upgrades planned features to supported', async () => {
-  const result = await checkCompatibility({ features: ['multi-window', 'application-packaging'], platform: 'macos' })
+  const result = await checkCompatibility({ features: ['linux-distribution', 'native-utilities'], platform: 'linux' })
   assert.equal(result.overall, 'planned')
   assert.equal(result.results[0].verdict, 'planned')
   assert.equal(result.results[1].verdict, 'limited')
@@ -119,6 +127,10 @@ test('recipes are sourced from localized documentation with English fallback', a
   const listed = await listRecipes({ locale: 'ja' })
   assert.ok(listed.recipes.some((recipe) => recipe.id === 'routing'))
   assert.ok(listed.recipes.some((recipe) => recipe.id === 'deep-links-and-file-associations'))
+  assert.ok(listed.recipes.some((recipe) => recipe.id === 'multi-window-permissions'))
+  assert.ok(listed.recipes.some((recipe) => recipe.id === 'node-main-lifecycle'))
+  assert.ok(listed.recipes.some((recipe) => recipe.id === 'tray-icon'))
+  assert.ok(listed.recipes.some((recipe) => recipe.id === 'security-and-csp'))
   const recipe = await getRecipe({ id: 'routing', locale: 'ja' })
   assert.equal(recipe.found, true)
   assert.equal(recipe.locale, 'ja')
@@ -127,6 +139,18 @@ test('recipes are sourced from localized documentation with English fallback', a
   const openRequestRecipe = await getRecipe({ id: 'deep-links-and-file-associations', locale: 'en' })
   assert.equal(openRequestRecipe.found, true)
   assert.equal(openRequestRecipe.slug, 'guides/deep-links')
+
+  const nodeMainRecipe = await getRecipe({ id: 'node-main-lifecycle', locale: 'en' })
+  assert.equal(nodeMainRecipe.found, true)
+  assert.equal(nodeMainRecipe.slug, 'guides/node-main')
+
+  const trayRecipe = await getRecipe({ id: 'tray-icon', locale: 'en' })
+  assert.equal(trayRecipe.found, true)
+  assert.equal(trayRecipe.slug, 'guides/native-apis')
+
+  const securityRecipe = await getRecipe({ id: 'security-and-csp', locale: 'en' })
+  assert.equal(securityRecipe.found, true)
+  assert.equal(securityRecipe.slug, 'building/security')
 })
 
 test('doctor inspects known project files without executing project code', async () => {
@@ -145,4 +169,13 @@ test('doctor inspects known project files without executing project code', async
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('Murasaki Node support begins at 22.12.0', () => {
+  assert.equal(isSupportedMurasakiNodeVersion('20.19.0'), false)
+  assert.equal(isSupportedMurasakiNodeVersion('22.11.0'), false)
+  assert.equal(isSupportedMurasakiNodeVersion('22.12.0'), true)
+  assert.equal(isSupportedMurasakiNodeVersion('22.12.0-rc.1'), true)
+  assert.equal(isSupportedMurasakiNodeVersion('23.0.0'), true)
+  assert.equal(isSupportedMurasakiNodeVersion('not-a-version'), false)
 })

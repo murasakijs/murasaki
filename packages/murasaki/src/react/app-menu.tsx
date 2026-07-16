@@ -44,6 +44,7 @@ import { isValidElement, useEffect, useRef } from 'react'
 import type { ReactElement } from 'react'
 import { post } from './rpc.js'
 import type { ContextMenuItem as WireMenuItem } from './rpc.js'
+import { appWindow } from '../native/index.js'
 import { useRouter } from './router.js'
 import { parseShortcut } from './shortcut.js'
 
@@ -141,6 +142,7 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 let listenerRefs = 0
+let appMenuInstanceCounter = 0
 function retainGlobalListeners() {
   if (listenerRefs++ === 0) {
     window.addEventListener('murasaki:menuclick', onMenuClick)
@@ -161,11 +163,26 @@ function releaseGlobalListeners() {
 
 export function useAppMenu(menus: AppMenu[]): void {
   const router = useRouter()
+  const instanceRef = useRef<number | null>(null)
+  if (instanceRef.current === null) instanceRef.current = appMenuInstanceCounter++
+  const generationRef = useRef({ shape: '', value: 0 })
 
   // Rebuilt every render (menus is a fresh array and its actions close over
   // the latest state); the ref keeps the once-installed listeners seeing it.
   const parsedRef = useRef<Parsed>({ menus: [], handlers: new Map(), shortcuts: [] })
-  parsedRef.current = buildAppMenu(menus, router)
+  const shapeCandidate = buildAppMenu(menus, router, 'murasaki-app-menu-shape')
+  const shape = JSON.stringify(shapeCandidate.menus, (key, value) => key === 'id' ? undefined : value)
+  if (generationRef.current.shape !== shape) {
+    generationRef.current = {
+      shape,
+      value: generationRef.current.value + 1,
+    }
+  }
+  parsedRef.current = buildAppMenu(
+    menus,
+    router,
+    `murasaki-app-menu-${instanceRef.current}-${generationRef.current.value}`,
+  )
 
   useEffect(() => {
     retainGlobalListeners()
@@ -202,9 +219,13 @@ export function useAppMenu(menus: AppMenu[]): void {
 // variant instead of an `<Action.* />` element.
 // ---------------------------------------------------------------------------
 
-function buildAppMenu(menus: AppMenu[], router: { push(to: string): void }): Parsed {
+function buildAppMenu(
+  menus: AppMenu[],
+  router: { push(to: string): void },
+  idPrefix: string,
+): Parsed {
   let counter = 0
-  const nextId = () => `murasaki-app-menu-${counter++}`
+  const nextId = () => `${idPrefix}-${counter++}`
   const handlers = new Map<string, () => void>()
   const shortcuts: { matches: (e: KeyboardEvent) => boolean; run: () => void }[] = []
 
@@ -250,6 +271,10 @@ function buildAppMenu(menus: AppMenu[], router: { push(to: string): void }): Par
           // Native side ignores `label`/`id` for a role item (uses its own
           // localized text + fixed id) — sent anyway for wire-shape uniformity.
           out.push({ id, role: spec.role as WireMenuItem['role'] })
+          if (spec.role === 'close') {
+            const { matches } = parseShortcut('command,W')
+            shortcuts.push({ matches, run: () => { void appWindow.close() } })
+          }
         }
         continue
       }

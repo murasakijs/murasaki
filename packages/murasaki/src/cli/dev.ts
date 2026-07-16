@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import http from 'node:http'
 import net from 'node:net'
 import { loadNative } from '../runtime/native.js'
 import { detectLocale, resolveMenuLabels } from '../menu-i18n.js'
-import type { MurasakiConfig } from '../config.js'
+import { resolveWindowDeclarations } from '../config.js'
+import { loadUserConfig } from './load-config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -31,87 +33,103 @@ export default async function dev(_argv: string[]) {
   if (port !== requestedPort) {
     process.stdout.write(`\n  Port ${requestedPort} is in use — starting on ${port} instead\n`)
   }
-  const url = `http://localhost:${port}/`
+  const url = `http://127.0.0.1:${port}/`
 
-  const vite = await startViteChild(cwd, port)
+  const runtimeToken = randomBytes(32).toString('hex')
+  const vite = await startViteChild(cwd, port, runtimeToken)
   try {
     await waitForServer(url, 15_000)
   } catch (err) {
-    vite.kill()
+    await stopViteChild(vite)
     throw err
   }
 
-  const native = await loadNative()
-  const app = new native.Application()
-  const webview = app.createWebview(
-    {
-      title: config.productName,
-      width: config.window?.width ?? 1280,
-      height: config.window?.height ?? 800,
-      minWidth: config.window?.minWidth,
-      minHeight: config.window?.minHeight,
-      resizable: config.window?.resizable,
-      transparent: config.window?.transparent,
-      // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
-      // undefined: napi's Option<String> maps undefined to None but rejects an
-      // explicit null with "Failed to convert Null into String".
-      vibrancy: config.window?.vibrancy ?? undefined,
-      icon: config.icon ? resolve(cwd, config.icon) : undefined,
-      version: config.version,
-      description: config.description,
-      copyright: config.copyright,
-      homepage: config.homepage,
-      authors: config.authors,
-      menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
-    },
-    {
-      url,
-      devtools: true,
-      appId: config.appId,
-      capabilities: config.capabilities,
-      trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,
-    },
-  )
+  try {
+    const native = await loadNative()
+    const app = new native.Application()
+    const shutdownTimeoutMs = config.main === false
+      ? 10_000
+      : (config.main?.shutdownTimeoutMs ?? 10_000)
+    if (app.configureShutdown) {
+      app.configureShutdown(port, runtimeToken, shutdownTimeoutMs)
+    } else {
+      // Compatibility with an older native prebuild. Current prebuilds use
+      // configureShutdown + run_return, so this callback is only a fallback.
+      app.onQuit(() => vite.kill())
+    }
+    const declarations = resolveWindowDeclarations(config)
+    // Keep every native webview strongly referenced for the lifetime of the
+    // blocking app loop. Secondary windows are created eagerly but default to
+    // hidden; the declarative window API opens/manages them by label.
+    const webviews = declarations.map((declaration) => app.createWebview(
+      {
+        label: declaration.label,
+        primary: declaration.primary,
+        title: declaration.title ?? config.productName,
+        width: declaration.width ?? 1280,
+        height: declaration.height ?? 800,
+        minWidth: declaration.minWidth,
+        minHeight: declaration.minHeight,
+        resizable: declaration.resizable,
+        transparent: declaration.transparent,
+        visible: declaration.visible,
+        // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
+        // undefined: napi's Option<String> maps undefined to None but rejects an
+        // explicit null with "Failed to convert Null into String".
+        vibrancy: declaration.vibrancy ?? undefined,
+        icon: config.icon ? resolve(cwd, config.icon) : undefined,
+        version: config.version,
+        description: config.description,
+        copyright: config.copyright,
+        homepage: config.homepage,
+        authors: config.authors,
+        menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
+      },
+      {
+        url: new URL(declaration.route, url).href,
+        devtools: true,
+        appId: config.appId,
+        capabilities: declaration.capabilities,
+        trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,
+      },
+    ))
 
-  // Context menus are handled natively on the Rust side (see
-  // crates/native/src/webview.rs) — Application::run() blocks Node's event
-  // loop, so this callback never fires while the app is open anyway. Kept
-  // for future use (e.g. once the run loop is wired to also pump libuv).
-  webview.onIpcMessage(() => {})
+    // Context menus are handled natively on the Rust side (see
+    // crates/native/src/webview.rs) — Application::run() blocks Node's event
+    // loop, so this callback never fires while the app is open anyway. Kept
+    // for future use (e.g. once the run loop is wired to also pump libuv).
+    for (const webview of webviews) webview.onIpcMessage(() => {})
 
-  app.onQuit(() => {
-    vite.kill()
-    process.exit(0)
-  })
+    // Do not install JavaScript SIGINT/SIGTERM listeners here. `app.run()` is
+    // a blocking native event loop, so libuv cannot execute those callbacks;
+    // registering them would suppress Node's default termination and make
+    // Ctrl+C hang. Terminal Ctrl+C reaches the whole foreground process group
+    // (the Vite child handles it too), while normal window/app shutdown returns
+    // through the finally block below and performs a bounded child reap.
+    process.on('exit', () => vite.kill())
 
-  const cleanup = () => {
-    vite.kill()
+    // Dock icon in dev mode too — see prod-launcher.mjs for why this needs to
+    // be set at runtime rather than relying on Info.plist alone.
+    if (config.icon) {
+      try {
+        app.setIconPath(resolve(cwd, config.icon))
+      } catch {}
+    }
+
+    app.run()
+  } finally {
+    await stopViteChild(vite)
   }
-  process.on('SIGINT', cleanup)
-  process.on('SIGTERM', cleanup)
-  process.on('exit', cleanup)
-
-  // Dock icon in dev mode too — see prod-launcher.mjs for why this needs to
-  // be set at runtime rather than relying on Info.plist alone.
-  if (config.icon) {
-    try {
-      app.setIconPath(resolve(cwd, config.icon))
-    } catch {}
-  }
-
-  app.run()
 }
 
-// Vite's dev server binds `localhost`, which on macOS resolves to IPv6 `::1`.
-// The probe below MUST bind the same host: a host-less `listen(port)` binds
-// `0.0.0.0` (IPv4), which does NOT collide with a `[::1]:port` held by a stale
-// dev server — so it would report the port free, hand it to Vite, and Vite
-// would then fail to bind `::1`. Probing `localhost` matches Vite exactly.
-const DEV_HOST = 'localhost'
+// Keep the port probe, Vite child, native shutdown client, and WebView on the
+// same explicit loopback address. This avoids localhost choosing IPv6 while
+// the Rust shutdown transport connects to IPv4.
+const DEV_HOST = '127.0.0.1'
 
 /**
  * Resolves the first free TCP port at or after `startPort`, probing on the same
- * host Vite binds (`localhost`). Binds a throwaway server on each candidate and
+ * host Vite binds (`127.0.0.1`). Binds a throwaway server on each candidate and
  * returns the first that listens cleanly. There is an inherent probe→bind race
  * — Vite still runs with `strictPort`, so if the port is grabbed in that window
  * it fails loudly rather than silently drifting.
@@ -140,7 +158,7 @@ function findFreePort(startPort: number, maxTries = 20): Promise<number> {
   })
 }
 
-function startViteChild(cwd: string, port: number) {
+function startViteChild(cwd: string, port: number, runtimeToken: string) {
   // Runs Vite via its JS API in a child process (see assets/dev-server.mjs) so
   // murasaki can print its own branded banner instead of Vite's own CLI output —
   // the vite CLI itself is never invoked here.
@@ -148,7 +166,7 @@ function startViteChild(cwd: string, port: number) {
   const child = spawn(process.execPath, [devServerEntry, '--port', String(port)], {
     cwd,
     stdio: ['ignore', 'inherit', 'inherit'],
-    env: process.env,
+    env: { ...process.env, MURASAKI_RUNTIME_TOKEN: runtimeToken },
   })
   child.on('exit', (code) => {
     // The child (assets/dev-server.mjs) already prints a branded error on a
@@ -158,11 +176,26 @@ function startViteChild(cwd: string, port: number) {
   return child
 }
 
+async function stopViteChild(child: ReturnType<typeof spawn>): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise<void>((resolveOk) => child.once('exit', () => resolveOk()))
+  child.kill('SIGTERM')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const graceful = await Promise.race([
+    exited.then(() => true),
+    new Promise<false>((resolveOk) => {
+      timer = setTimeout(() => resolveOk(false), 3_000)
+    }),
+  ])
+  if (timer) clearTimeout(timer)
+  if (graceful || child.exitCode !== null || child.signalCode !== null) return
+  child.kill('SIGKILL')
+  await exited
+}
+
 /**
- * Poll the actual dev URL until it answers. Uses http.get on the same URL the
- * webview loads — Node resolves `localhost` across IPv4/IPv6, so this waits for
- * exactly the endpoint that matters (Vite binds to `::1` on macOS, which a raw
- * `127.0.0.1` TCP probe would miss forever).
+ * Poll the actual dev URL until it answers. The child binds the IPv4 loopback
+ * explicitly so the Rust native host and the renderer use the same endpoint.
  */
 function waitForServer(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
@@ -181,20 +214,4 @@ function waitForServer(url: string, timeoutMs: number): Promise<void> {
     }
     tryOnce()
   })
-}
-
-async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
-  for (const name of ['murasaki.config.ts', 'murasaki.config.js', 'murasaki.config.mjs']) {
-    const p = resolve(cwd, name)
-    try {
-      const mod = await import(pathToFileURL(p).href)
-      const cfg = mod.default ?? mod.config ?? mod
-      if (cfg && typeof cfg === 'object') return cfg
-    } catch (err: any) {
-      if (err?.code !== 'ERR_MODULE_NOT_FOUND') throw err
-    }
-  }
-  throw new Error(
-    'murasaki: no config found — create murasaki.config.ts at the project root.',
-  )
 }

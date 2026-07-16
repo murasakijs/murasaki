@@ -8,6 +8,7 @@
     "api-routes",
     "metadata",
     "middleware",
+    "windows",
     "native-apis",
     "auto-update",
     "context-menu",

@@ -11,7 +11,7 @@ and a small Rust host owns the native window and application lifecycle.
 ┌──────────────── Native application ────────────────┐
 │                                                    │
 │  Rust host (tao / wry / muda)                      │
-│  window · WebView · native menus · update handoff  │
+│  windows · WebViews · native menus · update handoff│
 │                       │                            │
 │                       │ launches / supervises      │
 │                       ▼                            │
@@ -37,16 +37,16 @@ database, socket, worker, and secret-bearing code in
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Rust host | Native event loop, one application window, navigation policy, OS open-request normalization, menus, Node child supervision, final update handoff | Business logic and React state |
-| Local Node runtime | Long-lived main lifecycle, registered URL/file handling, actions, API routes, update verification, application resources and data | Native window creation APIs (not public yet) |
-| Renderer | UI, routing, browser APIs, calling typed backend functions | Direct filesystem/Node/native module access |
+| Rust host | Native event loop, declared application windows, per-window navigation/capability policy, OS open-request normalization, menus, Node child supervision, final update handoff | Business logic and React state |
+| Local Node runtime | Long-lived main lifecycle, registered URL/file handling, actions, API routes, update verification, application resources and data | Arbitrary native window creation |
+| Renderer | UI, routing, browser APIs, typed backend calls, permitted management of declared windows | Direct filesystem/Node/native module access |
 
 <Callout type="warn">
-  Murasaki is pre-1.0. Multi-window management and per-window/per-origin
-  capability policies are not public features yet. Packaged macOS/Windows apps
-  enforce a single instance, can register URL schemes and file associations,
-  and expose matching activations to Node Main through `openRequested()`.
-  Renderer native commands have a deny-by-default typed allowlist. Check [Platform & feature
+  Murasaki is pre-1.0. Declared windows have independent, deny-by-default
+  command allowlists, but capability arguments and path/URL scopes are not yet
+  policy-controlled. Packaged macOS/Windows apps enforce a single instance,
+  can register URL schemes and file associations, and expose matching
+  activations to Node Main through `openRequested()`. Check [Platform & feature
   status](/docs/core-concepts/platform-feature-status) before committing a
   production architecture to a feature.
 </Callout>
@@ -61,6 +61,7 @@ processes differ:
 | Web assets | Vite dev server with HMR | `dist/client` served by bundled Node |
 | Node backend | Vite child process | Portable Node runtime inside app resources |
 | Native host | CLI process loads `@murasakijs/native` | Standalone Rust launcher |
+| Declared windows | All routes created with individual dev WebViews | All routes created from resolved bundle metadata |
 | Main entry | Loaded with Vite SSR; exact entry hot-reloads | Compiled to `server/main.mjs` |
 | Backend calls | Vite middleware | Bundled loopback HTTP server |
 | URL/file registration | Not installed by dev mode | macOS app metadata or Windows installer registry |

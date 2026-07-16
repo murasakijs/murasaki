@@ -17,6 +17,10 @@ use tao::{
   event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
   window::WindowBuilder,
 };
+use tao::platform::run_return::EventLoopExtRunReturn;
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::launcher::shared::{ShutdownCoordinator, ShutdownPoll};
 
 #[cfg(target_os = "macos")]
 use crate::menu::build_default_app_menu;
@@ -25,13 +29,20 @@ use crate::menu::build_windows_menu_bar;
 use crate::{
   types::{WebviewOptions, WindowOptions},
   webview::Webview,
-  window::BrowserWindow,
+  window::{BrowserWindow, SharedWindowRegistry, WindowRegistry},
 };
 
 /// Custom user event dispatched from JS thread into the tao loop.
 pub enum UserEvent {
   Wake,
-  Quit,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[derive(Clone)]
+struct DevShutdownEndpoint {
+  port: u16,
+  runtime_token: String,
+  transport_timeout: Duration,
 }
 
 #[napi]
@@ -40,25 +51,20 @@ pub struct Application {
   on_quit: Rc<RefCell<Option<Arc<ThreadsafeFunction<()>>>>>,
   /// Holds the installed NSApp menu bar alive — muda's `Menu` releases the
   /// underlying NSMenu on drop, so this must outlive the app, not just the
-  /// `create_window()` call that installs it. `None` until the first window
+  /// `create_window()` call that installs it. `None` until the primary window
   /// is created; also doubles as the "already installed" guard.
   app_menu: Rc<RefCell<Option<muda::Menu>>>,
   /// Windows only: same reasoning as `app_menu` above, just for the native
   /// Win32 menu bar (`Menu::init_for_hwnd`) instead of `init_for_nsapp`.
-  /// `None` until the first window is created.
+  /// `None` until the primary window is created.
   #[cfg(target_os = "windows")]
   windows_menu_bar: Rc<RefCell<Option<muda::Menu>>>,
-  /// A handle to the most recently created webview, so `run()` can dispatch
-  /// native menu clicks into it (see `webview::poll_menu_bar_events`/
-  /// `webview::poll_app_menu_events`). `None` before a webview exists.
+  /// Every live/declaratively-created window keyed by its stable label.
+  /// Webview IPC and the event loop share this registry so cross-window
+  /// commands cannot escape the set of declared windows.
+  windows: SharedWindowRegistry,
   #[cfg(any(target_os = "macos", target_os = "windows"))]
-  webview_handle: Rc<RefCell<Option<crate::webview::SharedWebview>>>,
-  /// Windows only: a handle to the most recently created window, so `run()`
-  /// can act on menu-bar clicks that operate on the window itself (currently
-  /// just Minimize — see `webview::poll_menu_bar_events`). `None` before a
-  /// window exists.
-  #[cfg(target_os = "windows")]
-  window_handle: Rc<RefCell<Option<crate::window::SharedWindow>>>,
+  shutdown_endpoint: Rc<RefCell<Option<DevShutdownEndpoint>>>,
 }
 
 #[napi]
@@ -88,17 +94,51 @@ impl Application {
       app_menu: Rc::new(RefCell::new(None)),
       #[cfg(target_os = "windows")]
       windows_menu_bar: Rc::new(RefCell::new(None)),
+      windows: Rc::new(RefCell::new(WindowRegistry::default())),
       #[cfg(any(target_os = "macos", target_os = "windows"))]
-      webview_handle: Rc::new(RefCell::new(None)),
-      #[cfg(target_os = "windows")]
-      window_handle: Rc::new(RefCell::new(None)),
+      shutdown_endpoint: Rc::new(RefCell::new(None)),
     })
+  }
+
+  /// Configure the private dev-server endpoint used to run the same
+  /// cancellable Node main shutdown lifecycle as the production launcher.
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  #[napi(js_name = "configureShutdown")]
+  pub fn configure_shutdown(
+    &self,
+    port: u16,
+    runtime_token: String,
+    timeout_ms: u32,
+  ) -> Result<()> {
+    const MAX_TIMEOUT_MS: u32 = 300_000;
+    const TRANSPORT_GRACE_MS: u64 = 2_000;
+    if timeout_ms == 0 || timeout_ms > MAX_TIMEOUT_MS {
+      return Err(Error::new(
+        Status::InvalidArg,
+        format!("shutdown timeout must be between 1 and {MAX_TIMEOUT_MS} milliseconds"),
+      ));
+    }
+    if runtime_token.len() != 64 || !runtime_token.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+      return Err(Error::new(
+        Status::InvalidArg,
+        "runtime token must be a 256-bit hexadecimal value",
+      ));
+    }
+    *self.shutdown_endpoint.borrow_mut() = Some(DevShutdownEndpoint {
+      port,
+      runtime_token,
+      transport_timeout: Duration::from_millis(u64::from(timeout_ms) + TRANSPORT_GRACE_MS),
+    });
+    Ok(())
   }
 
   /// Create a native window bound to this Application's event loop.
   #[napi(js_name = "createWindow")]
   pub fn create_window(&self, opts: Option<WindowOptions>) -> Result<BrowserWindow> {
     let opts = opts.unwrap_or(WindowOptions {
+      label: Some("main".to_string()),
+      primary: Some(true),
+      visible: Some(true),
       title: None,
       width: None,
       height: None,
@@ -115,12 +155,16 @@ impl Application {
       authors: None,
       menu_labels: None,
     });
+    let label = opts.label.clone().unwrap_or_else(|| "main".to_string());
+    let primary = opts.primary.unwrap_or(label == "main");
+    self.windows.borrow().validate_registration(&label, primary)
+      .map_err(|error| Error::new(Status::InvalidArg, error))?;
 
-    // Install the standard macOS app menu bar (App/Edit/Window) once, on the
-    // first window created. Without this, NSApp has no main menu at all: the
+    // Install the standard macOS app menu bar (App/Edit/Window) once, for the
+    // primary window. Without this, NSApp has no main menu at all: the
     // bold app-name menu is empty and Cmd+Q/Cmd+C/Cmd+V don't work.
     #[cfg(target_os = "macos")]
-    if self.app_menu.borrow().is_none() {
+    if primary && self.app_menu.borrow().is_none() {
       let app_name = opts.title.as_deref().unwrap_or("Murasaki");
       let about = crate::menu::AboutInfo {
         name: app_name,
@@ -146,8 +190,8 @@ impl Application {
     // this, a JS-posted IPC message generates no OS event, so a
     // `ControlFlow::Wait` loop never re-polls `quit_requested()` until the
     // next mouse/keyboard event. Routed through `UserEvent::Wake` (not
-    // `Quit`) so `run()`'s `quit_requested()` poll below still fires the
-    // registered `onQuit` callback — `UserEvent::Quit` exits without it.
+    // a separate quit event) so `run()`'s `quit_requested()` poll below still
+    // fires the registered `onQuit` callback.
     let wake_proxy = event_loop.create_proxy();
     let wake: Rc<dyn Fn()> = Rc::new(move || {
       let _ = wake_proxy.send_event(UserEvent::Wake);
@@ -159,7 +203,8 @@ impl Application {
         opts.width.unwrap_or(1280) as f64,
         opts.height.unwrap_or(800) as f64,
       ))
-      .with_resizable(opts.resizable.unwrap_or(true));
+      .with_resizable(opts.resizable.unwrap_or(true))
+      .with_visible(opts.visible.unwrap_or(true));
 
     if let (Some(w), Some(h)) = (opts.min_width, opts.min_height) {
       builder = builder.with_min_inner_size(LogicalSize::new(w as f64, h as f64));
@@ -174,13 +219,12 @@ impl Application {
 
     crate::window::center_on_primary_monitor(&window);
 
-    // Install the native Win32 menu bar (File/Edit/Window) once, on the first
-    // window created — same "install once" semantics as the macOS app menu
-    // above, since (for now) murasaki only ever drives one window per
-    // process. Attaching requires the window's HWND, so unlike the macOS
+    // Install the native Win32 menu bar (File/Edit/Window) once, on the
+    // primary window — same "install once" semantics as the macOS app menu
+    // above. Attaching requires the window's HWND, so unlike the macOS
     // block above this has to happen after `build()` rather than before it.
     #[cfg(target_os = "windows")]
-    if self.windows_menu_bar.borrow().is_none() {
+    if primary && self.windows_menu_bar.borrow().is_none() {
       // Dev mode has no config→native plumbing for About metadata yet — `None`
       // here just means the startup bar has no Help/About submenu, same as
       // before this feature (see `menu::build_windows_menu_bar`'s doc comment).
@@ -199,15 +243,14 @@ impl Application {
       }
     }
 
-    let browser_window = BrowserWindow::from_window(window, self.app_menu_context(&opts), wake);
-
-    // Windows only: keep a handle so `run()`'s event loop can act on
-    // menu-bar clicks that operate on the window itself — see
-    // `window_handle`'s doc comment.
-    #[cfg(target_os = "windows")]
-    {
-      *self.window_handle.borrow_mut() = Some(browser_window.handle());
-    }
+    let browser_window = BrowserWindow::from_window(
+      window,
+      label,
+      primary,
+      self.windows.clone(),
+      self.app_menu_context(&opts),
+      wake,
+    )?;
 
     Ok(browser_window)
   }
@@ -252,32 +295,50 @@ impl Application {
   ) -> Result<Webview> {
     let win = self.create_window(window_opts)?;
     let webview = win.create_webview(webview_opts)?;
-    // Keep a handle so `run()`'s event loop can dispatch native menu clicks
-    // into it — see `webview_handle`'s doc comment.
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-      *self.webview_handle.borrow_mut() = Some(webview.handle());
-    }
     Ok(webview)
   }
 
   /// Run the tao event loop. Blocks the calling thread until quit.
   #[napi]
   pub fn run(&self) -> Result<()> {
-    let event_loop = self
+    let mut event_loop = self
       .event_loop
       .borrow_mut()
       .take()
       .ok_or_else(|| Error::new(Status::GenericFailure, "event loop already consumed"))?;
 
     let on_quit = self.on_quit.clone();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    let webview_handle = self.webview_handle.clone();
+    let windows = self.windows.clone();
+    #[cfg(target_os = "macos")]
+    let app_menu_slot = self.app_menu.clone();
     #[cfg(target_os = "windows")]
-    let window_handle = self.window_handle.clone();
+    let app_menu_slot = self.windows_menu_bar.clone();
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let shutdown_endpoint = self.shutdown_endpoint.clone();
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let wake_proxy = event_loop.create_proxy();
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let mut shutdown = ShutdownCoordinator::new();
+    let mut did_quit = false;
 
-    event_loop.run(move |event, _target, control_flow| {
+    event_loop.run_return(|event, _target, control_flow| {
       *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
+      let mut shutdown_reason = None;
+
+      #[cfg(any(target_os = "macos", target_os = "windows"))]
+      match shutdown.poll() {
+        ShutdownPoll::Proceed { transport_error } => {
+          if let Some(error) = transport_error {
+            eprintln!("murasaki: graceful shutdown transport failed: {error}");
+          }
+          *control_flow = ControlFlow::Exit;
+          let resources = windows.borrow_mut().prepare_close_all();
+          crate::window::drop_all_webviews(resources);
+          did_quit = true;
+          return;
+        }
+        ShutdownPoll::Cancelled | ShutdownPoll::None => {}
+      }
 
       // Windows: drain native menu clicks every tick (both the startup
       // default bar and any `useAppMenu` replacement — the menu bar is
@@ -287,19 +348,24 @@ impl Application {
       // way as the window's own close button, just below.
       #[cfg(target_os = "windows")]
       {
-        let window_handle_ref = window_handle.borrow();
-        let webview_handle_ref = webview_handle.borrow();
-        if let (Some(window_slot), Some(webview_slot)) =
-          (window_handle_ref.as_ref(), webview_handle_ref.as_ref())
-        {
-          if crate::webview::poll_menu_bar_events(window_slot, webview_slot) {
-            *control_flow = ControlFlow::Exit;
-            // Drop the wry WebView so WebView2 shuts its browser processes
-            // down — `EventLoop::run` calls `std::process::exit` once this
-            // closure returns, which skips destructors, orphaning it.
-            let _ = webview_slot.borrow_mut().take();
-            if let Some(tsf) = on_quit.borrow().as_ref() {
-              let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+        if let Some((label, window_slot, webview_slot)) = WindowRegistry::dispatch_target(&windows) {
+          let app_menu_webview = WindowRegistry::primary_dispatch_target(&windows)
+            .map(|(_, _, webview)| webview)
+            .unwrap_or_else(|| webview_slot.clone());
+          let outcome = crate::webview::poll_menu_bar_events(
+            &window_slot,
+            &webview_slot,
+            &app_menu_webview,
+            &app_menu_slot,
+          );
+          if outcome.quit {
+            shutdown_reason = Some("app-quit");
+          }
+          if outcome.close {
+            if windows.borrow().is_primary(&label) {
+              shutdown_reason = Some("window-close");
+            } else {
+              crate::window::set_window_visible(&window_slot, false);
             }
           }
         }
@@ -310,62 +376,107 @@ impl Application {
       // this before `useAppMenu` existed.
       #[cfg(target_os = "macos")]
       {
-        if let Some(webview_slot) = webview_handle.borrow().as_ref() {
-          crate::webview::poll_app_menu_events(webview_slot);
-          crate::webview::poll_tray_events(webview_slot);
+        if let (Some((label, window_slot, _)), Some((_, _, app_menu_webview))) = (
+          WindowRegistry::dispatch_target(&windows),
+          WindowRegistry::primary_dispatch_target(&windows),
+        ) {
+          let outcome = crate::webview::poll_app_menu_events(
+            &window_slot,
+            &app_menu_webview,
+            &app_menu_slot,
+          );
+          if outcome.quit {
+            shutdown_reason = Some("app-quit");
+          }
+          if outcome.close {
+            if windows.borrow().is_primary(&label) {
+              shutdown_reason = Some("window-close");
+            } else {
+              crate::window::set_window_visible(&window_slot, false);
+            }
+          }
         }
       }
 
-      #[cfg(target_os = "windows")]
-      if let Some(webview_slot) = webview_handle.borrow().as_ref() {
-        crate::webview::poll_tray_events(webview_slot);
+      #[cfg(any(target_os = "macos", target_os = "windows"))]
+      if let Some((_label, webview_slot, tray_slot)) = WindowRegistry::tray_dispatch_target(&windows) {
+        crate::webview::poll_tray_events(&webview_slot, &tray_slot);
+      }
+
+      let close_requests = windows.borrow_mut().take_close_requests();
+      for label in close_requests {
+        if windows.borrow().is_primary(&label) {
+          shutdown_reason = Some("window-close");
+        } else {
+          let resources = windows.borrow_mut().prepare_close_secondary(&label);
+          match resources {
+            Ok(resources) => crate::window::drop_closed_window(resources),
+            Err(error) => eprintln!("murasaki: failed to close window {label}: {error}"),
+          }
+        }
       }
 
       // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
       // doc comment. Same shutdown path as the window's own close button
       // below: fire the registered `onQuit` callback and exit the loop.
       if crate::webview::quit_requested() {
-        *control_flow = ControlFlow::Exit;
-        // Drop the wry WebView so WebView2 shuts its browser processes down —
-        // `EventLoop::run` calls `std::process::exit` once this closure
-        // returns, which skips destructors, orphaning it.
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
-        if let Some(webview_slot) = webview_handle.borrow().as_ref() {
-          let _ = webview_slot.borrow_mut().take();
-        }
-        if let Some(tsf) = on_quit.borrow().as_ref() {
-          let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+        shutdown_reason = Some("app-quit");
+      }
+
+      if let Event::WindowEvent {
+        event: WindowEvent::CloseRequested,
+        window_id,
+        ..
+      } = &event {
+        let label = WindowRegistry::label_for_id(&windows, *window_id);
+        if let Some(label) = label {
+          if windows.borrow().is_primary(&label) {
+            shutdown_reason = Some("window-close");
+          } else {
+            let window = windows.borrow().live_window(&label);
+            match window {
+              Ok(window) => crate::window::set_window_visible(&window, false),
+              Err(error) => eprintln!("murasaki: failed to hide window {label}: {error}"),
+            }
+          }
         }
       }
 
-      match event {
-        Event::WindowEvent {
-          event: WindowEvent::CloseRequested,
-          ..
-        } => {
-          *control_flow = ControlFlow::Exit;
-          // Drop the wry WebView so WebView2 shuts its browser processes
-          // down — see the `quit_requested()` branch above for why.
-          #[cfg(any(target_os = "macos", target_os = "windows"))]
-          if let Some(webview_slot) = webview_handle.borrow().as_ref() {
-            let _ = webview_slot.borrow_mut().take();
-          }
-          if let Some(tsf) = on_quit.borrow().as_ref() {
-            let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
-          }
+      if let Some(reason) = shutdown_reason {
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        if let Some(endpoint) = shutdown_endpoint.borrow().clone() {
+          let wake = wake_proxy.clone();
+          shutdown.begin(
+            endpoint.port,
+            &endpoint.runtime_token,
+            reason,
+            endpoint.transport_timeout,
+            move || {
+              let _ = wake.send_event(UserEvent::Wake);
+            },
+          );
+          return;
         }
-        Event::UserEvent(UserEvent::Quit) => {
-          *control_flow = ControlFlow::Exit;
-          // Drop the wry WebView so WebView2 shuts its browser processes
-          // down — see the `quit_requested()` branch above for why.
-          #[cfg(any(target_os = "macos", target_os = "windows"))]
-          if let Some(webview_slot) = webview_handle.borrow().as_ref() {
-            let _ = webview_slot.borrow_mut().take();
-          }
-        }
-        _ => {}
+
+        *control_flow = ControlFlow::Exit;
+        let resources = windows.borrow_mut().prepare_close_all();
+        crate::window::drop_all_webviews(resources);
+        did_quit = true;
       }
     });
+
+    // `run_return` restores the JavaScript event loop. Clean up any resources
+    // left by an external OS termination path before scheduling the legacy
+    // callback; normal dev orchestration performs child kill/wait immediately
+    // after this method returns.
+    if !did_quit {
+      let resources = windows.borrow_mut().prepare_close_all();
+      crate::window::drop_all_webviews(resources);
+    }
+    if let Some(tsf) = on_quit.borrow().as_ref() {
+      let _ = tsf.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+    Ok(())
   }
 
   #[napi(js_name = "onQuit")]

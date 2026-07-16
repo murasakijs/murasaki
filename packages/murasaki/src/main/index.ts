@@ -14,7 +14,7 @@ export interface MainContext {
     logs: string
     temp: string
   }
-  /** Aborted after `beforeQuit` and before `shutdown` begins. */
+  /** Aborted after `beforeQuit`, or when the total quit-hook deadline expires. */
   signal: AbortSignal
 }
 

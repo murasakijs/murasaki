@@ -19,6 +19,13 @@ use crate::types::MenuItemOptions;
 /// and, here, replace — the same live value.
 pub(crate) type SharedMenu = Rc<RefCell<Option<Menu>>>;
 
+pub(crate) mod native_menu_ids {
+  pub(crate) const QUIT: &str = "murasaki-menu:quit";
+  pub(crate) const CLOSE: &str = "murasaki-menu:close";
+  pub(crate) const MINIMIZE: &str = "murasaki-menu:minimize";
+  pub(crate) const ZOOM: &str = "murasaki-menu:zoom";
+}
+
 /// A single top-level menu in `useAppMenu`'s wire payload (`{ kind:
 /// "appMenu", menus }`, see `webview.rs`) — either a custom `{ label, items
 /// }` submenu or a standard-role one (`role: "editMenu" | "windowMenu"`).
@@ -148,6 +155,8 @@ fn build_macos_app_submenu(info: &AboutInfo, labels: Option<&crate::types::MenuL
   };
 
   let app_menu = Submenu::new(info.name, true);
+  let quit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit");
+  let quit_accelerator = "CmdOrCtrl+Q".parse::<Accelerator>().ok();
   app_menu
     .append_items(&[
       &PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)),
@@ -158,7 +167,7 @@ fn build_macos_app_submenu(info: &AboutInfo, labels: Option<&crate::types::MenuL
       &PredefinedMenuItem::hide_others(labels.and_then(|l| l.hide_others.as_deref())),
       &PredefinedMenuItem::show_all(labels.and_then(|l| l.show_all.as_deref())),
       &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::quit(labels.and_then(|l| l.quit.as_deref())),
+      &MenuItem::with_id(native_menu_ids::QUIT, quit_label, true, quit_accelerator),
     ])
     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
@@ -277,10 +286,6 @@ pub(crate) fn build_macos_app_menu_from_spec(
 #[cfg(target_os = "macos")]
 fn predefined_localized(role: &str, labels: Option<&crate::types::MenuLabels>) -> Option<PredefinedMenuItem> {
   match role {
-    "quit" => Some(PredefinedMenuItem::quit(labels.and_then(|l| l.quit.as_deref()))),
-    "close" => Some(PredefinedMenuItem::close_window(None)),
-    "minimize" => Some(PredefinedMenuItem::minimize(labels.and_then(|l| l.minimize.as_deref()))),
-    "zoom" => Some(PredefinedMenuItem::maximize(labels.and_then(|l| l.zoom.as_deref()))),
     "undo" => Some(PredefinedMenuItem::undo(labels.and_then(|l| l.undo.as_deref()))),
     "redo" => Some(PredefinedMenuItem::redo(labels.and_then(|l| l.redo.as_deref()))),
     "cut" => Some(PredefinedMenuItem::cut(labels.and_then(|l| l.cut.as_deref()))),
@@ -294,6 +299,41 @@ fn predefined_localized(role: &str, labels: Option<&crate::types::MenuLabels>) -
     "separator" => Some(PredefinedMenuItem::separator()),
     _ => None,
   }
+}
+
+fn lifecycle_role_item(
+  role: &str,
+  label: &str,
+  enabled: bool,
+  accelerator: Option<Accelerator>,
+) -> Option<MenuItem> {
+  let (id, fallback_label) = match role {
+    "quit" => (native_menu_ids::QUIT, "Quit"),
+    "close" | "closeWindow" | "close-window" => (native_menu_ids::CLOSE, "Close"),
+    "minimize" => (native_menu_ids::MINIMIZE, "Minimize"),
+    "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => {
+      (native_menu_ids::ZOOM, "Zoom")
+    }
+    _ => return None,
+  };
+  let accelerator = lifecycle_role_accelerator(role, accelerator);
+  Some(MenuItem::with_id(
+    id,
+    if label.is_empty() { fallback_label } else { label },
+    enabled,
+    accelerator,
+  ))
+}
+
+fn lifecycle_role_accelerator(
+  role: &str,
+  accelerator: Option<Accelerator>,
+) -> Option<Accelerator> {
+  accelerator.or_else(|| {
+    matches!(role, "close" | "closeWindow" | "close-window")
+      .then(|| "CmdOrCtrl+W".parse::<Accelerator>().ok())
+      .flatten()
+  })
 }
 
 /// Recursive item builder for `build_macos_app_menu_from_spec` — mirrors
@@ -313,7 +353,31 @@ fn append_app_menu_item_macos(
     return Ok(());
   }
 
+  let label = item.label.as_deref().unwrap_or("");
+  let enabled = item.enabled.unwrap_or(true);
+  let accelerator = item
+    .accelerator
+    .as_deref()
+    .and_then(|s| s.parse::<Accelerator>().ok());
+
   if let Some(role) = item.role.as_deref() {
+    let localized_label = if label.is_empty() {
+      match role {
+        "quit" => labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit"),
+        "minimize" => labels.and_then(|l| l.minimize.as_deref()).unwrap_or("Minimize"),
+        "zoom" | "maximize" => labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"),
+        "close" | "closeWindow" | "close-window" => "Close",
+        _ => label,
+      }
+    } else {
+      label
+    };
+    if let Some(mi) = lifecycle_role_item(role, localized_label, enabled, accelerator) {
+      sub
+        .append(&mi)
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+      return Ok(());
+    }
     if let Some(predef) = predefined_localized(role, labels) {
       sub
         .append(&predef)
@@ -321,13 +385,6 @@ fn append_app_menu_item_macos(
       return Ok(());
     }
   }
-
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
 
   if let Some(inner_items) = &item.submenu {
     let inner = Submenu::new(label, enabled);
@@ -412,18 +469,19 @@ fn load_icon_rgba(path: &str) -> Option<Icon> {
 /// and the dispatcher never drift apart.
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_menu_bar_ids {
-  pub(crate) const EXIT: &str = "murasaki-menu-bar:exit";
+  pub(crate) const EXIT: &str = super::native_menu_ids::QUIT;
+  pub(crate) const CLOSE: &str = super::native_menu_ids::CLOSE;
   pub(crate) const UNDO: &str = "murasaki-menu-bar:undo";
   pub(crate) const REDO: &str = "murasaki-menu-bar:redo";
   pub(crate) const CUT: &str = "murasaki-menu-bar:cut";
   pub(crate) const COPY: &str = "murasaki-menu-bar:copy";
   pub(crate) const PASTE: &str = "murasaki-menu-bar:paste";
   pub(crate) const SELECT_ALL: &str = "murasaki-menu-bar:selectAll";
-  pub(crate) const MINIMIZE: &str = "murasaki-menu-bar:minimize";
+  pub(crate) const MINIMIZE: &str = super::native_menu_ids::MINIMIZE;
   /// Added for `useAppMenu`'s `role: "zoom"` item (toggle-maximize) — the
   /// startup default Windows bar has no Zoom item of its own (only
   /// Minimize), so this id is only ever produced by `windows_role_item`.
-  pub(crate) const ZOOM: &str = "murasaki-menu-bar:zoom";
+  pub(crate) const ZOOM: &str = super::native_menu_ids::ZOOM;
 }
 
 /// Builds the native Win32 menu bar (File / Edit / Window), attached via
@@ -638,9 +696,22 @@ fn windows_role_item(role: &str, labels: Option<&crate::types::MenuLabels>) -> O
       true,
       None,
     )),
-    "zoom" => Some(MenuItem::with_id(ids::ZOOM, labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"), true, None)),
+    "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => Some(MenuItem::with_id(
+      ids::ZOOM,
+      labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"),
+      true,
+      None,
+    )),
     "quit" => Some(MenuItem::with_id(ids::EXIT, labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit"), true, None)),
-    "close" => Some(MenuItem::with_id(ids::EXIT, labels.and_then(|l| l.quit.as_deref()).unwrap_or("Close"), true, None)),
+    "close" => Some(MenuItem::with_id(
+      ids::CLOSE,
+      labels.and_then(|l| l.quit.as_deref()).unwrap_or("Close"),
+      true,
+      // tao does not expose the raw Win32 TranslateAcceleratorW hook, so
+      // displaying a native accelerator here would be decorative. The React
+      // useAppMenu hook implements Ctrl+W through its keydown path instead.
+      None,
+    )),
     _ => None,
   }
 }
@@ -718,7 +789,20 @@ fn append_item(menu: &Menu, item: &MenuItemOptions) -> Result<()> {
     return Ok(());
   }
 
+  let label = item.label.as_deref().unwrap_or("");
+  let enabled = item.enabled.unwrap_or(true);
+  let accelerator = item
+    .accelerator
+    .as_deref()
+    .and_then(|s| s.parse::<Accelerator>().ok());
+
   if let Some(role) = item.role.as_deref() {
+    if let Some(mi) = lifecycle_role_item(role, label, enabled, accelerator) {
+      menu
+        .append(&mi)
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+      return Ok(());
+    }
     if let Some(predef) = predefined(role) {
       menu
         .append(&predef)
@@ -726,13 +810,6 @@ fn append_item(menu: &Menu, item: &MenuItemOptions) -> Result<()> {
       return Ok(());
     }
   }
-
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
 
   if let Some(sub_items) = &item.submenu {
     let sub = Submenu::new(label, enabled);
@@ -764,7 +841,20 @@ fn append_submenu_item(sub: &Submenu, item: &MenuItemOptions) -> Result<()> {
     return Ok(());
   }
 
+  let label = item.label.as_deref().unwrap_or("");
+  let enabled = item.enabled.unwrap_or(true);
+  let accelerator = item
+    .accelerator
+    .as_deref()
+    .and_then(|s| s.parse::<Accelerator>().ok());
+
   if let Some(role) = item.role.as_deref() {
+    if let Some(mi) = lifecycle_role_item(role, label, enabled, accelerator) {
+      sub
+        .append(&mi)
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+      return Ok(());
+    }
     if let Some(predef) = predefined(role) {
       sub
         .append(&predef)
@@ -772,13 +862,6 @@ fn append_submenu_item(sub: &Submenu, item: &MenuItemOptions) -> Result<()> {
       return Ok(());
     }
   }
-
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
 
   if let Some(inner_items) = &item.submenu {
     let inner = Submenu::new(label, enabled);
@@ -811,16 +894,25 @@ fn predefined(role: &str) -> Option<PredefinedMenuItem> {
     "selectAll" | "select-all" => Some(PredefinedMenuItem::select_all(None)),
     "undo" => Some(PredefinedMenuItem::undo(None)),
     "redo" => Some(PredefinedMenuItem::redo(None)),
-    "quit" => Some(PredefinedMenuItem::quit(None)),
-    "hide" => Some(PredefinedMenuItem::hide(None)),
-    "hideOthers" | "hide-others" => Some(PredefinedMenuItem::hide_others(None)),
-    "showAll" | "show-all" => Some(PredefinedMenuItem::show_all(None)),
-    "services" => Some(PredefinedMenuItem::services(None)),
-    "minimize" => Some(PredefinedMenuItem::minimize(None)),
-    "maximize" => Some(PredefinedMenuItem::maximize(None)),
-    "closeWindow" | "close-window" => Some(PredefinedMenuItem::close_window(None)),
-    "fullscreen" | "toggleFullscreen" => Some(PredefinedMenuItem::fullscreen(None)),
     "separator" => Some(PredefinedMenuItem::separator()),
     _ => None,
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::lifecycle_role_accelerator;
+  use muda::accelerator::Accelerator;
+
+  #[test]
+  fn close_role_defaults_to_platform_command_or_control_w() {
+    let expected = "CmdOrCtrl+W".parse::<Accelerator>().unwrap();
+    assert_eq!(lifecycle_role_accelerator("close", None), Some(expected));
+    assert_eq!(lifecycle_role_accelerator("closeWindow", None), Some(expected));
+    assert_eq!(lifecycle_role_accelerator("close-window", None), Some(expected));
+
+    let explicit = "Shift+W".parse::<Accelerator>().unwrap();
+    assert_eq!(lifecycle_role_accelerator("close", Some(explicit)), Some(explicit));
+    assert_eq!(lifecycle_role_accelerator("quit", None), None);
   }
 }

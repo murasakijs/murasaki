@@ -17,6 +17,7 @@ test('production API server streams requests/responses and preserves HTTP semant
   await mkdir(clientDir)
   await mkdir(serverDir)
   await writeFile(join(clientDir, 'index.html'), '<!doctype html><title>test</title>')
+  await writeFile(join(root, 'client-secret.txt'), 'must not be served')
   await writeFile(join(serverDir, 'actions.mjs'), 'export const registry = {}\n')
   await writeFile(join(serverDir, 'main-actions.mjs'), `
 export const registry = {
@@ -136,6 +137,11 @@ export const routes = [{
     ...runtimeHeaders,
     'x-murasaki-native-token': runtimeCookie.slice(runtimeCookie.indexOf('=') + 1),
   }
+
+  const escapedStatic = await fetch(
+    `http://127.0.0.1:${port}/%2e%2e%2fclient-secret.txt`,
+  )
+  assert.equal(escapedStatic.status, 403)
 
   const forbidden = await fetch(url)
   assert.equal(forbidden.status, 403)

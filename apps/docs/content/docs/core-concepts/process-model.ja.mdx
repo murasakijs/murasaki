@@ -16,7 +16,7 @@ launch
   → main.ready(context) が完了
   → local server が listen を開始
   → cold start 時の登録済み URL / file を main.openRequested() へ配送
-  → WebView が renderer を読み込む
+  → 宣言済みWebViewが各renderer routeを読み込む
 ```
 
 `ready()` が reject すると、未初期化のバックエンドに UI を接続せず起動に失敗します。
@@ -54,21 +54,24 @@ open 処理は `openRequested()`、その他の secondary-launch argument は
 
 ```txt
 quit request
-  → beforeQuit(context)       false でキャンセル可能
+  → beforeQuit(context)       false でキャンセル可能 ┐
   → context.signal が abort
-  → shutdown(context)         shutdownTimeoutMs の上限付き
+  → shutdown(context)                                 ┘ 全体が shutdownTimeoutMs の上限付き
   → Node child が終了
   → native host が終了、または更新を適用
 ```
 
 `beforeQuit()` は未保存ドキュメントがある場合などに通常終了をキャンセルできます。
 process signal や開発時 Main reload を含む強制終了ではキャンセルできません。
-`shutdown()` の既定上限は 10 秒です。まず新規処理の受付を止め、その後 flush / close
-してください。
+2つのhook全体の既定上限は10秒です。`shutdown()`ではまず新規処理の受付を止め、
+その後 flush / close してください。
 
 <Callout type="warn">
-  キャンセルはアプリ全体に対するものです。現状サポートされるウィンドウは 1 枚で、
-  ウィンドウ別の close lifecycle event は公開されていません。
+  OSのclose controlと `appWindow.close()` はsecondaryをhideするため、`windows.open()`
+  で再表示できます。primaryの`main`を閉じるとapp quit requestになり、上記sequenceへ
+  進みます。cancelはapp全体に対するもので、window別close lifecycle eventはありません。
+  明示的な `windows.close(label)` はsecondary targetを破棄し、同じprocess内では現在
+  再生成できません。
 </Callout>
 
 ## 開発時の reload

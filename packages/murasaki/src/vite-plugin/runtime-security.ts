@@ -3,10 +3,21 @@ import type { Connect, Plugin } from 'vite'
 
 const RUNTIME_COOKIE = 'murasaki_runtime'
 const PRIVILEGED_PREFIXES = ['/api/', '/__murasaki/']
+let resolvedRuntimeToken: string | undefined
+
+/** One private token shared by dev middleware and the native parent process. */
+export function runtimeToken(): string {
+  if (resolvedRuntimeToken) return resolvedRuntimeToken
+  const inherited = process.env.MURASAKI_RUNTIME_TOKEN
+  resolvedRuntimeToken = inherited && /^[0-9a-fA-F]{64}$/.test(inherited)
+    ? inherited
+    : randomBytes(32).toString('hex')
+  return resolvedRuntimeToken
+}
 
 /** Protects dev's loopback actions/API/updater endpoints with an app session. */
 export function runtimeSecurityPlugin(): Plugin {
-  const token = randomBytes(32).toString('hex')
+  const token = runtimeToken()
   return {
     name: 'murasaki:runtime-security',
     apply: 'serve',
@@ -38,6 +49,18 @@ export function runtimeSecurityPlugin(): Plugin {
       })
     },
   }
+}
+
+export function isAuthorizedNativeRequest(
+  req: Connect.IncomingMessage,
+  expectedToken: string,
+): boolean {
+  if (!isAuthorizedRuntimeRequest(req, expectedToken)) return false
+  const nativeToken = req.headers['x-murasaki-native-token']
+  if (typeof nativeToken !== 'string') return false
+  const received = Buffer.from(nativeToken)
+  const expected = Buffer.from(expectedToken)
+  return received.length === expected.length && timingSafeEqual(received, expected)
 }
 
 export function isAuthorizedRuntimeRequest(req: Connect.IncomingMessage, expectedToken: string): boolean {

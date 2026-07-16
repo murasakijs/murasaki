@@ -19,7 +19,7 @@ pnpm exec murasaki dev
 Murasaki は `config.devPort`（既定 `5178`）を検査し、使用中なら次の port に進みます。
 それでも待ち続ける / 終了する場合:
 
-1. `node --version` で Node 22+ を確認
+1. `node --version` で Node 22.12+ を確認
 2. `murasaki.config.ts` が `appId` / `productName` を含む object を export しているか確認
 3. `src/main.ts` を一時 rename、または `main: false` で Main startup を切り分け
 4. 選択された port を保持する古い dev process を終了

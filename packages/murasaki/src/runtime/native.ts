@@ -29,6 +29,10 @@ export interface MenuLabels {
 }
 
 export interface WindowOptions {
+  /** Stable declarative window label (`main` for the primary window). */
+  label?: string
+  /** Whether this is the primary application window. Exactly one window is primary. */
+  primary?: boolean
   title?: string
   width?: number
   height?: number
@@ -36,6 +40,8 @@ export interface WindowOptions {
   minHeight?: number
   resizable?: boolean
   transparent?: boolean
+  /** Initial native visibility. Secondary declarative windows default false. */
+  visible?: boolean
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
   /** macOS only. Resolved path to a PNG icon shown in the standard "About
    * <app>" panel. */
@@ -91,6 +97,7 @@ interface NativeModule {
   Application: new () => {
     createWindow(opts: WindowOptions): NativeWindow
     createWebview(windowOpts: WindowOptions, webviewOpts: WebviewOptions): NativeWebview
+    configureShutdown?(port: number, runtimeToken: string, timeoutMs: number): void
     run(): void
     exit(): void
     onQuit(cb: () => void): void

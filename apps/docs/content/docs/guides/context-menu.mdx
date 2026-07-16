@@ -6,7 +6,16 @@ description: Declare a real OS context menu with useContextMenu — no HTML popu
 Murasaki's context menu is declared with a hook, not markup, so it lives right
 next to your state — its `action`s can close over `useState` setters. None of
 it renders HTML: items are posted to the Rust side, which pops a real OS menu
-(`NSMenu` on macOS, `HMENU` on Windows, `GtkMenu` on Linux).
+(`NSMenu` on macOS and `HMENU` on Windows). Grant `menu:context` to each
+renderer that declares one:
+
+```ts title="murasaki.config.ts"
+window: { capabilities: ['menu:context', 'clipboard:writeText'] }
+```
+
+Native roles require their own capability as well. The example grants
+`clipboard:writeText` for `<Action.Copy />`; a plain custom callback needs only
+`menu:context`.
 
 ## The whole-window menu
 
@@ -77,6 +86,20 @@ elements — native OS roles (`Copy`, `Paste`, `Cut`, `SelectAll`, `Undo`,
 `Redo`, `Quit`) or client behaviors (`Reload`, `Navigate`, `Run`). See
 [Native APIs](/docs/guides/native-apis#built-in-menu-actions) for the full
 list.
+
+Every native context menu requires `menu:context`. Native role actions also
+require the same permission as their direct native API:
+
+| Action | Additional capability |
+| --- | --- |
+| `Copy`, `Cut` | `clipboard:writeText` |
+| `Paste` | `clipboard:readText` |
+| `Quit` | `app:quit` |
+| `SelectAll`, `Undo`, `Redo` | None beyond `menu:context` |
+
+Murasaki rejects the complete menu payload when a required role capability is
+missing. Client behaviors and your own callbacks need no additional native
+capability.
 
 ## Reusable actions with `createActions`
 

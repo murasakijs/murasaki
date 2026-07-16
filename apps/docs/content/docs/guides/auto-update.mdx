@@ -38,7 +38,10 @@ the whole trust model is a single Ed25519 keypair you generate once.
 
    `true` is a complete config: the GitHub repo is inferred from
    `package.json`'s `repository` field, and the public key from
-   `.murasaki/update-key.pub`.
+   `.murasaki/update-key.pub`. Enabling the updater also grants the primary
+   window its internal `app:quit` permission so the verified install can
+   complete the graceful restart. If the update UI lives in a secondary
+   window, grant `app:quit` to that window explicitly.
 
 3. Drop in the button:
 

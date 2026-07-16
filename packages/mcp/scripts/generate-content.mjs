@@ -91,9 +91,13 @@ const recipes = [
   ['api-routes', 'guides/api-routes'],
   ['native-context-menu', 'guides/context-menu'],
   ['application-menu', 'guides/app-menu'],
+  ['multi-window-permissions', 'guides/windows'],
+  ['node-main-lifecycle', 'guides/node-main'],
+  ['tray-icon', 'guides/native-apis'],
   ['auto-update', 'guides/auto-update'],
   ['deep-links-and-file-associations', 'guides/deep-links'],
   ['configuration', 'building/configuration'],
+  ['security-and-csp', 'building/security'],
   ['package-and-distribute', 'building/distribution'],
 ].map(([id, slug]) => ({ id, slug }))
 

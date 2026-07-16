@@ -10,9 +10,10 @@ covers what's actually reachable **from your React app** today.
 
 ## Window & native menu bar
 
-The window itself — size, title, resizability, macOS vibrancy — is declared
-once in `murasaki.config.ts`'s `window` field, not called imperatively from
-React. See [Configuration](/docs/building/configuration) for the full shape.
+Window shape—size, title, route, visibility, permissions, and macOS
+vibrancy—is declared in `murasaki.config.ts`. `window` is the primary `main`
+window; `windows` contains labeled secondary windows. See [Windows &
+permissions](/docs/guides/windows) for the full model.
 
 On macOS, the standard App/Edit/Window menu bar (About, Services, Hide, Quit,
 Edit, Window) is generated for you and localized from `config.locales` — no
@@ -33,7 +34,7 @@ by the Rust host:
 ```tsx
 'use client'
 
-import { appWindow, clipboard, dialog, notification, shell, tray } from 'murasaki/native'
+import { app, appWindow, clipboard, dialog, notification, shell, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -42,24 +43,39 @@ const files = await dialog.openFile({
 await clipboard.writeText(files.join('\n'))
 await notification.show({ title: 'Files selected', body: `${files.length} files` })
 await appWindow.setTitle('Import complete')
+console.log(await appWindow.getLabel())
+await windows.open('preview')
 await shell.showItemInFolder(files[0])
 ```
 
 | API | Operations |
 | --- | --- |
+| `app` | `quit` (graceful application shutdown) |
 | `dialog` | `openFile`, `openDirectory`, `saveFile` |
 | `clipboard` | `readText`, `writeText` |
 | `notification` | `show` |
 | `shell` | `openExternal` (safe URL schemes only), `showItemInFolder` |
-| `appWindow` | `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
+| `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
+| `windows` | `open`, `list`, `show`, `hide`, `focus`, `close` for declared labels |
 | `tray` | `create`, `remove`, `setTooltip`, `onClick` |
+
+`app.quit()` and the root `quit()` helper both require `app:quit`; an
+unprivileged secondary renderer cannot terminate the whole application.
+
+<Callout type="warning">
+  **0.50 migration:** `quit()` used to post an unpermissioned raw IPC message.
+  Existing non-updater apps that call it must add `app:quit` to that window.
+  Enabling the built-in updater grants it to the primary window only so the
+  verified install/restart handshake remains backwards-compatible.
+</Callout>
 
 <Callout type="info">
   These APIs run in trusted renderer code, not directly in `src/main.ts`.
   The bridge accepts messages only from the app's exact origin and exposes a
-  fixed, default-deny command allowlist. Grant only the commands your app uses
-  through `config.capabilities`. Per-window and argument/path scopes are still
-  planned, so do not load untrusted remote content into the app window.
+  fixed, default-deny command allowlist. Grant only the commands each renderer
+  uses through `window.capabilities` / `windows[label].capabilities`. Argument
+  and path/URL scopes are still planned, so do not load untrusted remote
+  content into a privileged app window.
 </Callout>
 
 ## Tray icon
@@ -125,8 +141,8 @@ const { status, latest, check, download, install } = useUpdate()
 security model, and a GitHub Actions release workflow.
 
 <Callout type="warn">
-  Tray menus, global shortcuts, multi-window management, and per-window or
-  argument-scoped capability rules are not public yet. Check the
+  Tray menus, global shortcuts, and argument/path-scoped capability rules are
+  not public yet. Check the
   [platform feature status](/docs/core-concepts/platform-feature-status)
   before designing around them.
 </Callout>
@@ -134,6 +150,7 @@ security model, and a GitHub Actions release workflow.
 ## Next
 
 <Cards>
+  <Card title="Windows & permissions" href="/docs/guides/windows" description="Declarative windows and per-renderer capability lists." />
   <Card title="Auto-update" href="/docs/guides/auto-update" description="Manifest format, signing, and publishing releases." />
   <Card title="Context Menu" href="/docs/guides/context-menu" description="The full useContextMenu API." />
   <Card title="Configuration" href="/docs/building/configuration" description="Window, signing, and installer settings." />

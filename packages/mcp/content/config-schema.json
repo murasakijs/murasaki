@@ -6,6 +6,76 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["appId", "productName"],
+  "$defs": {
+    "nativeCapability": {
+      "enum": [
+        "app:quit",
+        "dialog:openFile",
+        "dialog:openDirectory",
+        "dialog:saveFile",
+        "clipboard:readText",
+        "clipboard:writeText",
+        "menu:application",
+        "menu:context",
+        "notification:show",
+        "shell:openExternal",
+        "shell:showItemInFolder",
+        "window:setTitle",
+        "window:setSize",
+        "window:minimize",
+        "window:toggleMaximize",
+        "window:show",
+        "window:hide",
+        "window:focus",
+        "window:close",
+        "window:setAlwaysOnTop",
+        "window:isVisible",
+        "window:isFocused",
+        "window:isMaximized",
+        "window:isMinimized",
+        "window:getLabel",
+        "window:open",
+        "window:list",
+        "window:manage",
+        "tray:create",
+        "tray:remove",
+        "tray:setTooltip"
+      ]
+    },
+    "windowConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "minWidth": { "type": "integer", "minimum": 1 },
+        "minHeight": { "type": "integer", "minimum": 1 },
+        "resizable": { "type": "boolean" },
+        "transparent": { "type": "boolean" },
+        "vibrancy": {
+          "enum": ["hud", "sidebar", "popover", null],
+          "description": "Declared but currently a no-op."
+        },
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/(?!/)",
+          "not": { "pattern": "\\\\" },
+          "default": "/",
+          "description": "Same-origin path. Full URLs, protocol-relative URLs, and backslashes are rejected."
+        },
+        "visible": { "type": "boolean", "default": false },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nativeCapability" },
+          "uniqueItems": true,
+          "default": [],
+          "description": "Per-secondary-window allowlist. It never inherits top-level capabilities."
+        }
+      }
+    }
+  },
   "properties": {
     "appId": { "type": "string", "minLength": 1 },
     "productName": { "type": "string", "minLength": 1 },
@@ -29,8 +99,31 @@
           "enum": ["hud", "sidebar", "popover", null],
           "description": "Declared but currently a no-op."
         },
-        "console": { "type": "boolean", "description": "Windows backend console visibility." }
+        "console": { "type": "boolean", "description": "Windows backend console visibility." },
+        "route": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/(?!/)",
+          "not": { "pattern": "\\\\" },
+          "default": "/",
+          "description": "Same-origin path. Full URLs, protocol-relative URLs, and backslashes are rejected."
+        },
+        "visible": { "type": "boolean", "default": true },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nativeCapability" },
+          "uniqueItems": true,
+          "description": "Primary-window allowlist. Falls back to top-level capabilities when omitted."
+        }
       }
+    },
+    "windows": {
+      "type": "object",
+      "description": "Secondary windows keyed by a safe 1-64 character label. `main` is reserved. Secondary windows default to visible=false and capabilities=[]; the primary-only console option is rejected.",
+      "propertyNames": {
+        "pattern": "^(?![Mm][Aa][Ii][Nn]$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+      },
+      "additionalProperties": { "$ref": "#/$defs/windowConfig" }
     },
     "main": {
       "oneOf": [
@@ -40,21 +133,30 @@
           "additionalProperties": false,
           "properties": {
             "entry": { "type": "string", "default": "src/main.ts" },
-            "shutdownTimeoutMs": { "type": "integer", "minimum": 1, "default": 10000 }
+            "shutdownTimeoutMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 300000,
+              "default": 10000,
+              "description": "End-to-end limit for beforeQuit plus shutdown before native host exit."
+            }
           }
         }
       ]
     },
     "capabilities": {
       "type": "array",
-      "description": "Native renderer commands to grant. Default is deny-all.",
+      "description": "Legacy primary-window native command allowlist. window.capabilities takes precedence when present; secondary windows never inherit it. The default is deny-all, except that enabling the updater implicitly grants app:quit to the primary window for the verified restart handshake.",
       "items": {
         "enum": [
+          "app:quit",
           "dialog:openFile",
           "dialog:openDirectory",
           "dialog:saveFile",
           "clipboard:readText",
           "clipboard:writeText",
+          "menu:application",
+          "menu:context",
           "notification:show",
           "shell:openExternal",
           "shell:showItemInFolder",
@@ -71,6 +173,10 @@
           "window:isFocused",
           "window:isMaximized",
           "window:isMinimized",
+          "window:getLabel",
+          "window:open",
+          "window:list",
+          "window:manage",
           "tray:create",
           "tray:remove",
           "tray:setTooltip"
@@ -124,6 +230,24 @@
           "minItems": 1,
           "uniqueItems": true,
           "default": ["VITE_", "NEXT_PUBLIC_"]
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "description": "Renderer HTML Content Security Policy injection. Murasaki moves an existing user-owned CSP meta tag to the beginning of head; otherwise it injects security.csp or the environment-specific default unless injection is explicitly disabled. An existing tag and a security.csp string cannot be combined.",
+      "additionalProperties": false,
+      "properties": {
+        "csp": {
+          "description": "Complete, non-empty, single-line Content Security Policy override. Whitespace-only values, control characters, quotes, and angle brackets are rejected. Omit it for Murasaki's environment-specific default, or use false to disable framework injection.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F\"<>]+$"
+            },
+            { "const": false }
+          ]
         }
       }
     },

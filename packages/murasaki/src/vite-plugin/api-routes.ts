@@ -178,7 +178,7 @@ function handleApiRequest(server: ViteDevServer, apiDir: string): Connect.NextHa
   return async (req, res, next) => {
     const rawUrl = req.url ?? '/'
     const pathname = rawUrl.split('?')[0]
-    if (!pathname.startsWith(API_PATH_PREFIX)) return next()
+    if (pathname !== '/api' && !pathname.startsWith(API_PATH_PREFIX)) return next()
 
     // Re-scanned per request rather than cached/watched — the api dir is
     // small and this keeps dev routes accurate across add/edit/remove

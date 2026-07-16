@@ -1,7 +1,7 @@
 import type { Plugin, PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
 import svgr from 'vite-plugin-svgr'
-import type { MurasakiConfig } from '../config.js'
+import { validateConfig, type MurasakiConfig } from '../config.js'
 import { apiRoutesPlugin } from './api-routes.js'
 import { fileRouterPlugin } from './routing.js'
 import { serverActionsPlugin } from './server-actions.js'
@@ -19,6 +19,9 @@ export interface MurasakiPluginOptions {
 }
 
 export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
+  // This is a public JavaScript API as well as an internal CLI boundary. Do
+  // not rely on TypeScript or the CLI config loader having validated callers.
+  validateConfig(opts.config)
   return [
     react(),
     // Import SVGs as React components via `import Icon from './x.svg?react'`,
@@ -31,9 +34,9 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     mainModulesPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),
     apiRoutesPlugin({ srcDir: opts.srcDir }),
-    mainProcessPlugin({ config: opts.config, projectRoot: process.cwd() }),
+    mainProcessPlugin({ config: opts.config }),
     updaterPlugin({ config: opts.config }),
-    appShellPlugin(),
+    appShellPlugin({ csp: opts.config.security?.csp }),
     {
       name: 'murasaki:core',
       config() {
@@ -51,6 +54,13 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
             __MURASAKI_VERSION__: JSON.stringify(opts.config.version ?? '0.0.0'),
           },
           resolve: {
+            // Workspace links and `pnpm link` can otherwise make Vite follow
+            // a component package to a second React installation. Hooks from
+            // that copy cannot be rendered by the application's ReactDOM and
+            // fail at runtime with an invalid/null dispatcher. Always resolve
+            // React through the application root, including for linked local
+            // packages and monorepo workspaces.
+            dedupe: ['react', 'react-dom'],
             alias: {
               '@': opts.srcDir,
             },

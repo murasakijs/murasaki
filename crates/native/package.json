@@ -1,6 +1,6 @@
 {
   "name": "@murasakijs/native",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Native binding for murasaki (wry + tao + muda) exposed via napi-rs.",
   "main": "index.js",
   "types": "index.d.ts",
@@ -17,7 +17,7 @@
     "name": "murasaki-native"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "build": "napi build --platform --release",

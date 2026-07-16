@@ -4,11 +4,12 @@ import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readdir, stat } f
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { success, warn, error, dim, unsignedNote } from './brand.js'
 import bundle, { parseTarget, type Arch } from './bundle.js'
 import type { MurasakiConfig } from '../config.js'
 import { resolveAssociations, windowsProgId, type ResolvedAssociations } from '../associations.js'
+import { loadUserConfig } from './load-config.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -1723,18 +1724,4 @@ function escapeMsiFormatted(s: string): string {
     if (character === ']') return '[\\]]'
     return character
   }).join('')
-}
-
-async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
-  for (const name of ['murasaki.config.ts', 'murasaki.config.js', 'murasaki.config.mjs']) {
-    const p = resolve(cwd, name)
-    try {
-      const mod = await import(pathToFileURL(p).href)
-      const cfg = mod.default ?? mod.config ?? mod
-      if (cfg && typeof cfg === 'object') return cfg
-    } catch (err: any) {
-      if (err?.code !== 'ERR_MODULE_NOT_FOUND') throw err
-    }
-  }
-  throw new Error('murasaki: no config found — create murasaki.config.ts')
 }

@@ -19,7 +19,7 @@ pnpm exec murasaki dev
 Murasaki probes `config.devPort` (default `5178`) and advances to another port
 when it is occupied. If startup still waits or exits:
 
-1. confirm Node 22+ with `node --version`,
+1. confirm Node 22.12+ with `node --version`,
 2. confirm `murasaki.config.ts` exports an object with `appId` and
    `productName`,
 3. temporarily rename `src/main.ts` or set `main: false` to isolate Main

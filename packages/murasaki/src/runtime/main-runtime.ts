@@ -10,6 +10,18 @@ import type {
   SecondInstanceEvent,
 } from '../main/index.js'
 
+const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS = 10_000
+const MAX_MAIN_SHUTDOWN_TIMEOUT_MS = 300_000
+
+function validateRuntimeShutdownTimeoutMs(value: number | undefined): void {
+  if (value === undefined) return
+  if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_MAIN_SHUTDOWN_TIMEOUT_MS) {
+    throw new TypeError(
+      `shutdownTimeoutMs must be a positive safe integer no greater than ${MAX_MAIN_SHUTDOWN_TIMEOUT_MS}`,
+    )
+  }
+}
+
 export interface MainRuntimeOptions {
   appId: string
   productName: string
@@ -34,6 +46,32 @@ export interface ShutdownResult {
 
 type RuntimeState = 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed'
 
+type DeadlineResult<T> =
+  | { completed: true; value: T }
+  | { completed: false }
+
+async function runBeforeDeadline<T>(
+  deadline: number,
+  operation: () => T | PromiseLike<T>,
+): Promise<DeadlineResult<T>> {
+  const remainingMs = deadline - Date.now()
+  if (remainingMs <= 0) return { completed: false }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<DeadlineResult<T>>((resolveOk) => {
+    timer = setTimeout(() => resolveOk({ completed: false }), remainingMs)
+    timer.unref?.()
+  })
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation).then((value) => ({ completed: true, value }) as const),
+      timeout,
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export class MainRuntime {
   #state: RuntimeState = 'idle'
   #definition: MainDefinition | null = null
@@ -41,6 +79,9 @@ export class MainRuntime {
   #abortController = new AbortController()
   #startPromise: Promise<MainContext> | null = null
   #shutdownPromise: Promise<ShutdownResult> | null = null
+  #forceShutdownSignal: Promise<void> | null = null
+  #resolveForceShutdown: (() => void) | null = null
+  #forceShutdownReason: QuitReason | null = null
   #openRequestQueue: Promise<void> = Promise.resolve()
   #queuedOpenRequests = 0
 
@@ -69,10 +110,13 @@ export class MainRuntime {
         this.#definition = candidate
         this.#context = context
         await candidate.ready?.(context)
-        this.#state = 'running'
+        // A bounded shutdown may have timed out while ready() ignored its
+        // AbortSignal. A late resolution must not resurrect a runtime the host
+        // has already committed to stopping.
+        if (this.#state === 'starting') this.#state = 'running'
         return context
       } catch (error) {
-        this.#state = 'failed'
+        if (this.#state !== 'stopped') this.#state = 'failed'
         this.#abortController.abort(error)
         throw error
       }
@@ -81,7 +125,24 @@ export class MainRuntime {
   }
 
   shutdown(options: ShutdownOptions): Promise<ShutdownResult> {
-    if (this.#shutdownPromise) return this.#shutdownPromise
+    if (this.#shutdownPromise) {
+      if (options.force) {
+        this.#forceShutdownReason = options.reason
+        this.#abortController.abort(options.reason)
+        this.#resolveForceShutdown?.()
+      }
+      return this.#shutdownPromise
+    }
+    this.#forceShutdownReason = options.force ? options.reason : null
+    this.#forceShutdownSignal = new Promise((resolveOk) => {
+      this.#resolveForceShutdown = resolveOk
+    })
+    if (options.force) {
+      // A forced quit may arrive while ready() is still pending. Abort its
+      // background work immediately; #shutdown still applies the same total
+      // deadline if the hook ignores the signal.
+      this.#abortController.abort(options.reason)
+    }
     this.#shutdownPromise = this.#shutdown(options)
     return this.#shutdownPromise
   }
@@ -119,9 +180,23 @@ export class MainRuntime {
       return { cancelled: false, timedOut: false }
     }
 
+    validateRuntimeShutdownTimeoutMs(this.options.shutdownTimeoutMs)
+    const timeoutMs = this.options.shutdownTimeoutMs ?? DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS
+    // The budget starts when shutdown is requested, even if ready() is still
+    // running. Otherwise a pending startup plus beforeQuit/shutdown could make
+    // the native transport wait for multiple full timeout windows.
+    const deadline = Date.now() + timeoutMs
+
     try {
-      await this.#startPromise
+      const start = await runBeforeDeadline(deadline, () => this.#startPromise)
+      if (!start.completed) {
+        this.#abortController.abort(options.reason)
+        this.#state = 'stopped'
+        return { cancelled: false, timedOut: true }
+      }
     } catch {
+      // Startup already failed and aborted the context. Quitting should fail
+      // open so a broken ready() hook cannot keep the native host alive.
       this.#state = 'stopped'
       return { cancelled: false, timedOut: false }
     }
@@ -134,28 +209,57 @@ export class MainRuntime {
     }
 
     this.#state = 'stopping'
-    const quitContext: QuitContext = { ...context, reason: options.reason }
-    if (!options.force) {
-      const decision = await definition.beforeQuit?.(quitContext)
-      if (decision === false) {
-        this.#state = 'running'
-        this.#shutdownPromise = null
-        return { cancelled: true, timedOut: false }
+    let quitContext: QuitContext = { ...context, reason: options.reason }
+    try {
+      // One end-to-end budget covers both beforeQuit and shutdown. The native
+      // transport waits for this budget plus a small response grace period, so
+      // a slow beforeQuit hook cannot consume cleanup time and then leave the
+      // native host blocked for a second full timeout.
+      if (!options.force) {
+        const beforeQuit = await Promise.race([
+          runBeforeDeadline(deadline, () => definition.beforeQuit?.(quitContext))
+            .then((outcome) => ({ kind: 'hook' as const, outcome })),
+          (this.#forceShutdownSignal ?? new Promise<void>(() => {}))
+            .then(() => ({ kind: 'force' as const })),
+        ])
+        if (beforeQuit.kind === 'force') {
+          quitContext = {
+            ...context,
+            reason: this.#forceShutdownReason ?? options.reason,
+          }
+        } else if (!beforeQuit.outcome.completed) {
+          this.#abortController.abort(options.reason)
+          this.#state = 'stopped'
+          return { cancelled: false, timedOut: true }
+        } else if (beforeQuit.outcome.value === false) {
+          this.#state = 'running'
+          this.#shutdownPromise = null
+          this.#forceShutdownSignal = null
+          this.#resolveForceShutdown = null
+          this.#forceShutdownReason = null
+          return { cancelled: true, timedOut: false }
+        }
       }
-    }
 
-    this.#abortController.abort(options.reason)
-    const timeoutMs = this.options.shutdownTimeoutMs ?? 10_000
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<'timeout'>((resolveOk) => {
-      timer = setTimeout(() => resolveOk('timeout'), timeoutMs)
-      timer.unref?.()
-    })
-    const cleanup = Promise.resolve(definition.shutdown?.(quitContext)).then(() => 'done' as const)
-    const outcome = await Promise.race([cleanup, timeout])
-    if (timer) clearTimeout(timer)
-    this.#state = 'stopped'
-    return { cancelled: false, timedOut: outcome === 'timeout' }
+      this.#abortController.abort(quitContext.reason)
+      const cleanup = await runBeforeDeadline(
+        deadline,
+        () => definition.shutdown?.(quitContext),
+      )
+      this.#state = 'stopped'
+      return { cancelled: false, timedOut: !cleanup.completed }
+    } catch (error) {
+      // A failing hook must fail the transport open (so the native host can
+      // fail open and exit), but it must not pin this runtime forever in
+      // `stopping` with a permanently rejected single-flight Promise.
+      this.#abortController.abort(quitContext.reason)
+      this.#state = 'stopped'
+      this.#shutdownPromise = null
+      this.#forceShutdownSignal = null
+      this.#resolveForceShutdown = null
+      this.#forceShutdownReason = null
+      throw error
+    }
   }
 }
 

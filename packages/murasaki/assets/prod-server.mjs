@@ -28,7 +28,7 @@
 import http from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
-import { extname, join, resolve } from 'node:path'
+import { extname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
@@ -152,9 +152,10 @@ const server = http.createServer((req, res) => {
 
 async function handleRequest(req, res) {
   const pathname = (req.url ?? '/').split('?')[0]
+  const isApiPath = pathname === '/api' || pathname.startsWith(API_PATH_PREFIX)
   const isPrivileged = pathname.startsWith(ACTION_PATH_PREFIX)
     || pathname.startsWith(MAIN_CALL_PREFIX)
-    || pathname.startsWith(API_PATH_PREFIX)
+    || isApiPath
     || pathname.startsWith(UPDATE_PATH_PREFIX)
     || pathname === MAIN_SHUTDOWN_PATH
     || pathname === MAIN_SECOND_INSTANCE_PATH
@@ -199,7 +200,7 @@ async function handleRequest(req, res) {
     await handleUpdateRequest(req, res)
     return
   }
-  if (pathname.startsWith(API_PATH_PREFIX)) {
+  if (isApiPath) {
     return handleApiRoute(req, res, pathname)
   }
   return serveStatic(req, res)
@@ -392,7 +393,23 @@ async function handleRegistryCall(req, res, prefix, load, label) {
 
   const encodedId = rest.slice(0, sepIndex)
   const name = rest.slice(sepIndex + 1)
-  const actionId = decodeURIComponent(encodedId)
+  let actionId
+  try {
+    actionId = decodeURIComponent(encodedId)
+  } catch {
+    await sendWireResponse(res, 400, {
+      ok: false,
+      error: new Error(`Invalid ${label} module id`),
+    })
+    return
+  }
+  if (!/^[A-Za-z_$][\w$]*$/.test(name)) {
+    await sendWireResponse(res, 404, {
+      ok: false,
+      error: new Error(`No such ${label}: ${name}`),
+    })
+    return
+  }
 
   let args
   try {
@@ -409,8 +426,8 @@ async function handleRegistryCall(req, res, prefix, load, label) {
 
   try {
     const registry = await load()
-    const mod = registry[actionId]
-    const fn = mod && mod[name]
+    const mod = Object.hasOwn(registry, actionId) ? registry[actionId] : null
+    const fn = mod && Object.hasOwn(mod, name) ? mod[name] : null
     if (typeof fn !== 'function') {
       await sendWireResponse(res, 404, {
         ok: false,
@@ -584,7 +601,10 @@ async function serveStatic(req, res) {
 
   const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0])
   const requested = resolve(clientDir, `.${urlPath}`)
-  if (!requested.startsWith(clientDir)) {
+  // A plain startsWith(clientDir) also accepts siblings such as
+  // `<clientDir>-secrets`. Require a real path boundary after the configured
+  // client directory so encoded `../` segments cannot escape static assets.
+  if (requested !== clientDir && !requested.startsWith(`${clientDir}${sep}`)) {
     res.statusCode = 403
     res.end()
     return

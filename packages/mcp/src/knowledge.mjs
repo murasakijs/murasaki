@@ -198,6 +198,14 @@ async function firstExisting(root, candidates) {
   return null
 }
 
+export function isSupportedMurasakiNodeVersion(version) {
+  const match = /^(\d+)\.(\d+)(?:\.\d+)?(?:[-+].*)?$/.exec(String(version))
+  if (!match) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return major > 22 || (major === 22 && minor >= 12)
+}
+
 export async function doctor({ projectPath = process.cwd() } = {}) {
   const root = resolve(projectPath)
   const rootStat = await exists(root)
@@ -235,11 +243,10 @@ export async function doctor({ projectPath = process.cwd() } = {}) {
     ? { id: 'app-router', status: 'pass', message: `Found ${layout} and ${page}.` }
     : { id: 'app-router', status: 'fail', message: 'Expected src/app/layout.* and src/app/page.* entry files.' })
 
-  const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number)
-  const supportedNode = (nodeMajor === 20 && nodeMinor >= 19) || nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 12)
+  const supportedNode = isSupportedMurasakiNodeVersion(process.versions.node)
   checks.push(supportedNode
     ? { id: 'node', status: 'pass', message: `Node ${process.versions.node} satisfies murasaki's supported engine range.` }
-    : { id: 'node', status: 'fail', message: `Node ${process.versions.node} is outside murasaki's supported range (^20.19.0 or >=22.12.0).` })
+    : { id: 'node', status: 'fail', message: `Node ${process.versions.node} is outside murasaki's supported range (>=22.12.0).` })
 
   const overall = checks.some((check) => check.status === 'fail') ? 'fail' : checks.some((check) => check.status === 'warn') ? 'warn' : 'pass'
   return { projectPath: root, overall, checks }

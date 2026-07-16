@@ -10,5 +10,13 @@ export default defineConfig({
   authors: ['ichi'],
   icon: 'src/assets/icon.png',
   locales: ['en'],
+  capabilities: [
+    'menu:application',
+    'menu:context',
+    'clipboard:readText',
+    'clipboard:writeText',
+    'window:minimize',
+    'window:toggleMaximize',
+  ],
   window: { title: 'Violet Notes', width: 1280, height: 820, minWidth: 920, minHeight: 640 },
 })

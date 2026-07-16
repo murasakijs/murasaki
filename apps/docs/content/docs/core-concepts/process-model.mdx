@@ -16,7 +16,7 @@ launch
   → main.ready(context) finishes
   → local server begins listening
   → registered cold-start URLs/files are delivered to main.openRequested()
-  → WebView loads the renderer
+  → declared WebViews load their renderer routes
 ```
 
 If `ready()` rejects, startup fails instead of showing a renderer attached to a
@@ -58,21 +58,25 @@ Normal window-close and app-quit requests use the lifecycle below:
 
 ```txt
 quit request
-  → beforeQuit(context)       may return false
+  → beforeQuit(context)       may return false ┐
   → context.signal aborts
-  → shutdown(context)         bounded by shutdownTimeoutMs
+  → shutdown(context)                             ┘ bounded together by shutdownTimeoutMs
   → Node child exits
   → native host exits or applies an update
 ```
 
 `beforeQuit()` may cancel a normal close—for example while a document has
 unsaved changes. Forced shutdown paths, including process signals and dev Main
-reloads, ignore cancellation. `shutdown()` defaults to a 10-second limit; it
-should stop accepting work first, then flush and close resources.
+reloads, ignore cancellation. The combined hooks default to a 10-second limit;
+`shutdown()` should stop accepting work first, then flush and close resources.
 
 <Callout type="warn">
-  Cancellation is application-wide. Murasaki currently has one supported
-  window and does not expose per-window close lifecycle events.
+  The OS close control and `appWindow.close()` hide a secondary, so it can be
+  shown again with `windows.open()`. Closing the primary `main` window is an
+  application quit request and follows the sequence above. Cancellation is
+  application-wide; Murasaki does not expose per-window close lifecycle events.
+  Explicit `windows.close(label)` destroys a secondary target, which cannot
+  currently be recreated in the same process.
 </Callout>
 
 ## Development reloads

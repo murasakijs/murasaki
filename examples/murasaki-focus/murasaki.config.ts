@@ -10,5 +10,13 @@ export default defineConfig({
   authors: ['ichi'],
   icon: 'src/assets/icon.png',
   locales: ['en'],
+  capabilities: [
+    'menu:application',
+    'menu:context',
+    'clipboard:readText',
+    'clipboard:writeText',
+    'window:minimize',
+    'window:toggleMaximize',
+  ],
   window: { title: 'Murasaki Focus', width: 1160, height: 760, minWidth: 920, minHeight: 640 },
 })

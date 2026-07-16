@@ -8,7 +8,7 @@ import {
 } from 'node:crypto'
 import { resolve } from 'node:path'
 import pc from 'picocolors'
-import { loadUserConfig } from './bundle.js'
+import { loadUserConfig } from './load-config.js'
 
 /**
  * `murasaki release` — the auto-update publishing helpers (contract §9).

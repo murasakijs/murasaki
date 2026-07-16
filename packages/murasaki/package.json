@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.49.0",
+  "version": "0.50.0",
   "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
   "keywords": [
     "desktop",
@@ -19,7 +19,7 @@
   },
   "type": "module",
   "engines": {
-    "node": "^20.19.0 || >=22.12.0"
+    "node": ">=22.12.0"
   },
   "bin": {
     "murasaki": "./bin/murasaki.mjs"

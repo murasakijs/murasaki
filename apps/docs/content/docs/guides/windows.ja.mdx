@@ -1,0 +1,160 @@
+---
+title: ウィンドウと権限
+description: 複数のネイティブウィンドウを宣言し、各レンダラーへ必要最小限のコマンドだけを許可する。
+---
+
+Murasaki のウィンドウは `murasaki.config.ts` で宣言します。既存の `window` が primary
+window で、label は常に `main` です。追加ウィンドウは安定したlabelをkeyにして
+`windows` へ記述します。
+
+```ts title="murasaki.config.ts"
+import { defineConfig } from 'murasaki'
+
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+
+  capabilities: ['clipboard:readText'], // main だけのfallback
+  window: {
+    route: '/',
+    width: 1100,
+    height: 760,
+    capabilities: ['window:getLabel', 'window:open', 'window:list', 'window:manage'],
+  },
+
+  windows: {
+    settings: {
+      route: '/settings',
+      title: 'Settings',
+      width: 720,
+      height: 560,
+      // secondaryのvisibleは既定false
+      capabilities: [],
+    },
+    preview: {
+      route: '/preview',
+      visible: false,
+      capabilities: ['clipboard:readText'],
+    },
+  },
+})
+```
+
+host は宣言済みウィンドウをすべて作成します。secondary は `visible: true` を指定しない
+限り非表示で開始します。secondary で `capabilities` を省略するとdeny-allであり、
+top-level listを継承しません。後方互換のため、primaryだけは
+`window.capabilities ?? capabilities ?? []` の順に権限を解決します。
+
+非表示secondaryは、通常 `main` など表示中のrendererから開いてください。WebKitや
+WebView2は非表示のままrendererを実行する場合も、表示後までJavaScriptを遅延する場合も
+あります。どちらのtimingにも依存せず、非表示renderer自身が `windows.open()` で自分を
+開く設計にはしないでください。native visibilityはOS event loopで反映されるため、
+`windows.list()` でopen後の状態を確認する必要がある場合は、最初のreadがcompositorと
+同期していると仮定せず、`visible` が `true` になるまで待ってください。
+
+Windows backendの `console` optionはapplication backend console全体を制御するため、
+primary専用です。secondary declarationへ `console` を書くと設定解決時に拒否されます。
+
+label は1〜64文字で、先頭は英数字、残りは英数字・`.`・`_`・`-`だけを利用できます。
+`main` は予約済みです。`route` は `/` で始まるsame-origin pathだけを受け付け、完全URL、
+protocol-relative URL、backslashは設定解決時に拒否されます。
+
+## ウィンドウを識別・操作する
+
+レンダラー自身のwindowには `appWindow`、labelで指定する宣言済みwindowには `windows`
+を使います。
+
+```tsx
+'use client'
+
+import { appWindow, windows } from 'murasaki/native'
+
+const current = await appWindow.getLabel()
+await windows.open('settings')
+await windows.focus('settings')
+
+const all = await windows.list()
+const settings = all.find((item) => item.label === 'settings')
+console.log({ current, settings })
+
+await windows.hide('settings')
+```
+
+`windows.list()` は `WindowInfo[]` を返します。
+
+```ts
+interface WindowInfo {
+  label: string
+  primary: boolean
+  visible: boolean
+  focused: boolean
+  minimized: boolean
+  maximized: boolean
+}
+```
+
+| API | Capability | 動作 |
+| --- | --- | --- |
+| `appWindow.getLabel()` | `window:getLabel` | 現在のrendererのlabelを返す。 |
+| `windows.open(label)` | `window:open` | 生存中の宣言windowを表示・復元・focusする。 |
+| `windows.list()` | `window:list` | 生存中の全宣言windowのstateを返す。 |
+| `windows.show(label)` / `hide(label)` / `focus(label)` / `close(label)` | `window:manage` | 別の宣言済みwindowを操作する。 |
+
+設定にないlabelは利用できません。任意のrouteやruntime windowを動的生成するAPIでは
+ありません。
+
+<Callout type="warn">
+  OSのclose controlと `appWindow.close()` はsecondaryをhideするため、
+  `windows.open(label)` で同じ宣言済みwindowを再表示できます。一方、
+  `windows.close(label)` はsecondary targetを明示的に破棄します。破棄したsecondaryは
+  現行版では再生成できません。`main` のcloseは引き続きapp quit requestです。
+</Callout>
+
+## Primary closeとアプリライフサイクル
+
+secondaryでOSのclose controlまたは `appWindow.close()` を使うと、そのwindowだけが
+hideされます。`main` のcloseはアプリのquit requestであり、`beforeQuit()` が実行され、
+そこでcancel可能です。その後、上限付き `shutdown()` を経てnative hostが終了します。
+window別close hookはまだありません。`windows.close(label)` は、そのprocess lifetime中
+に再利用しないsecondaryを明示的に破棄するときだけ使ってください。
+
+## Window別の最小権限
+
+権限はcallを行うrendererごとに評価されます。React stateだけを編集するsettingsには
+`capabilities: []`、clipboardを読むpreviewには `clipboard:readText` だけを付与できます。
+window管理権限は通常、信頼するprimary rendererだけに置きます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    route: '/',
+    capabilities: ['window:open', 'window:list', 'window:manage'],
+  },
+  windows: {
+    settings: { route: '/settings', capabilities: [] },
+    importer: { route: '/import', capabilities: ['dialog:openFile'] },
+  },
+})
+```
+
+window別capability listは、侵害されたrendererが呼べるnative command名を制限しますが、
+argumentはscopeしません。`window:manage` は広い権限であり、`dialog:openFile` を特定の
+directoryだけに限定することもまだできません。権限を持つrendererにremote contentや
+実行可能なuser-authored contentを読み込まず、広い操作のapp-level intentも検証して
+ください。
+
+これはnative commandの境界であり、renderer全体のsandboxではありません。宣言windowは
+現在、同じapplication originと認証済みlocal Node sessionを共有するため、Server Actions、
+`'use main'`、API route、updater HTTP endpointはこのlistでは分離されません。それらの
+handler内でもapplication操作を認証・認可し、deny-all windowをuntrusted executable
+content向けのsandboxとして扱わないでください。
+
+## 次へ
+
+<Cards>
+  <Card title="ネイティブAPI" href="/ja/docs/guides/native-apis" description="renderer向けdialog、shell、tray、window操作。" />
+  <Card title="セキュリティ" href="/ja/docs/building/security" description="信頼境界と最小権限。" />
+  <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" description="primary close、Main、shutdown順序。" />
+</Cards>

@@ -7,7 +7,7 @@
 //! Node's libuv loop for as long as the app is open, so a round-trip through
 //! `onIpcMessage` back into JS never fires. Instead the IPC handler below
 //! intercepts `{ kind: "contextMenu" }`, `{ kind: "appMenu" }`, and
-//! `{ kind: "appQuit" }` messages itself.
+//! authorized `app.quit` native calls itself.
 //!
 //! Context menus pop the muda menu synchronously — via a modal call that
 //! pumps its own nested run/message loop (`show_context_menu_for_nsview` on
@@ -23,7 +23,7 @@
 //! / `poll_menu_bar_events` (Windows), polled once per tao event-loop tick
 //! from `Application::run` and `launcher.rs`'s per-platform launchers.
 //!
-//! `appQuit` (`quit()`) sets `QUIT_REQUESTED` instead of acting immediately —
+//! `app.quit` (`quit()`) sets `QUIT_REQUESTED` instead of acting immediately —
 //! the ipc_handler closure has no access to the event loop's `ControlFlow`,
 //! so like the two polls above, it's read once per tick (`quit_requested`)
 //! by those same three event loops, which do have access to it.
@@ -40,18 +40,29 @@ use std::{
   rc::Rc,
   sync::{atomic::AtomicBool, Arc},
 };
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::collections::{HashSet, VecDeque};
 
 use wry::{
   http::{header::CONTENT_TYPE, Response, StatusCode},
   WebContext, WebView, WebViewBuilder,
 };
-use tray_icon::{Icon as TrayIconImage, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{Icon as TrayIconImage, TrayIconBuilder, TrayIconEvent};
 
 use crate::{
   menu::{build_menu, AppMenuSpec, SharedMenu},
   types::{MenuItemOptions, MenuOptions, Position, WebviewOptions},
-  window::SharedWindow,
+  window::{SharedProcessTray, SharedWindow, SharedWindowRegistry, WindowRegistry},
 };
+
+const MAX_IPC_BODY_BYTES: usize = 256 * 1024;
+const MAX_MENU_ITEMS: usize = 256;
+const MAX_MENU_DEPTH: usize = 8;
+const MAX_MENU_STRING_BYTES: usize = 1024;
+
+fn ipc_body_is_allowed(len: usize) -> bool {
+  len <= MAX_IPC_BODY_BYTES
+}
 
 /// Just enough of the IPC envelope to dispatch on `kind` before deciding
 /// whether to handle a message natively or forward it to Node.
@@ -78,6 +89,150 @@ struct AppMenuPayload {
   menus: Vec<AppMenuSpec>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MenuPollOutcome {
+  pub quit: bool,
+  pub close: bool,
+}
+
+fn has_capability(capabilities: &[String], capability: &str) -> bool {
+  capabilities.iter().any(|entry| entry == capability)
+}
+
+fn context_menu_is_allowed(capabilities: &[String]) -> bool {
+  has_capability(capabilities, "menu:context")
+}
+
+fn app_menu_is_allowed(label: &str, capabilities: &[String]) -> bool {
+  label == "main" && has_capability(capabilities, "menu:application")
+}
+
+fn role_capability(role: &str) -> std::result::Result<Option<&'static str>, String> {
+  match role {
+    "quit" => Ok(Some("app:quit")),
+    "close" | "closeWindow" | "close-window" => Ok(Some("window:close")),
+    "minimize" => Ok(Some("window:minimize")),
+    "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => {
+      Ok(Some("window:toggleMaximize"))
+    }
+    "copy" | "cut" => Ok(Some("clipboard:writeText")),
+    "paste" => Ok(Some("clipboard:readText")),
+    "about" | "selectAll" | "select-all" | "undo" | "redo" | "separator" => Ok(None),
+    _ => Err(format!("unsupported renderer menu role {role}")),
+  }
+}
+
+fn validate_menu_string(value: Option<&str>) -> std::result::Result<(), String> {
+  if value.is_some_and(|value| value.len() > MAX_MENU_STRING_BYTES) {
+    return Err("menu strings must not exceed 1024 bytes".to_string());
+  }
+  Ok(())
+}
+
+fn validate_menu_items(
+  items: &[MenuItemOptions],
+  capabilities: &[String],
+  depth: usize,
+  total: &mut usize,
+) -> std::result::Result<(), String> {
+  if depth > MAX_MENU_DEPTH {
+    return Err("menu nesting exceeds the maximum depth of 8".to_string());
+  }
+  for item in items {
+    *total += 1;
+    if *total > MAX_MENU_ITEMS {
+      return Err("menu exceeds the maximum of 256 items".to_string());
+    }
+    for value in [
+      item.id.as_deref(),
+      item.label.as_deref(),
+      item.accelerator.as_deref(),
+      item.icon.as_deref(),
+      item.role.as_deref(),
+    ] {
+      validate_menu_string(value)?;
+    }
+    if item.id.as_deref().is_some_and(|id| {
+      id.starts_with("murasaki-menu:") || id.starts_with("murasaki-menu-bar:")
+    }) {
+      return Err("menu item id uses a reserved Murasaki menu prefix".to_string());
+    }
+    if let Some(role) = item.role.as_deref() {
+      if let Some(capability) = role_capability(role)? {
+        if !has_capability(capabilities, capability) {
+          return Err(format!("menu role {role} requires capability {capability}"));
+        }
+      }
+    }
+    if let Some(children) = item.submenu.as_deref() {
+      validate_menu_items(children, capabilities, depth + 1, total)?;
+    }
+  }
+  Ok(())
+}
+
+fn validate_context_menu_payload(
+  payload: &ContextMenuPayload,
+  capabilities: &[String],
+) -> std::result::Result<(), String> {
+  if payload.x.is_some_and(|value| !value.is_finite())
+    || payload.y.is_some_and(|value| !value.is_finite())
+  {
+    return Err("context menu coordinates must be finite".to_string());
+  }
+  if menu_items_contain_id_prefix(&payload.items, "murasaki-app-menu-") {
+    return Err("context menu item id uses a reserved application-menu prefix".to_string());
+  }
+  let mut total = 0;
+  validate_menu_items(&payload.items, capabilities, 1, &mut total)
+}
+
+fn menu_items_contain_id_prefix(items: &[MenuItemOptions], prefix: &str) -> bool {
+  items.iter().any(|item| {
+    item.id.as_deref().is_some_and(|id| id.starts_with(prefix))
+      || item.submenu.as_deref().is_some_and(|children| {
+        menu_items_contain_id_prefix(children, prefix)
+      })
+  })
+}
+
+fn validate_app_menu_payload(
+  payload: &AppMenuPayload,
+  capabilities: &[String],
+) -> std::result::Result<(), String> {
+  let mut total = 0;
+  for menu in &payload.menus {
+    total += 1;
+    if total > MAX_MENU_ITEMS {
+      return Err("menu exceeds the maximum of 256 items".to_string());
+    }
+    validate_menu_string(menu.role.as_deref())?;
+    validate_menu_string(menu.label.as_deref())?;
+    match menu.role.as_deref() {
+      Some("editMenu") => {
+        for capability in ["clipboard:readText", "clipboard:writeText"] {
+          if !has_capability(capabilities, capability) {
+            return Err(format!("menu role editMenu requires capability {capability}"));
+          }
+        }
+      }
+      Some("windowMenu") => {
+        for capability in ["window:minimize", "window:toggleMaximize"] {
+          if !has_capability(capabilities, capability) {
+            return Err(format!("menu role windowMenu requires capability {capability}"));
+          }
+        }
+      }
+      Some(role) => return Err(format!("unsupported application menu role {role}")),
+      None => {}
+    }
+    if let Some(items) = menu.items.as_deref() {
+      validate_menu_items(items, capabilities, 1, &mut total)?;
+    }
+  }
+  Ok(())
+}
+
 /// Authenticated renderer -> native-host RPC. The IPC handler already checks
 /// that the sender belongs to the exact application origin before parsing
 /// this payload, so native privileges never follow an off-origin navigation.
@@ -90,19 +245,40 @@ struct NativeCallPayload {
   args: serde_json::Value,
 }
 
-/// Set synchronously by the IPC handler below when `{ kind: "appQuit" }`
-/// arrives (posted by `quit()` — see the updater install→quit→apply
+struct NativeCallContext<'a> {
+  window_slot: &'a SharedWindow,
+  webview_slot: &'a Rc<RefCell<Option<WebView>>>,
+  tray_slot: &'a SharedProcessTray,
+  default_tray_icon: Option<&'a str>,
+  capabilities: &'a [String],
+  current_label: &'a str,
+  windows: &'a SharedWindowRegistry,
+  wake: &'a dyn Fn(),
+}
+
+/// Set synchronously by the IPC handler below when an authorized `app.quit`
+/// call arrives (posted by `quit()` — see the updater install→quit→apply
 /// handshake, contract §7). Like `contextMenu`/`appMenu`, this can't be
 /// handled by calling into `ControlFlow` directly — the ipc_handler closure
 /// has no access to it — so it's a flag instead, read once per tao
 /// event-loop tick by `Application::run` (dev) and both of `launcher.rs`'s
 /// prod event loops (`quit_requested` below) so *they* can set
-/// `ControlFlow::Exit`. A plain `static` (rather than a field threaded
-/// through `Application`/the launchers) is enough: murasaki only ever drives
-/// one window/webview per process (see `SharedWebview`'s doc comment).
+/// `ControlFlow::Exit`. App quit remains process-wide even when several
+/// labeled windows are registered.
 static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Whether `{ kind: "appQuit" }` has been requested since the last check —
+// `muda` exposes one process-global event channel for every menu type. A
+// context popup is modal, but an application-menu click may already be
+// queued when that popup opens. Preserve those unrelated ids here instead
+// of letting the popup consume and mis-dispatch them.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+thread_local! {
+  static DEFERRED_APP_MENU_EVENTS: RefCell<VecDeque<String>> = const {
+    RefCell::new(VecDeque::new())
+  };
+}
+
+/// Whether `app.quit` has been requested since the last check —
 /// see `QUIT_REQUESTED`'s doc comment. Consumes the flag (so once an
 /// event-loop tick acts on it, later ticks don't see it again), the same way
 /// `poll_menu_bar_events`/`poll_app_menu_events` drain their event channel.
@@ -117,9 +293,7 @@ pub(crate) fn quit_requested() -> bool {
 /// menu bar/app menu is persistent, so unlike the context-menu popup below,
 /// nothing can grab this synchronously off a single call's `self`.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) type SharedWebview = Rc<RefCell<Option<WebView>>>;
-
-type SharedTrayIcon = Rc<RefCell<Option<TrayIcon>>>;
+pub(crate) type SharedWebview = crate::window::SharedWebview;
 
 /// Extra context `Webview::new` needs to install/replace the application
 /// menu on demand — see `{ kind: "appMenu" }` in `with_ipc_handler` below and
@@ -153,7 +327,10 @@ pub(crate) struct AppMenuContext {
 #[napi]
 pub struct Webview {
   webview: Rc<RefCell<Option<WebView>>>,
-  tray: SharedTrayIcon,
+  label: String,
+  windows: SharedWindowRegistry,
+  tray: SharedProcessTray,
+  wake: Rc<dyn Fn()>,
   on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>>,
   /// Keep the tao window alive for as long as the webview exists. wry's WebView
   /// only *borrows* the window's NSView/HWND — if the tao `Window` is dropped,
@@ -201,7 +378,13 @@ fn webview2_data_dir(app_id: Option<&str>) -> Option<std::path::PathBuf> {
 }
 
 fn sanitize_profile_name(value: &str) -> String {
-  value
+  use sha2::{Digest, Sha256};
+
+  // Retain a short human-readable prefix for diagnostics, but make the
+  // identity collision-resistant. Replacing separators alone made distinct
+  // app IDs such as `com.example/app` and `com.example?app` share cookies,
+  // localStorage and a concurrently locked WebView2 profile directory.
+  let mut prefix: String = value
     .chars()
     .map(|ch| {
       if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
@@ -210,7 +393,16 @@ fn sanitize_profile_name(value: &str) -> String {
         '_'
       }
     })
-    .collect()
+    .take(48)
+    .collect();
+  if prefix.is_empty() {
+    prefix.push_str("app");
+  }
+  let hash: String = Sha256::digest(value.as_bytes())
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect();
+  format!("{prefix}-{hash}")
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -233,16 +425,17 @@ fn navigation_policy(target: &str, trusted: Option<&url::Url>) -> NavigationPoli
     return NavigationPolicy::Allow;
   }
   if parsed.scheme() == "blob" {
-    return NavigationPolicy::Allow;
+    // A blob URL serializes its creator URL after `blob:`. Only blobs created
+    // by the exact application origin may stay inside the privileged webview.
+    return target.strip_prefix("blob:")
+      .and_then(|inner| url::Url::parse(inner).ok())
+      .filter(|inner| same_origin(inner, trusted))
+      .map(|_| NavigationPolicy::Allow)
+      .unwrap_or(NavigationPolicy::Deny);
   }
 
-  if let Some(trusted) = trusted {
-    let same_origin = parsed.scheme() == trusted.scheme()
-      && parsed.host() == trusted.host()
-      && parsed.port_or_known_default() == trusted.port_or_known_default();
-    if same_origin {
-      return NavigationPolicy::Allow;
-    }
+  if same_origin(&parsed, trusted) {
+    return NavigationPolicy::Allow;
   }
 
   match parsed.scheme() {
@@ -252,8 +445,28 @@ fn navigation_policy(target: &str, trusted: Option<&url::Url>) -> NavigationPoli
   }
 }
 
+fn same_origin(candidate: &url::Url, trusted: Option<&url::Url>) -> bool {
+  trusted.is_some_and(|trusted| {
+    candidate.scheme() == trusted.scheme()
+      && candidate.host() == trusted.host()
+      && candidate.port_or_known_default() == trusted.port_or_known_default()
+  })
+}
+
+/// Privileged IPC is stricter than top-level navigation. `about:blank` and
+/// `blob:` inherit an origin at runtime, but the callback only exposes their
+/// serialized URI; it cannot prove which frame created them. Requiring the
+/// exact configured application origin prevents a remote child frame from
+/// manufacturing an inherited-looking URI and reaching native capabilities.
+fn ipc_origin_is_trusted(target: &str, trusted: Option<&url::Url>) -> bool {
+  url::Url::parse(target)
+    .ok()
+    .is_some_and(|parsed| same_origin(&parsed, trusted))
+}
+
 fn permission_for_native_method(method: &str) -> Option<&'static str> {
   match method {
+    "app.quit" => Some("app:quit"),
     "dialog.openFile" => Some("dialog:openFile"),
     "dialog.openDirectory" => Some("dialog:openDirectory"),
     "dialog.saveFile" => Some("dialog:saveFile"),
@@ -275,6 +488,12 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
     "window.isFocused" => Some("window:isFocused"),
     "window.isMaximized" => Some("window:isMaximized"),
     "window.isMinimized" => Some("window:isMinimized"),
+    "window.getLabel" => Some("window:getLabel"),
+    "window.open" => Some("window:open"),
+    "window.list" => Some("window:list"),
+    "window.showOther" | "window.hideOther" | "window.focusOther" | "window.closeOther" => {
+      Some("window:manage")
+    }
     "tray.create" => Some("tray:create"),
     "tray.remove" => Some("tray:remove"),
     "tray.setTooltip" => Some("tray:setTooltip"),
@@ -292,8 +511,11 @@ impl Webview {
     window: SharedWindow,
     opts: WebviewOptions,
     app_menu: AppMenuContext,
+    label: String,
+    windows: SharedWindowRegistry,
     wake: Box<dyn Fn() + 'static>,
   ) -> Result<Self> {
+    let wake: Rc<dyn Fn()> = Rc::from(wake);
     let trusted_origin = opts
       .url
       .as_deref()
@@ -312,7 +534,7 @@ impl Webview {
     // the page has loaded, which can't happen before `build()` returns and
     // the slot is filled. So the handler never observes an empty slot.
     let webview_slot: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
-    let tray_slot: SharedTrayIcon = Rc::new(RefCell::new(None));
+    let tray_slot = windows.borrow().tray();
 
     // Pin the WebView2 user-data directory to a writable location. wry's
     // default puts it next to the host executable — for `murasaki dev`/prod
@@ -341,12 +563,17 @@ impl Webview {
     let ipc_app_menu = app_menu;
     let ipc_trusted_origin = trusted_origin.clone();
     let ipc_capabilities = opts.capabilities.clone().unwrap_or_default();
+    let ipc_label = label.clone();
+    let ipc_windows = windows.clone();
     let ipc_tray_slot = tray_slot.clone();
     let ipc_tray_icon = opts.tray_icon.clone();
+    let ipc_wake = wake.clone();
     builder = builder.with_ipc_handler(move |request| {
-      if navigation_policy(&request.uri().to_string(), ipc_trusted_origin.as_ref())
-        != NavigationPolicy::Allow
-      {
+      if !ipc_origin_is_trusted(&request.uri().to_string(), ipc_trusted_origin.as_ref()) {
+        return;
+      }
+      if !ipc_body_is_allowed(request.body().len()) {
+        eprintln!("murasaki: rejected oversized renderer IPC payload");
         return;
       }
       let body = request.body().clone();
@@ -356,41 +583,50 @@ impl Webview {
         .and_then(|e| e.kind);
 
       if kind.as_deref() == Some("contextMenu") {
+        if !context_menu_is_allowed(&ipc_capabilities) {
+          return;
+        }
         if let Ok(payload) = serde_json::from_str::<ContextMenuPayload>(&body) {
-          show_native_context_menu(
+          if validate_context_menu_payload(&payload, &ipc_capabilities).is_err() {
+            return;
+          }
+          let outcome = show_native_context_menu(
             &ipc_window_slot,
             &ipc_webview_slot,
             &payload.items,
             payload.x,
             payload.y,
           );
+          apply_menu_outcome(&ipc_label, &ipc_windows, ipc_wake.as_ref(), outcome);
         }
         return;
       }
 
       if kind.as_deref() == Some("appMenu") {
+        if !app_menu_is_allowed(&ipc_label, &ipc_capabilities) {
+          return;
+        }
         if let Ok(payload) = serde_json::from_str::<AppMenuPayload>(&body) {
+          if validate_app_menu_payload(&payload, &ipc_capabilities).is_err() {
+            return;
+          }
           handle_app_menu_message(&ipc_window_slot, &ipc_app_menu, &payload.menus);
         }
         return;
       }
 
-      if kind.as_deref() == Some("appQuit") {
-        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
-        wake();
-        return;
-      }
-
       if kind.as_deref() == Some("nativeCall") {
         if let Ok(payload) = serde_json::from_str::<NativeCallPayload>(&body) {
-          handle_native_call(
-            &ipc_window_slot,
-            &ipc_webview_slot,
-            &ipc_tray_slot,
-            ipc_tray_icon.as_deref(),
-            &ipc_capabilities,
-            payload,
-          );
+          handle_native_call(NativeCallContext {
+            window_slot: &ipc_window_slot,
+            webview_slot: &ipc_webview_slot,
+            tray_slot: &ipc_tray_slot,
+            default_tray_icon: ipc_tray_icon.as_deref(),
+            capabilities: &ipc_capabilities,
+            current_label: &ipc_label,
+            windows: &ipc_windows,
+            wake: ipc_wake.as_ref(),
+          }, payload);
         }
         return;
       }
@@ -443,20 +679,20 @@ impl Webview {
     };
 
     *webview_slot.borrow_mut() = Some(webview);
+    windows.borrow_mut().attach_webview(&label, webview_slot.clone())
+      .map_err(|error| Error::new(Status::InvalidArg, error))?;
 
     Ok(Self {
       webview: webview_slot,
+      label,
+      windows,
       tray: tray_slot,
+      wake,
       on_ipc,
       _window: window,
     })
   }
 
-  /// See `SharedWebview`'s doc comment.
-  #[cfg(any(target_os = "macos", target_os = "windows"))]
-  pub(crate) fn handle(&self) -> SharedWebview {
-    self.webview.clone()
-  }
 }
 
 fn native_error(error: impl std::fmt::Display) -> serde_json::Value {
@@ -478,18 +714,45 @@ fn dispatch_native_response(
   }
 }
 
+fn apply_menu_outcome(
+  current_label: &str,
+  windows: &SharedWindowRegistry,
+  wake: &dyn Fn(),
+  outcome: MenuPollOutcome,
+) {
+  if outcome.quit {
+    QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+    wake();
+  }
+  if outcome.close {
+    if windows.borrow().is_primary(current_label) {
+      if windows.borrow_mut().request_close(current_label).is_ok() {
+        wake();
+      }
+    } else {
+      let window = windows.borrow().live_window(current_label);
+      if let Ok(window) = window {
+        crate::window::set_window_visible(&window, false);
+      }
+    }
+  }
+}
+
 /// Execute the stable renderer-facing native API synchronously on the UI
 /// thread, then resolve the caller's Promise inside the webview. Keeping this
 /// in Rust makes dev and packaged apps use the same implementation; it also
 /// avoids Node/libuv being blocked by the native event loop in development.
-fn handle_native_call(
-  window_slot: &SharedWindow,
-  webview_slot: &Rc<RefCell<Option<WebView>>>,
-  tray_slot: &SharedTrayIcon,
-  default_tray_icon: Option<&str>,
-  capabilities: &[String],
-  payload: NativeCallPayload,
-) {
+fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload) {
+  let NativeCallContext {
+    window_slot,
+    webview_slot,
+    tray_slot,
+    default_tray_icon,
+    capabilities,
+    current_label,
+    windows,
+    wake,
+  } = context;
   #[derive(serde::Deserialize)]
   struct TextArg { text: String }
   #[derive(serde::Deserialize)]
@@ -500,6 +763,8 @@ fn handle_native_call(
   struct SizeArg { width: f64, height: f64 }
   #[derive(serde::Deserialize)]
   struct EnabledArg { enabled: bool }
+  #[derive(serde::Deserialize)]
+  struct LabelArg { label: String }
   #[derive(serde::Deserialize)]
   #[serde(rename_all = "camelCase")]
   struct TrayCreateArg {
@@ -520,8 +785,14 @@ fn handle_native_call(
     return;
   }
 
+  let method = payload.method.clone();
   let result: std::result::Result<serde_json::Value, String> = (|| {
-    match payload.method.as_str() {
+    match method.as_str() {
+      "app.quit" => {
+        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        wake();
+        Ok(serde_json::Value::Null)
+      }
       "dialog.openFile" => {
         let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
         crate::dialog::open_file_dialog(Some(opts))
@@ -607,7 +878,14 @@ fn handle_native_call(
         Ok(serde_json::Value::Null)
       }
       "window.close" => {
-        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        let primary = windows.borrow().is_primary(current_label);
+        if primary {
+          windows.borrow_mut().request_close(current_label)?;
+          wake();
+        } else {
+          let target = windows.borrow().live_window(current_label)?;
+          crate::window::set_window_visible(&target, false);
+        }
         Ok(serde_json::Value::Null)
       }
       "window.setAlwaysOnTop" => {
@@ -635,6 +913,44 @@ fn handle_native_call(
         .as_ref()
         .map(|window| serde_json::Value::Bool(window.is_minimized()))
         .unwrap_or(serde_json::Value::Bool(false))),
+      "window.getLabel" => Ok(serde_json::Value::String(current_label.to_string())),
+      "window.open" => {
+        let args: LabelArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        let target = windows.borrow().live_window(&args.label)?;
+        crate::window::open_window(&target);
+        Ok(serde_json::Value::Null)
+      }
+      "window.list" => serde_json::to_value(WindowRegistry::list(windows)).map_err(|e| e.to_string()),
+      "window.showOther" | "window.hideOther" | "window.focusOther" | "window.closeOther" => {
+        let args: LabelArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        if args.label == current_label {
+          return Err("other-window methods require a different target label".to_string());
+        }
+        match method.as_str() {
+          "window.showOther" => {
+            let target = windows.borrow().live_window(&args.label)?;
+            crate::window::set_window_visible(&target, true);
+          }
+          "window.hideOther" => {
+            let target = windows.borrow().live_window(&args.label)?;
+            crate::window::set_window_visible(&target, false);
+          }
+          "window.focusOther" => {
+            let target = windows.borrow().live_window(&args.label)?;
+            if let Ok(target) = target.try_borrow() {
+              if let Some(target) = target.as_ref() {
+                target.set_focus();
+              }
+            };
+          }
+          "window.closeOther" => {
+            windows.borrow_mut().request_close(&args.label)?;
+            wake();
+          }
+          _ => unreachable!(),
+        }
+        Ok(serde_json::Value::Null)
+      }
       "tray.create" => {
         let args: TrayCreateArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
         let icon_path = args.icon.as_deref().or(default_tray_icon)
@@ -647,21 +963,43 @@ fn handle_native_call(
           builder = builder.with_tooltip(tooltip);
         }
         let tray = builder.build().map_err(|e| format!("create tray icon: {e}"))?;
-        tray_slot.borrow_mut().replace(tray);
+        let previous = {
+          let mut state = tray_slot.borrow_mut();
+          state.owner_label = Some(current_label.to_string());
+          state.icon.replace(tray)
+        };
+        drop(previous);
         Ok(serde_json::Value::Null)
       }
       "tray.remove" => {
-        tray_slot.borrow_mut().take();
+        let previous = {
+          let mut state = tray_slot.borrow_mut();
+          state.owner_label = None;
+          state.icon.take()
+        };
+        drop(previous);
         Ok(serde_json::Value::Null)
       }
       "tray.setTooltip" => {
         let args: TextArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
-        let tray = tray_slot.borrow();
-        let tray = tray.as_ref().ok_or_else(|| "tray icon has not been created".to_string())?;
-        tray.set_tooltip(Some(args.text)).map_err(|e| format!("set tray tooltip: {e}"))?;
+        let tray = tray_slot.borrow_mut().icon.take()
+          .ok_or_else(|| "tray icon has not been created".to_string())?;
+        let tooltip_result = tray.set_tooltip(Some(args.text))
+          .map_err(|e| format!("set tray tooltip: {e}"));
+        let replaced = {
+          let mut state = tray_slot.borrow_mut();
+          if state.icon.is_none() {
+            state.icon = Some(tray);
+            None
+          } else {
+            Some(tray)
+          }
+        };
+        drop(replaced);
+        tooltip_result?;
         Ok(serde_json::Value::Null)
       }
-      _ => Err(format!("unknown native method: {}", payload.method)),
+      _ => Err(format!("unknown native method: {method}")),
     }
   })();
 
@@ -727,7 +1065,8 @@ impl Webview {
         Some(p) => (Some(p.x), Some(p.y)),
         None => (None, None),
       };
-      show_native_context_menu(&self._window, &self.webview, &menu.items, x, y);
+      let outcome = show_native_context_menu(&self._window, &self.webview, &menu.items, x, y);
+      apply_menu_outcome(&self.label, &self.windows, self.wake.as_ref(), outcome);
     }
     #[cfg(all(unix, not(target_os = "macos"), not(target_os = "android"), not(target_os = "freebsd")))]
     {
@@ -743,8 +1082,19 @@ impl Webview {
 
   #[napi]
   pub fn dispose(&self) -> Result<()> {
-    self.tray.borrow_mut().take();
-    self.webview.borrow_mut().take();
+    let tray = {
+      let mut tray = self.tray.borrow_mut();
+      if tray.owner_label.as_deref() == Some(&self.label) {
+        tray.owner_label = None;
+        tray.icon.take()
+      } else {
+        None
+      }
+    };
+    let webview = self.webview.borrow_mut().take();
+    self.windows.borrow_mut().clear_webview(&self.label);
+    drop(webview);
+    drop(tray);
     Ok(())
   }
 }
@@ -777,10 +1127,24 @@ fn load_tray_icon(path: &str) -> std::result::Result<TrayIconImage, String> {
 /// loop polls this because tray-icon uses its own channel rather than tao
 /// user events.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) fn poll_tray_events(webview_slot: &SharedWebview) {
+fn tray_event_is_current(active_id: Option<&str>, event_id: &str) -> bool {
+  active_id.is_some_and(|active_id| active_id == event_id)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn poll_tray_events(
+  webview_slot: &SharedWebview,
+  tray_slot: &SharedProcessTray,
+) {
   use tray_icon::{MouseButton, MouseButtonState};
 
   while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+    let active_id = tray_slot.borrow().icon.as_ref()
+      .map(|icon| icon.id().as_ref().to_string());
+    let is_current_icon = tray_event_is_current(active_id.as_deref(), event.id().as_ref());
+    if !is_current_icon {
+      continue;
+    }
     let detail = match event {
       TrayIconEvent::Click { button, button_state: MouseButtonState::Up, .. } => {
         Some(serde_json::json!({
@@ -805,6 +1169,95 @@ pub(crate) fn poll_tray_events(webview_slot: &SharedWebview) {
   }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn collect_menu_item_ids(items: Vec<muda::MenuItemKind>, ids: &mut HashSet<String>) {
+  for item in items {
+    ids.insert(item.id().as_ref().to_string());
+    if let Some(submenu) = item.as_submenu() {
+      collect_menu_item_ids(submenu.items(), ids);
+    }
+  }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn menu_owned_ids(menu: &muda::Menu) -> HashSet<String> {
+  let mut ids = HashSet::new();
+  collect_menu_item_ids(menu.items(), &mut ids);
+  ids
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn defer_menu_event_ids(ids: impl IntoIterator<Item = String>) {
+  DEFERRED_APP_MENU_EVENTS.with(|pending| pending.borrow_mut().extend(ids));
+}
+
+/// Move events that predate a context popup out of muda's shared receiver.
+/// The popup can then claim only ids belonging to the `Menu` it just built.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn defer_pending_app_menu_events() {
+  let mut pending = Vec::new();
+  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    pending.push(event.id().as_ref().to_string());
+  }
+  defer_menu_event_ids(pending);
+}
+
+/// Select the first event owned by a modal context menu and preserve every
+/// other id, in order, for the persistent application-menu poller.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn split_first_owned_menu_event(
+  queued: impl IntoIterator<Item = String>,
+  owned_ids: &HashSet<String>,
+) -> (Option<String>, Vec<String>) {
+  let mut selected = None;
+  let mut deferred = Vec::new();
+  for id in queued {
+    if selected.is_none() && owned_ids.contains(&id) {
+      selected = Some(id);
+    } else {
+      deferred.push(id);
+    }
+  }
+  (selected, deferred)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn take_context_menu_event(owned_ids: &HashSet<String>) -> Option<String> {
+  let mut queued = Vec::new();
+  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    queued.push(event.id().as_ref().to_string());
+  }
+  let (selected, deferred) = split_first_owned_menu_event(queued, owned_ids);
+  defer_menu_event_ids(deferred);
+  selected
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn retain_owned_menu_events(
+  queued: impl IntoIterator<Item = String>,
+  owned_ids: &HashSet<String>,
+) -> Vec<String> {
+  queued.into_iter().filter(|id| owned_ids.contains(id)).collect()
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn take_app_menu_events(menu_slot: &SharedMenu) -> Vec<String> {
+  let mut queued = DEFERRED_APP_MENU_EVENTS.with(|pending| pending.borrow_mut().drain(..).collect::<Vec<_>>());
+  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    queued.push(event.id().as_ref().to_string());
+  }
+  // The receiver is process-global and context popups may deliver their
+  // selection after the synchronous show call has returned. Dispatch only
+  // ids owned by the currently installed application menu; stale context
+  // ids and events from a replaced app menu must never reach useAppMenu.
+  let owned_ids = menu_slot
+    .borrow()
+    .as_ref()
+    .map(menu_owned_ids)
+    .unwrap_or_default();
+  retain_owned_menu_events(queued, &owned_ids)
+}
+
 /// Build a muda menu from `items` and pop it up **synchronously** over the
 /// webview, then report the clicked item id (if any) back into page JS as a
 /// `murasaki:menuclick` `CustomEvent`. Called both from the IPC handler
@@ -825,16 +1278,16 @@ fn show_native_context_menu(
   items: &[MenuItemOptions],
   _x: Option<f64>,
   _y: Option<f64>,
-) {
-  let _ = window_slot;
-
+) -> MenuPollOutcome {
   use muda::ContextMenu;
   use wry::WebViewExtMacOS;
 
   let menu = match build_menu(items) {
     Ok(m) => m,
-    Err(_) => return,
+    Err(_) => return MenuPollOutcome::default(),
   };
+  let owned_ids = menu_owned_ids(&menu);
+  defer_pending_app_menu_events();
 
   // Grab the NSView pointer and drop the RefCell borrow *before* calling
   // `show_context_menu_for_nsview` below — that call is modal (it pumps a
@@ -844,7 +1297,7 @@ fn show_native_context_menu(
     let guard = webview_slot.borrow();
     match guard.as_ref() {
       Some(wv) => objc2::rc::Retained::as_ptr(&wv.webview()) as *const std::ffi::c_void,
-      None => return,
+      None => return MenuPollOutcome::default(),
     }
   };
 
@@ -861,9 +1314,9 @@ fn show_native_context_menu(
     menu.show_context_menu_for_nsview(ns_view_ptr, None);
   }
 
-  if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
-    dispatch_menu_click(webview_slot, event.id().as_ref());
-  }
+  take_context_menu_event(&owned_ids)
+    .map(|id| handle_native_menu_event(window_slot, webview_slot, &id))
+    .unwrap_or_default()
 }
 
 /// Windows: same shape as the macOS version above — build the muda menu, pop
@@ -892,7 +1345,7 @@ fn show_native_context_menu(
   items: &[MenuItemOptions],
   x: Option<f64>,
   y: Option<f64>,
-) {
+) -> MenuPollOutcome {
   use muda::{
     dpi::{LogicalPosition, Position},
     ContextMenu,
@@ -901,8 +1354,10 @@ fn show_native_context_menu(
 
   let menu = match build_menu(items) {
     Ok(m) => m,
-    Err(_) => return,
+    Err(_) => return MenuPollOutcome::default(),
   };
+  let owned_ids = menu_owned_ids(&menu);
+  defer_pending_app_menu_events();
 
   // Grab the HWND and drop the RefCell borrow *before* calling
   // `show_context_menu_for_hwnd` below — like the macOS call above, it's
@@ -915,7 +1370,7 @@ fn show_native_context_menu(
     let guard = window_slot.borrow();
     match guard.as_ref() {
       Some(w) => w.hwnd(),
-      None => return,
+      None => return MenuPollOutcome::default(),
     }
   };
 
@@ -939,8 +1394,36 @@ fn show_native_context_menu(
     menu.show_context_menu_for_hwnd(hwnd, position);
   }
 
-  if let Ok(event) = muda::MenuEvent::receiver().try_recv() {
-    dispatch_menu_click(webview_slot, event.id().as_ref());
+  take_context_menu_event(&owned_ids)
+    .map(|id| handle_native_menu_event(window_slot, webview_slot, &id))
+    .unwrap_or_default()
+}
+
+fn handle_native_menu_event(
+  window_slot: &SharedWindow,
+  webview_slot: &SharedWebview,
+  id: &str,
+) -> MenuPollOutcome {
+  use crate::menu::native_menu_ids as ids;
+  match id {
+    ids::QUIT => MenuPollOutcome { quit: true, close: false },
+    ids::CLOSE => MenuPollOutcome { quit: false, close: true },
+    ids::MINIMIZE => {
+      if let Some(window) = window_slot.borrow().as_ref() {
+        window.set_minimized(true);
+      }
+      MenuPollOutcome::default()
+    }
+    ids::ZOOM => {
+      if let Some(window) = window_slot.borrow().as_ref() {
+        window.set_maximized(!window.is_maximized());
+      }
+      MenuPollOutcome::default()
+    }
+    _ => {
+      dispatch_menu_click(webview_slot, id);
+      MenuPollOutcome::default()
+    }
   }
 }
 
@@ -968,14 +1451,13 @@ fn dispatch_menu_click(webview_slot: &Rc<RefCell<Option<WebView>>>, id: &str) {
 /// once per tao event-loop tick instead (see both call sites' `event_loop.run`
 /// closures).
 ///
-/// Drains every pending event (`while let`, not just the first) in case more
-/// than one queued up between two ticks. Ids outside `windows_menu_bar_ids`
+/// Drains every pending event in case more than one queued up between two
+/// ticks. Ids outside `windows_menu_bar_ids`
 /// are treated as a `useAppMenu` custom-item click (see
 /// `menu::build_windows_app_menu_from_spec`) and dispatched via
-/// `dispatch_menu_click` — in principle an app's own `useContextMenu` popup
-/// also posts to this same global channel, but never actually reaches here:
-/// its own `try_recv()` above runs synchronously in the same call stack as
-/// its click, before this function's caller gets a turn.
+/// `dispatch_menu_click` to the primary renderer. Context popups share muda's
+/// process-global receiver; `show_native_context_menu` separates their owned
+/// ids and preserves unrelated queued app-menu ids for this poller.
 ///
 /// Returns whether the Exit item was clicked — Minimize/Zoom, the Edit
 /// items, and unrecognized (custom) ids are fully handled inside this
@@ -985,15 +1467,22 @@ fn dispatch_menu_click(webview_slot: &Rc<RefCell<Option<WebView>>>, id: &str) {
 /// `onQuit` JS callback in the dev path via `Application`), so it's left for
 /// the caller to act on.
 #[cfg(target_os = "windows")]
-pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &SharedWebview) -> bool {
+pub(crate) fn poll_menu_bar_events(
+  window_slot: &SharedWindow,
+  focused_webview_slot: &SharedWebview,
+  app_menu_webview_slot: &SharedWebview,
+  app_menu_slot: &SharedMenu,
+) -> MenuPollOutcome {
   use crate::menu::windows_menu_bar_ids as ids;
 
-  let mut exit_requested = false;
+  let mut outcome = MenuPollOutcome::default();
 
-  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
-    let id = event.id().as_ref();
+  for id in take_app_menu_events(app_menu_slot) {
+    let id = id.as_str();
     if id == ids::EXIT {
-      exit_requested = true;
+      outcome.quit = true;
+    } else if id == ids::CLOSE {
+      outcome.close = true;
     } else if id == ids::MINIMIZE {
       if let Some(w) = window_slot.borrow().as_ref() {
         w.set_minimized(true);
@@ -1003,23 +1492,23 @@ pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &Sh
         w.set_maximized(!w.is_maximized());
       }
     } else if id == ids::UNDO {
-      run_menu_bar_edit_command(webview_slot, "undo", ids::UNDO);
+      run_menu_bar_edit_command(focused_webview_slot, "undo", ids::UNDO);
     } else if id == ids::REDO {
-      run_menu_bar_edit_command(webview_slot, "redo", ids::REDO);
+      run_menu_bar_edit_command(focused_webview_slot, "redo", ids::REDO);
     } else if id == ids::CUT {
-      run_menu_bar_edit_command(webview_slot, "cut", ids::CUT);
+      run_menu_bar_edit_command(focused_webview_slot, "cut", ids::CUT);
     } else if id == ids::COPY {
-      run_menu_bar_edit_command(webview_slot, "copy", ids::COPY);
+      run_menu_bar_edit_command(focused_webview_slot, "copy", ids::COPY);
     } else if id == ids::PASTE {
-      run_menu_bar_edit_command(webview_slot, "paste", ids::PASTE);
+      run_menu_bar_edit_command(focused_webview_slot, "paste", ids::PASTE);
     } else if id == ids::SELECT_ALL {
-      run_menu_bar_edit_command(webview_slot, "selectAll", ids::SELECT_ALL);
+      run_menu_bar_edit_command(focused_webview_slot, "selectAll", ids::SELECT_ALL);
     } else {
-      dispatch_menu_click(webview_slot, id);
+      dispatch_menu_click(app_menu_webview_slot, id);
     }
   }
 
-  exit_requested
+  outcome
 }
 
 /// macOS only: polls muda's global menu-event channel for clicks on CUSTOM
@@ -1029,7 +1518,8 @@ pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &Sh
 /// `PredefinedMenuItem`s riding Cocoa's responder chain straight into the
 /// focused `WKWebView` or the window manager — those never reach this
 /// channel, so every event seen here is, by construction, a custom
-/// `useAppMenu` item click that needs dispatching into the webview. Called
+/// `useAppMenu` item click that needs dispatching into the primary webview
+/// where the handlers are registered. Called
 /// once per tao event-loop tick from `Application::run` and `launcher.rs`'s
 /// `imp_macos`, mirroring `poll_menu_bar_events`'s role on Windows in the
 /// same two call sites. (Before `useAppMenu`, macOS never needed this: the
@@ -1037,10 +1527,18 @@ pub(crate) fn poll_menu_bar_events(window_slot: &SharedWindow, webview_slot: &Sh
 /// pushed to this channel — that's why this function is new while
 /// `poll_menu_bar_events` already existed.)
 #[cfg(target_os = "macos")]
-pub(crate) fn poll_app_menu_events(webview_slot: &SharedWebview) {
-  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
-    dispatch_menu_click(webview_slot, event.id().as_ref());
+pub(crate) fn poll_app_menu_events(
+  window_slot: &SharedWindow,
+  app_menu_webview_slot: &SharedWebview,
+  app_menu_slot: &SharedMenu,
+) -> MenuPollOutcome {
+  let mut outcome = MenuPollOutcome::default();
+  for id in take_app_menu_events(app_menu_slot) {
+    let event_outcome = handle_native_menu_event(window_slot, app_menu_webview_slot, &id);
+    outcome.quit |= event_outcome.quit;
+    outcome.close |= event_outcome.close;
   }
+  outcome
 }
 
 /// Replaces the currently-installed application menu — the "REPLACE the
@@ -1065,7 +1563,8 @@ fn handle_app_menu_message(_window_slot: &SharedWindow, ctx: &AppMenuContext, me
     Err(_) => return,
   };
 
-  ctx.menu_slot.borrow_mut().take();
+  let previous = ctx.menu_slot.borrow_mut().take();
+  drop(previous);
   menu.init_for_nsapp();
   *ctx.menu_slot.borrow_mut() = Some(menu);
 }
@@ -1091,7 +1590,8 @@ fn handle_app_menu_message(window_slot: &SharedWindow, ctx: &AppMenuContext, men
   };
 
   // Drop the OLD menu first — see this function's doc comment.
-  ctx.menu_slot.borrow_mut().take();
+  let previous = ctx.menu_slot.borrow_mut().take();
+  drop(previous);
   // SAFETY: `hwnd` was read from a live tao `Window` just above.
   if let Err(e) = unsafe { menu.init_for_hwnd(hwnd) } {
     eprintln!("murasaki: failed to attach app menu: {e}");
@@ -1136,7 +1636,8 @@ fn show_native_context_menu(
   _items: &[MenuItemOptions],
   _x: Option<f64>,
   _y: Option<f64>,
-) {
+) -> MenuPollOutcome {
+  MenuPollOutcome::default()
 }
 
 /// Custom-protocol handler backing `serve_dir` (production static file
@@ -1214,10 +1715,67 @@ fn mime_for(path: &str) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-  use super::{native_method_is_allowed, navigation_policy, sanitize_profile_name, NavigationPolicy};
+  use super::{
+    app_menu_is_allowed, context_menu_is_allowed, ipc_body_is_allowed, ipc_origin_is_trusted,
+    native_method_is_allowed, navigation_policy, sanitize_profile_name,
+    validate_app_menu_payload, validate_context_menu_payload, AppMenuPayload,
+    ContextMenuPayload, NavigationPolicy, MAX_IPC_BODY_BYTES,
+  };
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  use super::{retain_owned_menu_events, split_first_owned_menu_event, tray_event_is_current};
+  use crate::{menu::AppMenuSpec, types::MenuItemOptions};
+
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  #[test]
+  fn context_menu_claims_only_owned_ids_and_preserves_app_menu_order() {
+    let owned = ["context-open".to_string()].into_iter().collect();
+    let (selected, deferred) = split_first_owned_menu_event(
+      [
+        "app-save".to_string(),
+        "context-open".to_string(),
+        "app-help".to_string(),
+      ],
+      &owned,
+    );
+    assert_eq!(selected.as_deref(), Some("context-open"));
+    assert_eq!(deferred, ["app-save", "app-help"]);
+  }
+
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  #[test]
+  fn application_menu_dispatch_drops_delayed_context_and_stale_menu_events() {
+    let owned = ["app-save".to_string(), "app-help".to_string()]
+      .into_iter()
+      .collect();
+    assert_eq!(
+      retain_owned_menu_events(
+        [
+          "context-open".to_string(),
+          "app-save".to_string(),
+          "old-app-item".to_string(),
+          "app-help".to_string(),
+        ],
+        &owned,
+      ),
+      ["app-save", "app-help"],
+    );
+  }
+
+  #[cfg(any(target_os = "macos", target_os = "windows"))]
+  #[test]
+  fn stale_tray_icon_events_are_rejected_after_replacement() {
+    assert!(tray_event_is_current(Some("new-icon"), "new-icon"));
+    assert!(!tray_event_is_current(Some("new-icon"), "old-icon"));
+    assert!(!tray_event_is_current(None, "old-icon"));
+  }
 
   #[test]
   fn native_commands_are_default_deny_and_exact_match() {
+    assert!(!native_method_is_allowed("app.quit", &[]));
+    assert!(native_method_is_allowed(
+      "app.quit",
+      &["app:quit".to_string()]
+    ));
     assert!(!native_method_is_allowed("clipboard.readText", &[]));
     assert!(!native_method_is_allowed(
       "clipboard.writeText",
@@ -1239,6 +1797,154 @@ mod tests {
       "window.isVisible",
       &["window:isFocused".to_string()]
     ));
+    assert!(native_method_is_allowed(
+      "window.getLabel",
+      &["window:getLabel".to_string()]
+    ));
+    assert!(native_method_is_allowed(
+      "window.open",
+      &["window:open".to_string()]
+    ));
+    assert!(native_method_is_allowed(
+      "window.list",
+      &["window:list".to_string()]
+    ));
+    for method in [
+      "window.showOther",
+      "window.hideOther",
+      "window.focusOther",
+      "window.closeOther",
+    ] {
+      assert!(native_method_is_allowed(method, &["window:manage".to_string()]));
+      assert!(!native_method_is_allowed(method, &["window:open".to_string()]));
+    }
+  }
+
+  #[test]
+  fn raw_menu_ipc_is_default_deny_and_app_menu_is_primary_only() {
+    assert!(!context_menu_is_allowed(&[]));
+    assert!(context_menu_is_allowed(&["menu:context".to_string()]));
+    assert!(!app_menu_is_allowed("main", &[]));
+    assert!(app_menu_is_allowed("main", &["menu:application".to_string()]));
+    assert!(!app_menu_is_allowed("settings", &["menu:application".to_string()]));
+  }
+
+  #[test]
+  fn renderer_ipc_and_menu_complexity_are_bounded() {
+    assert!(ipc_body_is_allowed(MAX_IPC_BODY_BYTES));
+    assert!(!ipc_body_is_allowed(MAX_IPC_BODY_BYTES + 1));
+
+    let mut nested = MenuItemOptions::default();
+    for _ in 0..9 {
+      nested = MenuItemOptions { submenu: Some(vec![nested]), ..Default::default() };
+    }
+    let deep = ContextMenuPayload { items: vec![nested], x: Some(1.0), y: Some(2.0) };
+    assert!(validate_context_menu_payload(&deep, &["menu:context".to_string()]).is_err());
+
+    let oversized = ContextMenuPayload {
+      items: vec![MenuItemOptions { label: Some("x".repeat(1025)), ..Default::default() }],
+      x: None,
+      y: None,
+    };
+    assert!(validate_context_menu_payload(&oversized, &[]).is_err());
+
+    let non_finite = ContextMenuPayload { items: vec![], x: Some(f64::NAN), y: None };
+    assert!(validate_context_menu_payload(&non_finite, &[]).is_err());
+
+    let too_many = ContextMenuPayload {
+      items: (0..257).map(|_| MenuItemOptions::default()).collect(),
+      x: None,
+      y: None,
+    };
+    assert!(validate_context_menu_payload(&too_many, &[]).is_err());
+  }
+
+  #[test]
+  fn privileged_menu_roles_require_native_capabilities() {
+    for (role, capability) in [
+      ("quit", "app:quit"),
+      ("close", "window:close"),
+      ("minimize", "window:minimize"),
+      ("zoom", "window:toggleMaximize"),
+      ("toggleFullscreen", "window:toggleMaximize"),
+      ("copy", "clipboard:writeText"),
+      ("paste", "clipboard:readText"),
+    ] {
+      let payload = ContextMenuPayload {
+        items: vec![MenuItemOptions { role: Some(role.to_string()), ..Default::default() }],
+        x: None,
+        y: None,
+      };
+      assert!(validate_context_menu_payload(&payload, &[]).is_err(), "role {role}");
+      assert!(validate_context_menu_payload(&payload, &[capability.to_string()]).is_ok(), "role {role}");
+    }
+
+    let reserved = ContextMenuPayload {
+      items: vec![MenuItemOptions { id: Some("murasaki-menu:quit".to_string()), ..Default::default() }],
+      x: None,
+      y: None,
+    };
+    assert!(validate_context_menu_payload(&reserved, &["app:quit".to_string()]).is_err());
+
+    let app_menu_collision = ContextMenuPayload {
+      items: vec![MenuItemOptions {
+        id: Some("murasaki-app-menu-1-0".to_string()),
+        ..Default::default()
+      }],
+      x: None,
+      y: None,
+    };
+    assert!(validate_context_menu_payload(&app_menu_collision, &[]).is_err());
+
+    for role in ["hide", "hideOthers", "showAll", "services", "reload", "unknown"] {
+      let unsupported = ContextMenuPayload {
+        items: vec![MenuItemOptions { role: Some(role.to_string()), ..Default::default() }],
+        x: None,
+        y: None,
+      };
+      assert!(
+        validate_context_menu_payload(
+          &unsupported,
+          &[
+            "app:quit".to_string(),
+            "window:close".to_string(),
+            "window:minimize".to_string(),
+            "window:toggleMaximize".to_string(),
+            "clipboard:readText".to_string(),
+            "clipboard:writeText".to_string(),
+          ],
+        ).is_err(),
+        "unsupported role {role} must stay denied on every platform",
+      );
+    }
+
+    let app_menu = AppMenuPayload {
+      menus: vec![AppMenuSpec { role: Some("editMenu".to_string()), ..Default::default() }],
+    };
+    assert!(validate_app_menu_payload(&app_menu, &[]).is_err());
+    assert!(validate_app_menu_payload(
+      &app_menu,
+      &["clipboard:readText".to_string(), "clipboard:writeText".to_string()],
+    ).is_ok());
+
+    let reload_wire_shape = AppMenuPayload {
+      menus: vec![AppMenuSpec {
+        label: Some("View".to_string()),
+        items: Some(vec![MenuItemOptions {
+          id: Some("reload-action".to_string()),
+          label: Some("Reload".to_string()),
+          role: None,
+          ..Default::default()
+        }]),
+        ..Default::default()
+      }],
+    };
+    assert!(validate_app_menu_payload(&reload_wire_shape, &[]).is_ok());
+
+    let unsupported_top_level = AppMenuPayload {
+      menus: vec![AppMenuSpec { role: Some("services".to_string()), ..Default::default() }],
+    };
+    assert!(validate_app_menu_payload(&unsupported_top_level, &[]).is_err());
   }
 
   #[test]
@@ -1260,6 +1966,31 @@ mod tests {
       navigation_policy("https://example.com/", Some(&trusted)),
       NavigationPolicy::OpenExternal
     );
+    assert_eq!(
+      navigation_policy("blob:http://127.0.0.1:55123/01234567", Some(&trusted)),
+      NavigationPolicy::Allow
+    );
+    assert_eq!(
+      navigation_policy("blob:https://example.com/01234567", Some(&trusted)),
+      NavigationPolicy::Deny
+    );
+  }
+
+  #[test]
+  fn privileged_ipc_requires_a_provable_exact_origin() {
+    let trusted = url::Url::parse("http://127.0.0.1:55123/").unwrap();
+    assert!(ipc_origin_is_trusted(
+      "http://127.0.0.1:55123/settings",
+      Some(&trusted),
+    ));
+    for target in [
+      "http://127.0.0.1:55124/",
+      "about:blank",
+      "blob:http://127.0.0.1:55123/01234567",
+      "data:text/html,owned",
+    ] {
+      assert!(!ipc_origin_is_trusted(target, Some(&trusted)), "{target}");
+    }
   }
 
   #[test]
@@ -1277,7 +2008,17 @@ mod tests {
 
   #[test]
   fn webview_profile_names_cannot_escape_their_directory() {
-    assert_eq!(sanitize_profile_name("com.example/app"), "com.example_app");
-    assert_eq!(sanitize_profile_name("../../other"), ".._.._other");
+    let slash = sanitize_profile_name("com.example/app");
+    let question = sanitize_profile_name("com.example?app");
+    assert!(slash.starts_with("com.example_app-"));
+    assert!(question.starts_with("com.example_app-"));
+    assert_ne!(slash, question);
+    assert!(!slash.contains('/'));
+    assert!(!slash.contains('\\'));
+    assert!(slash.len() <= 48 + 1 + 64);
+
+    let traversal = sanitize_profile_name("../../other");
+    assert!(traversal.starts_with(".._.._other-"));
+    assert!(!traversal.contains('/'));
   }
 }

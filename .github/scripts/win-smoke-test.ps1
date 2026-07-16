@@ -12,6 +12,10 @@
   confirms the launcher actually spawned node.exe and the bundled backend
   served a request, not just that a window appeared.
 
+  When ExpectedMarker is provided, the same deadline also requires that exact
+  renderer-produced marker on launcher stdout. CI uses this to prove a hidden
+  secondary WebView completed its native IPC checks.
+
   Also asserts the launcher process is still alive a couple seconds after the
   backend responds: node comes up *before* the tao window / wry WebView2
   webview are created (see imp_win::run_inner's ordering), so a 200 response
@@ -27,7 +31,9 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$ExePath,
 
-  [int]$TimeoutSeconds = 60
+  [int]$TimeoutSeconds = 60,
+
+  [string]$ExpectedMarker = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,7 +135,33 @@ try {
 
   Write-Host 'Got HTTP 200 from the packaged app backend.'
 
-  # Phase 3: the tao window / wry WebView2 webview are created *after* node
+  # Phase 3: when requested by the caller, wait for a marker that can only be
+  # emitted after renderer-side native API checks have reached a backend route.
+  # This turns the CI scaffold's smoke from a backend-only test into a real
+  # multi-window WebView/IPC test without imposing that contract on other apps
+  # that reuse this script.
+  if ($ExpectedMarker) {
+    Write-Host "Waiting for renderer probe marker: $ExpectedMarker"
+    $markerFound = $false
+    while (-not $markerFound -and (Get-Date) -lt $deadline) {
+      if (($stdout.ToString() -split '\r?\n') -ccontains $ExpectedMarker) {
+        $markerFound = $true
+        break
+      }
+      if ($proc.HasExited) {
+        Write-Error "murasaki-launcher exited (code $($proc.ExitCode)) before the renderer probe completed."
+        throw 'probe-early-exit'
+      }
+      Start-Sleep -Milliseconds 250
+    }
+    if (-not $markerFound) {
+      Write-Error "Renderer probe did not report the expected marker within ${TimeoutSeconds}s: $ExpectedMarker"
+      throw 'probe-timeout'
+    }
+    Write-Host 'Renderer multi-window probe passed.'
+  }
+
+  # Phase 4: the tao window / wry WebView2 webview are created *after* node
   # comes up (imp_win::run_inner) — give that a couple seconds and confirm
   # the process is still alive, so a window/WebView2-creation failure right
   # after the backend responds doesn't get reported as a pass.

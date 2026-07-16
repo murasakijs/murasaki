@@ -53,11 +53,23 @@ test('server action client transform uses the shared versioned wire codec', asyn
 })
 
 test('development action middleware round-trips rich values and structured errors', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'murasaki-dev-actions-'))
+  const srcDir = join(root, 'src')
+  const actionPath = join(srcDir, 'actions.ts')
+  await mkdir(srcDir)
+  await writeFile(actionPath, `'use server'\nexport async function echo(value) { return value }\n`)
+  await writeFile(join(root, 'private.ts'), `export function readSecret() { return 'secret' }\n`)
+  t.after(() => rm(root, { recursive: true, force: true }))
+
   let middleware
-  const plugin = serverActionsPlugin({ srcDir: '/project/src' })
+  let loadCalls = 0
+  const plugin = serverActionsPlugin({ srcDir })
+  plugin.configResolved({ root })
   plugin.configureServer({
     middlewares: { use(handler) { middleware = handler } },
-    async ssrLoadModule() {
+    async ssrLoadModule(id) {
+      loadCalls++
+      assert.equal(id, actionPath)
       return {
         async echo(value) { return value },
         async fail() {
@@ -111,6 +123,17 @@ test('development action middleware round-trips rich values and structured error
   const malformedPayload = parseWire(await malformed.text())
   assert.equal(malformedPayload.ok, false)
   assert.equal(malformedPayload.error instanceof Error, true)
+
+  const escaped = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/action/${encodeURIComponent('private.ts')}/readSecret`,
+    {
+      method: 'POST',
+      headers: { 'content-type': WIRE_CONTENT_TYPE },
+      body: await stringifyWire({ args: [] }),
+    },
+  )
+  assert.equal(escaped.status, 404)
+  assert.equal(loadCalls, 2)
 })
 
 test('production action server uses the same codec contract as development', async (t) => {
@@ -196,4 +219,14 @@ export const registry = {
   assert.equal(failedPayload.error.message, 'prod exploded')
   assert.equal(failedPayload.error.code, 'E_PROD_ACTION')
   assert.equal(failedPayload.error.cause.message, 'prod cause')
+
+  const inherited = await fetch(
+    `${origin}/__murasaki/action/${encodeURIComponent('constructor')}/assign`,
+    {
+      method: 'POST',
+      headers,
+      body: await stringifyWire({ args: [] }),
+    },
+  )
+  assert.equal(inherited.status, 404)
 })

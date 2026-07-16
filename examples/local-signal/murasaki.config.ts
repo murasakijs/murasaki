@@ -10,5 +10,13 @@ export default defineConfig({
   authors: ['ichi'],
   icon: 'src/assets/icon.png',
   locales: ['en'],
+  capabilities: [
+    'menu:application',
+    'menu:context',
+    'clipboard:readText',
+    'clipboard:writeText',
+    'window:minimize',
+    'window:toggleMaximize',
+  ],
   window: { title: 'Local Signal', width: 1320, height: 820, minWidth: 1000, minHeight: 680 },
 })

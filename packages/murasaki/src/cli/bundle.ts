@@ -2,7 +2,7 @@ import { resolve, dirname, join, relative, sep } from 'node:path'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import pngToIco from 'png-to-ico'
@@ -12,11 +12,18 @@ import build from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote } from './brand.js'
 import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
-import type { MurasakiConfig } from '../config.js'
+import {
+  resolveWindowDeclarations,
+  validateMainShutdownTimeoutMs,
+  type MurasakiConfig,
+} from '../config.js'
 import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
 import { resolveAssociations } from '../associations.js'
+import { loadUserConfig } from './load-config.js'
+
+export { loadUserConfig } from './load-config.js'
 
 export type Arch = 'arm64' | 'x64'
 export type Platform = NodePlatform
@@ -447,18 +454,36 @@ async function zipDarwinApp(
  * resolved updater config. Kept as one function so the two bundle targets
  * can't drift apart.
  */
-function metaJson(
+export function metaJson(
   config: MurasakiConfig,
   productName: string,
   iconResource: string | null,
   cwd: string,
 ): string {
+  const mainShutdownTimeoutMs = config.main === false ? undefined : config.main?.shutdownTimeoutMs
+  validateMainShutdownTimeoutMs(mainShutdownTimeoutMs)
   // Resolved (not raw) so prod-server.mjs never has to re-derive the GitHub
   // manifest URL / public key / interval parsing itself — resolveUpdater()
   // throws on a broken updater config, which surfaces as a bundle failure
   // here rather than a silent runtime no-op.
   const updater = resolveUpdater(config.updater, { projectRoot: cwd })
   const associations = resolveAssociations(config)
+  const windows = resolveWindowDeclarations(config).map((declaration) => ({
+    label: declaration.label,
+    primary: declaration.primary,
+    route: declaration.route,
+    visible: declaration.visible,
+    title: declaration.title,
+    width: declaration.width,
+    height: declaration.height,
+    minWidth: declaration.minWidth,
+    minHeight: declaration.minHeight,
+    resizable: declaration.resizable,
+    transparent: declaration.transparent,
+    vibrancy: declaration.vibrancy,
+    capabilities: declaration.capabilities,
+  }))
+  const primaryWindow = windows[0]
   return JSON.stringify(
     {
       appId: config.appId,
@@ -469,16 +494,18 @@ function metaJson(
       homepage: config.homepage,
       authors: config.authors,
       locales: config.locales,
-      width: config.window?.width,
-      height: config.window?.height,
-      minWidth: config.window?.minWidth,
-      minHeight: config.window?.minHeight,
-      resizable: config.window?.resizable,
-      transparent: config.window?.transparent,
-      capabilities: config.capabilities,
-      mainShutdownTimeoutMs: config.main === false ? undefined : config.main?.shutdownTimeoutMs,
-      vibrancy: config.window?.vibrancy,
+      title: primaryWindow.title,
+      width: primaryWindow.width,
+      height: primaryWindow.height,
+      minWidth: primaryWindow.minWidth,
+      minHeight: primaryWindow.minHeight,
+      resizable: primaryWindow.resizable,
+      transparent: primaryWindow.transparent,
+      capabilities: primaryWindow.capabilities,
+      mainShutdownTimeoutMs,
+      vibrancy: primaryWindow.vibrancy,
       console: config.window?.console,
+      windows,
       icon: iconResource ?? undefined,
       protocols: associations.protocols,
       fileAssociations: associations.files,
@@ -1195,18 +1222,4 @@ function escapeXml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;')
-}
-
-export async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
-  for (const name of ['murasaki.config.ts', 'murasaki.config.js', 'murasaki.config.mjs']) {
-    const p = resolve(cwd, name)
-    try {
-      const mod = await import(pathToFileURL(p).href)
-      const cfg = mod.default ?? mod.config ?? mod
-      if (cfg && typeof cfg === 'object') return cfg
-    } catch (err: any) {
-      if (err?.code !== 'ERR_MODULE_NOT_FOUND') throw err
-    }
-  }
-  throw new Error('murasaki: no config found — create murasaki.config.ts')
 }

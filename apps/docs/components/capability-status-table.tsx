@@ -130,12 +130,12 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "metadata shapeはNext.js完全互換ではなく、document metadataからnative window titleは更新されません。",
   ],
   "node-main-lifecycle": [
-    "src/main.tsはready、cancel可能なbeforeQuit、時間制限付きshutdown、app path、AbortSignalを提供します。",
-    "本番向けwindow manager、native command registry、process監視APIはまだ提供していません。",
+    "src/main.ts lifecycleはready、cancel可能なbeforeQuit、時間制限付きshutdown、second-launch配送、app path、AbortSignal、renderer向けtyped live eventを提供します。",
+    "window管理はrenderer向けで、src/main.tsからは利用できません。crash-restart policyとprocess supervision APIも未実装です。",
   ],
   "native-window": [
-    "Murasakiが起動するapplication windowは1つです。対応済みのmulti-window managerやwindowごとのlifecycle eventはありません。",
-    "window vibrancyは現在もno-opで、renderer向けpublic APIが公開するnative window操作は一部だけです。",
+    "primary / secondary windowを宣言し、識別、表示、非表示、focus、一覧、open、明示的closeを行えます。runtimeでの任意作成とwindow別lifecycle subscriptionは未実装です。",
+    "window vibrancyは現在も宣言のみのno-opです。",
   ],
   "application-menu": [
     "macOSとWindowsではnative application menuを利用できますが、roleの挙動にはplatform差があります。",
@@ -146,8 +146,8 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "LinuxのIPC経路ではnative context menu未実装としてエラーになります。",
   ],
   "native-utilities": [
-    "dialog、clipboard、notification、shell helperは@murasakijs/nativeに存在します。",
-    "mainのmurasaki packageから、permission scopeを持つ正式なpublic APIとしてはまだ公開されていません。",
+    "dialog、clipboard、notification、shell helper、window操作はsame-origin native bridgeとwindow別allowlistを通してtrusted rendererへ公開されます。",
+    "capabilityはcommand単位でargument / path scopeを持たず、renderer native APIはsrc/main.tsから直接利用できません。",
   ],
   "auto-update": [
     "署名付きmanifest、上限付きdownload、SHA-256 payload検証、staging handoff、relaunchをpackaged app向けに実装しています。",
@@ -163,20 +163,27 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "loopback-endpoint-protection": [
     "開発時のprivileged endpointはHttpOnly SameSite runtime sessionを要求し、loopback Host、Origin、Fetch Metadataを検証します。",
-    "すべてのnative command、window、remote originを対象にするTauri型のcapability/permission systemはまだありません。",
+    "renderer native commandにはdeny-by-defaultのwindow別allowlistがありますが、argument / path / URL scopeとmulti-origin policyは未実装です。",
+  ],
+  "content-security-policy": [
+    "Murasakiは環境別の既定CSPをframework / user-owned HTMLへ注入し、完全なsecurity.csp override、明示的opt-out、user-owned CSP tagのhead先頭への移動に対応します。",
+    "policyはmeta tag配信のためframe-ancestors、sandbox、reportingなどheader専用directiveを強制できません。CSPはHTMLのsanitizeやNode関数の認可を行わず、互換性のためinline styleを許可します。",
   ],
   "multi-window": [
-    "複数windowの作成、識別、復元、個別closeを行う正式なpublic APIはありません。",
+    "windowはconfigで宣言して起動時に作成します。runtimeでの任意作成と、明示的に破棄したwindowの再作成は未実装です。",
+    "secondaryのOS/self closeは再openできるようhideし、親からの明示的closeは再起動まで破棄します。application menuはprocess-globalです。",
   ],
   "tray-and-global-shortcuts": [
-    "public frameworkにはtray iconやsystem-wide shortcut APIがありません。依存packageや内部moduleがあるだけではshipping featureとして扱いません。",
+    "macOS / Windowsではtooltipとclick eventを持つ1個のtray icon APIを利用できます。",
+    "tray menu、動的icon差し替え、global shortcut、Linux trayは未実装です。",
   ],
   "single-instance-and-deep-links": [
     "packaged macOS appとinstaller経由のWindows appは、設定したURL schemeとfile associationを登録し、single-instanceを維持したままOpenRequestEventをsrc/main.tsへ渡します。",
     "Windows portable .zip／bare executableは自動登録を行いません。protocolとfile associationの登録はNSIS／MSI installerが担い、Linux対応はplannedです。",
   ],
   "capability-permissions": [
-    "window/origin単位のpermission、command scope、deny rule、監査可能なcapability manifestはまだ提供していません。",
+    "renderer native commandはdeny-by-defaultで、typedなwindow別capability allowlistから許可します。Rustはsender originとcommand名を検証します。",
+    "argument / path scopeと明示的deny overrideは未実装です。secondary windowはtop-level grantを継承しません。",
   ],
   "linux-distribution": [
     "Linux用prebuilt native binaryと開発対応だけでは、install可能なLinux application releaseにはなりません。",
@@ -223,7 +230,13 @@ function Badge({
 
 function limitationText(feature: CapabilityFeature, locale: Locale) {
   if (locale === "en") return feature.limitations;
-  return JA_LIMITATIONS[feature.id] ?? feature.limitations;
+  const translated = JA_LIMITATIONS[feature.id];
+  // The manifest is canonical. If its limitation shape changes before the
+  // translation is updated, show the current English source instead of a
+  // stale Japanese claim about a feature that may now ship.
+  return translated?.length === feature.limitations.length
+    ? translated
+    : feature.limitations;
 }
 
 function localizeDocsSlug(slug: string, locale: Locale) {

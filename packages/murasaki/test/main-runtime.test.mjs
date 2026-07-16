@@ -92,6 +92,144 @@ test('bounds graceful shutdown time', async (t) => {
   assert.equal(runtime.state, 'stopped')
 })
 
+test('the shutdown deadline includes beforeQuit instead of starting after it', async (t) => {
+  let cleanupCalls = 0
+  const runtime = await fixture(t, { shutdownTimeoutMs: 20 })
+  const context = await runtime.start(async () => ({
+    default: {
+      beforeQuit: () => new Promise(() => {}),
+      shutdown() { cleanupCalls++ },
+    },
+  }))
+  assert.deepEqual(await runtime.shutdown({ reason: 'window-close' }), {
+    cancelled: false,
+    timedOut: true,
+  })
+  assert.equal(runtime.state, 'stopped')
+  assert.equal(context.signal.aborted, true)
+  assert.equal(cleanupCalls, 0)
+})
+
+test('the shutdown deadline includes a ready hook that never settles', async (t) => {
+  let signal
+  const runtime = await fixture(t, { shutdownTimeoutMs: 20 })
+  void runtime.start(async () => ({
+    default: {
+      ready(context) {
+        signal = context.signal
+        return new Promise(() => {})
+      },
+    },
+  }))
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(await runtime.shutdown({ reason: 'signal', force: true }), {
+    cancelled: false,
+    timedOut: true,
+  })
+  assert.equal(runtime.state, 'stopped')
+  assert.equal(signal.aborted, true)
+})
+
+test('a late ready resolution cannot resurrect a timed-out runtime', async (t) => {
+  let readyStarted
+  const didStartReady = new Promise((resolve) => { readyStarted = resolve })
+  let finishReady
+  const readyGate = new Promise((resolve) => { finishReady = resolve })
+  const runtime = await fixture(t, { shutdownTimeoutMs: 20 })
+  const starting = runtime.start(async () => ({
+    default: {
+      ready() {
+        readyStarted()
+        return readyGate
+      },
+    },
+  }))
+  await didStartReady
+
+  assert.deepEqual(await runtime.shutdown({ reason: 'signal', force: true }), {
+    cancelled: false,
+    timedOut: true,
+  })
+  assert.equal(runtime.state, 'stopped')
+  finishReady()
+  await starting
+  assert.equal(runtime.state, 'stopped')
+  await assert.rejects(
+    runtime.secondInstance({ argv: [], cwd: '/tmp' }),
+    /cannot receive a second instance from stopped/,
+  )
+})
+
+test('startup and cleanup share one end-to-end shutdown deadline', async (t) => {
+  let readyStarted
+  const didStartReady = new Promise((resolve) => { readyStarted = resolve })
+  let finishReady
+  const readyGate = new Promise((resolve) => { finishReady = resolve })
+  const runtime = await fixture(t, { shutdownTimeoutMs: 200 })
+  const starting = runtime.start(async () => ({
+    default: {
+      ready() {
+        readyStarted()
+        return readyGate
+      },
+      shutdown: () => new Promise(() => {}),
+    },
+  }))
+  await didStartReady
+
+  const originalDateNow = Date.now
+  const closing = runtime.shutdown({ reason: 'signal', force: true })
+  // Deterministically consume nearly all of the already-created deadline
+  // without making the passing test sleep. Recreating the deadline after
+  // ready() would incorrectly give shutdown() another full 200ms.
+  Date.now = () => originalDateNow() + 199
+  const startedAt = performance.now()
+  try {
+    finishReady()
+    assert.deepEqual(await closing, { cancelled: false, timedOut: true })
+    assert.ok(performance.now() - startedAt < 100, 'shutdown deadline was reset after startup')
+  } finally {
+    Date.now = originalDateNow
+  }
+  await starting
+})
+
+test('a concurrent forced shutdown overrides a pending cancellable beforeQuit', async (t) => {
+  const events = []
+  const runtime = await fixture(t, { shutdownTimeoutMs: 100 })
+  await runtime.start(async () => ({
+    default: {
+      beforeQuit: () => new Promise(() => {}),
+      shutdown(context) { events.push(`shutdown:${context.reason}`) },
+    },
+  }))
+
+  const normal = runtime.shutdown({ reason: 'window-close' })
+  await new Promise((resolve) => setImmediate(resolve))
+  const forced = runtime.shutdown({ reason: 'signal', force: true })
+  assert.equal(forced, normal)
+  assert.deepEqual(await forced, { cancelled: false, timedOut: false })
+  assert.deepEqual(events, ['shutdown:signal'])
+  assert.equal(runtime.state, 'stopped')
+})
+
+test('a failing quit hook does not leave the runtime stuck in stopping', async (t) => {
+  const runtime = await fixture(t)
+  await runtime.start(async () => ({
+    default: { beforeQuit() { throw new Error('quit hook failed') } },
+  }))
+  await assert.rejects(
+    runtime.shutdown({ reason: 'window-close' }),
+    /quit hook failed/,
+  )
+  assert.equal(runtime.state, 'stopped')
+  assert.deepEqual(await runtime.shutdown({ reason: 'signal', force: true }), {
+    cancelled: false,
+    timedOut: false,
+  })
+})
+
 test('rejects invalid main modules and exposes a failed state', async (t) => {
   const runtime = await fixture(t)
   await assert.rejects(runtime.start(async () => ({ default: null })), /default-export/)

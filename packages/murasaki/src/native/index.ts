@@ -40,12 +40,54 @@ export interface TrayClickEvent {
   double: boolean
 }
 
-interface NativeResponse {
-  requestId: string
-  response: { ok: true; value: unknown } | { ok: false; error?: { message?: string } }
+/** Serializable state returned for each declared native window. */
+export interface WindowInfo {
+  label: string
+  primary: boolean
+  visible: boolean
+  focused: boolean
+  minimized: boolean
+  maximized: boolean
 }
 
+export const app = {
+  /** Request graceful application shutdown through the native host. */
+  quit(): Promise<void> {
+    return invokeNative('app.quit')
+  },
+}
+
+type NativeResult = { ok: true; value: unknown } | { ok: false; error?: { message?: string } }
+
 let requestSequence = 0
+
+function nativeRequestId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID
+  if (typeof randomUUID === 'function') return randomUUID.call(globalThis.crypto)
+  // Old embedded engines may not expose randomUUID. Include random entropy in
+  // addition to time/sequence so duplicate module instances cannot collide.
+  const random = Math.random().toString(36).slice(2)
+  return `${Date.now().toString(36)}-${(++requestSequence).toString(36)}-${random}`
+}
+
+function parseNativeResult(detail: unknown, requestId: string): NativeResult | null {
+  if (!detail || typeof detail !== 'object'
+    || (detail as { requestId?: unknown }).requestId !== requestId) return null
+  const response = (detail as { response?: unknown }).response
+  if (!response || typeof response !== 'object'
+    || typeof (response as { ok?: unknown }).ok !== 'boolean') {
+    throw new Error('Murasaki native bridge returned a malformed response')
+  }
+  if ((response as { ok: boolean }).ok) {
+    return { ok: true, value: (response as { value?: unknown }).value }
+  }
+  const error = (response as { error?: unknown }).error
+  if (error !== undefined && (!error || typeof error !== 'object'
+    || ('message' in error && typeof (error as { message?: unknown }).message !== 'string'))) {
+    throw new Error('Murasaki native bridge returned a malformed error response')
+  }
+  return { ok: false, error: error as { message?: string } | undefined }
+}
 
 function invokeNative<T>(method: string, args: unknown = {}): Promise<T> {
   if (typeof window === 'undefined') {
@@ -57,20 +99,27 @@ function invokeNative<T>(method: string, args: unknown = {}): Promise<T> {
   }
   const postMessage = bridge.postMessage.bind(bridge)
 
-  const requestId = `${Date.now().toString(36)}-${(++requestSequence).toString(36)}`
+  const requestId = nativeRequestId()
   return new Promise<T>((resolveOk, rejectFail) => {
     const timeout = window.setTimeout(() => {
       cleanup()
       rejectFail(new Error(`${method} timed out`))
     }, 120_000)
     const onResponse = (event: Event) => {
-      const detail = (event as CustomEvent<NativeResponse>).detail
-      if (!detail || detail.requestId !== requestId) return
+      let response: NativeResult | null
+      try {
+        response = parseNativeResult((event as CustomEvent<unknown>).detail, requestId)
+      } catch (error) {
+        cleanup()
+        rejectFail(error)
+        return
+      }
+      if (!response) return
       cleanup()
-      if (detail.response.ok) {
-        resolveOk(detail.response.value as T)
+      if (response.ok) {
+        resolveOk(response.value as T)
       } else {
-        rejectFail(new Error(detail.response.error?.message ?? `${method} failed`))
+        rejectFail(new Error(response.error?.message ?? `${method} failed`))
       }
     }
     const cleanup = () => {
@@ -78,7 +127,12 @@ function invokeNative<T>(method: string, args: unknown = {}): Promise<T> {
       window.removeEventListener('murasaki:nativeresponse', onResponse)
     }
     window.addEventListener('murasaki:nativeresponse', onResponse)
-    postMessage(JSON.stringify({ kind: 'nativeCall', requestId, method, args }))
+    try {
+      postMessage(JSON.stringify({ kind: 'nativeCall', requestId, method, args }))
+    } catch (error) {
+      cleanup()
+      rejectFail(error)
+    }
   })
 }
 
@@ -119,6 +173,9 @@ export const shell = {
 }
 
 export const appWindow = {
+  getLabel(): Promise<string> {
+    return invokeNative('window.getLabel')
+  },
   setTitle(title: string): Promise<void> {
     return invokeNative('window.setTitle', { title })
   },
@@ -157,6 +214,28 @@ export const appWindow = {
   },
   isMinimized(): Promise<boolean> {
     return invokeNative('window.isMinimized')
+  },
+}
+
+/** Controls windows declared in `murasaki.config.*` by label. */
+export const windows = {
+  open(label: string): Promise<void> {
+    return invokeNative('window.open', { label })
+  },
+  list(): Promise<WindowInfo[]> {
+    return invokeNative('window.list')
+  },
+  show(label: string): Promise<void> {
+    return invokeNative('window.showOther', { label })
+  },
+  hide(label: string): Promise<void> {
+    return invokeNative('window.hideOther', { label })
+  },
+  focus(label: string): Promise<void> {
+    return invokeNative('window.focusOther', { label })
+  },
+  close(label: string): Promise<void> {
+    return invokeNative('window.closeOther', { label })
   },
 }
 

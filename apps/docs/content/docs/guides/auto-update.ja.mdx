@@ -39,7 +39,10 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
    ```
 
    `true` は完全な設定です: GitHub リポジトリは `package.json` の `repository`
-   フィールドから、公開鍵は `.murasaki/update-key.pub` から推論されます。
+   フィールドから、公開鍵は `.murasaki/update-key.pub` から推論されます。updaterを
+   有効にするとprimary windowへ内部の `app:quit` permissionも付与され、検証済みinstallの
+   graceful restartを完了できます。更新UIをsecondary windowへ置く場合は、そのwindowへ
+   `app:quit` を明示してください。
 
 3. ボタンを配置します:
 

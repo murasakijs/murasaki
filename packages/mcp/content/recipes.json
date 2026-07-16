@@ -22,6 +22,18 @@
       "slug": "guides/app-menu"
     },
     {
+      "id": "multi-window-permissions",
+      "slug": "guides/windows"
+    },
+    {
+      "id": "node-main-lifecycle",
+      "slug": "guides/node-main"
+    },
+    {
+      "id": "tray-icon",
+      "slug": "guides/native-apis"
+    },
+    {
       "id": "auto-update",
       "slug": "guides/auto-update"
     },
@@ -32,6 +44,10 @@
     {
       "id": "configuration",
       "slug": "building/configuration"
+    },
+    {
+      "id": "security-and-csp",
+      "slug": "building/security"
     },
     {
       "id": "package-and-distribute",

@@ -9,7 +9,7 @@ React 19 · Vite · OS WebView · Rust ネイティブ · Chromium 不要
 [![npm version](https://img.shields.io/npm/v/murasaki?color=A855F7&label=npm)](https://www.npmjs.com/package/murasaki)
 [![npm downloads](https://img.shields.io/npm/dm/murasaki?color=A855F7)](https://www.npmjs.com/package/murasaki)
 [![license](https://img.shields.io/npm/l/murasaki?color=A855F7)](./LICENSE)
-[![CI](https://github.com/murasakijs/murasaki/actions/workflows/release.yml/badge.svg)](https://github.com/murasakijs/murasaki/actions)
+[![CI](https://github.com/murasakijs/murasaki/actions/workflows/ci.yml/badge.svg)](https://github.com/murasakijs/murasaki/actions/workflows/ci.yml)
 
 [English](./README.md) · [日本語](./README.ja.md)
 
@@ -23,7 +23,8 @@ Murasaki は TypeScript ファーストのデスクトップフレームワー�
 (Chromium は同梱しません)。ネイティブウィンドウ、メニュー、OS 連携は自作の Rust バインディング
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) が担っており
 ——あなたが書くのは TypeScript だけで、Rust を書くことはありません。対応ターゲットは
-**macOS / Windows / Linux** です。
+本番向けの対応対象は **macOS / Windows** です。Linux は現在、開発ランタイムのみを提供し、
+パッケージング対応は保証していません。
 
 ```bash
 npm create murasaki@latest my-app
@@ -56,9 +57,13 @@ export default function Page() {
 }
 ```
 
+`murasaki.config.ts` でそのレンダラーへ `menu:context` と
+`clipboard:writeText` を付与してください。ネイティブメニューの各ロールは、対応する権限がない限り
+拒否されます。
+
 これは本物の Vite 開発サーバーが React Fast Refresh とともに動き、ネイティブウィンドウの中で
 レンダリングされている状態です——そして画面のどこを右クリックしても、HTML のポップアップではなく
-**本物の OS コンテキストメニュー**(macOS では NSMenu、Windows では HMENU、Linux では GtkMenu)
+**本物の OS コンテキストメニュー**(macOS では NSMenu、Windows では HMENU)
 が表示されます。
 
 ---
@@ -188,7 +193,7 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
   action, shortcut }])` — state の隣に置けるデータで、`action` は組み込みの
   `<Action.* />` 要素か自前の関数。id なしは全ウィンドウ、
   id を付けて領域を `<ContextMenuTrigger id>` で囲めばそこだけに適用。Rust 側へ post
-  され、本物の OS メニュー(NSMenu / HMENU / GtkMenu)が出ます。HTML のポップアップは
+  され、本物の OS メニュー(NSMenu / HMENU)が出ます。HTML のポップアップは
   介在しません。
 - **ネイティブメニュー、ダイアログ、クリップボード、通知、シェル** —
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 上に

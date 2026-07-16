@@ -87,7 +87,7 @@ export function useUpdate(): UpdateState & {
         // does NOT quit the app itself (contract §7 step 3) — that's on the
         // client. On failure the engine has already pushed an 'error' state
         // over SSE, so there's nothing further to do here.
-        if (res.ok) quit()
+        if (res.ok) return quit()
       })
       .catch((err) => {
         setState((s) => ({ ...s, status: 'error', error: errorMessage(err) }))

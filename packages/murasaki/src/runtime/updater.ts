@@ -12,9 +12,9 @@
  *    Node) spawns the apply-helper on its way out, because a process Node
  *    spawns on Windows can't escape the launcher's orphan-killing Job
  *    Object (see the contract's §7 REVISED for why). The React client quits
- *    the app via `quit()` / `{ kind: "appQuit" }`, per §7, which is what
- *    gives the launcher its "on the way out" moment to act on the handoff
- *    file,
+ *    the app via the capability-checked `quit()` / `app.quit` native call.
+ *    This gives the launcher its "on the way out" moment to act on the
+ *    handoff file,
  *  - `/__murasaki/update/*` HTTP route dispatch (§6), consumed by
  *    `vite-plugin/updater.ts` in dev.
  *

@@ -10,9 +10,9 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 
 <Callout type="warn">
   renderer native command は deny-by-default で、型付き `capabilities` list から許可
-  します。window 別 allow/deny rule、path / URL scope、複数 app origin ごとの policy
-  はまだありません。renderer-to-Node 関数も privileged application code として扱い、
-  surface を小さく保ってください。
+  します。宣言windowごとに独立したallowlistがありますが、argument / path / URL scope
+  はありません。renderer-to-Node関数もprivileged application codeとして扱い、surfaceを
+  小さく保ってください。
 </Callout>
 
 ## 信頼境界
@@ -20,7 +20,7 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 | 境界 | 組み込み保護 | アプリ側の責務 |
 | --- | --- | --- |
 | Remote URL → app WebView | app origin と完全一致する遷移だけを window 内で許可。off-origin HTTP(S) は system browser で開き、`file:` / `data:` / `javascript:` は拒否 | navigation behavior を弱めず、remote script を renderer に注入しない |
-| Renderer → Rust native command | exact-origin IPC check と typed / deny-by-default `capabilities` allowlist | 使用する command だけを grant。広い操作の app-level intent を検証 |
+| Renderer → Rust native command | exact-origin IPC checkと、call元windowごとに評価するtyped / deny-by-default allowlist | そのrendererが使うcommandだけをgrant。`window:manage`など広い操作のapp-level intentを検証 |
 | Renderer → local Node | `/api/*` と `/__murasaki/*` は random 256-bit HttpOnly / SameSite=Strict cookie を要求し Host / Origin を検証。wire payload に上限 | 各 action / route / Main function 内で引数を検証し操作を認可 |
 | OS URL / file activation → Node Main | 設定済み scheme / extension だけを normalize して `openRequested()` target にし、認証付き app-local channel で配送 | URL / path をすべて attacker-controlled として扱い、操作前に intent、identifier、host、file content を検証 |
 | App → update host | manifest raw bytes の Ed25519 signature、その後 payload の SHA-256 を検証 | private update key を保護し、hash/signature を同時に公開 |
@@ -36,18 +36,24 @@ session cookie は最初の document response が設定し、JavaScript から�
 export default defineConfig({
   appId: 'com.example.notes',
   productName: 'Notes',
-  capabilities: [
-    'dialog:openFile',
-    'clipboard:writeText',
-    'shell:openExternal',
-  ],
+  window: {
+    route: '/',
+    capabilities: ['app:quit', 'dialog:openFile', 'shell:openExternal', 'window:open'],
+  },
+  windows: {
+    preview: { route: '/preview', capabilities: ['clipboard:writeText'] },
+    settings: { route: '/settings', capabilities: [] },
+  },
 })
 ```
 
-`capabilities` を省略すると何も許可されません。未知の文字列も何も許可せず、bridge は
-trusted app origin と完全一致する call だけを受け付けます。allowlist は command 単位
-です。dialog を 1 directory、external URL を 1 host、command を複数 window 中の 1 枚
-だけに制限することはまだできないので、より狭い rule は app code でも強制します。
+capabilityを省略すると何も許可されません。ただしprimaryは`window.capabilities`がない
+場合だけlegacy top-level listへfallbackし、secondaryは継承しません。未知の文字列も何も
+許可せず、bridgeはtrusted app originと完全一致するcallだけを受け付けます。allowlistは
+command単位で、dialogを1 directory、external URLを1 hostに限定できません。
+`window:manage`は全宣言windowをtargetにできるため、信頼するrendererだけへ付与し、より
+狭いintentはapp codeでも強制します。application全体のprogrammatic shutdownは
+`app:quit` で別に制御されます。
 
 ## シークレットは Node に置く
 
@@ -123,9 +129,49 @@ deep-link URL へ renderer を自動 navigation させたり、query 値を HTML
 ## Content Security Policy
 
 Murasaki は document に `X-Content-Type-Options: nosniff` と `Referrer-Policy:
-no-referrer` を設定しますが、現状アプリの Content Security Policy は生成しません。
-`dangerouslySetInnerHTML` を避け、user-authored HTML を sanitize し、third-party script
-を固定し、外部制御コンテンツを扱う場合は application layer で CSP を追加してください。
+no-referrer`を設定し、framework-owned / user-owned HTMLへCSP meta tagを1つ注入します。
+production既定値は`script-src 'self'`を使い、object、frame、base URL変更、inline script
+attribute、他originへのform送信を遮断します。一方remote-backed appのHTTPS / WSS接続は
+許可し、image / font / mediaには一般的なHTTPS / data / blob sourceを許可します。
+Reactのstyle attributeとruntime CSS互換性のため、`style-src 'self' 'unsafe-inline'`は
+残しています。
+
+developmentでは別policyを使い、Vite / React Refreshが注入するinline scriptとHMR用の
+`ws:`を追加で許可します。`'unsafe-eval'`は追加せず、この緩和はproductionには入りません。
+
+policy全体のoverride、または別layerが管理する場合のopt-outを設定できます。
+
+```ts
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  security: {
+    csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.example.com; object-src 'none'; base-uri 'none'; frame-src 'none'",
+  },
+})
+
+// Murasakiの注入だけを無効化:
+// security: { csp: false }
+```
+
+stringはdirective mergeではなく完全なoverrideです。user-owned `index.html`にCSP metaが
+あればそれを維持して`<head>`先頭へ移動します。既存tagと`security.csp` stringの両方を
+設定すると、片方を暗黙に選ばずbuild errorにします。blockされたsourceはbrowser consoleの
+CSP violationで確認し、そのsourceだけを追加するかapp originへ移してください。
+
+既存appを移行するときはproductionのinline scriptをexternal moduleへ移します。remote
+script / frameは既定でblockされるため、必要なら明示的にoverrideしてください。HTTPS / WSS
+backendは既定で利用できます。remoteのplain HTTP backendにはoverrideが必要です
+（same-origin loopback callは許可されます）。
+
+meta配信CSPにはbrowser定義の制約があります。tagをparseした位置から適用されるため
+Murasakiは`<head>`先頭へ注入または移動します。`frame-ancestors`、`sandbox`、reportingなどの
+directiveはmeta tagから完全には利用できないため、既定policyにも含めていません。これらが
+必要な実network serviceではresponse headerを使ってください。CSPはHTMLをsanitizeせず、
+Node関数をauthorizeしません。
+既定のinline style許可も互換性上のtradeoffであり、XSS安全性の保証ではありません。
+引き続き`dangerouslySetInnerHTML`を避け、user-authored HTMLをsanitizeし、third-party codeを
+固定してください。
 
 ## 実ネットワークサービスを公開する場合
 
@@ -150,14 +196,14 @@ notarization（Windows は外部 Authenticode flow）、更新は Murasaki manif
 
 ## 既知の security gap
 
-- Native capability は command 単位のみで path / URL scope や window / origin 別 policy
-  file がない
-- multi-window 未対応のため window 別 security policy がない
-- CSP generator がない
+- Native capabilityはcommand単位・window別だが、path / URL / argument scopeや独立policy
+  fileがない
+- 宣言windowは1つのapplication originと認証済みlocal Node sessionを共有する。native
+  allowlistはServer Actions、`'use main'`、API route、updater endpointを隔離しないため、
+  application code側で操作を認証・認可する必要がある
 - Windows Authenticode / Linux package signing が未実装
 - Linux の protocol / file-association 登録は未実装。Windows portable archive は意図的に self-register しない
-- public native utility API は permission-scoped でないため main `murasaki` package から
-  まだ公開されていない
+- renderer native APIは `src/main.ts` から直接呼べない
 
 正確な状況は[プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)
 で確認できます。

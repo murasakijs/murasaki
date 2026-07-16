@@ -23,8 +23,8 @@ export default defineConfig({
 })
 ```
 
-`defineConfig` は型推論のための単なる恒等関数です — 渡したオブジェクト以外に、await
-したり設定したりするものは何もありません。
+`defineConfig` は型推論用に同じobjectを返し、宣言windowのlabel / routeを同期的に
+検証します。awaitは不要です。
 
 ## トップレベルのフィールド
 
@@ -38,10 +38,12 @@ export default defineConfig({
 | `homepage` | `string?` | About パネルに表示されるホームページ URL。 |
 | `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
-| `capabilities` | `NativeCapability[]?` | レンダラーへ許可するネイティブコマンド。デフォルトはすべて拒否 — [ネイティブ API](/docs/guides/native-apis)を参照。 |
+| `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したlabelをkeyにしたsecondary window — [下記](#windows)を参照。 |
+| `capabilities` | `NativeCapability[]?` | primary window向けnative command。`window.capabilities`省略時だけ利用。既定deny-all。 |
 | `main` | `false \| object?` | 長寿命 Node Main entry と shutdown 上限 — [下記](#main)を参照。 |
 | `bundle` | `object?` | Node dependency と non-code resource packaging — [下記](#bundle)を参照。 |
 | `build` | `object?` | pre-build command とclient公開env prefix — [下記](#build)を参照。 |
+| `security` | `object?` | rendererのContent Security Policy — [下記](#security)を参照。 |
 | `updater` | `UpdaterConfig?` | 自動更新のソース — [下記](#updater)を参照。 |
 | `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、Murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは Murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
 | `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
@@ -63,11 +65,40 @@ export default defineConfig({
 | `transparent` | `boolean?` | 透明なウィンドウ背景。 |
 | `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS の半透明なウィンドウビブランシー。 |
 | `console` | `boolean?` | Windows のみ: backend Node console window を表示。既定 `false`。 |
+| `route` | `string?` | windowに読み込むsame-origin path。既定`/`。完全URL / protocol-relative URLは拒否。 |
+| `visible` | `boolean?` | 初期表示。`main`は既定`true`、secondaryは既定`false`。 |
+| `capabilities` | `NativeCapability[]?` | window別native command allowlist。secondaryは既定deny-all。 |
 
 <Callout type="warn">
   `vibrancy` は宣言できますが、ネイティブバインディングにはまだ適用されていません —
   設定しても現時点では no-op です(サポート予定)。
 </Callout>
+
+## `windows`
+
+`window` は予約label `main` を持つprimaryです。secondaryは `windows` に宣言し、
+primary専用の `console` を除く同じshapeでroute、初期表示、command allowlistを
+個別設定します。
+
+```ts
+window: {
+  route: '/',
+  capabilities: ['window:open', 'window:list', 'window:manage'],
+},
+windows: {
+  settings: {
+    route: '/settings',
+    width: 720,
+    height: 560,
+    capabilities: [],
+  },
+},
+```
+
+labelは安全な1〜64文字で、`main`は予約済みです。secondaryは非表示で作成され、
+top-level permissionを継承しません。`console` はWindows backend console全体を制御する
+ため、secondaryに書くと拒否されます。lifecycle / renderer APIは
+[ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
 
 ## `capabilities`
 
@@ -76,6 +107,7 @@ export default defineConfig({
 
 ```ts
 capabilities: [
+  'app:quit',
   'dialog:openFile',
   'clipboard:readText',
   'clipboard:writeText',
@@ -85,8 +117,12 @@ capabilities: [
 ]
 ```
 
-完全な型付き一覧は `NativeCapability` です。許可は信頼済みアプリoriginにだけ適用され、
-別originのページはネイティブブリッジを利用できません。
+完全な型付き一覧は `NativeCapability` です。primaryは
+`window.capabilities ?? capabilities ?? []`、secondaryは自身のlistまたは`[]`を使い、
+call元rendererごとに評価します。別originのページはnative bridgeを利用できません。
+window管理では `window:getLabel`、`window:open`、`window:list`、`window:manage` を使います。
+applicationのprogrammatic shutdownには `app:quit` が必要です。built-in updaterを有効に
+すると、検証済みrestart handshake用としてprimary windowへ自動付与されます。
 
 ## `main`
 
@@ -104,7 +140,7 @@ main: {
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
 | `entry` | `string?` | project root からの相対 path。既定 `src/main.ts`。 |
-| `shutdownTimeoutMs` | `number?` | host exit 前の `shutdown()` 最大時間。既定 `10_000`。 |
+| `shutdownTimeoutMs` | `number?` | host exit前の `beforeQuit()` + `shutdown()` 全体の上限。既定 `10_000`。 |
 
 lifecycle hook と `'use main'` は [Node Main](/ja/docs/guides/node-main)を参照してください。
 
@@ -203,6 +239,33 @@ build: {
 prefix付き変数はclient公開用ですが、secretを置かないでください。Viteが値を配布JavaScriptへ
 埋め込みます。packaged Node Mainはlauncherの環境を継承し、Murasakiは`.env`をappへ
 コピーしません。end-user runtime設定は`context.paths.data`かdeployment環境を使います。
+
+## `security`
+
+Murasakiはframework shellとuser-owned `index.html`の両方へ、環境別のContent
+Security Policyを1つ注入します。完全な置き換え、または明示的なopt-outを設定できます。
+
+```ts
+security: {
+  csp: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https: wss:; object-src 'none'; base-uri 'none'; frame-src 'none'",
+},
+
+// 別layerがpolicyを管理する場合のescape hatch:
+// security: { csp: false },
+```
+
+| 値 | 動作 |
+| --- | --- |
+| 省略 | Murasakiのproduction / development既定値を使用。 |
+| `string` | 既定値を完全に置換。directiveはmergeされない。 |
+| `false` | framework注入を無効化。user-authored CSPは削除しない。 |
+
+`index.html`にCSPの`<meta http-equiv>`がすでにあれば、そのuser-owned policyを維持しつつ
+script / resourceより先に適用されるよう`<head>`先頭へ移動します。policyは必ず1か所で
+管理してください。既存tagと`security.csp` stringの併用はbuild errorです。設定値は空でない
+1行のstringに限り、control character、double quote、
+`<`、`>`は使えません。既定値、migration、meta配信CSPの制約は
+[セキュリティ](/ja/docs/building/security)を参照してください。
 
 ## `updater`
 

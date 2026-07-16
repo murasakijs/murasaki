@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isAuthorizedRuntimeRequest } from '../dist/vite-plugin/runtime-security.js'
+import {
+  isAuthorizedNativeRequest,
+  isAuthorizedRuntimeRequest,
+} from '../dist/vite-plugin/runtime-security.js'
 
 const TOKEN = 'a'.repeat(64)
 
@@ -25,4 +28,20 @@ test('accepts only same-origin loopback requests with the runtime cookie', () =>
   ]) {
     assert.equal(isAuthorizedRuntimeRequest(request(headers), TOKEN), false)
   }
+})
+
+test('requires the private native header in addition to the runtime session', () => {
+  const base = {
+    host: '127.0.0.1:5178',
+    cookie: `murasaki_runtime=${TOKEN}`,
+  }
+  assert.equal(isAuthorizedNativeRequest(request({
+    ...base,
+    'x-murasaki-native-token': TOKEN,
+  }), TOKEN), true)
+  assert.equal(isAuthorizedNativeRequest(request(base), TOKEN), false)
+  assert.equal(isAuthorizedNativeRequest(request({
+    ...base,
+    'x-murasaki-native-token': 'b'.repeat(64),
+  }), TOKEN), false)
 })

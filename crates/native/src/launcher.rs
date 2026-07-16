@@ -33,9 +33,9 @@
 /// resolution and the node binary's filename (`"node"` vs `"node.exe"`)
 /// differ, and callers pass those in.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-mod shared {
+pub(crate) mod shared {
   use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
     net::TcpStream,
@@ -50,6 +50,10 @@ mod shared {
   use fs2::FileExt;
 
   use crate::types::MenuLabels;
+
+  const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 10_000;
+  const MAX_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 300_000;
+  const SHUTDOWN_TRANSPORT_GRACE_MS: u64 = 2_000;
 
   /// Subset of the packaged resources dir's `murasaki-meta.json` (written by
   /// `cli/bundle.ts`; `Contents/Resources/` on macOS, `resources/` on
@@ -105,6 +109,118 @@ mod shared {
     pub(super) protocols: Vec<ProtocolMeta>,
     #[serde(default)]
     pub(super) file_associations: Vec<FileAssociationMeta>,
+    /// Fully-resolved declarative windows written by the packager. Empty is
+    /// accepted for backwards compatibility with legacy single-window
+    /// metadata, which the launcher expands to one `main` window below.
+    #[serde(default)]
+    pub(super) windows: Vec<WindowMeta>,
+    #[serde(default)]
+    pub(super) main_shutdown_timeout_ms: Option<u64>,
+  }
+
+  pub(super) fn main_shutdown_transport_timeout(meta: &Meta) -> Result<Duration, String> {
+    let configured = meta.main_shutdown_timeout_ms.unwrap_or(DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS);
+    if configured == 0 || configured > MAX_MAIN_SHUTDOWN_TIMEOUT_MS {
+      return Err(format!(
+        "mainShutdownTimeoutMs must be between 1 and {MAX_MAIN_SHUTDOWN_TIMEOUT_MS} milliseconds"
+      ));
+    }
+    Ok(Duration::from_millis(configured + SHUTDOWN_TRANSPORT_GRACE_MS))
+  }
+
+  #[derive(Clone, Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  pub(super) struct WindowMeta {
+    pub(super) label: String,
+    #[serde(default)]
+    pub(super) primary: Option<bool>,
+    #[serde(default)]
+    pub(super) route: Option<String>,
+    #[serde(default)]
+    pub(super) title: Option<String>,
+    #[serde(default)]
+    pub(super) width: Option<i32>,
+    #[serde(default)]
+    pub(super) height: Option<i32>,
+    #[serde(default)]
+    pub(super) min_width: Option<i32>,
+    #[serde(default)]
+    pub(super) min_height: Option<i32>,
+    #[serde(default)]
+    pub(super) visible: Option<bool>,
+    #[serde(default)]
+    pub(super) resizable: Option<bool>,
+    #[serde(default)]
+    pub(super) transparent: Option<bool>,
+    #[serde(default)]
+    pub(super) vibrancy: Option<String>,
+    #[serde(default)]
+    pub(super) capabilities: Option<Vec<String>>,
+  }
+
+  impl WindowMeta {
+    pub(super) fn is_primary(&self) -> bool {
+      self.primary.unwrap_or(self.label == "main")
+    }
+
+    pub(super) fn route(&self) -> &str {
+      self.route.as_deref().unwrap_or("/")
+    }
+  }
+
+  pub(super) fn resolve_windows(meta: &Meta) -> Result<Vec<WindowMeta>, String> {
+    let mut windows = if meta.windows.is_empty() {
+      vec![WindowMeta {
+        label: "main".to_string(),
+        primary: Some(true),
+        route: Some("/".to_string()),
+        title: Some(meta.product_name.clone()),
+        width: meta.width,
+        height: meta.height,
+        min_width: meta.min_width,
+        min_height: meta.min_height,
+        visible: Some(true),
+        resizable: meta.resizable,
+        transparent: meta.transparent,
+        vibrancy: meta.vibrancy.clone(),
+        capabilities: meta.capabilities.clone(),
+      }]
+    } else {
+      meta.windows.clone()
+    };
+
+    let mut labels = HashSet::new();
+    let mut primary_count = 0;
+    for window in &mut windows {
+      crate::window::validate_window_label(&window.label)
+        .map_err(|error| format!("invalid window label {}: {error}", window.label))?;
+      if !labels.insert(window.label.clone()) {
+        return Err(format!("duplicate window label: {}", window.label));
+      }
+      let primary = window.is_primary();
+      if window.label.eq_ignore_ascii_case("main") && window.label != "main" {
+        return Err("window label main is reserved for the primary window".to_string());
+      }
+      if primary != (window.label == "main") {
+        return Err("the primary window must use the reserved label main".to_string());
+      }
+      if primary {
+        primary_count += 1;
+      }
+      let route = window.route().to_string();
+      if route.is_empty() || !route.starts_with('/') || route.starts_with("//") || route.contains('\\') {
+        return Err(format!("window {} route must be a same-origin absolute path", window.label));
+      }
+      window.primary = Some(primary);
+      window.route = Some(route);
+      window.visible = Some(window.visible.unwrap_or(primary));
+      window.capabilities.get_or_insert_with(Vec::new);
+    }
+    if primary_count != 1 {
+      return Err("window metadata must contain exactly one primary main window".to_string());
+    }
+    windows.sort_by_key(|window| !window.is_primary());
+    Ok(windows)
   }
 
   #[derive(Deserialize)]
@@ -190,7 +306,11 @@ mod shared {
     let meta_path = resources_dir.join("murasaki-meta.json");
     let meta_raw = fs::read_to_string(&meta_path)
       .map_err(|e| format!("read {}: {e}", meta_path.display()))?;
-    serde_json::from_str(&meta_raw).map_err(|e| format!("parse {}: {e}", meta_path.display()))
+    let meta: Meta = serde_json::from_str(&meta_raw)
+      .map_err(|e| format!("parse {}: {e}", meta_path.display()))?;
+    main_shutdown_transport_timeout(&meta)
+      .map_err(|e| format!("parse {}: {e}", meta_path.display()))?;
+    Ok(meta)
   }
 
   /// Spawns `<resources_dir>/<node_binary_name> prod-server.mjs` the same way
@@ -202,13 +322,17 @@ mod shared {
   /// only per-OS difference in the command line; `console` (Windows-only,
   /// see the `CREATE_NO_WINDOW` block below) is the only other per-OS
   /// difference in this whole sequence.
-  pub(super) fn spawn_prod_server(
+  pub(super) fn spawn_prod_server<F>(
     resources_dir: &Path,
     node_binary_name: &str,
     console: bool,
     port: u16,
     runtime_token: &str,
-  ) -> Result<(Child, u16), String> {
+    guard_child: F,
+  ) -> Result<(Child, u16), String>
+  where
+    F: FnOnce(&Child) -> Result<(), String>,
+  {
     let node_path = resources_dir.join(node_binary_name);
     let mut cmd = Command::new(&node_path);
     cmd
@@ -252,10 +376,22 @@ mod shared {
       .spawn()
       .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
 
+    // Install platform process-lifetime protection immediately after spawn,
+    // before the Node main runtime is allowed to finish startup and report
+    // its port. In particular, Windows descendants only inherit a Job Object
+    // after their parent has been assigned to it; waiting for MURASAKI_PORT
+    // first leaves the whole main-runtime startup window unguarded.
+    if let Err(error) = guard_child(&child) {
+      let _ = child.kill();
+      let _ = child.wait();
+      return Err(error);
+    }
+
     match wait_for_port(&mut child, Duration::from_secs(15)) {
       Ok(port) => Ok((child, port)),
       Err(err) => {
         let _ = child.kill();
+        let _ = child.wait();
         Err(err)
       }
     }
@@ -282,6 +418,15 @@ mod shared {
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes).map_err(|e| format!("generate runtime token: {e}"))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+  }
+
+  fn app_instance_key(app_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(app_id.as_bytes())
+      .iter()
+      .map(|byte| format!("{byte:02x}"))
+      .collect()
   }
 
   #[derive(serde::Serialize, Deserialize)]
@@ -313,8 +458,13 @@ mod shared {
       use std::os::unix::fs::PermissionsExt;
       let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
     }
-    let id = app_origin_port(app_id);
-    Ok((dir.join(format!("{id}.lock")), dir.join(format!("{id}.activate"))))
+    // The stable HTTP port has only 14 bits and therefore cannot identify an
+    // app for locking purposes: two unrelated app IDs can map to the same
+    // port. Keep the lock/activation channel keyed by the full app ID hash so
+    // a port collision fails at bind time instead of cross-activating another
+    // application and exposing its runtime coordinates.
+    let key = app_instance_key(app_id);
+    Ok((dir.join(format!("{key}.lock")), dir.join(format!("{key}.activate"))))
   }
 
   /// Acquire the per-user, app-scoped single-instance lock. The file remains
@@ -324,6 +474,7 @@ mod shared {
     let (state_path, activation_path) = instance_paths(app_id)?;
     let file = OpenOptions::new()
       .create(true)
+      .truncate(false)
       .read(true)
       .write(true)
       .open(&state_path)
@@ -467,18 +618,19 @@ mod shared {
   /// native host terminates it. Returns true when `beforeQuit` cancelled the
   /// request. A transport failure is surfaced to the caller, which may still
   /// force termination rather than trapping the user in a broken app.
-  pub(super) fn request_main_shutdown(
+  pub(crate) fn request_main_shutdown(
     port: u16,
     runtime_token: &str,
     reason: &str,
     force: bool,
+    timeout: Duration,
   ) -> Result<bool, String> {
-    let timeout = Duration::from_secs(15);
+    let connect_timeout = timeout.min(Duration::from_millis(SHUTDOWN_TRANSPORT_GRACE_MS));
     let mut stream = TcpStream::connect_timeout(
       &format!("127.0.0.1:{port}")
         .parse()
         .map_err(|e| format!("parse main address: {e}"))?,
-      timeout,
+      connect_timeout,
     )
     .map_err(|e| format!("connect main shutdown: {e}"))?;
     stream.set_read_timeout(Some(timeout)).ok();
@@ -511,6 +663,78 @@ mod shared {
     Ok(parsed.cancelled)
   }
 
+  pub(crate) enum ShutdownPoll {
+    None,
+    Cancelled,
+    Proceed { transport_error: Option<String> },
+  }
+
+  struct ShutdownCompletion {
+    id: u64,
+    result: Result<bool, String>,
+  }
+
+  pub(crate) struct ShutdownCoordinator {
+    next_id: u64,
+    pending_id: Option<u64>,
+    tx: mpsc::Sender<ShutdownCompletion>,
+    rx: mpsc::Receiver<ShutdownCompletion>,
+  }
+
+  impl ShutdownCoordinator {
+    pub(crate) fn new() -> Self {
+      let (tx, rx) = mpsc::channel();
+      Self { next_id: 1, pending_id: None, tx, rx }
+    }
+
+    pub(crate) fn begin<F>(
+      &mut self,
+      port: u16,
+      runtime_token: &str,
+      reason: &str,
+      timeout: Duration,
+      wake: F,
+    )
+    where
+      F: FnOnce() + Send + 'static,
+    {
+      if self.pending_id.is_some() {
+        return;
+      }
+      let id = self.next_id;
+      self.next_id = self.next_id.wrapping_add(1).max(1);
+      self.pending_id = Some(id);
+      let tx = self.tx.clone();
+      let runtime_token = runtime_token.to_string();
+      let reason = reason.to_string();
+      thread::spawn(move || {
+        let result = request_main_shutdown(port, &runtime_token, &reason, false, timeout);
+        let _ = tx.send(ShutdownCompletion { id, result });
+        wake();
+      });
+    }
+
+    pub(crate) fn poll(&mut self) -> ShutdownPoll {
+      while let Ok(completion) = self.rx.try_recv() {
+        if self.pending_id != Some(completion.id) {
+          continue;
+        }
+        self.pending_id = None;
+        return match completion.result {
+          Ok(true) => ShutdownPoll::Cancelled,
+          Ok(false) => ShutdownPoll::Proceed { transport_error: None },
+          Err(error) => ShutdownPoll::Proceed { transport_error: Some(error) },
+        };
+      }
+      ShutdownPoll::None
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_pending(&self) -> bool {
+      self.pending_id.is_some()
+    }
+  }
+
   /// Reads `prod-server.mjs`'s stdout line-by-line looking for
   /// `MURASAKI_PORT=<n>` (see that file's `server.listen` callback), on a
   /// background thread so the child's pipe never fills up and blocks it.
@@ -526,6 +750,8 @@ mod shared {
 
     thread::spawn(move || {
       let reader = BufReader::new(stdout);
+      let launcher_stdout = std::io::stdout();
+      let mut forwarded = launcher_stdout.lock();
       let mut found = false;
       for line in reader.lines() {
         let Ok(line) = line else { break };
@@ -544,7 +770,15 @@ mod shared {
         // console (e.g. double-clicked from Explorer): there's no valid
         // stdout handle in that case. This forwarding is debug-output-only,
         // so best-effort-and-ignore is correct here, unlike a real error.
-        let _ = writeln!(std::io::stdout(), "{line}");
+        // Stdout becomes block-buffered when a packaged app is launched by a
+        // CI script or log collector with output redirected to a file. Flush
+        // every complete child line so renderer/backend diagnostics are
+        // observable while the GUI process is still running; otherwise a
+        // smoke test can wait forever for a marker already sitting in this
+        // process's userspace buffer.
+        if writeln!(forwarded, "{line}").is_ok() {
+          let _ = forwarded.flush();
+        }
       }
     });
 
@@ -765,9 +999,13 @@ mod shared {
 
   #[cfg(test)]
   mod tests {
-    use std::{fs, io::{Read, Write}, net::TcpListener, thread};
+    use std::{fs, io::{Read, Write}, net::TcpListener, thread, time::Duration};
 
-    use super::{app_origin_port, open_targets_from_args, request_main_shutdown, runtime_token, Meta, OpenTarget};
+    use super::{
+      app_instance_key, app_origin_port, main_shutdown_transport_timeout, open_targets_from_args,
+      request_main_shutdown, resolve_windows, runtime_token, Meta, OpenTarget,
+      ShutdownCompletion, ShutdownCoordinator, ShutdownPoll,
+    };
 
     #[test]
     fn app_origin_is_stable_and_private() {
@@ -775,6 +1013,14 @@ mod shared {
       assert_eq!(first, app_origin_port("com.example.notes"));
       assert!((49_152..=65_535).contains(&first));
       assert_ne!(first, app_origin_port("com.example.chat"));
+    }
+
+    #[test]
+    fn instance_identity_does_not_collapse_origin_port_collisions() {
+      let first = "com.example.app91";
+      let second = "com.example.app790";
+      assert_eq!(app_origin_port(first), app_origin_port(second));
+      assert_ne!(app_instance_key(first), app_instance_key(second));
     }
 
     #[test]
@@ -809,8 +1055,67 @@ mod shared {
         .unwrap();
       });
 
-      assert!(request_main_shutdown(port, "secret", "window-close", false).unwrap());
+      assert!(request_main_shutdown(
+        port,
+        "secret",
+        "window-close",
+        false,
+        Duration::from_secs(12),
+      ).unwrap());
       server.join().unwrap();
+    }
+
+    #[test]
+    fn async_shutdown_ignores_stale_results_and_recovers_after_cancel() {
+      let mut coordinator = ShutdownCoordinator::new();
+      coordinator.pending_id = Some(7);
+      coordinator.tx.send(ShutdownCompletion { id: 6, result: Ok(false) }).unwrap();
+      coordinator.tx.send(ShutdownCompletion { id: 7, result: Ok(true) }).unwrap();
+      assert!(matches!(coordinator.poll(), ShutdownPoll::Cancelled));
+      assert!(!coordinator.is_pending());
+
+      coordinator.pending_id = Some(8);
+      coordinator.tx.send(ShutdownCompletion {
+        id: 8,
+        result: Err("offline".to_string()),
+      }).unwrap();
+      assert!(matches!(
+        coordinator.poll(),
+        ShutdownPoll::Proceed { transport_error: Some(error) } if error == "offline"
+      ));
+      assert!(!coordinator.is_pending());
+    }
+
+    #[test]
+    fn main_shutdown_transport_timeout_tracks_config_and_rejects_extremes() {
+      let default_meta: Meta = serde_json::from_value(serde_json::json!({
+        "productName": "Default"
+      })).unwrap();
+      assert_eq!(
+        main_shutdown_transport_timeout(&default_meta).unwrap(),
+        Duration::from_millis(12_000),
+      );
+
+      let configured: Meta = serde_json::from_value(serde_json::json!({
+        "productName": "Configured",
+        "mainShutdownTimeoutMs": 20_000
+      })).unwrap();
+      assert_eq!(
+        main_shutdown_transport_timeout(&configured).unwrap(),
+        Duration::from_millis(22_000),
+      );
+
+      for timeout in [0_u64, 300_001, u64::MAX] {
+        let invalid: Meta = serde_json::from_value(serde_json::json!({
+          "productName": "Invalid",
+          "mainShutdownTimeoutMs": timeout
+        })).unwrap();
+        assert!(main_shutdown_transport_timeout(&invalid).is_err());
+      }
+      assert!(serde_json::from_value::<Meta>(serde_json::json!({
+        "productName": "Fractional",
+        "mainShutdownTimeoutMs": 1.5
+      })).is_err());
     }
 
     #[test]
@@ -842,6 +1147,74 @@ mod shared {
       });
       let _ = fs::remove_dir_all(root);
     }
+
+    #[test]
+    fn resolves_declarative_windows_and_legacy_metadata() {
+      let meta: Meta = serde_json::from_value(serde_json::json!({
+        "productName": "Violet",
+        "windows": [
+          {
+            "label": "main",
+            "primary": true,
+            "route": "/",
+            "visible": true,
+            "capabilities": ["window:open"]
+          },
+          {
+            "label": "settings",
+            "route": "/settings",
+            "visible": false,
+            "width": 640,
+            "height": 480,
+            "capabilities": ["window:getLabel"]
+          }
+        ]
+      })).unwrap();
+      let windows = resolve_windows(&meta).unwrap();
+      assert_eq!(windows.len(), 2);
+      assert_eq!(windows[0].label, "main");
+      assert!(windows[0].is_primary());
+      assert_eq!(windows[1].label, "settings");
+      assert!(!windows[1].is_primary());
+      assert_eq!(windows[1].route(), "/settings");
+      assert_eq!(windows[1].visible, Some(false));
+      assert_eq!(windows[1].capabilities.as_ref().unwrap()[0], "window:getLabel");
+
+      let legacy: Meta = serde_json::from_value(serde_json::json!({
+        "productName": "Legacy",
+        "width": 900,
+        "capabilities": ["clipboard:readText"]
+      })).unwrap();
+      let legacy_windows = resolve_windows(&legacy).unwrap();
+      assert_eq!(legacy_windows.len(), 1);
+      assert_eq!(legacy_windows[0].label, "main");
+      assert_eq!(legacy_windows[0].width, Some(900));
+      assert_eq!(legacy_windows[0].capabilities.as_ref().unwrap()[0], "clipboard:readText");
+    }
+
+    #[test]
+    fn rejects_unsafe_or_ambiguous_window_metadata() {
+      for windows in [
+        serde_json::json!([
+          { "label": "main", "primary": true },
+          { "label": "main" }
+        ]),
+        serde_json::json!([
+          { "label": "main", "primary": true },
+          { "label": "settings", "primary": true }
+        ]),
+        serde_json::json!([
+          { "label": "main", "primary": true },
+          { "label": "settings", "route": "https://example.com" }
+        ]),
+      ] {
+        let meta: Meta = serde_json::from_value(serde_json::json!({
+          "productName": "Invalid",
+          "windows": windows,
+        })).unwrap();
+        assert!(resolve_windows(&meta).is_err());
+      }
+    }
   }
 }
 
@@ -860,13 +1233,15 @@ mod imp_macos {
     menu::{build_default_app_menu, AboutInfo, AboutInfoOwned, SharedMenu},
     types::WebviewOptions,
     webview::{AppMenuContext, Webview},
-    window::{center_on_primary_monitor, SharedWindow},
+    window::{center_on_primary_monitor, SharedWindow, SharedWindowRegistry, WindowRegistry},
   };
 
   use super::shared::{
-    acquire_instance, app_origin_port, load_menu_locales, maybe_spawn_apply_helper, normalize_locale,
-    open_targets_from_args, open_targets_from_urls, read_meta, request_main_open, request_main_shutdown,
-    resolve_menu_labels, runtime_token, spawn_prod_server, InstanceRole,
+    acquire_instance, app_origin_port, load_menu_locales, main_shutdown_transport_timeout,
+    maybe_spawn_apply_helper, normalize_locale,
+    open_targets_from_args, open_targets_from_urls, read_meta, request_main_open,
+    resolve_menu_labels, resolve_windows, runtime_token, spawn_prod_server, InstanceRole,
+    ShutdownCoordinator, ShutdownPoll,
   };
 
   pub fn run() {
@@ -903,6 +1278,7 @@ mod imp_macos {
       .ok_or_else(|| "murasaki-launcher: could not resolve .app bundle path from Resources dir".to_string())?;
 
     let meta = read_meta(&resources_dir)?;
+    let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
     let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
     let mut primary_instance = match acquire_instance(app_id)? {
       InstanceRole::Primary(primary) => primary,
@@ -922,6 +1298,7 @@ mod imp_macos {
       meta.console,
       origin_port,
       &runtime_token,
+      |_| Ok(()),
     )?;
     primary_instance.publish(port, &runtime_token)?;
     let startup_argv: Vec<String> = std::env::args().skip(1).collect();
@@ -940,32 +1317,6 @@ mod imp_macos {
     // `ControlFlow::Wait` loop never re-polls `quit_requested()` until the
     // next mouse/keyboard event.
     let quit_proxy = event_loop.create_proxy();
-
-    // Matches prod-launcher.mjs's `meta.width ?? 1000` / `meta.height ?? 700`
-    // (not Application::createWindow's 1280x800 default, which is for
-    // `murasaki dev`'s window created with no explicit size).
-    let width = meta.width.unwrap_or(1000);
-    let height = meta.height.unwrap_or(700);
-    // Vibrancy isn't wired up on the native side yet — accepted here for
-    // murasaki-meta.json parity but currently a no-op, same as
-    // `BrowserWindow::from_window` (see window.rs).
-    let _ = &meta.vibrancy;
-
-    let mut window_builder = WindowBuilder::new()
-      .with_title(&meta.product_name)
-      .with_inner_size(LogicalSize::new(width as f64, height as f64))
-      .with_resizable(meta.resizable.unwrap_or(true))
-      .with_transparent(meta.transparent.unwrap_or(false));
-    if let (Some(min_width), Some(min_height)) = (meta.min_width, meta.min_height) {
-      window_builder = window_builder
-        .with_min_inner_size(LogicalSize::new(min_width as f64, min_height as f64));
-    }
-    let window = window_builder
-      .build(&event_loop)
-      .map_err(|e| format!("build window: {e}"))?;
-    center_on_primary_monitor(&window);
-
-    let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
 
     let icon_path = meta.icon.as_ref().map(|icon| resources_dir.join(icon));
 
@@ -1009,32 +1360,58 @@ mod imp_macos {
       about_info: about_owned,
     };
 
-    let url = format!("http://127.0.0.1:{port}/");
-    // `Webview::new` gives us the external-link navigation handler for free
-    // (see webview.rs) — kept alive for the app's lifetime, see the comment
-    // on `event_loop.run` below for why it's fine that it's never touched
-    // again after this.
-    let webview = Webview::new(
-      shared_window.clone(),
-      WebviewOptions {
-        url: Some(url),
-        html: None,
-        devtools: Some(false),
-        transparent: meta.transparent,
-        app_id: meta.app_id.clone(),
-        capabilities: meta.capabilities.clone(),
-        tray_icon: icon_path.as_ref().and_then(|path| path.to_str()).map(String::from),
-        serve_dir: None,
-      },
-      app_menu_context,
-      Box::new(move || {
-        let _ = quit_proxy.send_event(());
-      }),
-    )
-    .map_err(|e| format!("build webview: {e}"))?;
-    // Handle the app-menu poll below dispatches clicks into — see
-    // `poll_app_menu_events`'s doc comment in webview.rs.
-    let webview_handle = webview.handle();
+    let declarations = resolve_windows(&meta)?;
+    let windows: SharedWindowRegistry = Rc::new(RefCell::new(WindowRegistry::default()));
+    let mut webviews = Vec::with_capacity(declarations.len());
+    for declaration in declarations {
+      let width = declaration.width.unwrap_or(1000);
+      let height = declaration.height.unwrap_or(700);
+      // Vibrancy remains a declared no-op on the native side.
+      let _ = &declaration.vibrancy;
+      let mut window_builder = WindowBuilder::new()
+        .with_title(declaration.title.as_deref().unwrap_or(&meta.product_name))
+        .with_inner_size(LogicalSize::new(width as f64, height as f64))
+        .with_resizable(declaration.resizable.unwrap_or(true))
+        .with_transparent(declaration.transparent.unwrap_or(false))
+        .with_visible(declaration.visible.unwrap_or(declaration.is_primary()));
+      if let (Some(min_width), Some(min_height)) = (declaration.min_width, declaration.min_height) {
+        window_builder = window_builder
+          .with_min_inner_size(LogicalSize::new(min_width as f64, min_height as f64));
+      }
+      let window = window_builder
+        .build(&event_loop)
+        .map_err(|e| format!("build window {}: {e}", declaration.label))?;
+      center_on_primary_monitor(&window);
+      let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
+      windows.borrow_mut().register(
+        declaration.label.clone(),
+        declaration.is_primary(),
+        shared_window.clone(),
+      ).map_err(|error| format!("register window {}: {error}", declaration.label))?;
+
+      let url = format!("http://127.0.0.1:{port}{}", declaration.route());
+      let wake_proxy = quit_proxy.clone();
+      let webview = Webview::new(
+        shared_window,
+        WebviewOptions {
+          url: Some(url),
+          html: None,
+          devtools: Some(false),
+          transparent: declaration.transparent,
+          app_id: meta.app_id.clone(),
+          capabilities: declaration.capabilities.clone(),
+          tray_icon: icon_path.as_ref().and_then(|path| path.to_str()).map(String::from),
+          serve_dir: None,
+        },
+        app_menu_context.clone(),
+        declaration.label,
+        windows.clone(),
+        Box::new(move || {
+          let _ = wake_proxy.send_event(());
+        }),
+      ).map_err(|e| format!("build webview: {e}"))?;
+      webviews.push(webview);
+    }
 
     // Dock/About-panel icon — mirrors Application::set_icon_path. As the real
     // CFBundleExecutable, CFBundleIconFile (see cli/bundle.ts's Info.plist)
@@ -1046,24 +1423,37 @@ mod imp_macos {
 
     // tao's `EventLoop::run` never returns (`-> !`) and explicitly documents
     // that "values not passed to this function will *not* be dropped" — so
-    // `webview`/`app_menu_slot`/`shared_window`, though never referenced
-    // again after this point, simply stay alive on this stack frame for as
-    // long as the app runs. `webview_handle`, `child`, `resources_dir`, and
-    // `app_bundle` move into the closure below — the first two so the
-    // app-menu poll can reach the webview every tick and `child` can be
-    // killed on window close, the latter two so both clean-exit paths can
+    // `webviews`/`app_menu_slot`, though never referenced again after this
+    // point, simply stay alive on this stack frame for as long as the app
+    // runs. The registry, `child`, `resources_dir`, and `app_bundle` move
+    // into the closure below so menu dispatch can select the focused webview,
+    // the child can be killed on window close, and both clean-exit paths can
     // check for a pending `.murasaki-apply.json` handoff (contract §7
     // REVISED step 6) on the way out.
     let mut completed_initial_event_cycle = false;
     let mut received_open_event = false;
+    let mut shutdown = ShutdownCoordinator::new();
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
+      if matches!(&event, Event::LoopDestroyed) {
+        let resources = windows.borrow_mut().prepare_close_all();
+        crate::window::drop_all_webviews(resources);
+        let _ = child.kill();
+        let _ = child.wait();
+        return;
+      }
+      let shutdown_proceed = match shutdown.poll() {
+        ShutdownPoll::Proceed { transport_error } => Some(transport_error),
+        ShutdownPoll::Cancelled | ShutdownPoll::None => None,
+      };
 
       if primary_instance.take_activation() {
-        if let Some(window) = shared_window.borrow().as_ref() {
-          window.set_visible(true);
-          window.set_minimized(false);
-          window.set_focus();
+        if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+          if let Some(window) = window_slot.borrow().as_ref() {
+            window.set_visible(true);
+            window.set_minimized(false);
+            window.set_focus();
+          }
         }
         set_activation_policy_regular();
       }
@@ -1083,53 +1473,100 @@ mod imp_macos {
           };
           let _ = request_main_open(port, &runtime_token, activation, transport, targets, None);
           received_open_event = true;
-          if let Some(window) = shared_window.borrow().as_ref() {
-            window.set_visible(true);
-            window.set_minimized(false);
-            window.set_focus();
+          if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+            if let Some(window) = window_slot.borrow().as_ref() {
+              window.set_visible(true);
+              window.set_minimized(false);
+              window.set_focus();
+            }
           }
         }
       }
-      if matches!(event, Event::MainEventsCleared) {
+      if matches!(&event, Event::MainEventsCleared) {
         completed_initial_event_cycle = true;
       }
 
-      // Drain clicks on `useAppMenu`'s custom (non-role) items every tick —
-      // see `poll_app_menu_events`'s doc comment in webview.rs.
-      crate::webview::poll_app_menu_events(&webview_handle);
-      crate::webview::poll_tray_events(&webview_handle);
+      // Lifecycle roles follow the focused window. Custom application-menu
+      // ids always return to the primary renderer, which exclusively owns
+      // `useAppMenu` handlers.
+      let mut shutdown_reason = None;
+      if let (Some((label, window_slot, _)), Some((_, _, app_menu_webview))) = (
+        WindowRegistry::dispatch_target(&windows),
+        WindowRegistry::primary_dispatch_target(&windows),
+      ) {
+        let outcome = crate::webview::poll_app_menu_events(
+          &window_slot,
+          &app_menu_webview,
+          &app_menu_slot,
+        );
+        if outcome.quit {
+          shutdown_reason = Some("app-quit");
+        }
+        if outcome.close {
+          if windows.borrow().is_primary(&label) {
+            shutdown_reason = Some("window-close");
+          } else {
+            crate::window::set_window_visible(&window_slot, false);
+          }
+        }
+      }
+      if let Some((_label, webview_slot, tray_slot)) = WindowRegistry::tray_dispatch_target(&windows) {
+        crate::webview::poll_tray_events(&webview_slot, &tray_slot);
+      }
+      let close_requests = windows.borrow_mut().take_close_requests();
+      for label in close_requests {
+        if windows.borrow().is_primary(&label) {
+          shutdown_reason = Some("window-close");
+        } else {
+          let resources = windows.borrow_mut().prepare_close_secondary(&label);
+          match resources {
+            Ok(resources) => crate::window::drop_closed_window(resources),
+            Err(error) => eprintln!("murasaki-launcher: failed to close window {label}: {error}"),
+          }
+        }
+      }
 
       // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
       // doc comment. Same clean-shutdown as the window's own close button
       // just below: best-effort kill the spawned `node` child, hand off to
       // the apply-helper if one is pending, then exit.
       if crate::webview::quit_requested() {
-        if request_main_shutdown(port, &runtime_token, "app-quit", false).unwrap_or(false) {
-          return;
-        }
-        *control_flow = ControlFlow::Exit;
-        // Drop the wry WebView so WebView2 shuts its browser processes down —
-        // `std::process::exit` below skips destructors, which orphaned them.
-        let _ = webview_handle.borrow_mut().take();
-        let _ = child.kill();
-        maybe_spawn_apply_helper(&resources_dir, &app_bundle, &app_bundle);
-        std::process::exit(0);
+        shutdown_reason = Some("app-quit");
       }
 
       if let Event::WindowEvent {
         event: WindowEvent::CloseRequested,
+        window_id,
         ..
-      } = event
+      } = &event
       {
-        if request_main_shutdown(port, &runtime_token, "window-close", false).unwrap_or(false) {
-          return;
+        let label = WindowRegistry::label_for_id(&windows, *window_id);
+        if let Some(label) = label {
+          if windows.borrow().is_primary(&label) {
+            shutdown_reason = Some("window-close");
+          } else {
+            let window = windows.borrow().live_window(&label);
+            match window {
+              Ok(window) => crate::window::set_window_visible(&window, false),
+              Err(error) => eprintln!("murasaki-launcher: failed to hide window {label}: {error}"),
+            }
+          }
+        }
+      }
+
+      if let Some(reason) = shutdown_reason {
+        let wake = quit_proxy.clone();
+        shutdown.begin(port, &runtime_token, reason, shutdown_transport_timeout, move || {
+          let _ = wake.send_event(());
+        });
+      }
+      if let Some(transport_error) = shutdown_proceed {
+        if let Some(error) = transport_error {
+          eprintln!("murasaki-launcher: graceful shutdown transport failed: {error}");
         }
         *control_flow = ControlFlow::Exit;
-        // Drop the wry WebView so WebView2 shuts its browser processes down —
-        // `std::process::exit` below skips destructors, which orphaned them.
-        let _ = webview_handle.borrow_mut().take();
-        // Best-effort: if we get killed before this runs (force-quit, crash),
-        // prod-server.mjs's own orphan check (`ppid === 1`) reaps it within ~2s.
+        let resources = windows.borrow_mut().prepare_close_all();
+        crate::window::drop_all_webviews(resources);
         let _ = child.kill();
         maybe_spawn_apply_helper(&resources_dir, &app_bundle, &app_bundle);
         std::process::exit(0);
@@ -1260,9 +1697,8 @@ mod win_job {
 
   impl KillOnCloseJob {
     /// Creates the job object and sets `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
-    /// on it. Best-effort: returns `None` on any failure rather than
-    /// erroring the launcher out — the app still runs, just without this
-    /// orphan-kill safety net.
+    /// on it. Callers fail startup if this returns `None`: running without
+    /// this guard can orphan the packaged Node backend after a launcher crash.
     pub(super) fn new() -> Option<Self> {
       let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.ok()?;
 
@@ -1285,8 +1721,8 @@ mod win_job {
 
     /// Assigns `child` to this job — from this point on, Windows kills it
     /// (and anything it spawns, which inherits into the same job) once the
-    /// job handle closes. Best-effort: a `false` return just means this
-    /// child didn't get the orphan-kill protection, not a fatal error.
+    /// job handle closes. Callers treat `false` as a fatal startup error and
+    /// explicitly terminate the just-spawned child.
     pub(super) fn assign(&self, child: &std::process::Child) -> bool {
       use std::os::windows::io::AsRawHandle;
       let process = HANDLE(child.as_raw_handle());
@@ -1350,13 +1786,15 @@ mod imp_win {
     menu::{build_windows_menu_bar, AboutInfo, SharedMenu},
     types::WebviewOptions,
     webview::{poll_menu_bar_events, AppMenuContext, Webview},
-    window::{center_on_primary_monitor, SharedWindow},
+    window::{center_on_primary_monitor, SharedWindow, SharedWindowRegistry, WindowRegistry},
   };
 
   use super::shared::{
-    acquire_instance, app_origin_port, load_menu_locales, maybe_spawn_apply_helper, normalize_locale,
-    open_targets_from_args, open_targets_from_urls, read_meta, request_main_open, request_main_shutdown,
-    resolve_menu_labels, runtime_token, spawn_prod_server, InstanceRole,
+    acquire_instance, app_origin_port, load_menu_locales, main_shutdown_transport_timeout,
+    maybe_spawn_apply_helper, normalize_locale,
+    open_targets_from_args, open_targets_from_urls, read_meta, request_main_open,
+    resolve_menu_labels, resolve_windows, runtime_token, spawn_prod_server, InstanceRole,
+    ShutdownCoordinator, ShutdownPoll,
   };
   use super::win_job::KillOnCloseJob;
 
@@ -1550,6 +1988,7 @@ mod imp_win {
       .map_err(|e| format!("resolve resources dir: {e}"))?;
 
     let meta = read_meta(&resources_dir)?;
+    let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
     let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
     let mut primary_instance = match acquire_instance(app_id)? {
       InstanceRole::Primary(primary) => primary,
@@ -1569,6 +2008,21 @@ mod imp_win {
     let apply_target = exe_dir.to_path_buf();
     let apply_relaunch = apply_target.join(format!("{}.exe", meta.product_name));
 
+    // Create the lifetime guard before spawning. `spawn_prod_server` assigns
+    // node.exe to it immediately after `Command::spawn`, before waiting for
+    // the main runtime to start and print MURASAKI_PORT. This matters because
+    // only descendants created after assignment inherit the Job Object.
+    // `job` intentionally remains alive for the rest of this stack frame.
+    let job = match KillOnCloseJob::new() {
+      Some(job) => job,
+      None => {
+        return Err(
+          "Windows Job Object setup failed; refused to start an unguarded Node backend"
+            .to_string(),
+        );
+      }
+    };
+
     // Spawns resources/node.exe prod-server.mjs — same handshake as macOS,
     // see `shared::spawn_prod_server`. `meta.console` (default `false`) hides
     // the console window `node.exe` would otherwise get, via
@@ -1579,7 +2033,18 @@ mod imp_win {
       meta.console,
       origin_port,
       &runtime_token,
+      |child| {
+        if job.assign(child) {
+          Ok(())
+        } else {
+          Err(
+            "Windows Job Object assignment failed; refused to start an unguarded Node backend"
+              .to_string(),
+          )
+        }
+      },
     )?;
+
     primary_instance.publish(port, &runtime_token)?;
     let startup_argv: Vec<String> = std::env::args().skip(1).collect();
     let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -1588,29 +2053,11 @@ mod imp_win {
       request_main_open(port, &runtime_token, "cold-start", "argv", startup_targets, Some(startup_cwd))?;
     }
 
-    // Orphan protection (see `win_job`'s module doc comment) — assign the
-    // freshly spawned node.exe to a KILL_ON_JOB_CLOSE job so it can't outlive
-    // this launcher process, even if that's a crash rather than a clean exit.
-    // `job` is intentionally kept alive on this stack frame for the rest of
-    // `run_inner` (see the `event_loop.run` comment near the bottom of this
-    // function for why nothing here needs an explicit lifetime beyond that).
-    let job = KillOnCloseJob::new();
-    if let Some(job) = &job {
-      job.assign(&child);
-    }
-
     let event_loop = EventLoop::<()>::new();
     // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
     // see `webview::Webview::new`'s `wake` parameter doc comment / the
     // matching comment in `imp_macos`.
     let quit_proxy = event_loop.create_proxy();
-
-    // Matches prod-launcher.mjs's / the macOS launcher's `meta.width ?? 1000`
-    // / `meta.height ?? 700`.
-    let width = meta.width.unwrap_or(1000);
-    let height = meta.height.unwrap_or(700);
-    // Vibrancy is macOS-only (see window.rs) — a no-op here too.
-    let _ = &meta.vibrancy;
 
     // Title-bar/Alt-Tab window icon — see the module doc comment above for
     // why this is needed in addition to the .exe's already-embedded PE icon.
@@ -1621,27 +2068,6 @@ mod imp_win {
       .as_ref()
       .map(|icon| resources_dir.join(icon))
       .and_then(|path| load_window_icon(&path));
-
-    let mut window_builder = WindowBuilder::new()
-      .with_title(&meta.product_name)
-      .with_inner_size(LogicalSize::new(width as f64, height as f64))
-      .with_resizable(meta.resizable.unwrap_or(true))
-      .with_transparent(meta.transparent.unwrap_or(false))
-      .with_window_icon(window_icon);
-    if let (Some(min_width), Some(min_height)) = (meta.min_width, meta.min_height) {
-      window_builder = window_builder
-        .with_min_inner_size(LogicalSize::new(min_width as f64, min_height as f64));
-    }
-    let window = window_builder
-      .build(&event_loop)
-      .map_err(|e| format!("build window: {e}"))?;
-    center_on_primary_monitor(&window);
-
-    // Read the HWND before `window` moves into `shared_window` below —
-    // `init_for_hwnd` just needs the raw handle, not the tao `Window` itself.
-    let hwnd = window.hwnd();
-
-    let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
 
     // Native menu bar (File/Edit/Window) — localized the same way as macOS's
     // app menu (see the module doc comment above for why this launcher has
@@ -1670,12 +2096,6 @@ mod imp_win {
     };
     let menu_bar = build_windows_menu_bar(Some(&about), Some(&menu_labels))
       .map_err(|e| format!("build menu bar: {e}"))?;
-    // SAFETY: `hwnd` names the window built above, which is still open (its
-    // event loop hasn't run yet). A failure here is cosmetic (missing menu
-    // bar) — log and keep going rather than error the launcher out over it.
-    if let Err(e) = unsafe { menu_bar.init_for_hwnd(hwnd) } {
-      let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to attach the menu bar: {e}");
-    }
     // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
     // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
     let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu_bar)));
@@ -1684,39 +2104,75 @@ mod imp_win {
       menu_labels: Some(menu_labels.clone()),
     };
 
-    let url = format!("http://127.0.0.1:{port}/");
-    // `Webview::new` pins the WebView2 user-data directory under
-    // %LOCALAPPDATA% itself (see `webview::webview2_data_dir`'s doc comment)
-    // — no extra wiring needed here since this goes through the same
-    // constructor `murasaki dev` / `BrowserWindow::createWebview` use.
-    let webview = Webview::new(
-      shared_window.clone(),
-      WebviewOptions {
-        url: Some(url),
-        html: None,
-        devtools: Some(false),
-        transparent: meta.transparent,
-        app_id: meta.app_id.clone(),
-        capabilities: meta.capabilities.clone(),
-        tray_icon: meta.icon.as_ref().map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
-        serve_dir: None,
-      },
-      app_menu_context,
-      Box::new(move || {
-        let _ = quit_proxy.send_event(());
-      }),
-    )
-    .map_err(|e| format!("build webview: {e}"))?;
-    // Handle the menu bar's event loop poll dispatches into — see
-    // `poll_menu_bar_events` below and its doc comment in webview.rs.
-    let webview_handle = webview.handle();
+    let declarations = resolve_windows(&meta)?;
+    let windows: SharedWindowRegistry = Rc::new(RefCell::new(WindowRegistry::default()));
+    let mut webviews = Vec::with_capacity(declarations.len());
+    for declaration in declarations {
+      let width = declaration.width.unwrap_or(1000);
+      let height = declaration.height.unwrap_or(700);
+      let _ = &declaration.vibrancy;
+      let mut window_builder = WindowBuilder::new()
+        .with_title(declaration.title.as_deref().unwrap_or(&meta.product_name))
+        .with_inner_size(LogicalSize::new(width as f64, height as f64))
+        .with_resizable(declaration.resizable.unwrap_or(true))
+        .with_transparent(declaration.transparent.unwrap_or(false))
+        .with_visible(declaration.visible.unwrap_or(declaration.is_primary()))
+        .with_window_icon(window_icon.clone());
+      if let (Some(min_width), Some(min_height)) = (declaration.min_width, declaration.min_height) {
+        window_builder = window_builder
+          .with_min_inner_size(LogicalSize::new(min_width as f64, min_height as f64));
+      }
+      let window = window_builder
+        .build(&event_loop)
+        .map_err(|e| format!("build window {}: {e}", declaration.label))?;
+      center_on_primary_monitor(&window);
+
+      if declaration.is_primary() {
+        // SAFETY: this HWND belongs to the live primary window built above.
+        if let Some(menu_bar) = app_menu_slot.borrow().as_ref() {
+          if let Err(e) = unsafe { menu_bar.init_for_hwnd(window.hwnd()) } {
+            let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to attach the menu bar: {e}");
+          }
+        }
+      }
+
+      let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
+      windows.borrow_mut().register(
+        declaration.label.clone(),
+        declaration.is_primary(),
+        shared_window.clone(),
+      ).map_err(|error| format!("register window {}: {error}", declaration.label))?;
+
+      let url = format!("http://127.0.0.1:{port}{}", declaration.route());
+      let wake_proxy = quit_proxy.clone();
+      let webview = Webview::new(
+        shared_window,
+        WebviewOptions {
+          url: Some(url),
+          html: None,
+          devtools: Some(false),
+          transparent: declaration.transparent,
+          app_id: meta.app_id.clone(),
+          capabilities: declaration.capabilities.clone(),
+          tray_icon: meta.icon.as_ref().map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
+          serve_dir: None,
+        },
+        app_menu_context.clone(),
+        declaration.label,
+        windows.clone(),
+        Box::new(move || {
+          let _ = wake_proxy.send_event(());
+        }),
+      ).map_err(|e| format!("build webview: {e}"))?;
+      webviews.push(webview);
+    }
 
     // Same shutdown story as the macOS launcher (see that module's
     // `event_loop.run` comment): tao's `EventLoop::run` never returns and
     // explicitly documents that values not passed into it aren't dropped, so
-    // `webview`/`app_menu_slot`/`job` simply stay alive on this stack frame
-    // for the app's lifetime (`shared_window` and `webview_handle` move into
-    // the closure below, since the menu-bar poll needs them every tick).
+    // `webviews`/`app_menu_slot`/`job` simply stay alive on this stack frame
+    // for the app's lifetime (the window registry moves into the closure
+    // below, since menu/tray polling needs the focused window every tick).
     // `child`, `resources_dir`, `apply_target`, and `apply_relaunch` also
     // move in — the first to be killed on window close/Exit, the latter
     // three so every clean-exit path below can check for a pending
@@ -1724,14 +2180,21 @@ mod imp_win {
     // out.
     let mut completed_initial_event_cycle = false;
     let mut received_open_event = false;
+    let mut shutdown = ShutdownCoordinator::new();
     event_loop.run(move |event, _target, control_flow| {
       *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
+      let shutdown_proceed = match shutdown.poll() {
+        ShutdownPoll::Proceed { transport_error } => Some(transport_error),
+        ShutdownPoll::Cancelled | ShutdownPoll::None => None,
+      };
 
       if primary_instance.take_activation() {
-        if let Some(window) = shared_window.borrow().as_ref() {
-          window.set_visible(true);
-          window.set_minimized(false);
-          window.set_focus();
+        if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+          if let Some(window) = window_slot.borrow().as_ref() {
+            window.set_visible(true);
+            window.set_minimized(false);
+            window.set_focus();
+          }
         }
       }
 
@@ -1751,71 +2214,103 @@ mod imp_win {
           };
           let _ = request_main_open(port, &runtime_token, activation, transport, targets, None);
           received_open_event = true;
-          if let Some(window) = shared_window.borrow().as_ref() {
-            window.set_visible(true);
-            window.set_minimized(false);
-            window.set_focus();
+          if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+            if let Some(window) = window_slot.borrow().as_ref() {
+              window.set_visible(true);
+              window.set_minimized(false);
+              window.set_focus();
+            }
           }
         }
       }
-      if matches!(event, Event::MainEventsCleared) {
+      if matches!(&event, Event::MainEventsCleared) {
         completed_initial_event_cycle = true;
       }
 
-      // Native menu-bar clicks (Edit commands + Minimize) arrive
-      // asynchronously — see `poll_menu_bar_events`'s doc comment — so this
-      // is checked every tick rather than read synchronously like the
-      // context-menu popup in webview.rs. Exit is handled the same way as
-      // the window's own close button, just below.
-      if poll_menu_bar_events(&shared_window, &webview_handle) {
-        if request_main_shutdown(port, &runtime_token, "app-quit", false).unwrap_or(false) {
-          return;
+      let mut shutdown_reason = None;
+      if let Some((label, window_slot, webview_slot)) = WindowRegistry::dispatch_target(&windows) {
+        let app_menu_webview = WindowRegistry::primary_dispatch_target(&windows)
+          .map(|(_, _, webview)| webview)
+          .unwrap_or_else(|| webview_slot.clone());
+        let outcome = poll_menu_bar_events(
+          &window_slot,
+          &webview_slot,
+          &app_menu_webview,
+          &app_menu_slot,
+        );
+        if outcome.quit {
+          shutdown_reason = Some("app-quit");
         }
-        *control_flow = ControlFlow::Exit;
-        // Drop the wry WebView so WebView2 shuts its browser processes down —
-        // `std::process::exit` below skips destructors, which orphaned them.
-        let _ = webview_handle.borrow_mut().take();
-        let _ = child.kill();
-        maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
-        std::process::exit(0);
+        if outcome.close {
+          if windows.borrow().is_primary(&label) {
+            shutdown_reason = Some("window-close");
+          } else {
+            crate::window::set_window_visible(&window_slot, false);
+          }
+        }
       }
-      crate::webview::poll_tray_events(&webview_handle);
+      if let Some((_label, webview_slot, tray_slot)) = WindowRegistry::tray_dispatch_target(&windows) {
+        crate::webview::poll_tray_events(&webview_slot, &tray_slot);
+      }
+
+      let close_requests = windows.borrow_mut().take_close_requests();
+      for label in close_requests {
+        if windows.borrow().is_primary(&label) {
+          shutdown_reason = Some("window-close");
+        } else {
+          let resources = windows.borrow_mut().prepare_close_secondary(&label);
+          match resources {
+            Ok(resources) => crate::window::drop_closed_window(resources),
+            Err(error) => {
+              let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to close window {label}: {error}");
+            }
+          }
+        }
+      }
 
       // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
       // doc comment. Same clean-shutdown path as Exit/CloseRequested above
       // and below: best-effort kill `child` directly (the Job Object above
       // is the real safety net if this process dies before reaching here).
       if crate::webview::quit_requested() {
-        if request_main_shutdown(port, &runtime_token, "app-quit", false).unwrap_or(false) {
-          return;
-        }
-        *control_flow = ControlFlow::Exit;
-        // Drop the wry WebView so WebView2 shuts its browser processes down —
-        // `std::process::exit` below skips destructors, which orphaned them.
-        let _ = webview_handle.borrow_mut().take();
-        let _ = child.kill();
-        maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
-        std::process::exit(0);
+        shutdown_reason = Some("app-quit");
       }
 
       if let Event::WindowEvent {
         event: WindowEvent::CloseRequested,
+        window_id,
         ..
-      } = event
+      } = &event
       {
-        if request_main_shutdown(port, &runtime_token, "window-close", false).unwrap_or(false) {
-          return;
+        let label = WindowRegistry::label_for_id(&windows, *window_id);
+        if let Some(label) = label {
+          if windows.borrow().is_primary(&label) {
+            shutdown_reason = Some("window-close");
+          } else {
+            let window = windows.borrow().live_window(&label);
+            match window {
+              Ok(window) => crate::window::set_window_visible(&window, false),
+              Err(error) => {
+                let _ = writeln!(std::io::stderr(), "murasaki-launcher: failed to hide window {label}: {error}");
+              }
+            }
+          }
+        }
+      }
+
+      if let Some(reason) = shutdown_reason {
+        let wake = quit_proxy.clone();
+        shutdown.begin(port, &runtime_token, reason, shutdown_transport_timeout, move || {
+          let _ = wake.send_event(());
+        });
+      }
+      if let Some(transport_error) = shutdown_proceed {
+        if let Some(error) = transport_error {
+          let _ = writeln!(std::io::stderr(), "murasaki-launcher: graceful shutdown transport failed: {error}");
         }
         *control_flow = ControlFlow::Exit;
-        // Drop the wry WebView so WebView2 shuts its browser processes down —
-        // `std::process::exit` below skips destructors, which orphaned them.
-        let _ = webview_handle.borrow_mut().take();
-        // Best-effort direct kill on the clean-shutdown path. If we instead
-        // get killed before this ever runs (force-quit, crash), it's the
-        // `job` assigned above — not this — that reaps `child`: Windows has
-        // no ppid-reparenting signal for `prod-server.mjs` to detect itself
-        // (unlike macOS/Linux's `ppid === 1` check), so the Job Object is
-        // what actually guarantees no orphaned `node.exe` here.
+        let resources = windows.borrow_mut().prepare_close_all();
+        crate::window::drop_all_webviews(resources);
         let _ = child.kill();
         maybe_spawn_apply_helper(&resources_dir, &apply_target, &apply_relaunch);
         std::process::exit(0);

@@ -10,6 +10,7 @@ export default defineConfig({
   // Locales the app ships: localizes the native menu bar and shows a language
   // picker in the Windows installer. Trim to `['en']` for English-only.
   locales: ['en', 'ja'],
+  capabilities: ['menu:context', 'clipboard:readText', 'clipboard:writeText'],
   window: {
     title: 'Murasaki App',
     width: 1000,

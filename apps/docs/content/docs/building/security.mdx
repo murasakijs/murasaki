@@ -11,10 +11,10 @@ system.
 
 <Callout type="warn">
   Native renderer commands are deny-by-default and granted with the typed
-  `capabilities` list. Murasaki does not yet provide per-window allow/deny
-  rules, path/URL scopes, or different policies for multiple app origins.
-  Treat every renderer-to-Node function as privileged application code and
-  keep its surface small.
+  `capabilities` list. Every declared window has its own allowlist, but
+  argument-level and path/URL scopes are not available. Treat every
+  renderer-to-Node function as privileged application code and keep its
+  surface small.
 </Callout>
 
 ## Trust boundaries
@@ -22,7 +22,7 @@ system.
 | Boundary | Built-in protection | Your responsibility |
 | --- | --- | --- |
 | Remote URL → app WebView | Exact app-origin navigation stays in-window; off-origin HTTP(S) opens in the system browser; `file:`, `data:`, and `javascript:` navigations are denied | Do not weaken navigation behavior or inject remote scripts into the renderer |
-| Renderer → Rust native commands | Exact-origin IPC check and typed, deny-by-default `capabilities` allowlist | Grant only the commands you use; validate app-level intent before calling broad operations |
+| Renderer → Rust native commands | Exact-origin IPC check and a typed, deny-by-default allowlist evaluated for the calling window | Grant only the commands that renderer uses; validate app-level intent before broad operations such as `window:manage` |
 | Renderer → local Node | Privileged `/api/*` and `/__murasaki/*` endpoints require a random 256-bit HttpOnly, SameSite=Strict runtime cookie and validate Host/Origin; wire payloads are bounded | Validate arguments and authorize the requested operation inside every action/route/Main function |
 | OS URL/file activation → Node Main | Only configured schemes/extensions are normalized into `openRequested()` targets; delivery uses the authenticated app-local channel | Treat every URL and path as attacker-controlled; validate intent, identifiers, hosts, and file contents before acting |
 | App → update host | Ed25519 signature over raw manifest bytes, then SHA-256 verification of the selected payload | Protect the private update key and publish hashes/signatures together |
@@ -39,19 +39,25 @@ readable from JavaScript.
 export default defineConfig({
   appId: 'com.example.notes',
   productName: 'Notes',
-  capabilities: [
-    'dialog:openFile',
-    'clipboard:writeText',
-    'shell:openExternal',
-  ],
+  window: {
+    route: '/',
+    capabilities: ['app:quit', 'dialog:openFile', 'shell:openExternal', 'window:open'],
+  },
+  windows: {
+    preview: { route: '/preview', capabilities: ['clipboard:writeText'] },
+    settings: { route: '/settings', capabilities: [] },
+  },
 })
 ```
 
-Omitting `capabilities` grants nothing. Unknown strings grant nothing, and the
-bridge accepts calls only from the exact trusted application origin. The
-allowlist is command-level: it cannot yet constrain a dialog to one directory,
-an external URL to one host, or a command to one of several windows. Enforce
-those narrower rules in application code as well.
+Omitting capabilities grants nothing, except that the primary window falls
+back to the legacy top-level list when `window.capabilities` is absent.
+Secondary windows never inherit that list. Unknown strings grant nothing, and
+the bridge accepts calls only from the exact trusted application origin. The
+allowlist is command-level: it cannot constrain a dialog to one directory or
+an external URL to one host. `window:manage` can target any declared window,
+so keep it on a trusted renderer and enforce narrower intent in app code.
+Application-wide programmatic shutdown is separately gated by `app:quit`.
 
 ## Keep secrets in Node
 
@@ -130,10 +136,55 @@ validated value through the Main event API.
 ## Content Security Policy
 
 Murasaki sets `X-Content-Type-Options: nosniff` and `Referrer-Policy:
-no-referrer` on the document, but it does not currently generate a Content
-Security Policy for your app. Avoid `dangerouslySetInnerHTML`, sanitize any
-user-authored HTML, pin third-party scripts, and add a CSP at the application
-layer when your renderer loads externally controlled content.
+no-referrer` on the document and injects one CSP meta tag into framework-owned
+and user-owned HTML. The production default uses `script-src 'self'`, blocks
+objects, frames, base URL changes, inline script attributes, and form posts to
+other origins, while allowing remote-backed applications to connect over
+HTTPS/WSS. Images, fonts, and media support the common HTTPS/data/blob sources.
+`style-src 'self' 'unsafe-inline'` remains for React style attributes and
+runtime CSS compatibility.
+
+Development uses a separate policy: it additionally permits inline scripts
+inserted by Vite/React Refresh and `ws:` connections for HMR. It does not add
+`'unsafe-eval'`. This development relaxation is not present in production.
+
+Override the complete policy, or opt out when another layer owns it:
+
+```ts
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  security: {
+    csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.example.com; object-src 'none'; base-uri 'none'; frame-src 'none'",
+  },
+})
+
+// Disable only Murasaki's injection:
+// security: { csp: false }
+```
+
+A string is a complete override, not a directive merge. If a user-owned
+`index.html` already has a CSP meta tag, Murasaki keeps it and moves it to the
+beginning of `<head>`. Setting both that tag and a `security.csp` string is a
+build error instead of silently choosing one. Use the browser console's CSP
+violation to identify a blocked source, then add only that source or move the
+resource to the app origin.
+
+When migrating an existing app, move production inline scripts into external
+modules. Remote scripts and frames are blocked by default and must be enabled
+with an explicit override. HTTPS/WSS backends work with the default;
+plain-HTTP remote backends need an override (same-origin loopback calls remain
+allowed).
+
+Meta-delivered CSP has browser-defined limits. It begins applying where the
+tag is parsed (Murasaki prepends or moves it to `<head>`), and directives such
+as `frame-ancestors`, `sandbox`, and reporting are not fully supported from a
+meta tag. They are therefore not included in the default. Use response headers
+for a real network service that needs those protections. CSP also does not
+sanitize HTML or authorize Node functions, and
+the default inline-style allowance is a compatibility tradeoff rather than an
+XSS guarantee. Continue to avoid `dangerouslySetInnerHTML`, sanitize
+user-authored HTML, and pin third-party code.
 
 ## Exposing a real network service
 
@@ -159,15 +210,15 @@ OS artifact, plus Murasaki's manifest signature and payload hash.
 
 ## Known security gaps
 
-- Native capabilities are command-level only; there are no path/URL scopes or
-  per-window/per-origin policy files.
-- No public per-window security policy because multi-window is not supported.
-- No built-in CSP generator.
+- Native capabilities are command-level and per-window, but there are no
+  path/URL/argument scopes or separate policy files.
+- Declared windows share one application origin and authenticated local Node
+  session. Native allowlists do not isolate Server Actions, `'use main'`, API
+  routes, or updater endpoints; authorize those operations in application code.
 - Windows Authenticode and Linux package signing are not implemented.
 - Linux protocol/file-association registration is not implemented. Windows
   portable archives intentionally do not self-register.
-- Public native utility APIs are not permission-scoped and therefore are not
-  exposed from the main `murasaki` package yet.
+- Renderer native APIs are not callable directly from `src/main.ts`.
 
 Track exact status on [Platform & feature
 status](/docs/core-concepts/platform-feature-status).

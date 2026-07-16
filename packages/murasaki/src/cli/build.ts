@@ -2,12 +2,11 @@ import { build as viteBuild } from 'vite'
 import { resolve } from 'node:path'
 import { copyFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { spawn } from 'node:child_process'
 import { murasaki } from '../vite-plugin/index.js'
 import { SHELL_HTML_PATH } from '../vite-plugin/shell.js'
-import type { MurasakiConfig } from '../config.js'
+import { loadUserConfig } from './load-config.js'
 import { banner, dim, error, success, viteLogger } from './brand.js'
 
 type EmittedFile = { fileName: string; code?: string; source?: string | Uint8Array }
@@ -119,18 +118,4 @@ function toBuffer(file: EmittedFile): Buffer {
 
 function formatKb(bytes: number): string {
   return `${(bytes / 1024).toFixed(2)} kB`
-}
-
-async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
-  for (const name of ['murasaki.config.ts', 'murasaki.config.js', 'murasaki.config.mjs']) {
-    const p = resolve(cwd, name)
-    try {
-      const mod = await import(pathToFileURL(p).href)
-      const cfg = mod.default ?? mod.config ?? mod
-      if (cfg && typeof cfg === 'object') return cfg
-    } catch (err: any) {
-      if (err?.code !== 'ERR_MODULE_NOT_FOUND') throw err
-    }
-  }
-  throw new Error('murasaki: no config found — create murasaki.config.ts')
 }

@@ -4,12 +4,14 @@
  * The public surface. Import from `"murasaki"` in user code.
  */
 
-export { defineConfig } from './config.js'
+export { defineConfig, resolveWindowDeclarations } from './config.js'
 export type {
   MurasakiConfig,
   FileAssociationConfig,
   NativeCapability,
   ProtocolConfig,
+  ResolvedWindowConfig,
+  SecondaryWindowConfig,
   UpdaterConfig,
   WindowConfig,
 } from './config.js'

@@ -113,14 +113,14 @@ async function main() {
   // wires up murasaki/vite-plugin) — no plugins are hard-coded here.
   const server = await createServer({
     root: cwd,
-    server: { port, strictPort: true },
+    server: { host: '127.0.0.1', port, strictPort: true },
     customLogger: logger,
   })
   activeServer = server
   await server.listen()
 
   const actualPort = server.config.server.port ?? port
-  const url = `http://localhost:${actualPort}/`
+  const url = `http://127.0.0.1:${actualPort}/`
   const ms = Math.round(performance.now() - start)
   const version = readVersion()
 
@@ -142,6 +142,19 @@ function shutdown() {
 }
 process.on('SIGINT', () => void shutdown())
 process.on('SIGTERM', () => void shutdown())
+
+// If a process manager terminates only the blocked native parent (rather than
+// the terminal's whole foreground process group), macOS/Linux reparents this
+// child to init. Close Vite instead of leaving a stale port and watcher behind.
+// Windows does not expose the same reparenting signal, so normal shutdown uses
+// the parent's bounded TERM -> KILL reap in src/cli/dev.ts.
+if (process.platform !== 'win32') {
+  const originalParent = process.ppid
+  const orphanWatch = setInterval(() => {
+    if (process.ppid === 1 || process.ppid !== originalParent) void shutdown()
+  }, 1_000)
+  orphanWatch.unref()
+}
 
 main().catch((err) => {
   process.stderr.write(fatal(err))

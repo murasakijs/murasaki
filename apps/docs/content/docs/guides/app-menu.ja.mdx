@@ -11,7 +11,22 @@ Tauri のメニュー API に相当する Murasaki の機能です。
 
 これは **opt-in** です。呼ばなくても、アプリには Murasaki の標準メニュー(About/Quit
 を持つアプリメニュー + Edit + Window)が付きます。独自のメニューが欲しいときだけ
-`useAppMenu` を呼びます。
+`useAppMenu` を呼びます。application menuはprocess-globalなのでprimary `main` renderer
+だけが差し替えでき、そのrendererへ `menu:application` が必要です。
+
+```ts title="murasaki.config.ts"
+window: {
+  capabilities: [
+    'menu:application',
+    'window:close',
+    'clipboard:readText',
+    'clipboard:writeText',
+  ],
+}
+```
+
+native roleには対応するcapabilityも必要です。上のlistは、例に含まれる
+`{ role: 'close' }` と完全な `{ role: 'editMenu' }` submenuの両方を許可します。
 
 ## メニューを宣言する
 
@@ -56,6 +71,24 @@ macOS では標準のアプリ名メニュー(About / Hide / Quit)が常にあ�
 標準的なものにはロールを使い(特に Edit 項目 — `copy`/`paste` はフォーカス中の欄に届く
 ネイティブ挙動が必要です)、それ以外は `action` を持つカスタムエントリを使います。
 
+custom application menuには常に `menu:application` が必要です。使用するnative roleに
+応じて、次のcapabilityも追加します。
+
+| role | 追加で必要なcapability |
+| --- | --- |
+| `quit` | `app:quit` |
+| `close` | `window:close` |
+| `minimize` | `window:minimize` |
+| `zoom` | `window:toggleMaximize` |
+| `cut`, `copy` | `clipboard:writeText` |
+| `paste` | `clipboard:readText` |
+| `editMenu` | `clipboard:readText` と `clipboard:writeText` の両方 |
+| `windowMenu` | `window:minimize` と `window:toggleMaximize` の両方 |
+| `undo`, `redo`, `selectAll`, `reload` | `menu:application` 以外は不要 |
+
+必要なcapabilityが1つでも欠けている場合、Murasakiは置換全体を拒否します。一部だけが
+動くmenuをinstallせず、現在のapplication menuを維持します。
+
 ## 形
 
 ```ts
@@ -81,16 +114,17 @@ interface AppMenuEntry {
 で再利用できます。
 
 <Callout type="info">
-  `useAppMenu` は一度だけマウントします — 最後の呼び出しが勝ち、インストール済みの
-  メニューを置き換えます。呼ばなければ Murasaki のデフォルトメニューのままです。
+  `useAppMenu` はprimary layoutで一度だけmountします。hidden rendererがprocess-global
+  native chromeを置換しないよう、secondary windowからのcallは無視されます。呼ばなければ
+  Murasakiのdefault menuのままです。
 </Callout>
 
 ## プラットフォームメモ
 
 - **macOS** — 画面上部の `NSMenu`。アプリ名メニューが常に先頭に追加されます。
 - **Windows** — ウィンドウ内の `HMENU` バー。OS のクラシックなスタイルを引き継ぎ、
-  ダークモードには追従しません。`close` と `quit` は現状同じ動作です(Murasaki アプリ
-  は今のところ単一ウィンドウ)。
+  ダークモードには追従しません。`close` roleはsecondaryをhideして再open可能にし、
+  primaryの `main` closeと`quit`はapp lifecycleへ進みます。
 - **Linux** — デフォルトのメニューバーはまだありません。
 
 ## 次へ

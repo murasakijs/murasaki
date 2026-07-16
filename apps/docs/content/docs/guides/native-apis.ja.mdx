@@ -11,10 +11,9 @@ Murasaki のネイティブウィンドウ、メニュー、OS 統合は
 
 ## ウィンドウとネイティブメニューバー
 
-ウィンドウそのもの — サイズ、タイトル、リサイズ可否、macOS のビブランシーなど — は
-React から命令的に呼び出すのではなく、`murasaki.config.ts` の `window` フィールドで一
-度だけ宣言します。すべての形については[Configuration](/docs/building/configuration)を
-参照してください。
+windowのshape（サイズ、title、route、表示、permission、macOS vibrancy）は
+`murasaki.config.ts` で宣言します。`window` はprimaryの`main`、`windows` はlabel付き
+secondaryです。全体像は[ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
 
 macOS では、標準的な App/Edit/Window メニューバー(About、Services、Hide、Quit、
 Edit、Window)が自動的に生成され、`config.locales` からローカライズされます — コード
@@ -35,7 +34,7 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 ```tsx
 'use client'
 
-import { appWindow, clipboard, dialog, notification, shell, tray } from 'murasaki/native'
+import { app, appWindow, clipboard, dialog, notification, shell, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -44,24 +43,38 @@ const files = await dialog.openFile({
 await clipboard.writeText(files.join('\n'))
 await notification.show({ title: '選択完了', body: `${files.length} files` })
 await appWindow.setTitle('Import complete')
+console.log(await appWindow.getLabel())
+await windows.open('preview')
 await shell.showItemInFolder(files[0])
 ```
 
 | API | 操作 |
 | --- | --- |
+| `app` | `quit`（gracefulなapplication shutdown） |
 | `dialog` | `openFile`, `openDirectory`, `saveFile` |
 | `clipboard` | `readText`, `writeText` |
 | `notification` | `show` |
 | `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder` |
-| `appWindow` | `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
+| `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
+| `windows` | 宣言label向け`open`, `list`, `show`, `hide`, `focus`, `close` |
 | `tray` | `create`, `remove`, `setTooltip`, `onClick` |
+
+`app.quit()` とrootの `quit()` helperはいずれも `app:quit` が必要です。権限のない
+secondary rendererからapplication全体を終了することはできません。
+
+<Callout type="warning">
+  **0.50 migration:** 以前の`quit()`はpermissionなしのraw IPCを送っていました。
+  既存のnon-updater appで使用しているwindowには`app:quit`を追加してください。
+  built-in updaterを有効にした場合だけ、検証済みinstall / restart handshakeの後方互換性を
+  保つためprimary windowへ自動付与されます。
+</Callout>
 
 <Callout type="info">
   これらは `src/main.ts` から直接呼ぶAPIではなく、信頼済みレンダラー向けです。
   ブリッジはアプリと完全一致するoriginだけを受け付け、固定allowlistのコマンドだけを
-  公開します。利用するコマンドだけを `config.capabilities` で許可してください。
-  ウィンドウ単位やargument/path scopeのpermissionは計画中なので、アプリウィンドウに
-  信頼できないリモートコンテンツを読み込まないでください。
+  公開します。各rendererが使うcommandだけを `window.capabilities` /
+  `windows[label].capabilities` で許可してください。argument / path / URL scopeは
+  計画中なので、権限を持つwindowに信頼できないremote contentを読み込まないでください。
 </Callout>
 
 ## トレイアイコン
@@ -127,14 +140,15 @@ const { status, latest, check, download, install } = useUpdate()
 用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
-  tray menu、グローバルショートカット、マルチウィンドウ管理、window / argument 単位の
-  capability rule はまだ公開されていません。設計前に
+  tray menu、global shortcut、argument / path単位のcapability ruleはまだ公開されて
+  いません。設計前に
   [プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。
 </Callout>
 
 ## 次へ
 
 <Cards>
+  <Card title="ウィンドウと権限" href="/ja/docs/guides/windows" description="宣言windowとrenderer別capability list。" />
   <Card title="自動更新" href="/docs/guides/auto-update" description="マニフェストの形式、署名、リリースの公開。" />
   <Card title="コンテキストメニュー" href="/docs/guides/context-menu" description="useContextMenu API の全体像。" />
   <Card title="設定" href="/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />

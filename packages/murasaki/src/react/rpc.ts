@@ -10,6 +10,7 @@
  * module's IPC `message` listener.
  */
 import { useEffect } from 'react'
+import { app as nativeApp } from '../native/index.js'
 
 type IpcMsg = { kind: 'ready' }
 
@@ -47,10 +48,9 @@ export function post(msg: unknown) {
 /**
  * Quits the app.
  *
- * Posts `{ kind: 'appQuit' }` over the IPC bridge. Handled synchronously in
- * Rust (see `crates/native/src/webview.rs`'s `QUIT_REQUESTED`), exactly like
- * `contextMenu`/`appMenu` — it never round-trips through Node, since
- * `Application::run()` blocks the libuv loop for as long as the app is open.
+ * Uses the request-correlated native bridge and requires the calling window
+ * to have the `app:quit` capability. Rust turns the authorized request into
+ * a graceful host shutdown without round-tripping through Node/libuv.
  *
  * This is the only way to quit a murasaki app programmatically; there is no
  * other API for it. `useUpdate()`'s `install()` calls this after the backend
@@ -58,8 +58,8 @@ export function post(msg: unknown) {
  * install → quit → apply handshake (updater contract §7) — but it's a
  * general-purpose primitive, not an updater internal.
  */
-export function quit() {
-  post({ kind: 'appQuit' })
+export function quit(): Promise<void> {
+  return nativeApp.quit()
 }
 
 export interface ContextMenuItem {
