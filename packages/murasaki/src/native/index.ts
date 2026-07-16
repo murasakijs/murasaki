@@ -131,6 +131,33 @@ export const appWindow = {
   toggleMaximize(): Promise<void> {
     return invokeNative('window.toggleMaximize')
   },
+  show(): Promise<void> {
+    return invokeNative('window.show')
+  },
+  hide(): Promise<void> {
+    return invokeNative('window.hide')
+  },
+  focus(): Promise<void> {
+    return invokeNative('window.focus')
+  },
+  close(): Promise<void> {
+    return invokeNative('window.close')
+  },
+  setAlwaysOnTop(enabled: boolean): Promise<void> {
+    return invokeNative('window.setAlwaysOnTop', { enabled })
+  },
+  isVisible(): Promise<boolean> {
+    return invokeNative('window.isVisible')
+  },
+  isFocused(): Promise<boolean> {
+    return invokeNative('window.isFocused')
+  },
+  isMaximized(): Promise<boolean> {
+    return invokeNative('window.isMaximized')
+  },
+  isMinimized(): Promise<boolean> {
+    return invokeNative('window.isMinimized')
+  },
 }
 
 export const tray = {

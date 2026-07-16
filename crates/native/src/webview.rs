@@ -266,6 +266,15 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
     "window.setSize" => Some("window:setSize"),
     "window.minimize" => Some("window:minimize"),
     "window.toggleMaximize" => Some("window:toggleMaximize"),
+    "window.show" => Some("window:show"),
+    "window.hide" => Some("window:hide"),
+    "window.focus" => Some("window:focus"),
+    "window.close" => Some("window:close"),
+    "window.setAlwaysOnTop" => Some("window:setAlwaysOnTop"),
+    "window.isVisible" => Some("window:isVisible"),
+    "window.isFocused" => Some("window:isFocused"),
+    "window.isMaximized" => Some("window:isMaximized"),
+    "window.isMinimized" => Some("window:isMinimized"),
     "tray.create" => Some("tray:create"),
     "tray.remove" => Some("tray:remove"),
     "tray.setTooltip" => Some("tray:setTooltip"),
@@ -490,6 +499,8 @@ fn handle_native_call(
   #[derive(serde::Deserialize)]
   struct SizeArg { width: f64, height: f64 }
   #[derive(serde::Deserialize)]
+  struct EnabledArg { enabled: bool }
+  #[derive(serde::Deserialize)]
   #[serde(rename_all = "camelCase")]
   struct TrayCreateArg {
     #[serde(default)]
@@ -583,6 +594,47 @@ fn handle_native_call(
         if let Some(window) = window_slot.borrow().as_ref() { window.set_maximized(!window.is_maximized()); }
         Ok(serde_json::Value::Null)
       }
+      "window.show" => {
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_visible(true); }
+        Ok(serde_json::Value::Null)
+      }
+      "window.hide" => {
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_visible(false); }
+        Ok(serde_json::Value::Null)
+      }
+      "window.focus" => {
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_focus(); }
+        Ok(serde_json::Value::Null)
+      }
+      "window.close" => {
+        QUIT_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(serde_json::Value::Null)
+      }
+      "window.setAlwaysOnTop" => {
+        let args: EnabledArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_always_on_top(args.enabled); }
+        Ok(serde_json::Value::Null)
+      }
+      "window.isVisible" => Ok(window_slot
+        .borrow()
+        .as_ref()
+        .map(|window| serde_json::Value::Bool(window.is_visible()))
+        .unwrap_or(serde_json::Value::Bool(false))),
+      "window.isFocused" => Ok(window_slot
+        .borrow()
+        .as_ref()
+        .map(|window| serde_json::Value::Bool(window.is_focused()))
+        .unwrap_or(serde_json::Value::Bool(false))),
+      "window.isMaximized" => Ok(window_slot
+        .borrow()
+        .as_ref()
+        .map(|window| serde_json::Value::Bool(window.is_maximized()))
+        .unwrap_or(serde_json::Value::Bool(false))),
+      "window.isMinimized" => Ok(window_slot
+        .borrow()
+        .as_ref()
+        .map(|window| serde_json::Value::Bool(window.is_minimized()))
+        .unwrap_or(serde_json::Value::Bool(false))),
       "tray.create" => {
         let args: TrayCreateArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
         let icon_path = args.icon.as_deref().or(default_tray_icon)
@@ -1178,6 +1230,14 @@ mod tests {
     assert!(!native_method_is_allowed(
       "unknown.command",
       &["unknown:command".to_string()]
+    ));
+    assert!(native_method_is_allowed(
+      "window.isVisible",
+      &["window:isVisible".to_string()]
+    ));
+    assert!(!native_method_is_allowed(
+      "window.isVisible",
+      &["window:isFocused".to_string()]
     ));
   }
 

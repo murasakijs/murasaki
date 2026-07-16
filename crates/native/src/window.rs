@@ -125,6 +125,58 @@ impl BrowserWindow {
     Ok(())
   }
 
+  #[napi]
+  pub fn show(&self) -> Result<()> {
+    if let Some(w) = self.window.borrow().as_ref() {
+      w.set_visible(true);
+    }
+    Ok(())
+  }
+
+  #[napi]
+  pub fn hide(&self) -> Result<()> {
+    if let Some(w) = self.window.borrow().as_ref() {
+      w.set_visible(false);
+    }
+    Ok(())
+  }
+
+  #[napi]
+  pub fn focus(&self) -> Result<()> {
+    if let Some(w) = self.window.borrow().as_ref() {
+      w.set_focus();
+    }
+    Ok(())
+  }
+
+  #[napi(js_name = "setAlwaysOnTop")]
+  pub fn set_always_on_top(&self, enabled: bool) -> Result<()> {
+    if let Some(w) = self.window.borrow().as_ref() {
+      w.set_always_on_top(enabled);
+    }
+    Ok(())
+  }
+
+  #[napi(js_name = "isVisible")]
+  pub fn is_visible(&self) -> bool {
+    self.window.borrow().as_ref().is_some_and(Window::is_visible)
+  }
+
+  #[napi(js_name = "isFocused")]
+  pub fn is_focused(&self) -> bool {
+    self.window.borrow().as_ref().is_some_and(Window::is_focused)
+  }
+
+  #[napi(js_name = "isMaximized")]
+  pub fn is_maximized(&self) -> bool {
+    self.window.borrow().as_ref().is_some_and(Window::is_maximized)
+  }
+
+  #[napi(js_name = "isMinimized")]
+  pub fn is_minimized(&self) -> bool {
+    self.window.borrow().as_ref().is_some_and(Window::is_minimized)
+  }
+
   #[napi(js_name = "close")]
   pub fn close(&self) -> Result<()> {
     self.window.borrow_mut().take();
