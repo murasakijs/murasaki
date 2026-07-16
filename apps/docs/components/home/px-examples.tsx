@@ -10,6 +10,7 @@ import type { LpExtra } from "@/lib/home-content";
 import localSignalImage from "../../../../examples/local-signal/design/implementation.png";
 import focusImage from "../../../../examples/murasaki-focus/design/implementation.png";
 import violetNotesImage from "../../../../examples/violet-notes/design/implementation.png";
+import { SampleDemoCommand } from "./sample-demo-command";
 
 const REPO_URL = "https://github.com/murasakijs/murasaki";
 const DEMO_RELEASE_URL = `${REPO_URL}/releases/tag/v0.47.3`;
@@ -59,6 +60,10 @@ const DOWNLOADS = [
 
 function sampleDownloadUrl(assetStem: string, target: string) {
   return `${REPO_URL}/releases/download/samples-v0.47.2/${assetStem}-0.47.2-${target}`;
+}
+
+function sampleRunnerCommand(slug: string) {
+  return `curl -fsSL https://raw.githubusercontent.com/murasakijs/murasaki/main/scripts/run-sample-demo.sh | sh -s -- ${slug}`;
 }
 
 /**
@@ -223,6 +228,12 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                     </a>
                   </div>
                 </div>
+                <SampleDemoCommand
+                  command={sampleRunnerCommand(meta.slug)}
+                  label={content.runner.label}
+                  copyLabel={content.runner.copy}
+                  copiedLabel={content.runner.copied}
+                />
               </article>
             );
           })}

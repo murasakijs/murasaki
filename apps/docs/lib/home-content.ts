@@ -729,6 +729,11 @@ export interface LpExtra {
     sampleLabel: string;
     sourceLabel: string;
     downloadsLabel: string;
+    runner: {
+      label: string;
+      copy: string;
+      copied: string;
+    };
     apps: { name: string; description: string }[];
   };
   /** The 360° ASCII butterfly — the brand's Sasakia charonda voxelized from
@@ -847,6 +852,11 @@ const lpEn: LpExtra = {
     sampleLabel: "Three apps. Three directions.",
     sourceLabel: "Source",
     downloadsLabel: "Downloads",
+    runner: {
+      label: "Verified macOS demo runner",
+      copy: "Copy demo command",
+      copied: "Copied",
+    },
     apps: [
       {
         name: "Violet Notes",
@@ -970,6 +980,11 @@ const lpJa: LpExtra = {
     sampleLabel: "3つのアプリ。3つの方向性。",
     sourceLabel: "ソース",
     downloadsLabel: "ダウンロード",
+    runner: {
+      label: "検証付きmacOS Demoランナー",
+      copy: "Demoコマンドをコピー",
+      copied: "コピーしました",
+    },
     apps: [
       {
         name: "Violet Notes",
