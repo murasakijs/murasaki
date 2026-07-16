@@ -13,7 +13,7 @@
     "node": ">=20.19.0"
   },
   "bin": {
-    "murasaki-mcp": "./bin/murasaki-mcp.mjs"
+    "murasaki-mcp": "bin/murasaki-mcp.mjs"
   },
   "exports": {
     ".": "./src/server.mjs"
