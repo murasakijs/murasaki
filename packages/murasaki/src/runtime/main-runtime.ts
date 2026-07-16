@@ -59,8 +59,10 @@ async function runBeforeDeadline<T>(
 
   let timer: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<DeadlineResult<T>>((resolveOk) => {
+    // This deadline is part of the awaited lifecycle contract. Keeping it
+    // referenced guarantees shutdown settles even when no server/socket handle
+    // remains to keep Node alive (notably isolated runtimes and startup exits).
     timer = setTimeout(() => resolveOk({ completed: false }), remainingMs)
-    timer.unref?.()
   })
   try {
     return await Promise.race([
