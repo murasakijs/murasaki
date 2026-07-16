@@ -203,7 +203,12 @@ export function PxHero({
           </div>
 
           <div className="mt-6 flex items-center justify-center gap-3 md:justify-start">
-            <ProductHuntBadge lang={lang} accent />
+            <ProductHuntBadge
+              lang={lang}
+              variant="follow"
+              showLaunchTimer
+              accent
+            />
           </div>
         </div>
       </div>

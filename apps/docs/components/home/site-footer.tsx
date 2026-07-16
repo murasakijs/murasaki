@@ -87,7 +87,7 @@ export function SiteFooter({
               Murasaki
             </span>
           </Link>
-          <ProductHuntBadge lang={lang} lazy />
+          <ProductHuntBadge lang={lang} variant="review" lazy />
           <p className="text-xs text-muted-foreground">{license}</p>
         </div>
       </div>

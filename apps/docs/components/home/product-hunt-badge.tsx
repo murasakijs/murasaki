@@ -3,16 +3,27 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 
-const PRODUCT_HUNT_URL =
-  "https://www.producthunt.com/products/murasaki?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-murasaki";
-
-const PRODUCT_HUNT_BADGE_URL =
-  "https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1196791&theme=neutral&t=1784129201283";
+const PRODUCT_HUNT_BADGES = {
+  follow: {
+    href: "https://www.producthunt.com/products/murasaki?utm_source=badge-follow&utm_medium=badge&utm_source=badge-murasaki",
+    image:
+      "https://api.producthunt.com/widgets/embed-image/v1/follow.svg?product_id=1269936&theme=light",
+    label: "Follow Murasaki on Product Hunt",
+  },
+  review: {
+    href: "https://www.producthunt.com/products/murasaki/reviews/new?utm_source=badge-product_review&utm_medium=badge&utm_source=badge-murasaki",
+    image:
+      "https://api.producthunt.com/widgets/embed-image/v1/product_review.svg?product_id=1269936&theme=light",
+    label: "Review Murasaki on Product Hunt",
+  },
+} as const;
 
 const PRODUCT_HUNT_LAUNCH_AT = new Date("2026-07-16T00:01:00-07:00").getTime();
 
 interface ProductHuntBadgeProps {
   lang: string;
+  variant?: keyof typeof PRODUCT_HUNT_BADGES;
+  showLaunchTimer?: boolean;
   accent?: boolean;
   lazy?: boolean;
   className?: string;
@@ -31,16 +42,21 @@ function formatDuration(durationMs: number, round: "ceil" | "floor") {
     .join(" : ");
 }
 
-/** Official Product Hunt card, shared by the launch hero and site footer. */
+/** Official Product Hunt follow/review cards used by the hero and footer. */
 export function ProductHuntBadge({
   lang,
+  variant = "follow",
+  showLaunchTimer = false,
   accent = false,
   lazy = false,
   className,
 }: ProductHuntBadgeProps) {
+  const badge = PRODUCT_HUNT_BADGES[variant];
   const [nowMs, setNowMs] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!showLaunchTimer) return;
+
     const updateTimer = () => {
       setNowMs(Date.now());
     };
@@ -48,7 +64,7 @@ export function ProductHuntBadge({
     updateTimer();
     const interval = window.setInterval(updateTimer, 1000);
     return () => window.clearInterval(interval);
-  }, []);
+  }, [showLaunchTimer]);
 
   const isLocked = nowMs === null || nowMs < PRODUCT_HUNT_LAUNCH_AT;
   const timerValue =
@@ -66,7 +82,7 @@ export function ProductHuntBadge({
       : `Product Hunt live ${timerValue}`;
   const image = (
     <Image
-      src={PRODUCT_HUNT_BADGE_URL}
+      src={badge.image}
       alt="Murasaki - Next.js DX for native desktop apps | Product Hunt"
       width={250}
       height={54}
@@ -77,7 +93,9 @@ export function ProductHuntBadge({
   );
 
   return (
-    <span className={`inline-flex max-w-full pt-10 ${className ?? ""}`}>
+    <span
+      className={`inline-flex max-w-full ${showLaunchTimer ? "pt-10" : ""} ${className ?? ""}`}
+    >
       <span className="flex items-center gap-3">
         {accent ? (
           <span
@@ -87,27 +105,29 @@ export function ProductHuntBadge({
         ) : null}
 
         <span className="relative inline-flex max-w-full">
-          <span
-            role="timer"
-            aria-label={timerLabel}
-            className="lp-pixel absolute bottom-[calc(100%+10px)] left-1/2 z-10 flex w-[184px] -translate-x-1/2 items-center justify-center whitespace-nowrap bg-[#111014] px-3 py-2 text-[9px] tracking-[0.12em] text-white uppercase shadow-lg after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-x-[6px] after:border-t-[6px] after:border-x-transparent after:border-t-[#111014]"
-          >
-            {isLocked
-              ? lang === "ja"
-                ? "公開まで"
-                : "Launch in"
-              : lang === "ja"
-                ? "公開中"
-                : "Live"}{" "}
-            <time
-              dateTime="2026-07-16T00:01:00-07:00"
-              className="inline-block w-24 shrink-0 text-center tabular-nums"
+          {showLaunchTimer ? (
+            <span
+              role="timer"
+              aria-label={timerLabel}
+              className="lp-pixel absolute bottom-[calc(100%+10px)] left-1/2 z-10 flex w-[184px] -translate-x-1/2 items-center justify-center whitespace-nowrap bg-[#111014] px-3 py-2 text-[9px] tracking-[0.12em] text-white uppercase shadow-lg after:absolute after:top-full after:left-1/2 after:-translate-x-1/2 after:border-x-[6px] after:border-t-[6px] after:border-x-transparent after:border-t-[#111014]"
             >
-              {timerValue}
-            </time>
-          </span>
+              {isLocked
+                ? lang === "ja"
+                  ? "公開まで"
+                  : "Launch in"
+                : lang === "ja"
+                  ? "公開中"
+                  : "Live"}{" "}
+              <time
+                dateTime="2026-07-16T00:01:00-07:00"
+                className="inline-block w-24 shrink-0 text-center tabular-nums"
+              >
+                {timerValue}
+              </time>
+            </span>
+          ) : null}
 
-          {isLocked ? (
+          {showLaunchTimer && isLocked ? (
             <span
               aria-disabled="true"
               className="inline-flex max-w-full cursor-not-allowed opacity-45 grayscale-[0.15]"
@@ -116,10 +136,10 @@ export function ProductHuntBadge({
             </span>
           ) : (
             <a
-              href={PRODUCT_HUNT_URL}
+              href={badge.href}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="View Murasaki on Product Hunt"
+              aria-label={badge.label}
               className="inline-flex max-w-full transition-opacity hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#7c3aed]"
             >
               {image}
