@@ -7,11 +7,11 @@ import test from 'node:test'
 import { loadUserConfig } from '../dist/cli/load-config.js'
 import { murasaki } from '../dist/vite-plugin/index.js'
 
-async function configProject(t, source) {
+async function configProject(t, source, filename = 'murasaki.config.mjs') {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-config-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await mkdir(root, { recursive: true })
-  await writeFile(join(root, 'murasaki.config.mjs'), source)
+  await writeFile(join(root, filename), source)
   return root
 }
 
@@ -23,6 +23,19 @@ test('shared CLI loader accepts a raw default export and validates it', async (t
   }\n`)
   const config = await loadUserConfig(root)
   assert.equal(config.productName, 'Raw config')
+})
+
+test('shared CLI loader transpiles TypeScript config on the Node 22 floor', async (t) => {
+  const root = await configProject(t, `const config: {
+    appId: string
+    productName: string
+  } = {
+    appId: 'dev.test.typescript',
+    productName: 'TypeScript config'
+  }
+  export default config\n`, 'murasaki.config.ts')
+  const config = await loadUserConfig(root)
+  assert.equal(config.productName, 'TypeScript config')
 })
 
 test('shared CLI loader rejects invalid raw exports without defineConfig()', async (t) => {
