@@ -34,7 +34,7 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 ```tsx
 'use client'
 
-import { app, appWindow, clipboard, dialog, notification, shell, tray, windows } from 'murasaki/native'
+import { app, appWindow, clipboard, dialog, notification, shell, systemPermission, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -55,9 +55,10 @@ await shell.showItemInFolder(files[0])
 | `clipboard` | `readText`, `writeText` |
 | `notification` | `show` |
 | `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder` |
+| `systemPermission` | macOSのcamera / microphone / screen recording / accessibility向け`status`, `request` |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
 | `windows` | 宣言label向け`open`, `list`, `show`, `hide`, `focus`, `close` |
-| `tray` | `create`, `remove`, `setTooltip`, `onClick` |
+| `tray` | `create`, `remove`, `setTooltip`, `setIcon`, `setMenu`, `onClick`, `onMenuItem` |
 
 `app.quit()` とrootの `quit()` helperはいずれも `app:quit` が必要です。権限のない
 secondary rendererからapplication全体を終了することはできません。
@@ -86,24 +87,98 @@ client componentから1つのsystem tray iconを作成できます。既定で�
 ```ts
 import { tray } from 'murasaki/native'
 
-await tray.create({ tooltip: '同期中', template: true })
+await tray.create({
+  tooltip: '同期中',
+  template: true,
+  menu: [
+    { id: 'open', label: 'Murasakiを開く' },
+    { separator: true },
+    { id: 'quit', label: '終了' },
+  ],
+  menuOnLeftClick: navigator.userAgent.includes('Mac OS X'),
+  menuOnRightClick: true,
+})
 const unsubscribe = tray.onClick(({ button, double }) => {
   console.log({ button, double })
 })
+const unsubscribeMenu = tray.onMenuItem(async (id) => {
+  if (id === 'open') await appWindow.show()
+  if (id === 'quit') await app.quit()
+})
 
 await tray.setTooltip('同期完了')
-// 後で: unsubscribe(); await tray.remove()
+await tray.setIcon('/absolute/path/to/synced.png')
+await tray.setMenu([{ id: 'open', label: 'Murasakiを開く' }])
+// 後で: unsubscribe(); unsubscribeMenu(); await tray.remove()
 ```
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
   // ...
-  capabilities: ['tray:create', 'tray:setTooltip', 'tray:remove'],
+  capabilities: [
+    'tray:create',
+    'tray:setTooltip',
+    'tray:setIcon',
+    'tray:setMenu',
+    'tray:remove',
+    'window:show',
+    'app:quit',
+  ],
 })
 ```
 
 `template` はmacOS専用です。もう一度 `create` すると既存アイコンを置き換えます。
-tray menu、動的なicon差し替え、global shortcut、Linux trayは未対応です。
+tray menuはevent駆動で、click可能な項目には一意な`id`が必要です。quitなどのprivileged
+actionは、それぞれ本来のnative capabilityを通過します。process-wide iconを作成した
+rendererを閉じるとiconも削除されます。global shortcutとLinux trayは未対応です。
+
+## システム権限
+
+OSの同意とMurasaki renderer capabilityは別物です。packaged macOS appでは、用途説明と
+任意の起動時requestをconfigに宣言できます。用途説明は`Info.plist`へ書き込まれ、camera /
+microphoneの説明が欠けた状態でpromptしてappがcrashすることを防ぎます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  systemPermissions: {
+    macOS: {
+      camera: {
+        usageDescription: 'ビデオ通話でカメラを使用します。',
+        requestOnLaunch: true,
+      },
+      microphone: {
+        usageDescription: '音声通話でマイクを使用します。',
+      },
+      screenRecording: { requestOnLaunch: false },
+      accessibility: { requestOnLaunch: false },
+    },
+  },
+  capabilities: [
+    'systemPermission:status',
+    'systemPermission:request',
+  ],
+})
+```
+
+client componentから文脈に合わせて要求する場合:
+
+```ts
+const status = await systemPermission.status('microphone')
+if (status === 'notDetermined') {
+  await systemPermission.request('microphone')
+}
+```
+
+camera / microphoneのOS promptは非同期で完了するため、`request()`が最初は
+`notDetermined`を返す場合があります。protected featureを有効にする前に、appが再び
+focusされた時点で`status()`を再確認してください。
+
+`requestOnLaunch`はpackaged macOS appに適用されます。developmentはterminal / Node hostの
+identityで動くため、TCCの実動作はpackage buildから確認してください。Windowsのunpackaged
+desktop appではcamera / microphoneを利用するdevice API側が同意を要求し、汎用的な起動時
+promptはありません。そのためMurasakiは権限取得を装わず`unsupported`を返します。macOSの
+screen recording / accessibilityは初回とdenyを区別できない場合`notGranted`です。
 
 ## 組み込みのメニューアクション
 
@@ -140,8 +215,8 @@ const { status, latest, check, download, install } = useUpdate()
 用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
-  tray menu、global shortcut、argument / path単位のcapability ruleはまだ公開されて
-  いません。設計前に
+  global shortcut、argument / path単位のcapability ruleはまだ公開されていません。
+  設計前に
   [プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。
 </Callout>
 

@@ -199,6 +199,12 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) 上に
   構築されています。open/save/directory ダイアログ、クリップボードの読み書き、OS 通知、
   「Finder/Explorer で表示」などをすべて型付きで呼び出せ、呼び出しに Rust は不要です。
+- **macOSメニューバーのステータス項目 / Windowsシステムトレイ** — process-wide
+  icon、native nested menu、click / menu event、tooltip、動的icon / menu差し替えを
+  renderer別capabilityの下で利用できます。
+- **macOSシステム権限** — camera / microphoneの用途説明と任意の起動時promptをconfigに
+  宣言し、信頼済みrendererからcamera、microphone、screen recording、accessibilityの
+  status取得 / requestができます。
 - **実際に動く Server Actions** — `defineAction` + `useAction` は React 19 の
   `useActionState` の形をそのまま踏襲し、`'use server'` 関数は実際に Node 上で
   実行されます——開発時は Vite ミドルウェア、本番時はバンドルされた Node の

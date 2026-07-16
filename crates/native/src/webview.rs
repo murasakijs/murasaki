@@ -36,12 +36,13 @@ use napi_derive::napi;
 use std::{
   borrow::Cow,
   cell::RefCell,
+  collections::{HashMap, HashSet},
   path::Path,
   rc::Rc,
-  sync::{atomic::AtomicBool, Arc},
+  sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Arc},
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
 use wry::{
   http::{header::CONTENT_TYPE, Response, StatusCode},
@@ -59,6 +60,8 @@ const MAX_IPC_BODY_BYTES: usize = 256 * 1024;
 const MAX_MENU_ITEMS: usize = 256;
 const MAX_MENU_DEPTH: usize = 8;
 const MAX_MENU_STRING_BYTES: usize = 1024;
+const TRAY_MENU_ID_PREFIX: &str = "murasaki-tray-menu:";
+static TRAY_MENU_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 fn ipc_body_is_allowed(len: usize) -> bool {
   len <= MAX_IPC_BODY_BYTES
@@ -153,7 +156,9 @@ fn validate_menu_items(
       validate_menu_string(value)?;
     }
     if item.id.as_deref().is_some_and(|id| {
-      id.starts_with("murasaki-menu:") || id.starts_with("murasaki-menu-bar:")
+      id.starts_with("murasaki-menu:")
+        || id.starts_with("murasaki-menu-bar:")
+        || id.starts_with(TRAY_MENU_ID_PREFIX)
     }) {
       return Err("menu item id uses a reserved Murasaki menu prefix".to_string());
     }
@@ -169,6 +174,75 @@ fn validate_menu_items(
     }
   }
   Ok(())
+}
+
+fn namespace_tray_menu_items(
+  items: &[MenuItemOptions],
+  generation: u64,
+  public_ids: &mut HashSet<String>,
+  native_to_public: &mut HashMap<String, String>,
+) -> std::result::Result<Vec<MenuItemOptions>, String> {
+  let mut namespaced = Vec::with_capacity(items.len());
+  for item in items {
+    if item.role.is_some() {
+      return Err(
+        "tray menu roles are not supported; use an id and handle it with tray.onMenuItem()"
+          .to_string(),
+      );
+    }
+    let mut item = item.clone();
+    if let Some(children) = item.submenu.as_deref() {
+      // A submenu heading is not clickable and muda does not emit an event
+      // for it. Discard a manually supplied wire id so only namespaced leaf
+      // ids can ever enter the process-global menu event channel.
+      item.id = None;
+      item.submenu = Some(namespace_tray_menu_items(
+        children,
+        generation,
+        public_ids,
+        native_to_public,
+      )?);
+    } else if !item.separator.unwrap_or(false) {
+      let public_id = item.id.as_deref()
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| "every clickable tray menu item requires a non-empty id".to_string())?;
+      if !public_ids.insert(public_id.to_string()) {
+        return Err(format!("duplicate tray menu item id {public_id}"));
+      }
+      let native_id = format!("{TRAY_MENU_ID_PREFIX}{generation}:{public_id}");
+      native_to_public.insert(native_id.clone(), public_id.to_string());
+      item.id = Some(native_id);
+    }
+    namespaced.push(item);
+  }
+  Ok(namespaced)
+}
+
+fn build_tray_menu(
+  items: &[MenuItemOptions],
+  capabilities: &[String],
+) -> std::result::Result<(muda::Menu, HashMap<String, String>), String> {
+  let (namespaced, native_to_public) = prepare_tray_menu_items(items, capabilities)?;
+  let menu = build_menu(&namespaced).map_err(|error| error.to_string())?;
+  Ok((menu, native_to_public))
+}
+
+fn prepare_tray_menu_items(
+  items: &[MenuItemOptions],
+  capabilities: &[String],
+) -> std::result::Result<(Vec<MenuItemOptions>, HashMap<String, String>), String> {
+  let mut total = 0;
+  validate_menu_items(items, capabilities, 1, &mut total)?;
+  let generation = TRAY_MENU_GENERATION.fetch_add(1, Ordering::Relaxed);
+  let mut public_ids = HashSet::new();
+  let mut native_to_public = HashMap::new();
+  let namespaced = namespace_tray_menu_items(
+    items,
+    generation,
+    &mut public_ids,
+    &mut native_to_public,
+  )?;
+  Ok((namespaced, native_to_public))
 }
 
 fn validate_context_menu_payload(
@@ -475,6 +549,8 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
     "notification.show" => Some("notification:show"),
     "shell.openExternal" => Some("shell:openExternal"),
     "shell.showItemInFolder" => Some("shell:showItemInFolder"),
+    "systemPermission.status" => Some("systemPermission:status"),
+    "systemPermission.request" => Some("systemPermission:request"),
     "window.setTitle" => Some("window:setTitle"),
     "window.setSize" => Some("window:setSize"),
     "window.minimize" => Some("window:minimize"),
@@ -497,6 +573,8 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
     "tray.create" => Some("tray:create"),
     "tray.remove" => Some("tray:remove"),
     "tray.setTooltip" => Some("tray:setTooltip"),
+    "tray.setIcon" => Some("tray:setIcon"),
+    "tray.setMenu" => Some("tray:setMenu"),
     _ => None,
   }
 }
@@ -766,6 +844,8 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
   #[derive(serde::Deserialize)]
   struct LabelArg { label: String }
   #[derive(serde::Deserialize)]
+  struct PermissionArg { permission: String }
+  #[derive(serde::Deserialize)]
   #[serde(rename_all = "camelCase")]
   struct TrayCreateArg {
     #[serde(default)]
@@ -774,7 +854,17 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
     icon: Option<String>,
     #[serde(default)]
     template: bool,
+    #[serde(default)]
+    menu: Option<Vec<MenuItemOptions>>,
+    #[serde(default)]
+    menu_on_left_click: Option<bool>,
+    #[serde(default)]
+    menu_on_right_click: Option<bool>,
   }
+  #[derive(serde::Deserialize)]
+  struct IconArg { icon: String }
+  #[derive(serde::Deserialize)]
+  struct TrayMenuArg { items: Vec<MenuItemOptions> }
 
   if !native_method_is_allowed(&payload.method, capabilities) {
     dispatch_native_response(
@@ -841,6 +931,14 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         crate::shell::shell_show_item_in_folder(args.target)
           .map(|_| serde_json::Value::Null)
           .map_err(|e| e.to_string())
+      }
+      "systemPermission.status" => {
+        let args: PermissionArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::system_permission::status(&args.permission).map(serde_json::Value::from)
+      }
+      "systemPermission.request" => {
+        let args: PermissionArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::system_permission::request(&args.permission).map(serde_json::Value::from)
       }
       "window.setTitle" => {
         let args: TitleArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
@@ -959,6 +1057,22 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         let mut builder = TrayIconBuilder::new()
           .with_icon(icon)
           .with_icon_as_template(args.template);
+        let (menu, menu_items) = match args.menu.as_deref() {
+          Some(items) => {
+            let (menu, ids) = build_tray_menu(items, capabilities)?;
+            (Some(menu), ids)
+          }
+          None => (None, HashMap::new()),
+        };
+        if let Some(menu) = menu {
+          builder = builder.with_menu(Box::new(menu));
+        }
+        if let Some(enabled) = args.menu_on_left_click {
+          builder = builder.with_menu_on_left_click(enabled);
+        }
+        if let Some(enabled) = args.menu_on_right_click {
+          builder = builder.with_menu_on_right_click(enabled);
+        }
         if let Some(tooltip) = args.tooltip.as_deref() {
           builder = builder.with_tooltip(tooltip);
         }
@@ -966,6 +1080,7 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         let previous = {
           let mut state = tray_slot.borrow_mut();
           state.owner_label = Some(current_label.to_string());
+          state.menu_items = menu_items;
           state.icon.replace(tray)
         };
         drop(previous);
@@ -975,6 +1090,7 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         let previous = {
           let mut state = tray_slot.borrow_mut();
           state.owner_label = None;
+          state.menu_items.clear();
           state.icon.take()
         };
         drop(previous);
@@ -997,6 +1113,25 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         };
         drop(replaced);
         tooltip_result?;
+        Ok(serde_json::Value::Null)
+      }
+      "tray.setIcon" => {
+        let args: IconArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        let icon = load_tray_icon(&args.icon)?;
+        let state = tray_slot.borrow();
+        let tray = state.icon.as_ref()
+          .ok_or_else(|| "tray icon has not been created".to_string())?;
+        tray.set_icon(Some(icon)).map_err(|e| format!("set tray icon: {e}"))?;
+        Ok(serde_json::Value::Null)
+      }
+      "tray.setMenu" => {
+        let args: TrayMenuArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        let (menu, menu_items) = build_tray_menu(&args.items, capabilities)?;
+        let mut state = tray_slot.borrow_mut();
+        let tray = state.icon.as_ref()
+          .ok_or_else(|| "tray icon has not been created".to_string())?;
+        tray.set_menu(Some(Box::new(menu)));
+        state.menu_items = menu_items;
         Ok(serde_json::Value::Null)
       }
       _ => Err(format!("unknown native method: {method}")),
@@ -1086,6 +1221,7 @@ impl Webview {
       let mut tray = self.tray.borrow_mut();
       if tray.owner_label.as_deref() == Some(&self.label) {
         tray.owner_label = None;
+        tray.menu_items.clear();
         tray.icon.take()
       } else {
         None
@@ -1138,6 +1274,30 @@ pub(crate) fn poll_tray_events(
 ) {
   use tray_icon::{MouseButton, MouseButtonState};
 
+  // muda exposes one global menu receiver for application, context, and tray
+  // menus. The application-menu poll runs immediately before this function
+  // and preserves our generation-scoped ids in the deferred queue. Also
+  // drain the receiver in case a click arrives between the two polls; any
+  // non-tray id is returned for the next application-menu tick.
+  let menu_items = tray_slot.borrow().menu_items.clone();
+  let mut queued = DEFERRED_APP_MENU_EVENTS.with(|pending| {
+    pending.borrow_mut().drain(..).collect::<Vec<_>>()
+  });
+  while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
+    queued.push(event.id().as_ref().to_string());
+  }
+  let mut unrelated = Vec::new();
+  for native_id in queued {
+    if let Some(public_id) = menu_items.get(&native_id) {
+      dispatch_tray_menu_click(webview_slot, public_id);
+    } else if !native_id.starts_with(TRAY_MENU_ID_PREFIX) {
+      unrelated.push(native_id);
+    }
+    // Unknown tray-prefixed ids belong to an older replaced menu and are
+    // dropped instead of leaking a stale click into the new menu.
+  }
+  defer_menu_event_ids(unrelated);
+
   while let Ok(event) = TrayIconEvent::receiver().try_recv() {
     let active_id = tray_slot.borrow().icon.as_ref()
       .map(|icon| icon.id().as_ref().to_string());
@@ -1166,6 +1326,17 @@ pub(crate) fn poll_tray_events(
         let _ = webview.evaluate_script(&script);
       }
     }
+  }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn dispatch_tray_menu_click(webview_slot: &SharedWebview, id: &str) {
+  let script = format!(
+    "window.dispatchEvent(new CustomEvent('murasaki:traymenuclick',{{detail:{}}}))",
+    serde_json::to_string(id).unwrap_or_else(|_| "null".to_string())
+  );
+  if let Some(webview) = webview_slot.borrow().as_ref() {
+    let _ = webview.evaluate_script(&script);
   }
 }
 
@@ -1255,7 +1426,16 @@ fn take_app_menu_events(menu_slot: &SharedMenu) -> Vec<String> {
     .as_ref()
     .map(menu_owned_ids)
     .unwrap_or_default();
-  retain_owned_menu_events(queued, &owned_ids)
+  let owned = retain_owned_menu_events(queued.iter().cloned(), &owned_ids);
+  // Tray menus and the persistent application menu share muda's one
+  // process-global receiver. Preserve tray ids for `poll_tray_events`, which
+  // runs later in the same event-loop tick. Stale context/app ids are
+  // intentionally discarded here.
+  let tray = queued.into_iter()
+    .filter(|id| id.starts_with(TRAY_MENU_ID_PREFIX))
+    .collect::<Vec<_>>();
+  defer_menu_event_ids(tray);
+  owned
 }
 
 /// Build a muda menu from `items` and pop it up **synchronously** over the
@@ -1718,10 +1898,11 @@ fn mime_for(path: &str) -> &'static str {
 mod tests {
   use super::{
     app_menu_is_allowed, context_menu_is_allowed, ipc_body_is_allowed, ipc_origin_is_trusted,
-    native_method_is_allowed, navigation_policy, sanitize_profile_name,
+    native_method_is_allowed, navigation_policy, prepare_tray_menu_items, sanitize_profile_name,
     validate_app_menu_payload, validate_context_menu_payload, AppMenuPayload,
-    ContextMenuPayload, NavigationPolicy, MAX_IPC_BODY_BYTES,
+    ContextMenuPayload, NavigationPolicy, MAX_IPC_BODY_BYTES, TRAY_MENU_ID_PREFIX,
   };
+  use std::collections::HashSet;
   #[cfg(any(target_os = "macos", target_os = "windows"))]
   use super::{retain_owned_menu_events, split_first_owned_menu_event, tray_event_is_current};
   use crate::{menu::AppMenuSpec, types::MenuItemOptions};
@@ -1768,6 +1949,48 @@ mod tests {
     assert!(tray_event_is_current(Some("new-icon"), "new-icon"));
     assert!(!tray_event_is_current(Some("new-icon"), "old-icon"));
     assert!(!tray_event_is_current(None, "old-icon"));
+  }
+
+  #[test]
+  fn tray_menu_ids_are_required_unique_and_generation_scoped() {
+    let items = vec![
+      MenuItemOptions {
+        id: Some("open".to_string()),
+        label: Some("Open".to_string()),
+        ..Default::default()
+      },
+      MenuItemOptions {
+        id: Some("submenu-heading".to_string()),
+        label: Some("More".to_string()),
+        submenu: Some(vec![MenuItemOptions {
+          id: Some("settings".to_string()),
+          label: Some("Settings".to_string()),
+          ..Default::default()
+        }]),
+        ..Default::default()
+      },
+    ];
+    let (first, first_ids) = prepare_tray_menu_items(&items, &[]).unwrap();
+    let (_second, second_ids) = prepare_tray_menu_items(&items, &[]).unwrap();
+    assert_eq!(first_ids.values().cloned().collect::<HashSet<_>>(), [
+      "open".to_string(),
+      "settings".to_string(),
+    ].into_iter().collect());
+    assert!(first_ids.keys().all(|id| id.starts_with(TRAY_MENU_ID_PREFIX)));
+    assert!(first_ids.keys().all(|id| !second_ids.contains_key(id)));
+    assert_eq!(first[1].id, None);
+
+    let duplicate = vec![
+      MenuItemOptions { id: Some("same".to_string()), label: Some("A".to_string()), ..Default::default() },
+      MenuItemOptions { id: Some("same".to_string()), label: Some("B".to_string()), ..Default::default() },
+    ];
+    assert!(prepare_tray_menu_items(&duplicate, &[]).is_err());
+    assert!(prepare_tray_menu_items(&[
+      MenuItemOptions { label: Some("Missing id".to_string()), ..Default::default() },
+    ], &[]).is_err());
+    assert!(prepare_tray_menu_items(&[
+      MenuItemOptions { role: Some("quit".to_string()), ..Default::default() },
+    ], &["app:quit".to_string()]).is_err());
   }
 
   #[test]

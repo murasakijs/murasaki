@@ -20,6 +20,8 @@
         "notification:show",
         "shell:openExternal",
         "shell:showItemInFolder",
+        "systemPermission:status",
+        "systemPermission:request",
         "window:setTitle",
         "window:setSize",
         "window:minimize",
@@ -39,8 +41,26 @@
         "window:manage",
         "tray:create",
         "tray:remove",
-        "tray:setTooltip"
+        "tray:setTooltip",
+        "tray:setIcon",
+        "tray:setMenu"
       ]
+    },
+    "macCapturePermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usageDescription"],
+      "properties": {
+        "usageDescription": { "type": "string", "minLength": 1 },
+        "requestOnLaunch": { "type": "boolean", "default": false }
+      }
+    },
+    "macPromptPermission": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestOnLaunch": { "type": "boolean", "default": false }
+      }
     },
     "windowConfig": {
       "type": "object",
@@ -160,6 +180,8 @@
           "notification:show",
           "shell:openExternal",
           "shell:showItemInFolder",
+          "systemPermission:status",
+          "systemPermission:request",
           "window:setTitle",
           "window:setSize",
           "window:minimize",
@@ -179,10 +201,29 @@
           "window:manage",
           "tray:create",
           "tray:remove",
-          "tray:setTooltip"
+          "tray:setTooltip",
+          "tray:setIcon",
+          "tray:setMenu"
         ]
       },
       "uniqueItems": true
+    },
+    "systemPermissions": {
+      "type": "object",
+      "description": "Host-OS consent declarations. macOS purpose strings are embedded into Info.plist; launch prompts apply to packaged apps.",
+      "additionalProperties": false,
+      "properties": {
+        "macOS": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "camera": { "$ref": "#/$defs/macCapturePermission" },
+            "microphone": { "$ref": "#/$defs/macCapturePermission" },
+            "screenRecording": { "$ref": "#/$defs/macPromptPermission" },
+            "accessibility": { "$ref": "#/$defs/macPromptPermission" }
+          }
+        }
+      }
     },
     "bundle": {
       "type": "object",

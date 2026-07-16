@@ -26,6 +26,20 @@ export interface NotificationOptions {
   sound?: boolean
 }
 
+export type SystemPermissionName =
+  | 'camera'
+  | 'microphone'
+  | 'screenRecording'
+  | 'accessibility'
+
+export type SystemPermissionStatus =
+  | 'granted'
+  | 'denied'
+  | 'restricted'
+  | 'notDetermined'
+  | 'notGranted'
+  | 'unsupported'
+
 export interface TrayOptions {
   /** Tooltip shown by the host OS. */
   tooltip?: string
@@ -33,7 +47,27 @@ export interface TrayOptions {
   icon?: string
   /** macOS: render the icon as a monochrome template image. */
   template?: boolean
+  /** Native status-item/system-tray menu. Clickable entries require unique ids. */
+  menu?: TrayMenuItem[]
+  /** Show the native menu on left click. Host default is true. */
+  menuOnLeftClick?: boolean
+  /** Show the native menu on right click. Host default is true. */
+  menuOnRightClick?: boolean
 }
+
+export type TrayMenuItem =
+  | {
+      id: string
+      label: string
+      enabled?: boolean
+      accelerator?: string
+    }
+  | {
+      label: string
+      enabled?: boolean
+      submenu: TrayMenuItem[]
+    }
+  | { separator: true }
 
 export interface TrayClickEvent {
   button: 'left' | 'right' | 'middle'
@@ -172,6 +206,16 @@ export const shell = {
   },
 }
 
+/** Host OS consent, separate from Murasaki renderer capabilities. */
+export const systemPermission = {
+  status(permission: SystemPermissionName): Promise<SystemPermissionStatus> {
+    return invokeNative('systemPermission.status', { permission })
+  },
+  request(permission: SystemPermissionName): Promise<SystemPermissionStatus> {
+    return invokeNative('systemPermission.request', { permission })
+  },
+}
+
 export const appWindow = {
   getLabel(): Promise<string> {
     return invokeNative('window.getLabel')
@@ -249,10 +293,22 @@ export const tray = {
   setTooltip(text: string): Promise<void> {
     return invokeNative('tray.setTooltip', { text })
   },
+  setIcon(icon: string): Promise<void> {
+    return invokeNative('tray.setIcon', { icon })
+  },
+  setMenu(items: TrayMenuItem[]): Promise<void> {
+    return invokeNative('tray.setMenu', { items })
+  },
   onClick(listener: (event: TrayClickEvent) => void): () => void {
     if (typeof window === 'undefined') return () => {}
     const handler = (event: Event) => listener((event as CustomEvent<TrayClickEvent>).detail)
     window.addEventListener('murasaki:trayclick', handler)
     return () => window.removeEventListener('murasaki:trayclick', handler)
+  },
+  onMenuItem(listener: (id: string) => void): () => void {
+    if (typeof window === 'undefined') return () => {}
+    const handler = (event: Event) => listener((event as CustomEvent<string>).detail)
+    window.addEventListener('murasaki:traymenuclick', handler)
+    return () => window.removeEventListener('murasaki:traymenuclick', handler)
   },
 }

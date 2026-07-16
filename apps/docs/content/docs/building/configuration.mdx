@@ -40,6 +40,7 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `window` | `WindowConfig?` | Window shape — see [below](#window). |
 | `windows` | `Record<string, SecondaryWindowConfig>?` | Secondary windows keyed by stable label — see [below](#windows). |
 | `capabilities` | `NativeCapability[]?` | Primary-window native renderer commands. Used only when `window.capabilities` is omitted. Default is deny-all. |
+| `systemPermissions` | `SystemPermissionsConfig?` | Host-OS consent declarations and packaged macOS launch prompts — see [below](#systempermissions). |
 | `main` | `false \| object?` | Long-lived Node Main entry and shutdown bound — see [below](#main). |
 | `bundle` | `object?` | Node dependency and non-code resource packaging — see [below](#bundle). |
 | `build` | `object?` | Pre-build command and public client env prefixes — see [below](#build). |
@@ -126,6 +127,42 @@ cannot use the native bridge. Window management adds `window:getLabel`,
 `window:open`, `window:list`, and `window:manage`. Programmatic application
 shutdown requires `app:quit`; enabling the built-in updater grants it to the
 primary window for the verified restart handshake.
+
+## `systemPermissions`
+
+This config describes host-OS consent, not which renderer commands are trusted.
+For packaged macOS apps, Murasaki writes camera/microphone purpose text to
+`Info.plist` and can request selected permissions at launch:
+
+```ts
+systemPermissions: {
+  macOS: {
+    camera: {
+      usageDescription: 'Use your camera for video calls.',
+      requestOnLaunch: true,
+    },
+    microphone: {
+      usageDescription: 'Use your microphone for voice calls.',
+    },
+    screenRecording: { requestOnLaunch: false },
+    accessibility: { requestOnLaunch: false },
+  },
+},
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `macOS.camera` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSCameraUsageDescription`; optionally prompts during packaged launch. |
+| `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSMicrophoneUsageDescription`; optionally prompts during packaged launch. |
+| `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | Optionally asks for screen-capture consent at packaged launch. |
+| `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | Optionally opens the macOS accessibility trust prompt at packaged launch. |
+
+Prefer a contextual `systemPermission.request()` over launch-time prompts when
+the user can first understand the feature. Runtime calls additionally require
+`systemPermission:status` / `systemPermission:request` in that renderer's
+capability list. Windows unpackaged desktop consent is usage-driven, so it has
+no equivalent generic launch prompt. Test macOS TCC behavior from a packaged
+app, not the terminal/Node identity used by `murasaki dev`.
 
 ## `main`
 

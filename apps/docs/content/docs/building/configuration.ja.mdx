@@ -40,6 +40,7 @@ export default defineConfig({
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
 | `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したlabelをkeyにしたsecondary window — [下記](#windows)を参照。 |
 | `capabilities` | `NativeCapability[]?` | primary window向けnative command。`window.capabilities`省略時だけ利用。既定deny-all。 |
+| `systemPermissions` | `SystemPermissionsConfig?` | host OS同意とpackaged macOSの起動時prompt — [下記](#systempermissions)を参照。 |
 | `main` | `false \| object?` | 長寿命 Node Main entry と shutdown 上限 — [下記](#main)を参照。 |
 | `bundle` | `object?` | Node dependency と non-code resource packaging — [下記](#bundle)を参照。 |
 | `build` | `object?` | pre-build command とclient公開env prefix — [下記](#build)を参照。 |
@@ -123,6 +124,41 @@ call元rendererごとに評価します。別originのページはnative bridge�
 window管理では `window:getLabel`、`window:open`、`window:list`、`window:manage` を使います。
 applicationのprogrammatic shutdownには `app:quit` が必要です。built-in updaterを有効に
 すると、検証済みrestart handshake用としてprimary windowへ自動付与されます。
+
+## `systemPermissions`
+
+これは信頼するrenderer commandではなく、host OSの同意を宣言するconfigです。packaged
+macOS appではcamera / microphoneの用途説明を`Info.plist`へ書き込み、選択した権限を起動時
+に要求できます。
+
+```ts
+systemPermissions: {
+  macOS: {
+    camera: {
+      usageDescription: 'ビデオ通話でカメラを使用します。',
+      requestOnLaunch: true,
+    },
+    microphone: {
+      usageDescription: '音声通話でマイクを使用します。',
+    },
+    screenRecording: { requestOnLaunch: false },
+    accessibility: { requestOnLaunch: false },
+  },
+},
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `macOS.camera` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSCameraUsageDescription`を書き込み、任意でpackaged launch時にprompt。 |
+| `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSMicrophoneUsageDescription`を書き込み、任意でpackaged launch時にprompt。 |
+| `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にscreen capture同意を要求。 |
+| `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にmacOS accessibility trust promptを表示。 |
+
+機能の必要性をuserが理解できる場合は、起動時promptより文脈に沿った
+`systemPermission.request()`を優先してください。runtime callにはrenderer capabilityの
+`systemPermission:status` / `systemPermission:request`も必要です。Windows unpackaged
+desktopの同意は利用時に発生するため、汎用的な起動時promptはありません。macOS TCCの
+実動作は`murasaki dev`のterminal / Node identityではなくpackaged appで確認してください。
 
 ## `main`
 

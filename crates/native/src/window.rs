@@ -23,6 +23,10 @@ pub(crate) type SharedWebview = Rc<RefCell<Option<WebView>>>;
 pub(crate) struct ProcessTray {
   pub icon: Option<TrayIcon>,
   pub owner_label: Option<String>,
+  /// Native muda ids are generation-scoped so clicks from a replaced tray
+  /// menu cannot be delivered to the new owner. Values are the public ids
+  /// supplied to `tray.create({ menu })` / `tray.setMenu()`.
+  pub menu_items: HashMap<String, String>,
 }
 
 pub(crate) type SharedProcessTray = Rc<RefCell<ProcessTray>>;
@@ -220,6 +224,7 @@ impl WindowRegistry {
       let mut tray = self.tray.borrow_mut();
       if tray.owner_label.as_deref() == Some(label) {
         tray.owner_label = None;
+        tray.menu_items.clear();
         tray.icon.take()
       } else {
         None
@@ -322,6 +327,7 @@ impl WindowRegistry {
     let tray = {
       let mut tray = self.tray.borrow_mut();
       tray.owner_label = None;
+      tray.menu_items.clear();
       tray.icon.take()
     };
     (webviews, tray)

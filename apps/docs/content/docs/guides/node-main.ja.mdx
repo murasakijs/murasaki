@@ -228,7 +228,8 @@ version 付き wire codec は primitive、`undefined`、`bigint`、`Date`、`Map
 ## 現在の制限
 
 Node Mainにはimperativeなnative window生成APIがありません。宣言windowはtrusted renderer
-から`murasaki/native`で操作します。tray menu / global shortcut APIもまだありません。
+から`murasaki/native`で操作します。tray menuはそのrenderer APIから利用できますが、
+Node Main自体に直接のtray menu / global shortcut APIはまだありません。
 packaged macOS / Windows の single-instance delivery は `secondInstance()`、設定済み
 URL scheme / file association は `openRequested()` で利用できます。Windows portable
 archive、Linux、`murasaki dev` は system association metadata を install しません。

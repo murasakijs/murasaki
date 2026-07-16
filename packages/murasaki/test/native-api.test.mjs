@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { app, appWindow, clipboard, dialog, notification, shell, tray, windows } from '../dist/native/index.js'
+import {
+  app,
+  appWindow,
+  clipboard,
+  dialog,
+  notification,
+  shell,
+  systemPermission,
+  tray,
+  windows,
+} from '../dist/native/index.js'
 
 test('renderer native API uses request-correlated bridge calls', async () => {
   const calls = []
@@ -24,6 +34,8 @@ test('renderer native API uses request-correlated bridge calls', async () => {
         'window.isFocused': true,
         'window.isMaximized': false,
         'window.isMinimized': false,
+        'systemPermission.status': 'notDetermined',
+        'systemPermission.request': 'granted',
       }
       queueMicrotask(() => fakeWindow.dispatchEvent(new CustomEvent('murasaki:nativeresponse', {
         detail: {
@@ -41,6 +53,8 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   await clipboard.writeText('next')
   await notification.show({ title: 'Ready' })
   await shell.openExternal('https://example.com')
+  assert.equal(await systemPermission.status('camera'), 'notDetermined')
+  assert.equal(await systemPermission.request('camera'), 'granted')
   assert.equal(await appWindow.getLabel(), 'main')
   await appWindow.setSize(900, 600)
   await appWindow.show()
@@ -63,12 +77,18 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   await windows.close('settings')
   await tray.create({ tooltip: 'Murasaki' })
   await tray.setTooltip('Ready')
+  await tray.setIcon('/tmp/tray.png')
+  await tray.setMenu([{ id: 'open', label: 'Open' }])
   let trayClick
   const stop = tray.onClick((event) => { trayClick = event })
   fakeWindow.dispatchEvent(new CustomEvent('murasaki:trayclick', {
     detail: { button: 'left', double: false },
   }))
   stop()
+  let trayMenuItem
+  const stopMenu = tray.onMenuItem((id) => { trayMenuItem = id })
+  fakeWindow.dispatchEvent(new CustomEvent('murasaki:traymenuclick', { detail: 'open' }))
+  stopMenu()
   await tray.remove()
 
   assert.deepEqual(calls.map(({ method }) => method), [
@@ -78,6 +98,8 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'clipboard.writeText',
     'notification.show',
     'shell.openExternal',
+    'systemPermission.status',
+    'systemPermission.request',
     'window.getLabel',
     'window.setSize',
     'window.show',
@@ -97,6 +119,8 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'window.closeOther',
     'tray.create',
     'tray.setTooltip',
+    'tray.setIcon',
+    'tray.setMenu',
     'tray.remove',
   ])
   assert.equal(calls[1].args.multiple, true)
@@ -105,6 +129,7 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   assert.equal(new Set(calls.map(({ requestId }) => requestId)).size, calls.length)
   assert.equal(calls.every(({ requestId }) => typeof requestId === 'string' && requestId.length > 0), true)
   assert.deepEqual(trayClick, { button: 'left', double: false })
+  assert.equal(trayMenuItem, 'open')
   delete globalThis.window
 })
 

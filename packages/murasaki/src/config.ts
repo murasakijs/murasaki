@@ -62,6 +62,31 @@ export interface FileAssociationConfig {
   mimeType?: string
 }
 
+export interface MacOSCapturePermissionConfig {
+  /** Text macOS shows in its consent dialog and System Settings. */
+  usageDescription: string
+  /** Ask as the native host starts. Prefer an in-context request when possible. */
+  requestOnLaunch?: boolean
+}
+
+export interface MacOSPromptPermissionConfig {
+  /** Ask as the native host starts. */
+  requestOnLaunch?: boolean
+}
+
+/** macOS TCC permissions supported by Murasaki's native host. */
+export interface MacOSSystemPermissionsConfig {
+  camera?: MacOSCapturePermissionConfig
+  microphone?: MacOSCapturePermissionConfig
+  screenRecording?: MacOSPromptPermissionConfig
+  accessibility?: MacOSPromptPermissionConfig
+}
+
+/** Host-OS consent declarations. Separate from renderer native capabilities. */
+export interface SystemPermissionsConfig {
+  macOS?: MacOSSystemPermissionsConfig
+}
+
 /** Windows Authenticode settings used by `bundle --sign` and `installer --sign`. */
 export interface WindowsSigningConfig {
   /** PFX/P12 certificate file. The optional password is read only from
@@ -169,6 +194,13 @@ export interface MurasakiConfig {
    * Default is deny-all; grant only the capabilities the app uses.
    */
   capabilities?: NativeCapability[]
+
+  /**
+   * Host operating-system permissions. On macOS, camera/microphone usage
+   * descriptions are embedded into Info.plist and selected permissions can
+   * be requested at launch. Windows desktop consent remains usage-driven.
+   */
+  systemPermissions?: SystemPermissionsConfig
 
   /** Long-lived Node main process (`src/main.ts` by default when present). */
   main?: false | {
@@ -359,6 +391,8 @@ export const NATIVE_CAPABILITIES = [
   'notification:show',
   'shell:openExternal',
   'shell:showItemInFolder',
+  'systemPermission:status',
+  'systemPermission:request',
   'window:setTitle',
   'window:setSize',
   'window:minimize',
@@ -379,6 +413,8 @@ export const NATIVE_CAPABILITIES = [
   'tray:create',
   'tray:remove',
   'tray:setTooltip',
+  'tray:setIcon',
+  'tray:setMenu',
 ] as const
 
 export type NativeCapability = (typeof NATIVE_CAPABILITIES)[number]
@@ -436,10 +472,79 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   }
   validateMainConfig((config as { main?: unknown }).main)
   validateSecurityConfig(candidate.security)
+  validateSystemPermissionsConfig(candidate.systemPermissions)
   validateDevPort(candidate.devPort)
   validateUpdaterConfig(candidate.updater)
   validateSignConfig(candidate.sign)
   resolveWindowDeclarations(candidate)
+}
+
+function validateSystemPermissionsConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('systemPermissions must be an object')
+  }
+  const macOS = (value as { macOS?: unknown }).macOS
+  if (macOS === undefined) return
+  if (!macOS || typeof macOS !== 'object' || Array.isArray(macOS)) {
+    throw new TypeError('systemPermissions.macOS must be an object')
+  }
+  const permissions = macOS as Record<string, unknown>
+  for (const name of ['camera', 'microphone'] as const) {
+    const permission = permissions[name]
+    if (permission === undefined) continue
+    if (!permission || typeof permission !== 'object' || Array.isArray(permission)) {
+      throw new TypeError(`systemPermissions.macOS.${name} must be an object`)
+    }
+    const capture = permission as Record<string, unknown>
+    if (typeof capture.usageDescription !== 'string'
+      || capture.usageDescription.trim().length === 0) {
+      throw new TypeError(
+        `systemPermissions.macOS.${name}.usageDescription must be a non-empty string`,
+      )
+    }
+    if (capture.requestOnLaunch !== undefined
+      && typeof capture.requestOnLaunch !== 'boolean') {
+      throw new TypeError(
+        `systemPermissions.macOS.${name}.requestOnLaunch must be a boolean`,
+      )
+    }
+  }
+  for (const name of ['screenRecording', 'accessibility'] as const) {
+    const permission = permissions[name]
+    if (permission === undefined) continue
+    if (!permission || typeof permission !== 'object' || Array.isArray(permission)) {
+      throw new TypeError(`systemPermissions.macOS.${name} must be an object`)
+    }
+    const prompt = permission as Record<string, unknown>
+    if (prompt.requestOnLaunch !== undefined
+      && typeof prompt.requestOnLaunch !== 'boolean') {
+      throw new TypeError(
+        `systemPermissions.macOS.${name}.requestOnLaunch must be a boolean`,
+      )
+    }
+  }
+}
+
+export type SystemPermissionName =
+  | 'camera'
+  | 'microphone'
+  | 'screenRecording'
+  | 'accessibility'
+
+/** Resolve only the permissions explicitly opted into launch-time prompts. */
+export function resolveStartupSystemPermissions(
+  config: Pick<MurasakiConfig, 'systemPermissions'>,
+): SystemPermissionName[] {
+  const macOS = config.systemPermissions?.macOS
+  if (!macOS) return []
+  const names: SystemPermissionName[] = [
+    'camera',
+    'microphone',
+    'screenRecording',
+    'accessibility',
+  ]
+  return names.filter((name) => macOS[name]?.requestOnLaunch === true)
 }
 
 // productName and version are interpolated into bundle/installer paths before

@@ -210,6 +210,12 @@ we've benchmarked head-to-head:
   [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native):
   open/save/directory dialogs, clipboard read/write, OS notifications, and
   "reveal in Finder/Explorer" — all typed, no Rust required to call them.
+- **macOS menu-bar status items / Windows system tray.** One process-wide
+  icon with native nested menus, click/menu events, tooltips, and dynamic
+  icon/menu replacement, protected by per-renderer capabilities.
+- **macOS system permissions.** Declare camera/microphone purpose strings and
+  optional launch prompts in config; query/request camera, microphone, screen
+  recording, and accessibility consent from trusted renderer code.
 - **Server Actions, running end-to-end.** `defineAction` + `useAction` mirror
   React 19's `useActionState` shape, and the `'use server'` function actually
   runs in Node — via a Vite middleware in dev, via a bundled Node child server

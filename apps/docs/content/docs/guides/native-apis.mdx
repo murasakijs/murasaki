@@ -34,7 +34,7 @@ by the Rust host:
 ```tsx
 'use client'
 
-import { app, appWindow, clipboard, dialog, notification, shell, tray, windows } from 'murasaki/native'
+import { app, appWindow, clipboard, dialog, notification, shell, systemPermission, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -55,9 +55,10 @@ await shell.showItemInFolder(files[0])
 | `clipboard` | `readText`, `writeText` |
 | `notification` | `show` |
 | `shell` | `openExternal` (safe URL schemes only), `showItemInFolder` |
+| `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, and accessibility |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
 | `windows` | `open`, `list`, `show`, `hide`, `focus`, `close` for declared labels |
-| `tray` | `create`, `remove`, `setTooltip`, `onClick` |
+| `tray` | `create`, `remove`, `setTooltip`, `setIcon`, `setMenu`, `onClick`, `onMenuItem` |
 
 `app.quit()` and the root `quit()` helper both require `app:quit`; an
 unprivileged secondary renderer cannot terminate the whole application.
@@ -87,25 +88,103 @@ permissioned:
 ```ts
 import { tray } from 'murasaki/native'
 
-await tray.create({ tooltip: 'Sync is running', template: true })
+await tray.create({
+  tooltip: 'Sync is running',
+  template: true,
+  // macOS status-item menu / Windows system-tray menu
+  menu: [
+    { id: 'open', label: 'Open Murasaki' },
+    { separator: true },
+    { id: 'quit', label: 'Quit' },
+  ],
+  menuOnLeftClick: navigator.userAgent.includes('Mac OS X'),
+  menuOnRightClick: true,
+})
 const unsubscribe = tray.onClick(({ button, double }) => {
   console.log({ button, double })
 })
+const unsubscribeMenu = tray.onMenuItem(async (id) => {
+  if (id === 'open') await appWindow.show()
+  if (id === 'quit') await app.quit()
+})
 
 await tray.setTooltip('Sync complete')
-// Later: unsubscribe(); await tray.remove()
+await tray.setIcon('/absolute/path/to/synced.png')
+await tray.setMenu([{ id: 'open', label: 'Open Murasaki' }])
+// Later: unsubscribe(); unsubscribeMenu(); await tray.remove()
 ```
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
   // ...
-  capabilities: ['tray:create', 'tray:setTooltip', 'tray:remove'],
+  capabilities: [
+    'tray:create',
+    'tray:setTooltip',
+    'tray:setIcon',
+    'tray:setMenu',
+    'tray:remove',
+    'window:show',
+    'app:quit',
+  ],
 })
 ```
 
 `template` is macOS-specific. Creating a second tray icon replaces the first.
-Tray menus, dynamic icon replacement, global shortcuts, and Linux tray support
-are not available yet.
+Tray menu items are event-driven: every clickable item needs a unique `id`,
+and privileged actions such as quitting still pass through their own native
+capability. Closing the renderer that created the process-wide icon removes
+it. Global shortcuts and Linux tray support are not available yet.
+
+## System permissions
+
+OS consent is separate from Murasaki's renderer capability allowlist. For a
+packaged macOS app, declare purpose text and optional launch-time prompts in
+config. Purpose strings are written into `Info.plist`; missing camera or
+microphone descriptions are rejected before a prompt can crash the app:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  systemPermissions: {
+    macOS: {
+      camera: {
+        usageDescription: 'Use your camera for video calls.',
+        requestOnLaunch: true,
+      },
+      microphone: {
+        usageDescription: 'Use your microphone for voice calls.',
+      },
+      screenRecording: { requestOnLaunch: false },
+      accessibility: { requestOnLaunch: false },
+    },
+  },
+  capabilities: [
+    'systemPermission:status',
+    'systemPermission:request',
+  ],
+})
+```
+
+For contextual prompts from a client component:
+
+```ts
+const status = await systemPermission.status('microphone')
+if (status === 'notDetermined') {
+  await systemPermission.request('microphone')
+}
+```
+
+Camera and microphone prompts complete asynchronously at the OS level, so
+`request()` may initially return `notDetermined`; query `status()` again when
+the app regains focus before enabling the protected feature.
+
+`requestOnLaunch` applies to packaged macOS apps. Test TCC behavior from a
+packaged build because development runs under the terminal/Node host identity.
+On Windows, unpackaged desktop camera/microphone consent is requested by the
+device API when it is used, not through a generic application-start prompt;
+Murasaki therefore reports `unsupported` instead of pretending permission was
+granted. Screen recording and accessibility return `notGranted` when macOS
+cannot distinguish first-use from denial.
 
 ## Built-in menu actions
 
@@ -141,8 +220,8 @@ const { status, latest, check, download, install } = useUpdate()
 security model, and a GitHub Actions release workflow.
 
 <Callout type="warn">
-  Tray menus, global shortcuts, and argument/path-scoped capability rules are
-  not public yet. Check the
+  Global shortcuts and argument/path-scoped capability rules are not public
+  yet. Check the
   [platform feature status](/docs/core-concepts/platform-feature-status)
   before designing around them.
 </Callout>

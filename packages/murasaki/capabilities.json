@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.51.0",
+  "frameworkVersion": "0.52.0",
   "features": [
     {
       "id": "file-routing",
@@ -339,11 +339,35 @@
         "linux": "planned"
       },
       "limitations": [
-        "One process-wide tray icon with tooltip and owner-routed click events ships on macOS and Windows; the latest successful create replaces the previous owner.",
-        "Closing or disposing the owning renderer removes the icon. Tray menus, dynamic icon replacement, global shortcuts, and Linux tray support are not implemented yet."
+        "One process-wide macOS status item / Windows system-tray icon ships with tooltip, click events, native nested menus, menu-item events, and dynamic icon/menu replacement; the latest successful create replaces the previous owner.",
+        "Closing or disposing the owning renderer removes the icon. Menu roles are intentionally event-driven instead of privileged implicit actions; global shortcuts and Linux tray support are not implemented yet."
       ],
-      "apiSymbols": ["murasaki/native.tray", "TrayOptions", "TrayClickEvent"],
+      "apiSymbols": ["murasaki/native.tray", "TrayOptions", "TrayMenuItem", "TrayClickEvent"],
       "testEvidence": ["packages/murasaki/test/native-api.test.mjs", "crates/native/src/webview.rs"],
+      "docsSlug": "/docs/guides/native-apis"
+    },
+    {
+      "id": "system-permissions",
+      "category": "native-integration",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "partial",
+        "linux": "unsupported"
+      },
+      "limitations": [
+        "Packaged macOS apps can declare camera/microphone usage descriptions, request camera, microphone, screen-recording, or accessibility consent at launch, and query/request the same permissions from a capability-gated renderer API.",
+        "Windows unpackaged desktop privacy consent is usage-driven rather than an app-scoped launch prompt, so these generic calls report unsupported there; Linux is not implemented. Development requests use the terminal/Node host identity and should be tested with a packaged app."
+      ],
+      "apiSymbols": [
+        "MurasakiConfig.systemPermissions",
+        "SystemPermissionsConfig",
+        "murasaki/native.systemPermission"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/system-permissions.test.mjs",
+        "crates/native/src/system_permission.rs"
+      ],
       "docsSlug": "/docs/guides/native-apis"
     },
     {

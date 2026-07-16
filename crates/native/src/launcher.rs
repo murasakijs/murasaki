@@ -116,6 +116,9 @@ pub(crate) mod shared {
     pub(super) windows: Vec<WindowMeta>,
     #[serde(default)]
     pub(super) main_shutdown_timeout_ms: Option<u64>,
+    #[cfg(target_os = "macos")]
+    #[serde(default)]
+    pub(super) system_permissions_on_launch: Vec<String>,
   }
 
   pub(super) fn main_shutdown_transport_timeout(meta: &Meta) -> Result<Duration, String> {
@@ -1311,6 +1314,7 @@ mod imp_macos {
     set_activation_policy_regular();
 
     let event_loop = EventLoop::<()>::new();
+    crate::system_permission::request_many(&meta.system_permissions_on_launch)?;
     // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
     // see `webview::Webview::new`'s `wake` parameter doc comment. Without
     // this, a JS-posted IPC message generates no OS event, so a

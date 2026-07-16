@@ -13,6 +13,7 @@ import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote } from './brand.js'
 import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import {
+  resolveStartupSystemPermissions,
   resolveWindowDeclarations,
   validateMainShutdownTimeoutMs,
   type MurasakiConfig,
@@ -522,6 +523,7 @@ export function metaJson(
       resizable: primaryWindow.resizable,
       transparent: primaryWindow.transparent,
       capabilities: primaryWindow.capabilities,
+      systemPermissionsOnLaunch: resolveStartupSystemPermissions(config),
       mainShutdownTimeoutMs,
       vibrancy: primaryWindow.vibrancy,
       console: config.window?.console,
@@ -1158,6 +1160,16 @@ export function infoPlist(config: MurasakiConfig, productName: string, hasIcon: 
   const locales = config.locales ?? DEFAULT_LOCALES
   const localizationsXml = locales.map((l) => `    <string>${escapeXml(l)}</string>`).join('\n')
   const associations = resolveAssociations(config)
+  const cameraUsageDescription = config.systemPermissions?.macOS?.camera?.usageDescription
+  const microphoneUsageDescription = config.systemPermissions?.macOS?.microphone?.usageDescription
+  const permissionUsageXml = [
+    cameraUsageDescription
+      ? `\n  <key>NSCameraUsageDescription</key><string>${escapeXml(cameraUsageDescription)}</string>`
+      : '',
+    microphoneUsageDescription
+      ? `\n  <key>NSMicrophoneUsageDescription</key><string>${escapeXml(microphoneUsageDescription)}</string>`
+      : '',
+  ].join('')
   const protocolsXml = associations.protocols.length === 0 ? '' : `
   <key>CFBundleURLTypes</key>
   <array>
@@ -1220,7 +1232,7 @@ ${associations.files.map((file) => `    <dict>
   <key>CFBundleLocalizations</key>
   <array>
 ${localizationsXml}
-  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}${protocolsXml}${documentTypesXml}
+  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}${permissionUsageXml}${protocolsXml}${documentTypesXml}
 </dict>
 </plist>
 `

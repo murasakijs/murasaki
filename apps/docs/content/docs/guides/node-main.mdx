@@ -233,8 +233,9 @@ the internal RPC endpoints.
 ## Current limits
 
 Node Main does not provide an imperative native-window creation API; declared
-windows are managed from trusted renderers through `murasaki/native`. Main also
-does not yet provide tray-menu or global-shortcut APIs. Packaged macOS/Windows single-instance delivery is available
+windows are managed from trusted renderers through `murasaki/native`. Tray
+menus are available through that renderer API, while Node Main itself still
+has no direct tray-menu or global-shortcut API. Packaged macOS/Windows single-instance delivery is available
 through `secondInstance()`; configured URL schemes and file associations are
 delivered through `openRequested()`. Windows portable archives, Linux, and
 `murasaki dev` do not install system association metadata.

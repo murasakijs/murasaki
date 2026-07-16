@@ -27,6 +27,8 @@ mod clipboard;
 mod notification;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod shell;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod system_permission;
 mod launcher;
 mod updater;
 
