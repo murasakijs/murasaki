@@ -2,6 +2,7 @@
   "title": "ガイド",
   "pages": [
     "routing",
+    "node-main",
     "server-actions",
     "api-routes",
     "metadata",
@@ -10,6 +11,7 @@
     "auto-update",
     "context-menu",
     "app-menu",
+    "ai-tools",
     "styling"
   ]
 }

@@ -8,10 +8,10 @@ React 19 · Vite · OS WebView · Rust-native · No Chromium
 
 [![npm version](https://img.shields.io/npm/v/murasaki?color=A855F7&label=npm)](https://www.npmjs.com/package/murasaki)
 [![npm downloads](https://img.shields.io/npm/dm/murasaki?color=A855F7)](https://www.npmjs.com/package/murasaki)
-[![license](https://img.shields.io/npm/l/murasaki?color=A855F7)](./LICENSE)
+[![license](https://img.shields.io/npm/l/murasaki?color=A855F7)](https://github.com/murasakijs/murasaki/blob/main/LICENSE)
 [![CI](https://github.com/murasakijs/murasaki/actions/workflows/release.yml/badge.svg)](https://github.com/murasakijs/murasaki/actions)
 
-[English](./README.md) · [日本語](./README.ja.md)
+[English](https://github.com/murasakijs/murasaki/blob/main/README.md) · [日本語](https://github.com/murasakijs/murasaki/blob/main/README.ja.md)
 
 </div>
 
@@ -114,14 +114,14 @@ source tree, app identity, icon, native bundle, and installer.
 
 | App | What it demonstrates | Source |
 | --- | --- | --- |
-| **Violet Notes** | Local-first Markdown editing, live preview, import/export, native menus | [`examples/violet-notes`](./examples/violet-notes) |
-| **Murasaki Focus** | Persistent timer state, keyboard controls, consumer desktop UI | [`examples/murasaki-focus`](./examples/murasaki-focus) |
-| **Local Signal** | API Routes, Server Actions, bundled Node runtime, request monitoring | [`examples/local-signal`](./examples/local-signal) |
+| **Violet Notes** | Local-first Markdown editing, live preview, import/export, native menus | [`examples/violet-notes`](https://github.com/murasakijs/murasaki/tree/main/examples/violet-notes) |
+| **Murasaki Focus** | Persistent timer state, keyboard controls, consumer desktop UI | [`examples/murasaki-focus`](https://github.com/murasakijs/murasaki/tree/main/examples/murasaki-focus) |
+| **Local Signal** | API Routes, Server Actions, bundled Node runtime, request monitoring | [`examples/local-signal`](https://github.com/murasakijs/murasaki/tree/main/examples/local-signal) |
 
 <p align="center">
-  <img src="./examples/violet-notes/design/implementation.png" alt="Violet Notes" width="31%">
-  <img src="./examples/murasaki-focus/design/implementation.png" alt="Murasaki Focus" width="31%">
-  <img src="./examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
+  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/violet-notes/design/implementation.png" alt="Violet Notes" width="31%">
+  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/murasaki-focus/design/implementation.png" alt="Murasaki Focus" width="31%">
+  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
 </p>
 
 On macOS, run the checksum-verified developer previews from the CLI. It selects
@@ -518,7 +518,7 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
 ## Contributing
 
 We welcome contributions of all kinds — code, docs, examples, bug reports,
-feature requests. See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full
+feature requests. See [CONTRIBUTING.md](https://github.com/murasakijs/murasaki/blob/main/CONTRIBUTING.md) for the full
 workflow.
 
 Quick setup:
@@ -536,14 +536,14 @@ pnpm --filter @murasakijs/native build
 
 ## Code of Conduct
 
-This project follows the Contributor Covenant. Read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+This project follows the Contributor Covenant. Read [CODE_OF_CONDUCT.md](https://github.com/murasakijs/murasaki/blob/main/CODE_OF_CONDUCT.md)
 before participating.
 
 ## Security
 
 Please **do not report security issues via public GitHub issues**. See
-[SECURITY.md](./SECURITY.md) for how to report responsibly.
+[SECURITY.md](https://github.com/murasakijs/murasaki/blob/main/SECURITY.md) for how to report responsibly.
 
 ## License
 
-MIT © ichi — see [LICENSE](./LICENSE).
+MIT © ichi — see [LICENSE](https://github.com/murasakijs/murasaki/blob/main/LICENSE).

@@ -17,6 +17,8 @@ my-app/
 │  ├─ api/                    # API ルートハンドラ -> /api/*
 │  │  ├─ hello/route.ts       # GET/POST ハンドラ
 │  │  └─ greet/[name]/route.ts # 動的セグメント -> /api/greet/:name
+│  ├─ main.ts                 # 長寿命 Node lifecycle (任意)
+│  ├─ backend/                # 'use main' module の一般的な配置 (任意)
 │  ├─ middleware.ts           # すべてのナビゲーションの前に実行される(任意)
 │  ├─ lib/                    # アプリのコード(ストア、コンテキストメニューのアクション、ヘルパー)
 │  └─ assets/                 # 画像、アイコン
@@ -53,6 +55,13 @@ my-app/
 `useAction` で呼び出します。詳しくは
 [Server Actions](/docs/guides/server-actions)を参照してください。
 
+## Node Main と `'use main'`
+
+`src/main.ts` は長寿命 Node resource と graceful shutdown を所有します。top-level に
+`'use main'` を持つ module は型付き renderer-to-Node function を公開し、`src/` 以下の
+どこにでも配置できます。`src/backend/` は便宜的な規約です。
+[Node Main](/ja/docs/guides/node-main)を参照してください。
+
 ## `murasaki.config.ts`
 
 アプリの識別情報、ウィンドウ、ビルド設定を記述します:
@@ -75,6 +84,7 @@ export default defineConfig({
 ## 次へ
 
 <Cards>
-  <Card title="ルーティング" href="/docs/guides/routing" description="ファイルベースルーティング、レイアウト、ナビゲーション。" />
-  <Card title="設定" href="/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
+  <Card title="ルーティング" href="/ja/docs/guides/routing" description="ファイルベースルーティング、レイアウト、ナビゲーション。" />
+  <Card title="Node Main" href="/ja/docs/guides/node-main" description="長寿命 backend state と型付き renderer call。" />
+  <Card title="設定" href="/ja/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
 </Cards>

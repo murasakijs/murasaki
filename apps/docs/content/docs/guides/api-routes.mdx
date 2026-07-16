@@ -42,10 +42,17 @@ export const GET: RouteHandler = async (_request, { params }) => {
 }
 ```
 
-<Callout type="warn">
-  Only single-segment `[name]` params are supported today — a catch-all
-  (`[...name]`) segment isn't implemented yet.
-</Callout>
+Catch-all (`[...path]`) and optional catch-all (`[[...path]]`) folders are
+also supported. Their values are arrays of decoded path segments; an omitted
+optional catch-all is `undefined`:
+
+```ts title="src/api/files/[[...path]]/route.ts"
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (_request, { params }) => {
+  return Response.json({ path: params.path ?? [] })
+}
+```
 
 ## Calling a route
 
@@ -62,8 +69,9 @@ secrets.
 
 Both run on the server — pick by shape:
 
-- **API routes** are addressable HTTP endpoints. Any client can `fetch` them —
-  good for webhooks, third-party callers, REST-ish surfaces.
+- **API routes** are app-local HTTP endpoints for the renderer and Node main
+  process. Packaged apps protect them with an app-runtime session, so they are
+  not public webhook endpoints.
 - **Server actions** ([guide](/docs/guides/server-actions)) are typed RPC wired
   into React 19's form / `useAction` flow — no URL, no `fetch` boilerplate.
 

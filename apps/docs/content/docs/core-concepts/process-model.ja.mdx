@@ -1,0 +1,93 @@
+---
+title: プロセスモデル
+description: 起動、開発時 reload、graceful shutdown、アプリ所有リソース。
+---
+
+Murasaki はネイティブイベントループと Node のイベントループを分離します。パッケージ
+済みアプリでは Rust launcher が同梱 Node 子プロセスを起動・監視し、Node が Main
+ライフサイクルとローカル HTTP server を開始してから、ホストがレンダラーを読み込み
+ます。
+
+```txt
+launch
+  → Rust host が per-user app lock を取得
+  → host が app-local origin と runtime token を作る
+  → Node child が src/main.ts を読み込む
+  → main.ready(context) が完了
+  → local server が listen を開始
+  → WebView が renderer を読み込む
+```
+
+`ready()` が reject すると、未初期化のバックエンドに UI を接続せず起動に失敗します。
+DB の open、migration、アプリ所有 service の起動など、UI より先に必要な処理を置いて
+ください。
+
+packaged macOS / Windows app では 2 回目の起動は別 backend を開始しません。その
+`argv` / working directory は `main.secondInstance()` に渡され、host が primary window
+を focus します。開発 mode と Linux には現状この lock がありません。URL scheme / file
+association registration は別機能で、まだ実装されていません。
+
+## 終了シーケンス
+
+通常のウィンドウ close / app quit は次の順です。
+
+```txt
+quit request
+  → beforeQuit(context)       false でキャンセル可能
+  → context.signal が abort
+  → shutdown(context)         shutdownTimeoutMs の上限付き
+  → Node child が終了
+  → native host が終了、または更新を適用
+```
+
+`beforeQuit()` は未保存ドキュメントがある場合などに通常終了をキャンセルできます。
+process signal や開発時 Main reload を含む強制終了ではキャンセルできません。
+`shutdown()` の既定上限は 10 秒です。まず新規処理の受付を止め、その後 flush / close
+してください。
+
+<Callout type="warn">
+  キャンセルはアプリ全体に対するものです。現状サポートされるウィンドウは 1 枚で、
+  ウィンドウ別の close lifecycle event は公開されていません。
+</Callout>
+
+## 開発時の reload
+
+`murasaki dev` で設定された Main entry を変更すると次が実行されます。
+
+1. 現在の `shutdown({ reason: 'dev-reload' })`
+2. Vite による entry module の invalidate
+3. 新しい lifecycle の生成
+4. 新しい `ready()`
+
+Main が import するコードも Vite module graph に従いますが、現状 lifecycle restart を
+開始するのは設定した entry 自体の変更だけです。module top-level で timer / socket を
+作らず、`ready()` で作成し `shutdown()` で閉じると reload 時の leak を防げます。
+
+## アプリケーションパス
+
+`MainContext.paths` は `appId` ごとに安定した OS 標準パスを返します。
+
+| Path | 用途 |
+| --- | --- |
+| `data` | DB、アプリ所有のユーザードキュメント、永続 state |
+| `cache` | 再生成可能な cache |
+| `logs` | アプリログ |
+| `temp` | 一時 staging file |
+
+実行ファイルの隣には書き込まないでください。パッケージ済み resource は read-only の
+場合があり、OS ごとに配置が異なり、更新時には app bundle 自体が置換されます。
+
+## プロセス障害
+
+ホストが Node 子プロセスの lifetime を所有します。macOS / Linux では server が孤児に
+なると終了し、Windows では launcher と共に閉じる Job Object に割り当てられます。
+crash restart policy、health check hook、複数 worker の監視 API はまだ公開されて
+いません。Main から worker / child process を生成する場合、その終了処理はアプリ側の
+責務です。
+
+## 次へ
+
+<Cards>
+  <Card title="Node Main" href="/ja/docs/guides/node-main" description="lifecycle と型付き renderer call。" />
+  <Card title="トラブルシューティング" href="/ja/docs/building/troubleshooting" description="起動・終了障害を診断する。" />
+</Cards>

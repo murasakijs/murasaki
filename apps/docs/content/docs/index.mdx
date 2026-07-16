@@ -37,6 +37,9 @@ app without learning Rust or hand-wiring IPC.
   `loading` / `error` / `not-found`, `middleware.ts`. See [Routing](/docs/guides/routing).
 - **Server Actions** — `'use server'` + `defineAction` / `useAction`, the React
   19 shape you already know. See [Server Actions](/docs/guides/server-actions).
+- **Node Main** — a long-lived Node lifecycle plus typed `'use main'` calls for
+  databases, sockets, workers, and background work. See [Node
+  Main](/docs/guides/node-main).
 - **API Routes** — Next.js-style `src/api/**/route.ts` HTTP endpoints. See
   [API Routes](/docs/guides/api-routes).
 - **Native window & menus** — a real native window, a native menu bar, and
@@ -54,11 +57,19 @@ app without learning Rust or hand-wiring IPC.
   already builds for all five targets.
 </Callout>
 
+<Callout type="warn">
+  Murasaki is pre-1.0. Review the [platform and feature
+  status](/docs/core-concepts/platform-feature-status) for production blockers
+  such as multi-window, tray menus/global shortcuts, Linux packaging, and signing
+  coverage.
+</Callout>
+
 ## Next steps
 
 <Cards>
   <Card title="Quick start" href="/docs/getting-started/quick-start" description="Scaffold, run, and ship your first app." />
   <Card title="Project structure" href="/docs/getting-started/project-structure" description="What lives where in a Murasaki app." />
+  <Card title="Architecture" href="/docs/core-concepts/architecture" description="Native host, Node Main, renderer, and security boundaries." />
   <Card title="Components" href="/docs/components" description="Every @murasakijs/ui component, with live previews." />
   <Card title="Guides" href="/docs/guides/routing" description="Routing, server actions, API routes, metadata, and more." />
 </Cards>

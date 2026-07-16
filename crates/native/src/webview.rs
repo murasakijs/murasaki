@@ -45,6 +45,7 @@ use wry::{
   http::{header::CONTENT_TYPE, Response, StatusCode},
   WebContext, WebView, WebViewBuilder,
 };
+use tray_icon::{Icon as TrayIconImage, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 use crate::{
   menu::{build_menu, AppMenuSpec, SharedMenu},
@@ -77,6 +78,18 @@ struct AppMenuPayload {
   menus: Vec<AppMenuSpec>,
 }
 
+/// Authenticated renderer -> native-host RPC. The IPC handler already checks
+/// that the sender belongs to the exact application origin before parsing
+/// this payload, so native privileges never follow an off-origin navigation.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeCallPayload {
+  request_id: String,
+  method: String,
+  #[serde(default)]
+  args: serde_json::Value,
+}
+
 /// Set synchronously by the IPC handler below when `{ kind: "appQuit" }`
 /// arrives (posted by `quit()` — see the updater install→quit→apply
 /// handshake, contract §7). Like `contextMenu`/`appMenu`, this can't be
@@ -105,6 +118,8 @@ pub(crate) fn quit_requested() -> bool {
 /// nothing can grab this synchronously off a single call's `self`.
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) type SharedWebview = Rc<RefCell<Option<WebView>>>;
+
+type SharedTrayIcon = Rc<RefCell<Option<TrayIcon>>>;
 
 /// Extra context `Webview::new` needs to install/replace the application
 /// menu on demand — see `{ kind: "appMenu" }` in `with_ipc_handler` below and
@@ -138,6 +153,7 @@ pub(crate) struct AppMenuContext {
 #[napi]
 pub struct Webview {
   webview: Rc<RefCell<Option<WebView>>>,
+  tray: SharedTrayIcon,
   on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>>,
   /// Keep the tao window alive for as long as the webview exists. wry's WebView
   /// only *borrows* the window's NSView/HWND — if the tao `Window` is dropped,
@@ -162,10 +178,20 @@ pub struct Webview {
 ///
 /// Uses `cfg!(..)` rather than `#[cfg]` so the whole function type-checks on
 /// every host (the Windows branch is dead code off-Windows, but still compiled).
-fn webview2_data_dir() -> Option<std::path::PathBuf> {
+fn webview2_data_dir(app_id: Option<&str>) -> Option<std::path::PathBuf> {
   if cfg!(target_os = "windows") {
     let base = std::env::var_os("LOCALAPPDATA")?;
-    let dir = std::path::PathBuf::from(base).join("murasaki").join("WebView2");
+    // Never share browser state between unrelated Murasaki apps. Besides
+    // surprising cookie/localStorage leakage, a shared WebView2 directory
+    // also prevents two different apps from opening it concurrently.
+    let profile = app_id
+      .filter(|value| !value.is_empty())
+      .map(sanitize_profile_name)
+      .unwrap_or_else(|| "default".to_string());
+    let dir = std::path::PathBuf::from(base)
+      .join("murasaki")
+      .join(profile)
+      .join("WebView2");
     // Best-effort: WebView2 creates missing dirs itself, but only one level.
     let _ = std::fs::create_dir_all(&dir);
     Some(dir)
@@ -174,29 +200,82 @@ fn webview2_data_dir() -> Option<std::path::PathBuf> {
   }
 }
 
-/// Whether a navigation target should open in the system browser rather than
-/// inside the app window. Only `http(s)` URLs to a non-loopback host count as
-/// external — the dev server (localhost), the `murasaki://` prod protocol, and
-/// non-http schemes (`about:`, `data:`, `blob:`, `file:`, …) always load in-app.
-///
-/// The host is compared on the *parsed* URL, not a string prefix: a prefix
-/// check treats `http://localhost.evil.com` / `http://127.0.0.1.evil.com` as
-/// loopback and loads the external page in-app. Matching on the parsed host —
-/// the `localhost` domain, or an IP that `is_loopback()` — closes that hole.
-fn is_external_url(target: &str) -> bool {
+fn sanitize_profile_name(value: &str) -> String {
+  value
+    .chars()
+    .map(|ch| {
+      if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+        ch
+      } else {
+        '_'
+      }
+    })
+    .collect()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum NavigationPolicy {
+  Allow,
+  OpenExternal,
+  Deny,
+}
+
+/// Enforce an exact app origin rather than trusting every loopback port. An
+/// unrelated localhost page must never inherit the renderer's native IPC
+/// privileges. Unsafe local schemes are denied; normal web links and
+/// mail/tel links are delegated to the system instead of replacing the app.
+fn navigation_policy(target: &str, trusted: Option<&url::Url>) -> NavigationPolicy {
   let Ok(parsed) = url::Url::parse(target) else {
-    return false;
+    return NavigationPolicy::Deny;
   };
-  if !matches!(parsed.scheme(), "http" | "https") {
-    return false;
+
+  if parsed.scheme() == "about" && parsed.path() == "blank" {
+    return NavigationPolicy::Allow;
   }
-  match parsed.host() {
-    Some(url::Host::Domain("localhost")) => false,
-    Some(url::Host::Ipv4(ip)) => !ip.is_loopback(),
-    Some(url::Host::Ipv6(ip)) => !ip.is_loopback(),
-    Some(url::Host::Domain(_)) => true,
-    None => false,
+  if parsed.scheme() == "blob" {
+    return NavigationPolicy::Allow;
   }
+
+  if let Some(trusted) = trusted {
+    let same_origin = parsed.scheme() == trusted.scheme()
+      && parsed.host() == trusted.host()
+      && parsed.port_or_known_default() == trusted.port_or_known_default();
+    if same_origin {
+      return NavigationPolicy::Allow;
+    }
+  }
+
+  match parsed.scheme() {
+    "http" | "https" | "mailto" | "tel" => NavigationPolicy::OpenExternal,
+    "file" | "data" | "javascript" => NavigationPolicy::Deny,
+    _ => NavigationPolicy::Deny,
+  }
+}
+
+fn permission_for_native_method(method: &str) -> Option<&'static str> {
+  match method {
+    "dialog.openFile" => Some("dialog:openFile"),
+    "dialog.openDirectory" => Some("dialog:openDirectory"),
+    "dialog.saveFile" => Some("dialog:saveFile"),
+    "clipboard.readText" => Some("clipboard:readText"),
+    "clipboard.writeText" => Some("clipboard:writeText"),
+    "notification.show" => Some("notification:show"),
+    "shell.openExternal" => Some("shell:openExternal"),
+    "shell.showItemInFolder" => Some("shell:showItemInFolder"),
+    "window.setTitle" => Some("window:setTitle"),
+    "window.setSize" => Some("window:setSize"),
+    "window.minimize" => Some("window:minimize"),
+    "window.toggleMaximize" => Some("window:toggleMaximize"),
+    "tray.create" => Some("tray:create"),
+    "tray.remove" => Some("tray:remove"),
+    "tray.setTooltip" => Some("tray:setTooltip"),
+    _ => None,
+  }
+}
+
+fn native_method_is_allowed(method: &str, capabilities: &[String]) -> bool {
+  permission_for_native_method(method)
+    .is_some_and(|permission| capabilities.iter().any(|entry| entry == permission))
 }
 
 impl Webview {
@@ -206,6 +285,16 @@ impl Webview {
     app_menu: AppMenuContext,
     wake: Box<dyn Fn() + 'static>,
   ) -> Result<Self> {
+    let trusted_origin = opts
+      .url
+      .as_deref()
+      .and_then(|value| url::Url::parse(value).ok())
+      .or_else(|| {
+        opts
+          .serve_dir
+          .as_ref()
+          .and_then(|_| url::Url::parse("murasaki://localhost/").ok())
+      });
     let on_ipc: Rc<RefCell<Option<Arc<ThreadsafeFunction<String>>>>> =
       Rc::new(RefCell::new(None));
     // Created empty and filled in *after* `builder.build()` below, but a
@@ -214,6 +303,7 @@ impl Webview {
     // the page has loaded, which can't happen before `build()` returns and
     // the slot is filled. So the handler never observes an empty slot.
     let webview_slot: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
+    let tray_slot: SharedTrayIcon = Rc::new(RefCell::new(None));
 
     // Pin the WebView2 user-data directory to a writable location. wry's
     // default puts it next to the host executable — for `murasaki dev`/prod
@@ -222,7 +312,7 @@ impl Webview {
     // on Windows. Leaked because the WebContext must outlive the webview and
     // there's exactly one webview per app process.
     let web_context: &'static mut WebContext =
-      Box::leak(Box::new(WebContext::new(webview2_data_dir())));
+      Box::leak(Box::new(WebContext::new(webview2_data_dir(opts.app_id.as_deref()))));
     let mut builder = WebViewBuilder::new_with_web_context(web_context)
       .with_devtools(opts.devtools.unwrap_or(cfg!(debug_assertions)))
       .with_transparent(opts.transparent.unwrap_or(false));
@@ -240,7 +330,16 @@ impl Webview {
     // Moved in (not cloned): nothing else in `Webview::new` needs `app_menu`
     // after this point.
     let ipc_app_menu = app_menu;
+    let ipc_trusted_origin = trusted_origin.clone();
+    let ipc_capabilities = opts.capabilities.clone().unwrap_or_default();
+    let ipc_tray_slot = tray_slot.clone();
+    let ipc_tray_icon = opts.tray_icon.clone();
     builder = builder.with_ipc_handler(move |request| {
+      if navigation_policy(&request.uri().to_string(), ipc_trusted_origin.as_ref())
+        != NavigationPolicy::Allow
+      {
+        return;
+      }
       let body = request.body().clone();
 
       let kind = serde_json::from_str::<IpcEnvelope>(&body)
@@ -273,6 +372,20 @@ impl Webview {
         return;
       }
 
+      if kind.as_deref() == Some("nativeCall") {
+        if let Ok(payload) = serde_json::from_str::<NativeCallPayload>(&body) {
+          handle_native_call(
+            &ipc_window_slot,
+            &ipc_webview_slot,
+            &ipc_tray_slot,
+            ipc_tray_icon.as_deref(),
+            &ipc_capabilities,
+            payload,
+          );
+        }
+        return;
+      }
+
       if let Some(tsf) = ipc_slot.borrow().as_ref() {
         let _ = tsf.call(Ok(body), ThreadsafeFunctionCallMode::NonBlocking);
       }
@@ -283,12 +396,15 @@ impl Webview {
     // its own window. In-app navigations — the dev server on localhost, the
     // `murasaki://` prod protocol, and non-http schemes — load normally.
     // Returning `false` cancels the in-window navigation.
-    builder = builder.with_navigation_handler(|url| {
-      if is_external_url(&url) {
-        let _ = open::that_detached(&url);
-        return false;
+    builder = builder.with_navigation_handler(move |url| {
+      match navigation_policy(&url, trusted_origin.as_ref()) {
+        NavigationPolicy::Allow => true,
+        NavigationPolicy::OpenExternal => {
+          let _ = open::that_detached(&url);
+          false
+        }
+        NavigationPolicy::Deny => false,
       }
-      true
     });
 
     // Production loads static files (the built client) through wry's custom
@@ -321,6 +437,7 @@ impl Webview {
 
     Ok(Self {
       webview: webview_slot,
+      tray: tray_slot,
       on_ipc,
       _window: window,
     })
@@ -331,6 +448,176 @@ impl Webview {
   pub(crate) fn handle(&self) -> SharedWebview {
     self.webview.clone()
   }
+}
+
+fn native_error(error: impl std::fmt::Display) -> serde_json::Value {
+  serde_json::json!({ "ok": false, "error": { "message": error.to_string() } })
+}
+
+fn dispatch_native_response(
+  webview_slot: &Rc<RefCell<Option<WebView>>>,
+  request_id: &str,
+  response: serde_json::Value,
+) {
+  let detail = serde_json::json!({ "requestId": request_id, "response": response });
+  let Ok(detail_json) = serde_json::to_string(&detail) else { return };
+  let script = format!(
+    "window.dispatchEvent(new CustomEvent('murasaki:nativeresponse',{{detail:{detail_json}}}))"
+  );
+  if let Some(webview) = webview_slot.borrow().as_ref() {
+    let _ = webview.evaluate_script(&script);
+  }
+}
+
+/// Execute the stable renderer-facing native API synchronously on the UI
+/// thread, then resolve the caller's Promise inside the webview. Keeping this
+/// in Rust makes dev and packaged apps use the same implementation; it also
+/// avoids Node/libuv being blocked by the native event loop in development.
+fn handle_native_call(
+  window_slot: &SharedWindow,
+  webview_slot: &Rc<RefCell<Option<WebView>>>,
+  tray_slot: &SharedTrayIcon,
+  default_tray_icon: Option<&str>,
+  capabilities: &[String],
+  payload: NativeCallPayload,
+) {
+  #[derive(serde::Deserialize)]
+  struct TextArg { text: String }
+  #[derive(serde::Deserialize)]
+  struct TargetArg { target: String }
+  #[derive(serde::Deserialize)]
+  struct TitleArg { title: String }
+  #[derive(serde::Deserialize)]
+  struct SizeArg { width: f64, height: f64 }
+  #[derive(serde::Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  struct TrayCreateArg {
+    #[serde(default)]
+    tooltip: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    template: bool,
+  }
+
+  if !native_method_is_allowed(&payload.method, capabilities) {
+    dispatch_native_response(
+      webview_slot,
+      &payload.request_id,
+      native_error(format!("native capability is not granted for {}", payload.method)),
+    );
+    return;
+  }
+
+  let result: std::result::Result<serde_json::Value, String> = (|| {
+    match payload.method.as_str() {
+      "dialog.openFile" => {
+        let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::dialog::open_file_dialog(Some(opts))
+          .map(serde_json::Value::from)
+          .map_err(|e| e.to_string())
+      }
+      "dialog.openDirectory" => {
+        let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::dialog::open_directory_dialog(Some(opts))
+          .map(|value| serde_json::to_value(value).unwrap_or(serde_json::Value::Null))
+          .map_err(|e| e.to_string())
+      }
+      "dialog.saveFile" => {
+        let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::dialog::save_file_dialog(Some(opts))
+          .map(|value| serde_json::to_value(value).unwrap_or(serde_json::Value::Null))
+          .map_err(|e| e.to_string())
+      }
+      "clipboard.readText" => crate::clipboard::clipboard_read()
+        .map(serde_json::Value::from)
+        .map_err(|e| e.to_string()),
+      "clipboard.writeText" => {
+        let args: TextArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::clipboard::clipboard_write(args.text)
+          .map(|_| serde_json::Value::Null)
+          .map_err(|e| e.to_string())
+      }
+      "notification.show" => {
+        let args = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::notification::show_notification(args)
+          .map(|_| serde_json::Value::Null)
+          .map_err(|e| e.to_string())
+      }
+      "shell.openExternal" => {
+        let args: TargetArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        let parsed = url::Url::parse(&args.target).map_err(|_| "target must be an absolute URL".to_string())?;
+        if !matches!(parsed.scheme(), "http" | "https" | "mailto" | "tel") {
+          return Err("only http, https, mailto, and tel URLs may be opened".to_string());
+        }
+        crate::shell::shell_open_external(args.target)
+          .map(|_| serde_json::Value::Null)
+          .map_err(|e| e.to_string())
+      }
+      "shell.showItemInFolder" => {
+        let args: TargetArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        crate::shell::shell_show_item_in_folder(args.target)
+          .map(|_| serde_json::Value::Null)
+          .map_err(|e| e.to_string())
+      }
+      "window.setTitle" => {
+        let args: TitleArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_title(&args.title); }
+        Ok(serde_json::Value::Null)
+      }
+      "window.setSize" => {
+        let args: SizeArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        if !args.width.is_finite() || !args.height.is_finite() || args.width < 1.0 || args.height < 1.0 {
+          return Err("width and height must be positive finite numbers".to_string());
+        }
+        if let Some(window) = window_slot.borrow().as_ref() {
+          window.set_inner_size(tao::dpi::LogicalSize::new(args.width, args.height));
+        }
+        Ok(serde_json::Value::Null)
+      }
+      "window.minimize" => {
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_minimized(true); }
+        Ok(serde_json::Value::Null)
+      }
+      "window.toggleMaximize" => {
+        if let Some(window) = window_slot.borrow().as_ref() { window.set_maximized(!window.is_maximized()); }
+        Ok(serde_json::Value::Null)
+      }
+      "tray.create" => {
+        let args: TrayCreateArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        let icon_path = args.icon.as_deref().or(default_tray_icon)
+          .ok_or_else(|| "tray.create requires an icon path or config.icon".to_string())?;
+        let icon = load_tray_icon(icon_path)?;
+        let mut builder = TrayIconBuilder::new()
+          .with_icon(icon)
+          .with_icon_as_template(args.template);
+        if let Some(tooltip) = args.tooltip.as_deref() {
+          builder = builder.with_tooltip(tooltip);
+        }
+        let tray = builder.build().map_err(|e| format!("create tray icon: {e}"))?;
+        tray_slot.borrow_mut().replace(tray);
+        Ok(serde_json::Value::Null)
+      }
+      "tray.remove" => {
+        tray_slot.borrow_mut().take();
+        Ok(serde_json::Value::Null)
+      }
+      "tray.setTooltip" => {
+        let args: TextArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+        let tray = tray_slot.borrow();
+        let tray = tray.as_ref().ok_or_else(|| "tray icon has not been created".to_string())?;
+        tray.set_tooltip(Some(args.text)).map_err(|e| format!("set tray tooltip: {e}"))?;
+        Ok(serde_json::Value::Null)
+      }
+      _ => Err(format!("unknown native method: {}", payload.method)),
+    }
+  })();
+
+  let response = match result {
+    Ok(value) => serde_json::json!({ "ok": true, "value": value }),
+    Err(error) => native_error(error),
+  };
+  dispatch_native_response(webview_slot, &payload.request_id, response);
 }
 
 #[napi]
@@ -404,8 +691,65 @@ impl Webview {
 
   #[napi]
   pub fn dispose(&self) -> Result<()> {
+    self.tray.borrow_mut().take();
     self.webview.borrow_mut().take();
     Ok(())
+  }
+}
+
+fn load_tray_icon(path: &str) -> std::result::Result<TrayIconImage, String> {
+  let file = std::fs::File::open(path).map_err(|e| format!("open tray icon {path}: {e}"))?;
+  let decoder = png::Decoder::new(file);
+  let mut reader = decoder.read_info().map_err(|e| format!("decode tray icon {path}: {e}"))?;
+  let mut buf = vec![0; reader.output_buffer_size()];
+  let frame = reader.next_frame(&mut buf).map_err(|e| format!("decode tray icon {path}: {e}"))?;
+  buf.truncate(frame.buffer_size());
+  let info = reader.info();
+  let rgba = match (info.color_type, info.bit_depth) {
+    (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
+    (png::ColorType::Rgb, png::BitDepth::Eight) => {
+      let mut out = Vec::with_capacity(buf.len() / 3 * 4);
+      for chunk in buf.chunks_exact(3) {
+        out.extend_from_slice(chunk);
+        out.push(255);
+      }
+      out
+    }
+    _ => return Err("tray icon must be an 8-bit RGB or RGBA PNG".to_string()),
+  };
+  TrayIconImage::from_rgba(rgba, info.width, info.height)
+    .map_err(|e| format!("invalid tray icon {path}: {e}"))
+}
+
+/// Drain tray click events and deliver them to renderer listeners. The tao
+/// loop polls this because tray-icon uses its own channel rather than tao
+/// user events.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn poll_tray_events(webview_slot: &SharedWebview) {
+  use tray_icon::{MouseButton, MouseButtonState};
+
+  while let Ok(event) = TrayIconEvent::receiver().try_recv() {
+    let detail = match event {
+      TrayIconEvent::Click { button, button_state: MouseButtonState::Up, .. } => {
+        Some(serde_json::json!({
+          "button": match button { MouseButton::Left => "left", MouseButton::Right => "right", MouseButton::Middle => "middle" },
+          "double": false,
+        }))
+      }
+      TrayIconEvent::DoubleClick { button, .. } => Some(serde_json::json!({
+        "button": match button { MouseButton::Left => "left", MouseButton::Right => "right", MouseButton::Middle => "middle" },
+        "double": true,
+      })),
+      _ => None,
+    };
+    if let Some(detail) = detail {
+      let script = format!(
+        "window.dispatchEvent(new CustomEvent('murasaki:trayclick',{{detail:{detail}}}))"
+      );
+      if let Some(webview) = webview_slot.borrow().as_ref() {
+        let _ = webview.evaluate_script(&script);
+      }
+    }
   }
 }
 
@@ -813,5 +1157,67 @@ fn mime_for(path: &str) -> &'static str {
     "ttf" => "font/ttf",
     "map" => "application/json",
     _ => "application/octet-stream",
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{native_method_is_allowed, navigation_policy, sanitize_profile_name, NavigationPolicy};
+
+  #[test]
+  fn native_commands_are_default_deny_and_exact_match() {
+    assert!(!native_method_is_allowed("clipboard.readText", &[]));
+    assert!(!native_method_is_allowed(
+      "clipboard.writeText",
+      &["clipboard:readText".to_string()]
+    ));
+    assert!(native_method_is_allowed(
+      "clipboard.readText",
+      &["clipboard:readText".to_string()]
+    ));
+    assert!(!native_method_is_allowed(
+      "unknown.command",
+      &["unknown:command".to_string()]
+    ));
+  }
+
+  #[test]
+  fn only_exact_runtime_origin_may_navigate_in_app() {
+    let trusted = url::Url::parse("http://127.0.0.1:55123/").unwrap();
+    assert_eq!(
+      navigation_policy("http://127.0.0.1:55123/settings", Some(&trusted)),
+      NavigationPolicy::Allow
+    );
+    assert_eq!(
+      navigation_policy("http://127.0.0.1:55124/", Some(&trusted)),
+      NavigationPolicy::OpenExternal
+    );
+    assert_eq!(
+      navigation_policy("http://localhost:55123/", Some(&trusted)),
+      NavigationPolicy::OpenExternal
+    );
+    assert_eq!(
+      navigation_policy("https://example.com/", Some(&trusted)),
+      NavigationPolicy::OpenExternal
+    );
+  }
+
+  #[test]
+  fn unsafe_navigation_schemes_are_denied() {
+    let trusted = url::Url::parse("http://127.0.0.1:55123/").unwrap();
+    for target in [
+      "file:///tmp/secret",
+      "data:text/html,<script></script>",
+      "javascript:alert(1)",
+      "unknown://host/",
+    ] {
+      assert_eq!(navigation_policy(target, Some(&trusted)), NavigationPolicy::Deny);
+    }
+  }
+
+  #[test]
+  fn webview_profile_names_cannot_escape_their_directory() {
+    assert_eq!(sanitize_profile_name("com.example/app"), "com.example_app");
+    assert_eq!(sanitize_profile_name("../../other"), ".._.._other");
   }
 }

@@ -42,10 +42,17 @@ export const GET: RouteHandler = async (_request, { params }) => {
 }
 ```
 
-<Callout type="warn">
-  現在サポートされているのは単一セグメントの `[name]` パラメータのみです — キャッチ
-  オール(`[...name]`)セグメントはまだ実装されていません。
-</Callout>
+キャッチオール(`[...path]`)とオプショナルキャッチオール(`[[...path]]`)フォルダにも
+対応しています。値はデコード済みのパスセグメント配列になり、省略されたオプショナル
+キャッチオールは `undefined` です:
+
+```ts title="src/api/files/[[...path]]/route.ts"
+import type { RouteHandler } from 'murasaki'
+
+export const GET: RouteHandler = async (_request, { params }) => {
+  return Response.json({ path: params.path ?? [] })
+}
+```
 
 ## ルートを呼び出す
 
@@ -62,9 +69,9 @@ const data = await res.json()
 
 どちらもサーバー上で実行されます — 形状で使い分けます:
 
-- **API ルート**はアドレス可能な HTTP エンドポイントです。どんなクライアントからでも
-  `fetch` できます — Webhook、サードパーティの呼び出し元、REST 的なサーフェスに向いて
-  います。
+- **API ルート**はレンダラーと Node Main Process 向けのアプリローカル HTTP エンド
+  ポイントです。パッケージ版ではアプリ実行時セッションで保護されるため、公開 Webhook
+  エンドポイントではありません。
 - **サーバーアクション**([ガイド](/docs/guides/server-actions))は、React 19 のフォー
   ム / `useAction` フローに組み込まれた、型付きの RPC です — URL も `fetch` の定型コー
   ドも不要です。

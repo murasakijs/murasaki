@@ -1,0 +1,87 @@
+---
+title: Architecture
+description: How the Rust host, local Node runtime, and WebView renderer fit together.
+---
+
+Murasaki is a three-layer desktop runtime. React renders in the operating
+system WebView, application backend code runs in a bundled Node.js process,
+and a small Rust host owns the native window and application lifecycle.
+
+```txt
+┌──────────────── Native application ────────────────┐
+│                                                    │
+│  Rust host (tao / wry / muda)                      │
+│  window · WebView · native menus · update handoff  │
+│                       │                            │
+│                       │ launches / supervises      │
+│                       ▼                            │
+│  Local Node runtime                                │
+│  src/main.ts · use-main · use-server · API routes  │
+│                       │                            │
+│                       │ authenticated loopback HTTP│
+│                       ▼                            │
+│  OS WebView                                        │
+│  React 19 · Murasaki router · your renderer code   │
+│                                                    │
+└────────────────────────────────────────────────────┘
+```
+
+This is deliberately different from Electron's embedded Chromium + Node
+renderer model. Renderer code does not receive Node globals. Put filesystem,
+database, socket, worker, and secret-bearing code in
+[`src/main.ts`](/docs/guides/node-main), a `'use main'` module, a
+[`'use server'` action](/docs/guides/server-actions), or an
+[`src/api/` route](/docs/guides/api-routes).
+
+## Layer responsibilities
+
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| Rust host | Native event loop, one application window, navigation policy, menus, Node child supervision, final update handoff | Business logic and React state |
+| Local Node runtime | Long-lived main lifecycle, actions, API routes, update verification, application resources and data | Native window creation APIs (not public yet) |
+| Renderer | UI, routing, browser APIs, calling typed backend functions | Direct filesystem/Node/native module access |
+
+<Callout type="warn">
+  Murasaki is pre-1.0. Multi-window management, tray menus/global shortcuts, URL
+  scheme/file-association registration, and per-window/per-origin capability
+  policies are not public features yet. Packaged macOS/Windows apps do enforce
+  a single instance, and renderer native commands have a deny-by-default typed
+  allowlist. Check [Platform & feature
+  status](/docs/core-concepts/platform-feature-status) before committing a
+  production architecture to a feature.
+</Callout>
+
+## Development and packaged runtime
+
+The application code keeps the same boundaries in both modes, but the host
+processes differ:
+
+| | `murasaki dev` | Packaged app |
+| --- | --- | --- |
+| Web assets | Vite dev server with HMR | `dist/client` served by bundled Node |
+| Node backend | Vite child process | Portable Node runtime inside app resources |
+| Native host | CLI process loads `@murasakijs/native` | Standalone Rust launcher |
+| Main entry | Loaded with Vite SSR; exact entry hot-reloads | Compiled to `server/main.mjs` |
+| Backend calls | Vite middleware | Bundled loopback HTTP server |
+
+Production uses a deterministic loopback port derived from `appId`, giving the
+renderer a stable origin across launches. The Windows WebView2 profile is also
+isolated by `appId`. Keep `appId` stable after release: changing it can change
+the application data paths, browser profile, bundle identity, single-instance
+lock, and local origin.
+
+## Next.js-like, not Next.js itself
+
+Murasaki adopts familiar conventions—`src/app`, layouts, route handlers,
+directives, and React 19—but it is not the Next.js runtime. There are no React
+Server Components or Edge runtime, and middleware only participates in client
+navigation. Each guide documents the supported subset; do not assume an API is
+available because it exists in Next.js.
+
+## Next
+
+<Cards>
+  <Card title="Process model" href="/docs/core-concepts/process-model" description="Startup, reload, and graceful shutdown." />
+  <Card title="Node Main" href="/docs/guides/node-main" description="Own long-lived backend resources." />
+  <Card title="Security" href="/docs/building/security" description="Trust boundaries and current protections." />
+</Cards>

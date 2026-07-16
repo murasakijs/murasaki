@@ -1,0 +1,41 @@
+---
+title: プラットフォームと機能の対応状況
+description: macOS、Windows、LinuxにおけるMurasaki機能の、検証根拠に基づく正式な対応状況です。
+---
+
+import { CapabilityStatusTable } from "@/components/capability-status-table";
+
+Murasakiは1.0以前のソフトウェアです。現在利用できる部分、重要なplatform差が
+残る部分、まだ設計段階の部分があります。このページはrepository内の正式な
+capability manifestである
+[`packages/murasaki/capabilities.json`](https://github.com/murasakijs/murasaki/blob/main/packages/murasaki/capabilities.json)
+から生成しています。
+
+<Callout type="warn">
+  **「計画中」は「利用可能」という意味ではありません。** dependency、Rust
+  module、型、roadmapが存在するだけではshipping featureとしません。Murasakiが
+  正式な利用経路を公開し、その制限をここへ記録した時点で初めて対応扱いにします。
+</Callout>
+
+## 状態の定義
+
+- **Stable** — 現在のrelease lineでcompatibilityを維持するshipping public API。
+- **実験的** — 実装と検証はありますが、1.0までにAPIやwire contractが変わる可能性があります。
+- **部分対応** — 現在利用できますが、表に記載した重要なAPIまたはplatform差があります。
+- **計画中** — 正式に利用できる実装はありません。
+
+機能の成熟度とplatform対応は別々に表示します。**開発のみ**は、そのplatformで
+development runtimeを利用できてもproduction packagingを保証しないことを示します。
+**未対応**は、そのplatformに実装がない、またはその機能が適用されないことを示します。
+
+<CapabilityStatusTable locale="ja" />
+
+## 検証根拠の読み方
+
+各行の**APIと検証根拠**を開くと、正式なpublic symbolと、根拠となる自動testまたは
+workflowを確認できます。build workflowが示すのはそのplatformでcompileできること
+までです。公開されていないnative helperを正式なframework APIとして扱う根拠には
+なりません。
+
+実装とmanifestに差がある場合は、より低い対応状況を安全側の前提として扱い、
+[不一致を報告してください](https://github.com/murasakijs/murasaki/issues)。

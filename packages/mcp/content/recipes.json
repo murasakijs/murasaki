@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "recipes": [
+    {
+      "id": "routing",
+      "slug": "guides/routing"
+    },
+    {
+      "id": "server-actions",
+      "slug": "guides/server-actions"
+    },
+    {
+      "id": "api-routes",
+      "slug": "guides/api-routes"
+    },
+    {
+      "id": "native-context-menu",
+      "slug": "guides/context-menu"
+    },
+    {
+      "id": "application-menu",
+      "slug": "guides/app-menu"
+    },
+    {
+      "id": "auto-update",
+      "slug": "guides/auto-update"
+    },
+    {
+      "id": "configuration",
+      "slug": "building/configuration"
+    },
+    {
+      "id": "package-and-distribute",
+      "slug": "building/distribution"
+    }
+  ]
+}

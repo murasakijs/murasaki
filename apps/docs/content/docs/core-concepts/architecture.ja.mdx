@@ -1,0 +1,83 @@
+---
+title: アーキテクチャ
+description: Rust ホスト、ローカル Node ランタイム、WebView レンダラーの関係。
+---
+
+Murasaki は 3 層のデスクトップランタイムです。React は OS の WebView で描画され、
+アプリのバックエンドコードは同梱された Node.js プロセスで実行され、小さな Rust
+ホストがネイティブウィンドウとアプリのライフサイクルを管理します。
+
+```txt
+┌─────────────── ネイティブアプリ ────────────────┐
+│                                                 │
+│  Rust host (tao / wry / muda)                   │
+│  window · WebView · native menu · update handoff│
+│                      │                          │
+│                      │ 起動 / 監視              │
+│                      ▼                          │
+│  Local Node runtime                             │
+│  src/main.ts · use-main · use-server · API route│
+│                      │                          │
+│                      │ 認証付き loopback HTTP   │
+│                      ▼                          │
+│  OS WebView                                     │
+│  React 19 · Murasaki router · renderer code     │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+これは Electron の Chromium + Node レンダラーモデルとは異なります。レンダラーに
+Node グローバルはありません。ファイル、DB、ソケット、Worker、シークレットを扱う
+コードは [`src/main.ts`](/ja/docs/guides/node-main)、`'use main'` モジュール、
+[`'use server'` アクション](/ja/docs/guides/server-actions)、または
+[`src/api/` ルート](/ja/docs/guides/api-routes)に置きます。
+
+## 各レイヤーの責務
+
+| レイヤー | 担当 | 担当しないもの |
+| --- | --- | --- |
+| Rust ホスト | ネイティブイベントループ、単一ウィンドウ、ナビゲーション制御、メニュー、Node 子プロセス監視、更新の最終適用 | ビジネスロジック、React state |
+| ローカル Node | Main ライフサイクル、Action、API ルート、更新検証、アプリのリソースとデータ | ネイティブウィンドウ生成 API（現状は非公開） |
+| レンダラー | UI、ルーティング、ブラウザー API、型付きバックエンド関数の呼び出し | ファイルシステム・Node・ネイティブモジュールへの直接アクセス |
+
+<Callout type="warn">
+  Murasaki は 1.0 未満です。マルチウィンドウ、トレイ / グローバルショートカット、
+  URL scheme / file association registration、window / origin 別 Capability policy は
+  まだ公開機能ではありません。packaged macOS / Windows app は single instance を強制し、
+  renderer native command には deny-by-default の型付き allowlist があります。本番設計を確定する前に
+  [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)を
+  確認してください。
+</Callout>
+
+## 開発時とパッケージ後
+
+コードの境界は同じですが、実行するホストが異なります。
+
+| | `murasaki dev` | パッケージ済みアプリ |
+| --- | --- | --- |
+| Web アセット | HMR 付き Vite dev server | 同梱 Node が `dist/client` を配信 |
+| Node バックエンド | Vite 子プロセス | アプリ内のポータブル Node |
+| ネイティブホスト | CLI が `@murasakijs/native` をロード | 単体の Rust launcher |
+| Main entry | Vite SSR で読み込み、entry の変更で hot reload | `server/main.mjs` にコンパイル |
+| バックエンド呼び出し | Vite middleware | 同梱 loopback HTTP server |
+
+本番では `appId` から決めた loopback port を使うため、起動をまたいでレンダラーの
+origin が安定します。Windows の WebView2 profile も `appId` ごとに分離されます。
+リリース後は `appId` を安易に変更しないでください。データパス、WebView profile、
+bundle identity、single-instance lock、ローカル origin が変わる可能性があります。
+
+## Next.js 風であり、Next.js そのものではない
+
+`src/app`、layout、route handler、directive、React 19 といった慣れた規約を採用して
+いますが、Next.js runtime ではありません。React Server Components や Edge runtime
+はなく、middleware はクライアントナビゲーションだけに参加します。対応範囲は各
+ガイドの記述を基準にし、Next.js にあるという理由だけで API の存在を仮定しないで
+ください。
+
+## 次へ
+
+<Cards>
+  <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" description="起動、reload、graceful shutdown。" />
+  <Card title="Node Main" href="/ja/docs/guides/node-main" description="長寿命のバックエンドリソースを管理する。" />
+  <Card title="セキュリティ" href="/ja/docs/building/security" description="信頼境界と現在の保護。" />
+</Cards>

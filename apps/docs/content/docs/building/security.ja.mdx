@@ -1,0 +1,147 @@
+---
+title: セキュリティ
+description: Murasaki の信頼境界、組み込み runtime protection、アプリ側の責務。
+---
+
+デスクトップセキュリティはプロセス境界から始まります。Murasaki は Node を renderer
+から分離し、アプリ WebView の遷移先を自身の origin に制限し、特権 loopback endpoint
+を app-session token で保護します。通常の renderer bug の影響を減らしますが、完全な
+権限システムではありません。
+
+<Callout type="warn">
+  renderer native command は deny-by-default で、型付き `capabilities` list から許可
+  します。window 別 allow/deny rule、path / URL scope、複数 app origin ごとの policy
+  はまだありません。renderer-to-Node 関数も privileged application code として扱い、
+  surface を小さく保ってください。
+</Callout>
+
+## 信頼境界
+
+| 境界 | 組み込み保護 | アプリ側の責務 |
+| --- | --- | --- |
+| Remote URL → app WebView | app origin と完全一致する遷移だけを window 内で許可。off-origin HTTP(S) は system browser で開き、`file:` / `data:` / `javascript:` は拒否 | navigation behavior を弱めず、remote script を renderer に注入しない |
+| Renderer → Rust native command | exact-origin IPC check と typed / deny-by-default `capabilities` allowlist | 使用する command だけを grant。広い操作の app-level intent を検証 |
+| Renderer → local Node | `/api/*` と `/__murasaki/*` は random 256-bit HttpOnly / SameSite=Strict cookie を要求し Host / Origin を検証。wire payload に上限 | 各 action / route / Main function 内で引数を検証し操作を認可 |
+| App → update host | manifest raw bytes の Ed25519 signature、その後 payload の SHA-256 を検証 | private update key を保護し、hash/signature を同時に公開 |
+| OS → installed app | macOS ad-hoc signature はローカル整合性を検証。Developer ID + notarization は公開配布の信頼を確立 | macOS 公開版を署名・公証し、Windows は外部 signing flow を用意 |
+
+本番は全 interface ではなく `127.0.0.1` だけで listen します。開発時は loopback の
+`localhost` / `127.0.0.1` / `[::1]` を許可し、cross-site Fetch Metadata を拒否します。
+session cookie は最初の document response が設定し、JavaScript からは読めません。
+
+## Native command を明示的に許可する
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  capabilities: [
+    'dialog:openFile',
+    'clipboard:writeText',
+    'shell:openExternal',
+  ],
+})
+```
+
+`capabilities` を省略すると何も許可されません。未知の文字列も何も許可せず、bridge は
+trusted app origin と完全一致する call だけを受け付けます。allowlist は command 単位
+です。dialog を 1 directory、external URL を 1 host、command を複数 window 中の 1 枚
+だけに制限することはまだできないので、より狭い rule は app code でも強制します。
+
+## シークレットは Node に置く
+
+renderer code から import したものは public client JavaScript になり得ます。API token、
+private key、DB credential、license validation は `src/main.ts`、`'use main'`、
+`'use server'`、server-only API route module に置きます。
+
+```ts title="src/backend/account.ts"
+'use main'
+
+export async function loadAccount(accountId: string) {
+  if (!/^[a-z0-9_-]{1,64}$/i.test(accountId)) {
+    throw new TypeError('invalid account id')
+  }
+
+  const token = process.env.ACCOUNT_API_TOKEN
+  if (!token) throw new Error('account service is not configured')
+
+  const response = await fetch(`https://api.example.com/accounts/${accountId}`, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!response.ok) throw new Error(`account service returned ${response.status}`)
+  return response.json()
+}
+```
+
+<Callout type="info">
+  runtime session は request がアプリ renderer origin を経由したことを示しますが、
+  renderer が侵害されていないことは保証しません。XSS は client bundle から呼べる
+  関数を実行できます。
+</Callout>
+
+## Path と URL を検証する
+
+renderer input を無制限の filesystem path に連結しないでください。app-owned directory
+配下に resolve し、結果がその内側に留まることを確認します。raw path より opaque ID
+を優先してください。
+
+Node 関数が `fetch()` / URL open を行う前には protocol と host を allowlist します。
+これは意図しない local-network access と SSRF を防ぎます。renderer の request header
+をそのまま remote service に転送しないでください。
+
+## Content Security Policy
+
+Murasaki は document に `X-Content-Type-Options: nosniff` と `Referrer-Policy:
+no-referrer` を設定しますが、現状アプリの Content Security Policy は生成しません。
+`dangerouslySetInnerHTML` を避け、user-authored HTML を sanitize し、third-party script
+を固定し、外部制御コンテンツを扱う場合は application layer で CSP を追加してください。
+
+## 実ネットワークサービスを公開する場合
+
+Murasaki API route は app-local で、public service としては到達できません。Main から
+Node の TCP / WebSocket / HTTP listener を作れますが、Murasaki runtime-session 保護の
+外側に新しい security boundary ができます。
+
+- remote client が明示的な製品機能でなければ `127.0.0.1` に bind
+- message 処理前に認証
+- message / payload 上限を定義
+- 高コスト処理を rate limit
+- `shutdown()` で listener を閉じる
+- Murasaki runtime token を独自 protocol の credential に再利用しない
+
+## Code signing と update key は別物
+
+Code signing は OS に「誰がこの executable を作ったか」を示します。Ed25519 update
+signature は Murasaki に「この manifest を app の update key 保有者が承認したか」を
+示します。本番 updater は両方を使ってください。OS artifact は Developer ID +
+notarization（Windows は外部 Authenticode flow）、更新は Murasaki manifest signature
+と payload hash で保護します。
+
+## 既知の security gap
+
+- Native capability は command 単位のみで path / URL scope や window / origin 別 policy
+  file がない
+- multi-window 未対応のため window 別 security policy がない
+- CSP generator がない
+- Windows Authenticode / Linux package signing が未実装
+- public native utility API は permission-scoped でないため main `murasaki` package から
+  まだ公開されていない
+
+正確な状況は[プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)
+で確認できます。
+
+## 脆弱性を報告する
+
+public issue を作らないでください。[private GitHub Security
+Advisory](https://github.com/murasakijs/murasaki/security/advisories/new) または
+`murasaki@ichi10.com` を利用してください。1.0 未満では最新 minor release が
+サポート対象です。
+
+## 次へ
+
+<Cards>
+  <Card title="Node Main" href="/ja/docs/guides/node-main" />
+  <Card title="自動更新" href="/ja/docs/guides/auto-update" />
+  <Card title="配布" href="/ja/docs/building/distribution" />
+</Cards>

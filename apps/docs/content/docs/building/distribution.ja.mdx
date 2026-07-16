@@ -9,6 +9,19 @@ description: 本物のネイティブインストーラを出荷する — ク�
 は Linux(x64/arm64)向けのビルド済みバイナリも提供しています — Linux 向けのアプリ
 パッケージングはロードマップに含まれています。
 
+| Target | Bundle | Installer | 公開 code signing |
+| --- | --- | --- | --- |
+| macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization を組み込み対応 |
+| Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`、Windows 上で WiX `.msi` | 未実装。別 Authenticode step を使用 |
+| Linux | — | — | 予定 |
+
+<Callout type="warn">
+  ファイルが生成されたことは distribution-ready を意味しません。clean machine で
+  installed artifact をテストし、signature と全 production dependency / resource を
+  検証してください。Murasaki は 1.0 未満で、Node dependency packaging はすべての
+  dynamic native addon / runtime-discovered asset layout をまだ網羅していません。
+</Callout>
+
 ## クロスアーキテクチャビルド
 
 バンドルには、ポータブルでターゲット固有の Node ランタイム(nodejs.org からのチェック
@@ -34,13 +47,17 @@ Windows は `win32-x64` / `win32-arm64`。
   リリースで対応予定です。
 </Callout>
 
-デフォルトでは、`murasaki bundle` / `murasaki installer` は**未署名**(アドホック)
-の `.app` / `.dmg` を生成します — 受け取った側は、初回のみ右クリック →**開く**、また
-は次を実行して開きます:
+既定では `murasaki bundle` は **ad-hoc signed** `.app` を生成し、`murasaki installer`
+はその app を `.dmg` に入れます。macOS は local bundle integrity を検証できますが、
+信頼された developer identity にはならず、成果物は notarize できません。自分の
+download 済み development artifact に限り quarantine を外せます:
 
 ```bash
 xattr -dr com.apple.quarantine "<path>"
 ```
+
+これを end user 向け installation path にしないでください。警告なしの public 配布には
+Developer ID signing と notarization が必要です。
 
 警告なしで配布するには、あなた自身の Apple Developer ID で署名・公証してください —
 Murasaki は独自の証明書を一切同梱していません:
@@ -64,6 +81,39 @@ murasaki installer --sign --notarize   # + .dmg を Apple に提出し、チケ�
   オフラインで検証できるようチケットをステープルします。
 
 どちらも、有料の Apple Developer Program メンバーシップが必要です。
+
+### macOS artifact を検証する
+
+signing 後の最終 `.app` と notarization 後の最終 `.dmg` に対して実行します。
+
+```bash
+codesign --verify --strict --verbose=2 "dist/bundle/My App.app"
+codesign -dvvv --entitlements :- "dist/bundle/My App.app"
+spctl -a -t open --context context:primary-signature -vv "dist/My App-1.0.0.dmg"
+xcrun stapler validate "dist/My App-1.0.0.dmg"
+```
+
+`codesign --verify` は app の code / resource seal、`spctl` は配布 DMG の Gatekeeper
+policy、`stapler validate` はその notarization ticket を検査します。public release では
+すべてを実行してください。
+
+## Windows installer と signing
+
+`murasaki bundle --target win32-x64` は portable folder / `.zip` を生成します。
+`murasaki installer` は build host に存在する tool も呼びます。
+
+- NSIS `.exe`: `makensis`。macOS / Windows で実行可能
+- `.msi`: WiX v4。Windows 上で実行
+
+NSIS は `perUser`（既定、elevation なし）または `perMachine`、MSI は常に
+per-machine です。branding と upgrade identity は
+[設定](/ja/docs/building/configuration#installer)を参照してください。
+
+現状 Murasaki は application executable、NSIS installer、MSI を Authenticode-sign
+しません。release pipeline で証明書 / provider を使って最終 Windows artifact を署名し、
+公開前に Windows 上で検証してください。updater の Ed25519 manifest signature は
+Windows SmartScreen の publisher identity を確立しないため Authenticode の代わりには
+なりません。
 
 ### GitHub Actions による署名済みリリース
 
@@ -128,9 +178,28 @@ base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
   的に、環境変数からしかそれらを読み取りません。
 </Callout>
 
+## Release checklist
+
+- clean checkout と lock 済み dependency graph から build
+- installer 化の前に bundle を launch
+- 公開する全 platform / architecture の clean target で install / update / uninstall
+- Node Main shutdown、offline startup、network failure を確認
+- macOS signing / notarization、または外部 Windows signature を検証
+- 最終 payload が immutable になってから Murasaki update manifest を生成・署名
+- payload、`latest.json`、`latest.json.sig` を同時公開
+- signing credential / `MURASAKI_UPDATE_KEY` は CI secret に保存し、
+  `murasaki.config.ts` に書かない
+
+Code signing と update signing は独立しています。
+[セキュリティ](/ja/docs/building/security)と
+[自動更新](/ja/docs/guides/auto-update)を確認してから in-app update を有効にして
+ください。
+
 ## 次へ
 
 <Cards>
-  <Card title="CLI リファレンス" href="/docs/building/cli" />
-  <Card title="設定" href="/docs/building/configuration" />
+  <Card title="CLI リファレンス" href="/ja/docs/building/cli" />
+  <Card title="設定" href="/ja/docs/building/configuration" />
+  <Card title="セキュリティ" href="/ja/docs/building/security" />
+  <Card title="トラブルシューティング" href="/ja/docs/building/troubleshooting" />
 </Cards>

@@ -9,7 +9,7 @@ use napi::{
   threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use napi_derive::napi;
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::{Duration, Instant}};
 
 use tao::{
   dpi::LogicalSize,
@@ -277,7 +277,7 @@ impl Application {
     let window_handle = self.window_handle.clone();
 
     event_loop.run(move |event, _target, control_flow| {
-      *control_flow = ControlFlow::Wait;
+      *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
 
       // Windows: drain native menu clicks every tick (both the startup
       // default bar and any `useAppMenu` replacement — the menu bar is
@@ -312,7 +312,13 @@ impl Application {
       {
         if let Some(webview_slot) = webview_handle.borrow().as_ref() {
           crate::webview::poll_app_menu_events(webview_slot);
+          crate::webview::poll_tray_events(webview_slot);
         }
+      }
+
+      #[cfg(target_os = "windows")]
+      if let Some(webview_slot) = webview_handle.borrow().as_ref() {
+        crate::webview::poll_tray_events(webview_slot);
       }
 
       // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s

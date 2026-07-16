@@ -60,6 +60,12 @@ export interface WebviewOptions {
   html?: string
   devtools?: boolean
   transparent?: boolean
+  /** Stable application id used to isolate the native WebView profile. */
+  appId?: string
+  /** Native renderer command allowlist. Omitted means deny-all. */
+  capabilities?: string[]
+  /** Default PNG path used by the renderer tray API. */
+  trayIcon?: string
   /** Production only: serves this directory via the native custom protocol
    * (`murasaki://localhost/…`), taking priority over `url`/`html`. */
   serveDir?: string

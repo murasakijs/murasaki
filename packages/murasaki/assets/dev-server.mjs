@@ -13,6 +13,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+let activeServer
 
 // ── ANSI truecolor (Oomurasaki palette) — kept in sync with src/cli/brand.ts.
 const BRIGHT = '\x1b[38;2;168;85;247m'
@@ -115,6 +116,7 @@ async function main() {
     server: { port, strictPort: true },
     customLogger: logger,
   })
+  activeServer = server
   await server.listen()
 
   const actualPort = server.config.server.port ?? port
@@ -128,6 +130,18 @@ async function main() {
       `  ${paint('✓', GREEN)} ready in ${ms}ms\n\n`,
   )
 }
+
+let shuttingDown
+function shutdown() {
+  if (shuttingDown) return shuttingDown
+  shuttingDown = (async () => {
+    await activeServer?.close()
+    process.exit(0)
+  })()
+  return shuttingDown
+}
+process.on('SIGINT', () => void shutdown())
+process.on('SIGTERM', () => void shutdown())
 
 main().catch((err) => {
   process.stderr.write(fatal(err))

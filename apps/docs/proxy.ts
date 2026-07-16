@@ -47,6 +47,6 @@ export const config = {
   // live outside `app/[lang]/**` (favicons, robots/sitemap, `llms*.txt`, the
   // llms.mdx and OG image routes) — none should be rewritten under a locale.
   matcher: [
-    "/((?!_next/static|_next/image|api|favicon\\.ico|icon\\.svg|apple-icon|opengraph-image|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|llms\\.mdx|og/).*)",
+    "/((?!_next/static|_next/image|api|favicon\\.ico|icon\\.svg|apple-icon|opengraph-image|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|llms-api\\.txt|llms\\.mdx|og/).*)",
   ],
 };

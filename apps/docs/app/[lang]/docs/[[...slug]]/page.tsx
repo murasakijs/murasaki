@@ -32,7 +32,7 @@ export default async function Page(
   if (!page) notFound();
 
   const MDX = page.data.body;
-  const markdownUrl = getPageMarkdownUrl(page).url;
+  const markdownUrl = getPageMarkdownUrl(page, lang as "en" | "ja").url;
   // Resolve relative in-content links against the current file...
   const RelativeLink = createRelativeLink(source, page);
   const pagePath = localizedDocsPath(lang, page.slugs);
@@ -92,7 +92,7 @@ export default async function Page(
   // GitHub blob URL for the exact source file (same shape as the top toolbar's
   // "view options"), plus its last-commit date from the build-time git
   // manifest (absent when the file has no history yet — see gen-doc-dates.mjs).
-  const editUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/content/docs/${page.path}`;
+  const editUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/apps/docs/content/docs/${page.path}`;
   const isoDate = (docDates as Record<string, string>)[page.path];
 
   return (
@@ -105,10 +105,7 @@ export default async function Page(
         </DocsDescription>
         <div className="flex flex-row gap-2 items-center border-b pb-6">
           <MarkdownCopyButton markdownUrl={markdownUrl} />
-          <ViewOptionsPopover
-            markdownUrl={markdownUrl}
-            githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/content/docs/${page.path}`}
-          />
+          <ViewOptionsPopover markdownUrl={markdownUrl} githubUrl={editUrl} />
         </div>
         <DocsBody>
           <MDX

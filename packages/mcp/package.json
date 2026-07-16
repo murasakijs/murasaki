@@ -1,0 +1,41 @@
+{
+  "name": "@murasakijs/mcp",
+  "version": "0.48.0",
+  "description": "Read-only Model Context Protocol server for Murasaki documentation and compatibility data.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/murasakijs/murasaki.git",
+    "directory": "packages/mcp"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "bin": {
+    "murasaki-mcp": "./bin/murasaki-mcp.mjs"
+  },
+  "exports": {
+    ".": "./src/server.mjs"
+  },
+  "files": [
+    "bin",
+    "content",
+    "scripts",
+    "src",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "content:generate": "node scripts/generate-content.mjs",
+    "build": "node scripts/generate-content.mjs",
+    "prepack": "node scripts/generate-content.mjs",
+    "test": "node scripts/generate-content.mjs && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  }
+}

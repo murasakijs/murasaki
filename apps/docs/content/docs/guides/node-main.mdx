@@ -1,0 +1,231 @@
+---
+title: Node Main
+description: Long-lived Node lifecycle and typed renderer-to-Node functions with 'use main'.
+---
+
+Use Node Main for work that must live as long as the desktop application:
+database connections, filesystem watchers, sockets, worker pools, background
+queues, and cleanup that must finish before the native host exits.
+
+## Define the lifecycle
+
+Create `src/main.ts` and default-export `defineMain()`:
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+import { watch, type FSWatcher } from 'node:fs'
+
+let watcher: FSWatcher | undefined
+
+export default defineMain({
+  async ready({ paths, signal, isPackaged }) {
+    watcher = watch(paths.data, { recursive: true }, (_event, filename) => {
+      console.log('changed', filename)
+    })
+
+    signal.addEventListener('abort', () => watcher?.close(), { once: true })
+    console.log(isPackaged ? 'packaged main ready' : 'development main ready')
+  },
+
+  async beforeQuit({ reason }) {
+    // Return false only when a normal close really must be cancelled.
+    console.log('quit requested:', reason)
+  },
+
+  async secondInstance(_context, { argv, cwd }) {
+    // Packaged macOS/Windows: another launch was redirected here.
+    console.log('second launch:', { argv, cwd })
+  },
+
+  async shutdown() {
+    watcher?.close()
+    watcher = undefined
+  },
+})
+```
+
+Murasaki detects `src/main.ts` by default. Configure another entry or cleanup
+deadline in `murasaki.config.ts`:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  main: {
+    entry: 'src/backend/main.ts',
+    shutdownTimeoutMs: 15_000,
+  },
+})
+```
+
+Set `main: false` to disable discovery even when `src/main.ts` exists.
+
+## Context reference
+
+| Field | Meaning |
+| --- | --- |
+| `appId`, `productName`, `version` | Resolved application identity |
+| `isPackaged` | `false` under `murasaki dev`, `true` in a bundle |
+| `platform`, `arch` | Runtime target (`process.platform` / `process.arch`) |
+| `projectRoot` | Project root in dev; packaged resource working directory in production |
+| `resourcesPath` | Read-only application resources location |
+| `paths.data` | Durable app data |
+| `paths.cache` | Re-creatable cache data |
+| `paths.logs` | Log files |
+| `paths.temp` | Temporary staging data |
+| `signal` | Aborts after `beforeQuit` and before `shutdown` |
+
+Quit reasons are `window-close`, `app-quit`, `signal`, `restart`, `dev-reload`,
+and `startup-failure`. See the [process model](/docs/core-concepts/process-model)
+for ordering and cancellation behavior.
+
+### `secondInstance(context, event)`
+
+Packaged macOS and Windows apps use a per-user, per-`appId` lock. When another
+launch is redirected to the primary app, Murasaki focuses its window and calls
+`secondInstance()` with:
+
+| Field | Meaning |
+| --- | --- |
+| `event.argv` | Arguments passed to the second launcher, including URL/file arguments supplied by the caller |
+| `event.cwd` | Working directory of the second launch |
+
+Validate every argument before use. Murasaki does not yet register URL schemes
+or file associations for you; the event only receives values when the OS or
+caller already launches the executable with them. This hook is not currently
+delivered by `murasaki dev` or Linux.
+
+## Call Node from the renderer with `'use main'`
+
+A top-level `'use main'` directive exposes the module's exported functions as
+typed calls to the same Node module graph as `src/main.ts`.
+
+```ts title="src/backend/checksum.ts"
+'use main'
+
+import { createHash } from 'node:crypto'
+
+export async function sha256(text: string): Promise<string> {
+  if (typeof text !== 'string' || text.length > 1_000_000) {
+    throw new TypeError('text must be a string no larger than 1 MB')
+  }
+  return createHash('sha256').update(text).digest('hex')
+}
+```
+
+Import it normally from a client component. The renderer bundle receives a
+fetch stub; the Node implementation does not ship to the WebView.
+
+```tsx title="src/app/page.tsx"
+'use client'
+
+import { useState } from 'react'
+import { sha256 } from '../backend/checksum'
+
+export default function Page() {
+  const [digest, setDigest] = useState('')
+
+  return (
+    <button onClick={() => void sha256('Murasaki').then(setDigest)}>
+      Hash {digest && `(${digest.slice(0, 8)}…)`}
+    </button>
+  )
+}
+```
+
+## Stream Main events to the renderer
+
+Use the typed event channel for connection status, progress, device events,
+watcher output, or other values that originate in long-lived Node work:
+
+```ts title="src/main.ts"
+import { defineMain, emitMainEvent } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ signal }) {
+    const timer = setInterval(() => {
+      emitMainEvent('relay.status', { connected: true, at: new Date() })
+    }, 1_000)
+    signal.addEventListener('abort', () => clearInterval(timer), { once: true })
+  },
+})
+```
+
+Subscribe in a client component:
+
+```tsx
+'use client'
+
+import { useEffect, useState } from 'react'
+import { subscribeMainEvent } from 'murasaki/main-client'
+
+export function RelayStatus() {
+  const [connected, setConnected] = useState(false)
+  useEffect(() => subscribeMainEvent<{ connected: boolean; at: Date }>(
+    'relay.status',
+    (event) => setConnected(event.connected),
+  ), [])
+  return <output>{connected ? 'Connected' : 'Disconnected'}</output>
+}
+```
+
+Events use the same rich-value wire codec as `'use main'` and travel over an
+authenticated app-local SSE connection. EventSource reconnects after a
+temporary disconnect, but events are live-only: there is no replay buffer or
+durable queue. Store durable state in Node and expose a `'use main'` snapshot
+function when a subscriber must recover missed values.
+
+<Callout type="warn">
+  `'use main'` is an experimental RPC boundary, not an authorization boundary.
+  Treat every argument as untrusted renderer input: validate types, normalize
+  filesystem paths, and authorize access to application data inside the Node
+  function.
+</Callout>
+
+## Wire values and limits
+
+Calls use Murasaki's versioned wire codec. It supports primitives,
+`undefined`, `bigint`, `Date`, `Map`, `Set`, cyclic plain objects/arrays,
+`ArrayBuffer`, typed arrays, `Blob`, `File`, `FormData`, and structured
+`Error` values.
+
+- Maximum request or response payload: **32 MiB**.
+- Functions, symbols, and instances with custom prototypes are rejected.
+- Calls are request/response today; use Main events for live push. Returning
+  `AsyncIterable` directly from a `'use main'` call is not implemented.
+- Export named `function`, `async function`, `const`, `let`, or `var` values.
+  At runtime the selected export must be callable.
+
+For large files, do not send the bytes through RPC. Pass a validated app-owned
+identifier or path and stream the data entirely within Node.
+
+## `'use main'` vs `'use server'` vs API routes
+
+| Choose | When |
+| --- | --- |
+| `'use main'` | Typed imperative calls into the long-lived application backend |
+| `'use server'` | React action/form-shaped mutations using `ActionState` |
+| `src/api/**/route.ts` | Request/Response semantics, streaming bodies, HTTP method routing |
+
+All three execute in the app-local Node runtime. API routes are not a public
+network server; Murasaki protects them with the same app runtime session as
+the internal RPC endpoints.
+
+## Current limits
+
+Node Main does not yet provide public multi-window, tray-menu, global shortcut, URL
+scheme registration, or file-association APIs. Packaged macOS/Windows
+single-instance delivery is available through `secondInstance()`.
+Renderer-safe dialogs, clipboard, notifications, shell, and basic window commands are separately available from
+`murasaki/native` behind the `capabilities` allowlist. Node packages may also
+require explicit `bundle.external` / `bundle.resources` entries when they use
+computed imports, dynamic native addons, or runtime-discovered assets; always
+test the installed artifact on a clean machine, not only `murasaki dev`.
+
+## Next
+
+<Cards>
+  <Card title="Process model" href="/docs/core-concepts/process-model" />
+  <Card title="Security" href="/docs/building/security" />
+  <Card title="API Routes" href="/docs/guides/api-routes" />
+</Cards>

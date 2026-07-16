@@ -17,6 +17,8 @@ my-app/
 │  ├─ api/                    # API route handlers -> /api/*
 │  │  ├─ hello/route.ts       # GET/POST handlers
 │  │  └─ greet/[name]/route.ts # dynamic segment -> /api/greet/:name
+│  ├─ main.ts                 # long-lived Node lifecycle (optional)
+│  ├─ backend/                # common home for 'use main' modules (optional)
 │  ├─ middleware.ts           # runs before every navigation (optional)
 │  ├─ lib/                    # your app code (stores, context-menu actions, helpers)
 │  └─ assets/                 # images, icons
@@ -52,6 +54,13 @@ server'` function runs on the server and is called from the client with
 `useAction`, wherever you put the file. See
 [Server Actions](/docs/guides/server-actions).
 
+## Node Main and `'use main'`
+
+`src/main.ts` owns long-lived Node resources and graceful shutdown. A module
+with a top-level `'use main'` directive exposes typed renderer-to-Node
+functions and can live anywhere under `src/`; `src/backend/` is only a useful
+convention. See [Node Main](/docs/guides/node-main).
+
 ## `murasaki.config.ts`
 
 Your app's identity, window, and build settings:
@@ -74,5 +83,6 @@ See [Configuration](/docs/building/configuration) for every field.
 
 <Cards>
   <Card title="Routing" href="/docs/guides/routing" description="File-based routing, layouts, and navigation." />
+  <Card title="Node Main" href="/docs/guides/node-main" description="Long-lived backend state and typed renderer calls." />
   <Card title="Configuration" href="/docs/building/configuration" description="Window, signing, and installer settings." />
 </Cards>

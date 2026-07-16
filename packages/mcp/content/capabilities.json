@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "frameworkVersion": "0.48.0",
+  "features": [
+    {
+      "id": "file-routing",
+      "category": "web-framework",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Page, layout, loading, error, not-found, route-group, and single dynamic segments ship today; catch-all page segments are not implemented.",
+        "The router is client-side and does not provide the full Next.js App Router or React Server Components runtime."
+      ],
+      "apiSymbols": [
+        "AppRouter",
+        "Link",
+        "useRouter",
+        "usePathname",
+        "useParams"
+      ],
+      "testEvidence": [],
+      "docsSlug": "/docs/guides/routing"
+    },
+    {
+      "id": "server-actions",
+      "category": "web-framework",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Actions execute in the bundled local Node runtime; they are not Next.js Server Actions and are not a remotely hosted RPC service.",
+        "The versioned wire format has explicit value and payload limits and may change before Murasaki 1.0."
+      ],
+      "apiSymbols": [
+        "defineAction",
+        "callAction",
+        "useAction",
+        "ActionState"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/server-actions-wire.test.mjs",
+        "packages/murasaki/test/wire.test.mjs"
+      ],
+      "docsSlug": "/docs/guides/server-actions"
+    },
+    {
+      "id": "api-routes",
+      "category": "web-framework",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Routes are served by the app-local Node process and are not intended to expose a public network service.",
+        "The API surface follows Web Request and Response primitives but is not the complete Next.js Route Handler runtime."
+      ],
+      "apiSymbols": [
+        "RouteHandler"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/api-routes.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs"
+      ],
+      "docsSlug": "/docs/guides/api-routes"
+    },
+    {
+      "id": "navigation-middleware",
+      "category": "web-framework",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Middleware runs in the renderer before client navigation and only receives pathname.",
+        "Request headers, response headers, cookies, edge execution, and matcher configuration are not available."
+      ],
+      "apiSymbols": [
+        "Middleware",
+        "MiddlewareContext",
+        "MiddlewareResult"
+      ],
+      "testEvidence": [],
+      "docsSlug": "/docs/guides/middleware"
+    },
+    {
+      "id": "route-metadata",
+      "category": "web-framework",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Document title, description, favicon, and a small Open Graph subset are applied in the renderer.",
+        "The metadata shape is not Next.js-compatible in full, and document metadata does not update the native window title."
+      ],
+      "apiSymbols": [
+        "Metadata",
+        "GenerateMetadata",
+        "applyMetadata"
+      ],
+      "testEvidence": [],
+      "docsSlug": "/docs/guides/metadata"
+    },
+    {
+      "id": "node-main-lifecycle",
+      "category": "application-model",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, and typed live events to renderers.",
+        "It does not yet expose a production-ready multi-window manager, crash-restart policy, or process supervision API."
+      ],
+      "apiSymbols": [
+        "murasaki/main",
+        "defineMain",
+        "emitMainEvent",
+        "murasaki/main-client.subscribeMainEvent",
+        "MainContext",
+        "MainDefinition"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/main-runtime.test.mjs",
+        "packages/murasaki/test/main-events.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs"
+      ],
+      "docsSlug": "/docs/guides/node-main"
+    },
+    {
+      "id": "native-window",
+      "category": "native-integration",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Murasaki launches one application window; a supported multi-window manager and per-window lifecycle events are not available.",
+        "Window vibrancy remains a declared no-op, and the public renderer surface exposes only a subset of native window operations."
+      ],
+      "apiSymbols": [
+        "App",
+        "WindowConfig",
+        "murasaki/native.appWindow"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/native-api.test.mjs"
+      ],
+      "docsSlug": "/docs/building/configuration"
+    },
+    {
+      "id": "application-menu",
+      "category": "native-integration",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "unsupported"
+      },
+      "limitations": [
+        "Native application menus ship on macOS and Windows, with platform-specific role behavior.",
+        "Linux has no default or custom application menu implementation."
+      ],
+      "apiSymbols": [
+        "useAppMenu",
+        "AppMenu",
+        "AppMenuItemSpec"
+      ],
+      "testEvidence": [],
+      "docsSlug": "/docs/guides/app-menu"
+    },
+    {
+      "id": "context-menu",
+      "category": "native-integration",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "unsupported"
+      },
+      "limitations": [
+        "Native whole-window and scoped context menus ship on macOS and Windows.",
+        "The Linux IPC path reports that native context menus are not implemented."
+      ],
+      "apiSymbols": [
+        "useContextMenu",
+        "ContextMenuTrigger",
+        "Action",
+        "createActions"
+      ],
+      "testEvidence": [],
+      "docsSlug": "/docs/guides/context-menu"
+    },
+    {
+      "id": "native-utilities",
+      "category": "native-integration",
+      "status": "partial",
+      "platforms": {
+        "macos": "partial",
+        "windows": "partial",
+        "linux": "partial"
+      },
+      "limitations": [
+        "Dialogs, clipboard, notifications, shell helpers, and basic window controls are exposed to trusted renderer code through the same-origin native bridge.",
+        "The API is a fixed allowlist but does not yet have declarative per-window permissions; it is not available directly inside src/main.ts."
+      ],
+      "apiSymbols": [
+        "murasaki/native.dialog",
+        "murasaki/native.clipboard",
+        "murasaki/native.notification",
+        "murasaki/native.shell",
+        "murasaki/native.appWindow"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/native-api.test.mjs",
+        ".github/workflows/native-release.yml"
+      ],
+      "docsSlug": "/docs/guides/native-apis"
+    },
+    {
+      "id": "auto-update",
+      "category": "distribution",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "partial",
+        "linux": "unsupported"
+      },
+      "limitations": [
+        "Signed manifests, bounded downloads, SHA-256 payload verification, staged handoff, and relaunch are implemented for packaged apps.",
+        "Linux packaging and updates are unavailable; Windows arm64 update publishing is not supported by the current artifact naming and manifest scan."
+      ],
+      "apiSymbols": [
+        "useUpdate",
+        "UpdateButton",
+        "UpdaterConfig",
+        "UpdateState"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/updater-hardening.test.mjs",
+        ".github/workflows/app-package-win.yml"
+      ],
+      "docsSlug": "/docs/guides/auto-update"
+    },
+    {
+      "id": "application-packaging",
+      "category": "distribution",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "planned"
+      },
+      "limitations": [
+        "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today.",
+        "Linux launcher packaging and installers are not implemented. WiX is required for MSI and only runs on Windows."
+      ],
+      "apiSymbols": [
+        "murasaki bundle",
+        "murasaki installer"
+      ],
+      "testEvidence": [
+        ".github/workflows/app-package-win.yml"
+      ],
+      "docsSlug": "/docs/building/distribution"
+    },
+    {
+      "id": "code-signing",
+      "category": "distribution",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "planned",
+        "linux": "planned"
+      },
+      "limitations": [
+        "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",
+        "Windows Authenticode and Linux package signing are not implemented. Ad-hoc macOS signatures do not establish user trust."
+      ],
+      "apiSymbols": [
+        "MurasakiConfig.sign",
+        "murasaki bundle --sign",
+        "murasaki installer --notarize"
+      ],
+      "testEvidence": [],
+      "docsSlug": "/docs/building/distribution"
+    },
+    {
+      "id": "loopback-endpoint-protection",
+      "category": "security",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Development privileged endpoints require an HttpOnly same-site runtime session and validate loopback Host, Origin, and Fetch Metadata.",
+        "Renderer native commands have a deny-by-default app-level allowlist, but per-window, path/URL-scoped, and multi-origin policies are not implemented."
+      ],
+      "apiSymbols": [],
+      "testEvidence": [],
+      "docsSlug": "/docs/building/security"
+    },
+    {
+      "id": "multi-window",
+      "category": "application-model",
+      "status": "planned",
+      "platforms": {
+        "macos": "planned",
+        "windows": "planned",
+        "linux": "planned"
+      },
+      "limitations": [
+        "There is no supported public API for creating, identifying, restoring, or independently closing multiple application windows."
+      ],
+      "apiSymbols": [],
+      "testEvidence": [],
+      "docsSlug": "/docs/core-concepts/platform-feature-status"
+    },
+    {
+      "id": "tray-and-global-shortcuts",
+      "category": "native-integration",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "planned"
+      },
+      "limitations": [
+        "A one-icon tray API with tooltip and click events ships on macOS and Windows.",
+        "Tray menus, dynamic icon replacement, global shortcuts, and Linux tray support are not implemented yet."
+      ],
+      "apiSymbols": [
+        "murasaki/native.tray",
+        "TrayOptions",
+        "TrayClickEvent"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/native-api.test.mjs",
+        "crates/native/src/webview.rs"
+      ],
+      "docsSlug": "/docs/guides/native-apis"
+    },
+    {
+      "id": "single-instance-and-deep-links",
+      "category": "application-model",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "planned"
+      },
+      "limitations": [
+        "Packaged macOS and Windows apps enforce a per-user app lock, focus the primary window, and deliver second-launch argv/cwd to src/main.ts.",
+        "URL scheme and file-association registration are not implemented, so deep-link URLs only arrive when the OS or caller already launches the executable with them."
+      ],
+      "apiSymbols": [
+        "MainDefinition.secondInstance",
+        "SecondInstanceEvent"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/main-runtime.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs"
+      ],
+      "docsSlug": "/docs/guides/node-main"
+    },
+    {
+      "id": "capability-permissions",
+      "category": "security",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Renderer native commands are deny-by-default and granted through a typed app-level capability allowlist; sender origin and command names are validated in Rust.",
+        "Per-window grants, argument/path scopes, explicit deny overrides, and generated JSON schemas are not implemented yet."
+      ],
+      "apiSymbols": [
+        "MurasakiConfig.capabilities",
+        "NativeCapability"
+      ],
+      "testEvidence": [
+        "crates/native/src/webview.rs",
+        "packages/murasaki/test/native-api.test.mjs"
+      ],
+      "docsSlug": "/docs/building/security"
+    },
+    {
+      "id": "linux-distribution",
+      "category": "distribution",
+      "status": "planned",
+      "platforms": {
+        "macos": "unsupported",
+        "windows": "unsupported",
+        "linux": "planned"
+      },
+      "limitations": [
+        "Prebuilt Linux native binaries and development support do not constitute an installable Linux application release.",
+        "AppImage, deb, rpm, repository metadata, signing, updates, and launcher packaging are not implemented."
+      ],
+      "apiSymbols": [],
+      "testEvidence": [],
+      "docsSlug": "/docs/core-concepts/platform-feature-status"
+    }
+  ]
+}

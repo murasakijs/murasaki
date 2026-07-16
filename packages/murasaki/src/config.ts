@@ -88,6 +88,52 @@ export interface MurasakiConfig {
   window?: WindowConfig
 
   /**
+   * Native commands exposed to trusted renderer code through `murasaki/native`.
+   * Default is deny-all; grant only the capabilities the app uses.
+   */
+  capabilities?: NativeCapability[]
+
+  /** Long-lived Node main process (`src/main.ts` by default when present). */
+  main?: false | {
+    /** Entry relative to the project root. Default `src/main.ts`. */
+    entry?: string
+    /** Maximum graceful cleanup time before the native host exits. Default 10s. */
+    shutdownTimeoutMs?: number
+  }
+
+  /** Production packaging for Node-side code and non-code assets. */
+  bundle?: {
+    /**
+     * Additional npm packages to keep external from the server/main bundle
+     * and copy into the packaged app. Static bare imports are detected and
+     * staged automatically; list packages here when they are loaded through
+     * a computed import/require or by a plugin at runtime.
+     */
+    external?: string[]
+    /**
+     * Bare npm packages that should be compiled into dist/server instead of
+     * staged in node_modules. Framework packages are bundled by default. Do
+     * not use this for native add-ons or packages with runtime data files.
+     */
+    noExternal?: string[]
+    /**
+     * Files/directories copied into the packaged resources directory. The
+     * string form copies to its basename; the object form chooses a relative
+     * destination. Useful for Prisma schemas, migrations, models, and other
+     * data that JavaScript bundlers cannot discover.
+     */
+    resources?: Array<string | { from: string; to?: string }>
+  }
+
+  /** Client/server build orchestration and public client environment prefixes. */
+  build?: {
+    /** Command run before the client and Node bundles (for workspace packages, codegen, etc.). */
+    before?: string
+    /** Variables with these prefixes may be embedded in renderer code. Default `VITE_` and `NEXT_PUBLIC_`. */
+    envPrefix?: string[]
+  }
+
+  /**
    * Auto-update config. `true` is a complete, working setup for a normal OSS
    * app (GitHub repo inferred from `package.json`, public key from
    * `.murasaki/update-key.pub`). See `UpdaterConfig`/`resolveUpdater`.
@@ -196,6 +242,23 @@ export interface MurasakiConfig {
     entitlements?: string
   }
 }
+
+export type NativeCapability =
+  | 'dialog:openFile'
+  | 'dialog:openDirectory'
+  | 'dialog:saveFile'
+  | 'clipboard:readText'
+  | 'clipboard:writeText'
+  | 'notification:show'
+  | 'shell:openExternal'
+  | 'shell:showItemInFolder'
+  | 'window:setTitle'
+  | 'window:setSize'
+  | 'window:minimize'
+  | 'window:toggleMaximize'
+  | 'tray:create'
+  | 'tray:remove'
+  | 'tray:setTooltip'
 
 export function defineConfig(config: MurasakiConfig): MurasakiConfig {
   return config

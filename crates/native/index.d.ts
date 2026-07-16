@@ -159,6 +159,12 @@ export interface WebviewOptions {
   html?: string
   devtools?: boolean
   transparent?: boolean
+  /** Stable application identifier used to isolate native WebView profile data. */
+  appId?: string
+  /** Exact native renderer command allowlist. Omitted means deny-all. */
+  capabilities?: string[]
+  /** Default PNG path used by the renderer tray API. */
+  trayIcon?: string
   /**
    * When set, static files under this directory are served via wry's custom
    * protocol (`murasaki://localhost/…`) instead of `url`/`html` — used in

@@ -19,6 +19,7 @@ export default defineConfig({
     width: 1000,
     height: 700,
   },
+  capabilities: ['dialog:openFile', 'clipboard:writeText'],
 })
 ```
 
@@ -37,12 +38,16 @@ export default defineConfig({
 | `homepage` | `string?` | About パネルに表示されるホームページ URL。 |
 | `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
+| `capabilities` | `NativeCapability[]?` | レンダラーへ許可するネイティブコマンド。デフォルトはすべて拒否 — [ネイティブ API](/docs/guides/native-apis)を参照。 |
+| `main` | `false \| object?` | 長寿命 Node Main entry と shutdown 上限 — [下記](#main)を参照。 |
+| `bundle` | `object?` | Node dependency と non-code resource packaging — [下記](#bundle)を参照。 |
+| `build` | `object?` | pre-build command とclient公開env prefix — [下記](#build)を参照。 |
 | `updater` | `UpdaterConfig?` | 自動更新のソース — [下記](#updater)を参照。 |
 | `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、Murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは Murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
 | `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
 | `targets` | `Target[]?` | ビルドターゲット。デフォルトはホストプラットフォーム。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` のうち1つ以上。 |
 | `icon` | `string?` | ソースとなる PNG(理想は 1024px)へのパス。`murasaki icon` / `murasaki bundle` がこれを `.icns` / `.ico` / PNG セットに展開します。 |
-| `installer` | `object?` | `.dmg` のスタイリング — [下記](#installer)を参照。 |
+| `installer` | `object?` | macOS DMG / Windows installer option — [下記](#installer)を参照。 |
 | `sign` | `object?` | macOS のコード署名 — [下記](#sign)を参照。 |
 
 ## `window`
@@ -55,11 +60,94 @@ export default defineConfig({
 | `resizable` | `boolean?` | ウィンドウをリサイズ可能にするかどうか。 |
 | `transparent` | `boolean?` | 透明なウィンドウ背景。 |
 | `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS の半透明なウィンドウビブランシー。 |
+| `console` | `boolean?` | Windows のみ: backend Node console window を表示。既定 `false`。 |
 
 <Callout type="warn">
   `vibrancy` は宣言できますが、ネイティブバインディングにはまだ適用されていません —
   設定しても現時点では no-op です(サポート予定)。
 </Callout>
+
+## `capabilities`
+
+レンダラー向けネイティブAPIはデフォルトですべて拒否されます。アプリが実際に使う
+コマンドだけを追加してください。未知のpermissionは何も許可しません。
+
+```ts
+capabilities: [
+  'dialog:openFile',
+  'clipboard:readText',
+  'clipboard:writeText',
+  'notification:show',
+  'shell:openExternal',
+  'window:setTitle',
+]
+```
+
+完全な型付き一覧は `NativeCapability` です。許可は信頼済みアプリoriginにだけ適用され、
+別originのページはネイティブブリッジを利用できません。
+
+## `main`
+
+`src/main.ts` が存在すると Murasaki が読み込みます。別 entry、graceful cleanup deadline、
+Main discovery の無効化を設定できます。
+
+```ts
+main: {
+  entry: 'src/backend/main.ts',
+  shutdownTimeoutMs: 15_000,
+}
+// main: false
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `entry` | `string?` | project root からの相対 path。既定 `src/main.ts`。 |
+| `shutdownTimeoutMs` | `number?` | host exit 前の `shutdown()` 最大時間。既定 `10_000`。 |
+
+lifecycle hook と `'use main'` は [Node Main](/ja/docs/guides/node-main)を参照してください。
+
+## `bundle`
+
+server / Main code は本番向けに compile されます。static bare npm import は自動検出・
+stage されます。runtime behavior を静的検出できない dependency / asset に次を使います。
+
+```ts
+bundle: {
+  external: ['computed-plugin'],
+  noExternal: ['small-js-only-package'],
+  resources: [
+    'prisma/schema.prisma',
+    { from: 'prisma/migrations', to: 'database/migrations' },
+  ],
+}
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `external` | `string[]?` | app `node_modules` に stage。computed / dynamic package load を追加。native addon / runtime data を持つ package はこちらを優先。 |
+| `noExternal` | `string[]?` | compiled server bundle に強制的に含める。runtime asset のない JS-only package 向け。 |
+| `resources` | `Array<string \| { from: string; to?: string }>?` | packaged resources に file / directory を copy。string は source basename、object は相対 destination を指定。 |
+
+`resources` に secret を置かないでください。app bundle 内は user が読めます。native addon
+は全 target architecture でテストしてください。
+
+## `build`
+
+```ts
+build: {
+  before: 'pnpm --filter @acme/database build && pnpm prisma generate',
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+}
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `before` | `string?` | client / Node buildの前に一度実行するshell command。非0終了ならpackagingを停止。workspace prerequisiteやcode generation向け。 |
+| `envPrefix` | `string[]?` | Viteがrenderer codeへ公開できるenv prefix。既定は`VITE_`と`NEXT_PUBLIC_`。 |
+
+prefix付き変数はclient公開用ですが、secretを置かないでください。Viteが値を配布JavaScriptへ
+埋め込みます。packaged Node Mainはlauncherの環境を継承し、Murasakiは`.env`をappへ
+コピーしません。end-user runtime設定は`context.paths.data`かdeployment環境を使います。
 
 ## `updater`
 
@@ -95,14 +183,26 @@ type UpdaterConfig =
 
 ## `installer`
 
-`murasaki installer` が生成する `.dmg` のスタイリングです。まったく省略すれば
-Murasaki のデフォルトの背景が使われます。
+macOS DMG styling と Windows NSIS / MSI installer option です。省略時は Murasaki の
+既定値を使います。
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
 | `background` | `string?` | カスタム DMG 背景 PNG への(プロジェクトルートからの相対)パス。Murasaki のデフォルトを上書きします。 |
 | `window` | `{ width: number; height: number }?` | DMG ウィンドウのコンテンツサイズ(ポイント単位)。デフォルトは `{ width: 640, height: 420 }`(デフォルトの背景に合わせています)。 |
 | `iconSize` | `number?` | DMG ウィンドウ内のアイコンサイズ。デフォルトは `128`。 |
+
+### `installer.windows`
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `installMode` | `'perUser' \| 'perMachine'` | NSIS install scope。既定 `perUser`。MSI は常に per-machine。 |
+| `publisher` | `string?` | installer / Add-Remove Programs の publisher。`authors`、`copyright`、`productName` の順に fallback。 |
+| `upgradeCode` | `string?` | 安定した MSI GUID。既定は `appId` 由来。release 後は変更しない。 |
+| `icon` | `string?` | installer / uninstaller / Add-Remove Programs 用 `.ico`。既定は生成済み app icon。 |
+| `banner` | `string?` | wizard header BMP。NSIS は 150×57、MSI は 493×58 を期待。 |
+| `sidebar` | `string?` | welcome / finish BMP。NSIS は 164×314、MSI は 493×312 を期待。 |
+| `license` | `string?` | NSIS `.txt` / `.rtf` または MSI `.rtf` license file。 |
 
 ## `sign`
 
@@ -120,6 +220,7 @@ macOS のコード署名です。Murasaki は**あなた自身の**証明書で�
 ## 次へ
 
 <Cards>
-  <Card title="CLI リファレンス" href="/docs/building/cli" />
-  <Card title="配布" href="/docs/building/distribution" />
+  <Card title="CLI リファレンス" href="/ja/docs/building/cli" />
+  <Card title="Node Main" href="/ja/docs/guides/node-main" />
+  <Card title="配布" href="/ja/docs/building/distribution" />
 </Cards>

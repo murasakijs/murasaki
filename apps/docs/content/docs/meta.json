@@ -1,3 +1,10 @@
 {
-  "pages": ["index", "getting-started", "guides", "components", "building"]
+  "pages": [
+    "index",
+    "getting-started",
+    "core-concepts",
+    "guides",
+    "components",
+    "building"
+  ]
 }

@@ -21,23 +21,18 @@
  * Per §0, this only runs in Node — the updater never round-trips through the
  * napi IPC bridge (that path is dead in both dev and prod).
  *
- * `assets/prod-server.mjs` needs this exact same behavior in prod, but it
- * ships as a single standalone `.mjs` file with no import graph (see its own
- * header comment and `cli/bundle.ts`'s `metaJson`/bundling — nothing besides
- * that one file gets copied into the packaged resources dir). So prod mounts
- * a hand-mirrored, plain-JS re-implementation of everything below directly
- * in `prod-server.mjs`, the same way `handleAction`/`handleApiRoute` there
- * already mirror (never import) `vite-plugin/server-actions.ts` and
- * `vite-plugin/api-routes.ts`. Keep the two in sync by hand; this module is
- * the canonical version.
+ * `assets/prod-server.mjs` imports the compiled form of this module from the
+ * packaged `updater-engine.mjs` resource. This module is therefore the sole
+ * implementation shared by dev and production; do not mirror its security-
+ * sensitive manifest/download logic into the standalone server.
  */
-import { createHash, createPublicKey, verify as verifyEd25519 } from 'node:crypto'
+import { createHash, createPublicKey, randomBytes, verify as verifyEd25519 } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { ResolvedUpdater } from '../config.js'
 
@@ -64,6 +59,16 @@ export interface UpdaterEngineOptions {
   resourcesDir?: string
   /** Where downloaded payloads are staged before install. Defaults to a directory under `os.tmpdir()`. */
   stagingDir?: string
+  /** Network timeout for each manifest/signature request. Primarily exposed so embedders can tune unusually slow self-hosted endpoints. */
+  requestTimeoutMs?: number
+  /** End-to-end timeout for an update payload download. */
+  downloadTimeoutMs?: number
+  /** Maximum accepted raw manifest size. */
+  maxManifestBytes?: number
+  /** Maximum accepted detached signature response size. */
+  maxSignatureBytes?: number
+  /** Maximum accepted update payload size. Enforced even without `content-length`. */
+  maxPayloadBytes?: number
 }
 
 export interface UpdaterEngine {
@@ -82,6 +87,11 @@ export interface UpdaterEngine {
 const DEV_UNSUPPORTED_MESSAGE = 'Updates only apply to a bundled app. Run `murasaki bundle` first.'
 
 const SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex')
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+const DEFAULT_DOWNLOAD_TIMEOUT_MS = 10 * 60_000
+const DEFAULT_MAX_MANIFEST_BYTES = 1024 * 1024
+const DEFAULT_MAX_SIGNATURE_BYTES = 16 * 1024
+const DEFAULT_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   const listeners = new Set<(state: UpdateState) => void>()
@@ -90,6 +100,29 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   let manifestAsset: { url: string; sha256: string } | undefined
   let stagedPath: string | undefined
   let stagedSha256: string | undefined
+  let stagedDirectory: string | undefined
+
+  const requestTimeoutMs = positiveLimit(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS, 'requestTimeoutMs')
+  const downloadTimeoutMs = positiveLimit(
+    opts.downloadTimeoutMs,
+    DEFAULT_DOWNLOAD_TIMEOUT_MS,
+    'downloadTimeoutMs',
+  )
+  const maxManifestBytes = positiveLimit(
+    opts.maxManifestBytes,
+    DEFAULT_MAX_MANIFEST_BYTES,
+    'maxManifestBytes',
+  )
+  const maxSignatureBytes = positiveLimit(
+    opts.maxSignatureBytes,
+    DEFAULT_MAX_SIGNATURE_BYTES,
+    'maxSignatureBytes',
+  )
+  const maxPayloadBytes = positiveLimit(
+    opts.maxPayloadBytes,
+    DEFAULT_MAX_PAYLOAD_BYTES,
+    'maxPayloadBytes',
+  )
 
   function setState(next: UpdateState): UpdateState {
     state = next
@@ -134,17 +167,19 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
 
     try {
       const { manifestUrl, publicKey } = opts.resolvedUpdater
-      const manifestRes = await fetch(manifestUrl)
-      if (!manifestRes.ok) {
-        throw new Error(`failed to fetch manifest: HTTP ${manifestRes.status}`)
-      }
-      const manifestBytes = Buffer.from(await manifestRes.arrayBuffer())
-
-      const sigRes = await fetch(`${manifestUrl}.sig`)
-      if (!sigRes.ok) {
-        throw new Error(`failed to fetch manifest signature: HTTP ${sigRes.status}`)
-      }
-      const sigText = await sigRes.text()
+      const manifestBytes = await fetchLimitedBytes(
+        manifestUrl,
+        'manifest',
+        maxManifestBytes,
+        requestTimeoutMs,
+      )
+      const sigBytes = await fetchLimitedBytes(
+        `${manifestUrl}.sig`,
+        'manifest signature',
+        maxSignatureBytes,
+        requestTimeoutMs,
+      )
+      const sigText = sigBytes.toString('utf8')
 
       // Verify BEFORE parsing — the raw bytes are what was signed (contract
       // §1). A bad/missing signature is a hard error, never a silent pass:
@@ -189,7 +224,17 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
     }
   }
 
-  async function download(): Promise<void> {
+  let inFlightDownload: Promise<void> | undefined
+
+  function download(): Promise<void> {
+    if (inFlightDownload) return inFlightDownload
+    inFlightDownload = runDownload().finally(() => {
+      inFlightDownload = undefined
+    })
+    return inFlightDownload
+  }
+
+  async function runDownload(): Promise<void> {
     if (opts.mode === 'dev') {
       setState({ status: 'error', current: opts.currentVersion, error: DEV_UNSUPPORTED_MESSAGE })
       return
@@ -203,35 +248,62 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
       return
     }
 
+    // Snapshot the verified asset. A timer-driven check may complete while a
+    // large payload is downloading; it must not change which URL/hash this
+    // particular operation verifies.
+    const asset = manifestAsset
+    const info = manifestInfo
     setState({ status: 'downloading', current: opts.currentVersion, progress: 0 })
+    let sessionDirectory: string | undefined
     try {
-      const stagingDir = opts.stagingDir ?? join(tmpdir(), 'murasaki-update')
-      await mkdir(stagingDir, { recursive: true })
-      const dest = join(stagingDir, basenameFromUrl(manifestAsset.url))
-      await rm(dest, { force: true })
+      const stagingRoot = opts.stagingDir ?? join(tmpdir(), 'murasaki-update')
+      await mkdir(stagingRoot, { recursive: true })
+      const appKey = createHash('sha256')
+        .update(opts.resolvedUpdater?.manifestUrl ?? '')
+        .update('\0')
+        .update(opts.resolvedUpdater?.publicKey ?? '')
+        .digest('hex')
+        .slice(0, 12)
+      const targetVersion = safePathSegment(info?.version ?? 'unknown')
+      sessionDirectory = await mkdtemp(join(stagingRoot, `${appKey}-${targetVersion}-`))
+      await chmod(sessionDirectory, 0o700)
+      const dest = join(sessionDirectory, basenameFromUrl(asset.url))
 
-      await streamDownload(manifestAsset.url, dest, (progress) => {
-        setState({ status: 'downloading', current: opts.currentVersion, progress })
-      })
+      const digest = await streamDownload(
+        asset.url,
+        dest,
+        maxPayloadBytes,
+        downloadTimeoutMs,
+        (progress) => {
+          setState({ status: 'downloading', current: opts.currentVersion, progress })
+        },
+      )
 
-      const digest = await sha256File(dest)
-      if (digest.toLowerCase() !== manifestAsset.sha256.toLowerCase()) {
-        await rm(dest, { force: true })
+      if (digest.toLowerCase() !== asset.sha256.toLowerCase()) {
         throw new Error('downloaded payload failed sha256 verification')
       }
 
+      const previousDirectory = stagedDirectory
       stagedPath = dest
       stagedSha256 = digest
+      stagedDirectory = sessionDirectory
+      sessionDirectory = undefined
+      if (previousDirectory && previousDirectory !== stagedDirectory) {
+        await rm(previousDirectory, { recursive: true, force: true })
+      }
       setState({
         status: 'ready',
         current: opts.currentVersion,
-        latest: manifestInfo?.version,
-        notes: manifestInfo?.notes,
-        mandatory: manifestInfo?.mandatory,
+        latest: info?.version,
+        notes: info?.notes,
+        mandatory: info?.mandatory,
       })
     } catch (err) {
+      if (sessionDirectory) await rm(sessionDirectory, { recursive: true, force: true }).catch(() => {})
+      if (stagedDirectory) await rm(stagedDirectory, { recursive: true, force: true }).catch(() => {})
       stagedPath = undefined
       stagedSha256 = undefined
+      stagedDirectory = undefined
       setState({ status: 'error', current: opts.currentVersion, error: errorMessage(err) })
     }
   }
@@ -264,7 +336,10 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
       // install location and pid — this file deliberately carries only the
       // two things only Node knows.
       const handoffPath = join(opts.resourcesDir, '.murasaki-apply.json')
-      await writeFile(handoffPath, JSON.stringify({ payload: stagedPath, sha256: stagedSha256 }))
+      await writeAtomicPrivateFile(
+        handoffPath,
+        JSON.stringify({ payload: stagedPath, sha256: stagedSha256 }),
+      )
       return { ok: true }
     } catch (err) {
       const error = errorMessage(err)
@@ -375,33 +450,143 @@ function parseSemver(version: string): { core: [number, number, number]; pre: st
   }
 }
 
-/** Streams `url` to `dest`, reporting 0..1 progress as bytes arrive (only when the response carries `content-length`). */
-async function streamDownload(url: string, dest: string, onProgress: (progress: number) => void): Promise<void> {
-  const res = await fetch(url)
-  if (!res.ok || !res.body) {
-    throw new Error(`failed to download update: HTTP ${res.status}`)
-  }
-  const total = Number(res.headers.get('content-length') ?? 0)
-  let received = 0
-  const nodeStream = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream<Uint8Array>)
-  nodeStream.on('data', (chunk: Buffer) => {
-    received += chunk.length
-    if (total > 0) onProgress(Math.min(received / total, 1))
+async function fetchLimitedBytes(
+  url: string,
+  label: string,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<Buffer> {
+  return withFetchTimeout(label, timeoutMs, async (signal) => {
+    const res = await fetch(url, { signal })
+    if (!res.ok) {
+      throw new Error(`failed to fetch ${label}: HTTP ${res.status}`)
+    }
+    enforceContentLength(res, label, maxBytes)
+    if (!res.body) return Buffer.alloc(0)
+
+    const chunks: Buffer[] = []
+    let received = 0
+    const stream = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream<Uint8Array>)
+    for await (const chunk of stream) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      received += bytes.length
+      if (received > maxBytes) {
+        throw new Error(`${label} exceeds the ${maxBytes}-byte size limit`)
+      }
+      chunks.push(bytes)
+    }
+    return Buffer.concat(chunks, received)
   })
-  await pipeline(nodeStream, createWriteStream(dest))
 }
 
-async function sha256File(path: string): Promise<string> {
-  return createHash('sha256').update(await readFile(path)).digest('hex')
+/** Streams `url` to `dest`, hashing and enforcing the byte cap without buffering the payload in memory. */
+async function streamDownload(
+  url: string,
+  dest: string,
+  maxBytes: number,
+  timeoutMs: number,
+  onProgress: (progress: number) => void,
+): Promise<string> {
+  return withFetchTimeout('update payload', timeoutMs, async (signal) => {
+    const res = await fetch(url, { signal })
+    if (!res.ok || !res.body) {
+      throw new Error(`failed to download update: HTTP ${res.status}`)
+    }
+    const total = enforceContentLength(res, 'update payload', maxBytes)
+    let received = 0
+    const hash = createHash('sha256')
+    const meter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        received += chunk.length
+        if (received > maxBytes) {
+          callback(new Error(`update payload exceeds the ${maxBytes}-byte size limit`))
+          return
+        }
+        hash.update(chunk)
+        if (total > 0) onProgress(Math.min(received / total, 1))
+        callback(null, chunk)
+      },
+    })
+    const source = Readable.fromWeb(res.body as import('node:stream/web').ReadableStream<Uint8Array>)
+    await pipeline(source, meter, createWriteStream(dest, { flags: 'wx', mode: 0o600 }))
+    return hash.digest('hex')
+  })
+}
+
+function enforceContentLength(res: Response, label: string, maxBytes: number): number {
+  const header = res.headers.get('content-length')
+  if (header === null) return 0
+  const size = Number(header)
+  if (!Number.isSafeInteger(size) || size < 0) {
+    throw new Error(`${label} has an invalid content-length`)
+  }
+  if (size > maxBytes) {
+    throw new Error(`${label} exceeds the ${maxBytes}-byte size limit`)
+  }
+  return size
+}
+
+async function withFetchTimeout<T>(
+  label: string,
+  timeoutMs: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  timer.unref()
+  try {
+    return await operation(controller.signal)
+  } catch (err) {
+    if (timedOut) throw new Error(`${label} request timed out after ${timeoutMs}ms`)
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function writeAtomicPrivateFile(path: string, contents: string): Promise<void> {
+  const temporaryPath = `${path}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(temporaryPath, 'wx', 0o600)
+    await handle.writeFile(contents, 'utf8')
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await chmod(temporaryPath, 0o600)
+    await rename(temporaryPath, path)
+  } finally {
+    await handle?.close().catch(() => {})
+    await rm(temporaryPath, { force: true }).catch(() => {})
+  }
+}
+
+function positiveLimit(value: number | undefined, fallback: number, name: string): number {
+  const resolved = value ?? fallback
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new Error(`updater: ${name} must be a positive safe integer`)
+  }
+  return resolved
 }
 
 function basenameFromUrl(url: string): string {
   try {
     const pathname = new URL(url).pathname
-    return pathname.split('/').pop() || 'update-payload'
+    const candidate = pathname.split('/').pop() || ''
+    if (!candidate || candidate === '.' || candidate === '..') return 'update-payload'
+    return candidate.replace(/[^0-9A-Za-z._%+-]/g, '_') || 'update-payload'
   } catch {
     return 'update-payload'
   }
+}
+
+function safePathSegment(value: string): string {
+  const safe = value.replace(/[^0-9A-Za-z._-]/g, '_').slice(0, 80)
+  return safe && safe !== '.' && safe !== '..' ? safe : 'unknown'
 }
 
 function errorMessage(err: unknown): string {

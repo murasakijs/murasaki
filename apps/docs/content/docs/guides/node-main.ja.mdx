@@ -1,0 +1,224 @@
+---
+title: Node Main
+description: 長寿命 Node lifecycle と 'use main' による型付き renderer-to-Node 関数。
+---
+
+Node Main はデスクトップアプリと同じ期間生存する処理に使います。DB connection、
+filesystem watcher、socket、worker pool、background queue、ネイティブホスト終了前に
+完了すべき cleanup が対象です。
+
+## ライフサイクルを定義する
+
+`src/main.ts` を作り、`defineMain()` を default export します。
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+import { watch, type FSWatcher } from 'node:fs'
+
+let watcher: FSWatcher | undefined
+
+export default defineMain({
+  async ready({ paths, signal, isPackaged }) {
+    watcher = watch(paths.data, { recursive: true }, (_event, filename) => {
+      console.log('changed', filename)
+    })
+
+    signal.addEventListener('abort', () => watcher?.close(), { once: true })
+    console.log(isPackaged ? 'packaged main ready' : 'development main ready')
+  },
+
+  async beforeQuit({ reason }) {
+    // 通常の close を本当に止める必要がある場合だけ false を返す。
+    console.log('quit requested:', reason)
+  },
+
+  async secondInstance(_context, { argv, cwd }) {
+    // packaged macOS / Windows: 別 launch が primary に転送された。
+    console.log('second launch:', { argv, cwd })
+  },
+
+  async shutdown() {
+    watcher?.close()
+    watcher = undefined
+  },
+})
+```
+
+既定で `src/main.ts` を検出します。別 entry や cleanup 上限は設定できます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  main: {
+    entry: 'src/backend/main.ts',
+    shutdownTimeoutMs: 15_000,
+  },
+})
+```
+
+`src/main.ts` があっても無効化する場合は `main: false` にします。
+
+## Context reference
+
+| Field | 意味 |
+| --- | --- |
+| `appId`, `productName`, `version` | 解決済みアプリ identity |
+| `isPackaged` | `murasaki dev` は `false`、bundle 内は `true` |
+| `platform`, `arch` | 実行 target (`process.platform` / `process.arch`) |
+| `projectRoot` | dev は project root、本番は package resource の working directory |
+| `resourcesPath` | read-only のアプリ resource location |
+| `paths.data` | 永続アプリデータ |
+| `paths.cache` | 再生成可能な cache |
+| `paths.logs` | log file |
+| `paths.temp` | 一時 staging data |
+| `signal` | `beforeQuit` 後、`shutdown` 前に abort |
+
+終了理由は `window-close`、`app-quit`、`signal`、`restart`、`dev-reload`、
+`startup-failure` です。順序とキャンセルは
+[プロセスモデル](/ja/docs/core-concepts/process-model)を参照してください。
+
+### `secondInstance(context, event)`
+
+packaged macOS / Windows app は per-user / per-`appId` lock を使います。別 launch が
+primary app に転送されると、Murasaki は window を focus して次の値で
+`secondInstance()` を呼びます。
+
+| フィールド | 意味 |
+| --- | --- |
+| `event.argv` | 2 回目の launcher に渡された argument。caller が渡した URL / file argument を含む |
+| `event.cwd` | 2 回目の launch の working directory |
+
+使用前にすべての argument を検証してください。Murasaki は URL scheme / file
+association をまだ登録しません。OS / caller が executable をその値で起動した場合だけ
+event に届きます。`murasaki dev` と Linux では現状この hook は配信されません。
+
+## `'use main'` で renderer から Node を呼ぶ
+
+top-level の `'use main'` directive は export 関数を `src/main.ts` と同じ Node module
+graph 上の型付き呼び出しとして公開します。
+
+```ts title="src/backend/checksum.ts"
+'use main'
+
+import { createHash } from 'node:crypto'
+
+export async function sha256(text: string): Promise<string> {
+  if (typeof text !== 'string' || text.length > 1_000_000) {
+    throw new TypeError('text must be a string no larger than 1 MB')
+  }
+  return createHash('sha256').update(text).digest('hex')
+}
+```
+
+client component から通常どおり import します。renderer bundle には fetch stub だけが
+入り、Node 実装は WebView に配信されません。
+
+```tsx title="src/app/page.tsx"
+'use client'
+
+import { useState } from 'react'
+import { sha256 } from '../backend/checksum'
+
+export default function Page() {
+  const [digest, setDigest] = useState('')
+
+  return (
+    <button onClick={() => void sha256('Murasaki').then(setDigest)}>
+      Hash {digest && `(${digest.slice(0, 8)}…)`}
+    </button>
+  )
+}
+```
+
+## Main event を renderer へストリームする
+
+接続状態、進捗、device event、watcher出力など、長寿命Node処理から発生する値には
+型付きevent channelを使います。
+
+```ts title="src/main.ts"
+import { defineMain, emitMainEvent } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ signal }) {
+    const timer = setInterval(() => {
+      emitMainEvent('relay.status', { connected: true, at: new Date() })
+    }, 1_000)
+    signal.addEventListener('abort', () => clearInterval(timer), { once: true })
+  },
+})
+```
+
+client componentで購読します。
+
+```tsx
+'use client'
+
+import { useEffect, useState } from 'react'
+import { subscribeMainEvent } from 'murasaki/main-client'
+
+export function RelayStatus() {
+  const [connected, setConnected] = useState(false)
+  useEffect(() => subscribeMainEvent<{ connected: boolean; at: Date }>(
+    'relay.status',
+    (event) => setConnected(event.connected),
+  ), [])
+  return <output>{connected ? 'Connected' : 'Disconnected'}</output>
+}
+```
+
+eventは`'use main'`と同じrich-value wire codecを使い、認証済みapp-local SSEで届きます。
+一時切断後はEventSourceが再接続しますが、eventはlive-onlyでreplay bufferやdurable queueは
+ありません。取りこぼしを復元する必要がある場合、永続状態をNodeに保存し、`'use main'`
+のsnapshot関数も公開してください。
+
+<Callout type="warn">
+  `'use main'` は experimental な RPC 境界であり、認可境界ではありません。すべての
+  引数を信頼できない renderer input として扱い、型検証、filesystem path の正規化、
+  app data へのアクセス認可を Node 関数内で実施してください。
+</Callout>
+
+## Wire value と上限
+
+version 付き wire codec は primitive、`undefined`、`bigint`、`Date`、`Map`、`Set`、
+循環する plain object / array、`ArrayBuffer`、typed array、`Blob`、`File`、
+`FormData`、構造化 `Error` を扱えます。
+
+- request / response の最大サイズ: **32 MiB**
+- function、symbol、custom prototype を持つ instance は拒否
+- call自体はrequest/response。live pushにはMain eventを使います。`'use main'` callから
+  `AsyncIterable`を直接返すことは未実装
+- named `function` / `async function` / `const` / `let` / `var` を export 可能。
+  実行時に選択された export は callable である必要があります
+
+大きなファイルの bytes を RPC に通さないでください。検証済みの app-owned id / path
+だけを渡し、Node 内で完結して stream します。
+
+## `'use main'` / `'use server'` / API route
+
+| 選択 | 用途 |
+| --- | --- |
+| `'use main'` | 長寿命 app backend への型付き imperative call |
+| `'use server'` | `ActionState` を使う React action / form 形式の mutation |
+| `src/api/**/route.ts` | Request/Response、streaming body、HTTP method routing |
+
+いずれも app-local Node runtime で実行されます。API route は public network server では
+なく、内部 RPC と同じ app runtime session で保護されます。
+
+## 現在の制限
+
+Node Main には public な multi-window、tray menu、global shortcut、URL scheme registration、
+file association API がまだありません。packaged macOS / Windows の single-instance
+delivery は `secondInstance()` で利用できます。renderer-safe な dialog、clipboard、notification、shell、
+基本 window command は `capabilities` allowlist の下で別途 `murasaki/native` から利用
+できます。computed import、dynamic native addon、runtime-discovered asset を使う Node
+package は明示的な `bundle.external` / `bundle.resources` が必要な場合があります。
+`murasaki dev` だけでなく clean machine で installed artifact を必ずテストしてください。
+
+## 次へ
+
+<Cards>
+  <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" />
+  <Card title="セキュリティ" href="/ja/docs/building/security" />
+  <Card title="API Routes" href="/ja/docs/guides/api-routes" />
+</Cards>

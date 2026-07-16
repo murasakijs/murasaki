@@ -23,9 +23,74 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 ## コンテキストメニュー
 
 右クリックのコンテキストメニューは、マークアップではなくフックである
-`useContextMenu` で宣言し、Rust 側に投げられて本物の `NSMenu` / `HMENU` /
-`GtkMenu` がポップアップします。詳しくは専用の
+`useContextMenu` で宣言し、Rust 側に投げられて macOS / Windows では本物の
+`NSMenu` / `HMENU` がポップアップします。詳しくは専用の
 [コンテキストメニュー](/docs/guides/context-menu)ガイドを参照してください。
+
+## ダイアログ、クリップボード、通知、shell、ウィンドウ操作
+
+レンダラーから安全に使えるネイティブ機能は `murasaki/native` から import します。
+すべて Promise ベースで、リクエストID付きIPCをRustホストが直接処理します。
+
+```tsx
+'use client'
+
+import { appWindow, clipboard, dialog, notification, shell, tray } from 'murasaki/native'
+
+const files = await dialog.openFile({
+  multiple: true,
+  filters: [{ name: 'Images', extensions: ['png', 'jpg'] }],
+})
+await clipboard.writeText(files.join('\n'))
+await notification.show({ title: '選択完了', body: `${files.length} files` })
+await appWindow.setTitle('Import complete')
+await shell.showItemInFolder(files[0])
+```
+
+| API | 操作 |
+| --- | --- |
+| `dialog` | `openFile`, `openDirectory`, `saveFile` |
+| `clipboard` | `readText`, `writeText` |
+| `notification` | `show` |
+| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder` |
+| `appWindow` | `setTitle`, `setSize`, `minimize`, `toggleMaximize` |
+| `tray` | `create`, `remove`, `setTooltip`, `onClick` |
+
+<Callout type="info">
+  これらは `src/main.ts` から直接呼ぶAPIではなく、信頼済みレンダラー向けです。
+  ブリッジはアプリと完全一致するoriginだけを受け付け、固定allowlistのコマンドだけを
+  公開します。利用するコマンドだけを `config.capabilities` で許可してください。
+  ウィンドウ単位やargument/path scopeのpermissionは計画中なので、アプリウィンドウに
+  信頼できないリモートコンテンツを読み込まないでください。
+</Callout>
+
+## トレイアイコン
+
+client componentから1つのsystem tray iconを作成できます。既定では
+`config.icon` を使い、明示指定する場合は8-bit RGB/RGBA PNGを渡します。
+操作ごとに独立したpermissionが必要です。
+
+```ts
+import { tray } from 'murasaki/native'
+
+await tray.create({ tooltip: '同期中', template: true })
+const unsubscribe = tray.onClick(({ button, double }) => {
+  console.log({ button, double })
+})
+
+await tray.setTooltip('同期完了')
+// 後で: unsubscribe(); await tray.remove()
+```
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  capabilities: ['tray:create', 'tray:setTooltip', 'tray:remove'],
+})
+```
+
+`template` はmacOS専用です。もう一度 `create` すると既存アイコンを置き換えます。
+tray menu、動的なicon差し替え、global shortcut、Linux trayは未対応です。
 
 ## 組み込みのメニューアクション
 
@@ -62,12 +127,9 @@ const { status, latest, check, download, install } = useUpdate()
 用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
-  **まだ公開されていません:** open/save/directory ダイアログ、クリップボードの読み書
-  き、OS 通知、トレイアイコン、shell/「Finder で表示」はすべて `@murasakijs/native`
-  の内部に存在し、Murasaki の CLI(ネイティブウィンドウ、`.app` の About パネルなど)
-  が内部的に使用していますが、アプリケーションコードにそれらを公開する React フックは
-  まだありません。今日これらのどれかが必要な場合、存在しない API を推測で使おうとしな
-  いでください。これは将来のリリースに向けて追跡されています。
+  tray menu、グローバルショートカット、マルチウィンドウ管理、window / argument 単位の
+  capability rule はまだ公開されていません。設計前に
+  [プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。
 </Callout>
 
 ## 次へ

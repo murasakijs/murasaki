@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.47.4",
+  "version": "0.48.0",
   "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
   "keywords": [
     "desktop",
@@ -32,17 +32,32 @@
     "./vite-plugin": {
       "types": "./dist/vite-plugin/index.d.ts",
       "default": "./dist/vite-plugin/index.js"
+    },
+    "./main": {
+      "types": "./dist/main/index.d.ts",
+      "default": "./dist/main/index.js"
+    },
+    "./main-client": {
+      "types": "./dist/main-client/index.d.ts",
+      "default": "./dist/main-client/index.js"
+    },
+    "./native": {
+      "types": "./dist/native/index.d.ts",
+      "default": "./dist/native/index.js"
     }
   },
   "files": [
     "bin",
     "dist",
-    "assets"
+    "assets",
+    "capabilities.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
-    "test": "pnpm build && node --test test/*.test.mjs"
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "prepack": "node scripts/package-readme.mjs sync",
+    "postpack": "node scripts/package-readme.mjs clean"
   },
   "dependencies": {
     "@murasakijs/native": "workspace:^",

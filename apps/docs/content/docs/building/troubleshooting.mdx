@@ -1,0 +1,171 @@
+---
+title: Troubleshooting
+description: Diagnose development, packaging, signing, startup, and update failures.
+---
+
+Start by separating a renderer problem from a Node Main problem and a native
+host problem. Reproduce with `murasaki dev`, then build and launch the actual
+artifact. A successful Vite build does not prove that packaging, code signing,
+runtime-discovered assets, or another machine's trust policy will work.
+
+## Development window does not open
+
+Run the CLI from a terminal and keep the first error, not the final stack line:
+
+```bash
+pnpm exec murasaki dev
+```
+
+Murasaki probes `config.devPort` (default `5178`) and advances to another port
+when it is occupied. If startup still waits or exits:
+
+1. confirm Node 22+ with `node --version`,
+2. confirm `murasaki.config.ts` exports an object with `appId` and
+   `productName`,
+3. temporarily rename `src/main.ts` or set `main: false` to isolate Main
+   startup,
+4. stop old dev processes holding the selected port,
+5. reinstall dependencies for the current OS/architecture.
+
+If `main.ready()` never resolves, the renderer intentionally never opens.
+Add bounded timeouts to network initialization and log before/after each
+startup resource.
+
+## HMR works, but Main changes do not restart
+
+The configured Main **entry file** triggers lifecycle reload. Put resource
+ownership in that entry and make `shutdown()` idempotent. If only a deeply
+imported helper changed and the lifecycle must restart, touch/save the Main
+entry. Module-level sockets, timers, and child processes can survive incorrectly
+if they are not created and closed through the lifecycle.
+
+## App works in dev but not after bundling
+
+Test the bundle before creating an installer:
+
+```bash
+pnpm exec murasaki bundle
+open "dist/bundle/My App.app"                 # macOS
+# or: dist\\bundle\\My App\\My App.exe        # Windows
+```
+
+Common causes:
+
+- Node dependencies load files dynamically that the bundler could not discover.
+- A native addon does not include a binary for the target architecture.
+- Code writes beside the executable instead of `MainContext.paths.data`.
+- Code assumes `process.cwd()` is the project root.
+- A secret or `.env` file existed in development but was not provisioned for
+  the installed app.
+
+Prefer explicit resource paths and test on a clean VM/user account. Murasaki's
+current Node dependency packaging is not yet equivalent to Electron Forge or
+Tauri bundler for every native addon and runtime asset layout.
+
+## macOS says the app is damaged or cannot be verified
+
+First classify the artifact:
+
+```bash
+codesign -dvvv --entitlements :- "dist/bundle/My App.app"
+codesign --verify --deep --strict --verbose=2 "dist/bundle/My App.app"
+spctl -a -vv "dist/bundle/My App.app"
+xattr -l "dist/bundle/My App.app"
+```
+
+- `murasaki bundle` without `--sign` creates an **ad-hoc signature**. It checks
+  local bundle integrity but does not identify a trusted developer.
+- `murasaki bundle --sign` uses your Developer ID and hardened runtime.
+- `murasaki installer --sign --notarize` additionally submits and staples the
+  DMG for Gatekeeper.
+
+For your own developer/test artifact only, remove the downloaded quarantine
+attribute and launch again:
+
+```bash
+xattr -dr com.apple.quarantine "dist/bundle/My App.app"
+```
+
+Do not present that as the public installation flow. Public macOS distribution
+without trust warnings requires a Developer ID certificate and notarization;
+ad-hoc signing cannot replace them.
+
+## Wrong architecture on macOS
+
+Inspect the launcher and bundled Node executable:
+
+```bash
+file "dist/bundle/My App.app/Contents/MacOS/My App"
+file "dist/bundle/My App.app/Contents/Resources/node/bin/node"
+```
+
+Rebuild with `--arch arm64` for Apple Silicon or `--arch x64` for Intel. All
+native addons in the application must match the target too. Cross-arch
+packaging does not translate arbitrary third-party native modules.
+
+## Windows installer is not produced
+
+`murasaki bundle --target win32-x64` always produces the portable directory
+and `.zip` when bundling succeeds. Installer formats require external tools:
+
+- NSIS (`makensis`) for `.exe`—can be compiled from macOS/Windows.
+- WiX v4 for `.msi`—runs on Windows.
+
+If neither is on `PATH`, `murasaki installer` reports that no installer was
+produced; use the portable zip or install the required tool. Windows
+Authenticode signing is not implemented by Murasaki, so public releases need a
+separate signing step.
+
+## Shutdown hangs or is cut off
+
+`shutdown()` has a 10-second default deadline. Stop accepting new work, abort
+pending requests with `context.signal`, and close servers before waiting for
+queues. Increase the bound only for a measured requirement:
+
+```ts
+main: { shutdownTimeoutMs: 20_000 }
+```
+
+Do not use an unbounded retry loop in shutdown. Forced paths ignore
+`beforeQuit()` cancellation.
+
+## Backend call returns 403
+
+`/api/*` and `/__murasaki/*` are protected app-local endpoints. A browser tab,
+curl command, or external client does not have the HttpOnly runtime session and
+should receive `403`. Call API routes from the application renderer. If your
+product needs a public/local integration server, create and secure a separate
+listener in Node Main.
+
+If the application renderer itself gets `403`, check that requests use relative
+URLs and that code did not replace the `Host`, `Origin`, or cookie behavior.
+
+## Update checks fail
+
+Check in this order:
+
+1. `latest.json` and `latest.json.sig` are at adjacent URLs,
+2. the embedded `publicKey` matches the private key used by CI,
+3. the manifest signature covers the exact uploaded JSON bytes,
+4. the current `<platform>-<arch>` asset key exists,
+5. the payload URL is reachable and its SHA-256 matches,
+6. download/install is running from a bundle, not dev.
+
+Never bypass signature verification to diagnose a release. Generate a new
+test keypair and manifest instead. See [Auto-update](/docs/guides/auto-update).
+
+## Still blocked?
+
+Capture the Murasaki version, OS version, architecture, exact command, first
+error, and a minimal reproduction. Use a public GitHub issue for ordinary bugs;
+use a [private Security
+Advisory](https://github.com/murasakijs/murasaki/security/advisories/new) for a
+vulnerability.
+
+## Next
+
+<Cards>
+  <Card title="Architecture" href="/docs/core-concepts/architecture" />
+  <Card title="Distribution" href="/docs/building/distribution" />
+  <Card title="Security" href="/docs/building/security" />
+</Cards>
