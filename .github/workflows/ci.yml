@@ -98,6 +98,13 @@ jobs:
           // npm until the native-v* release workflow passes. Install the
           // locally-packed manifest/types so pre-release CI remains hermetic.
           manifest.dependencies['@murasakijs/native'] = `file:${process.env.NATIVE_TARBALL}`
+          manifest.pnpm = {
+            ...(manifest.pnpm ?? {}),
+            overrides: {
+              ...(manifest.pnpm?.overrides ?? {}),
+              '@murasakijs/native': `file:${process.env.NATIVE_TARBALL}`,
+            },
+          }
           fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
           NODE
 
