@@ -43,13 +43,15 @@ Node runtime + the native launcher binary into `dist/bundle/` — a
 murasaki bundle                       # host platform + arch, unsigned
 murasaki bundle --arch x64            # cross-arch (macOS): x64 .app on Apple Silicon
 murasaki bundle --target win32-arm64  # cross-target: an arm64 Windows bundle
-murasaki bundle --sign                # macOS: Developer ID-sign the .app
+murasaki bundle --sign                # macOS Developer ID or Windows Authenticode signing
 murasaki bundle --no-build            # reuse an existing dist/client
 ```
 
 - **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — target arch /
   platform (defaults to the host). Windows targets are `win32-x64` / `win32-arm64`.
-- **`--sign`** — Developer ID-sign the `.app` on macOS (see [Distribution](/docs/building/distribution#signing--notarization)).
+- **`--sign`** — Developer ID-sign the `.app` on macOS or Authenticode-sign
+  the app executable before the Windows portable ZIP is created. Windows
+  signing must run on Windows with SignTool. See [Distribution](/docs/building/distribution#signing--notarization).
 - **`--no-build`** — skip the Vite rebuild if `dist/client` already exists.
 
 ## `murasaki installer`
@@ -64,12 +66,15 @@ on Windows.
 murasaki installer                     # installer(s) for the host platform (re-bundles first)
 murasaki installer --target win32-x64  # Windows x64 installers
 murasaki installer --sign --notarize   # macOS: Developer ID sign + notarize + staple
+murasaki installer --target win32-x64 --sign # Windows: sign app + NSIS + MSI
 murasaki installer --no-build          # reuse an existing dist/bundle
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — forwarded to `bundle`.
-- **`--sign`** / **`--notarize`** — macOS only; submit the signed `.dmg` to
-  Apple's notary service and staple the ticket (`--notarize` requires `--sign`).
+- **`--sign`** — macOS Developer ID or Windows Authenticode signing. On
+  Windows it signs and verifies the app executable, NSIS setup, and MSI.
+- **`--notarize`** — macOS only; submits the signed `.dmg` to Apple's notary
+  service and staples the ticket (`--notarize` requires `--sign`).
 
 ## `murasaki init`
 

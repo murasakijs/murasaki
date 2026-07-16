@@ -275,10 +275,10 @@ bucket) can't push a fake update without also holding the private key — which
 never leaves `.murasaki/update-key` / your CI secret.
 
 <Callout type="warn">
-  This project ships no Windows code-signing (Authenticode) — see
-  [Distribution](/docs/building/distribution#signing--notarization). On
-  Windows, the Ed25519 manifest signature is therefore the **only**
-  authenticity guarantee an update has.
+  Use `murasaki installer --target win32-x64 --sign` for Authenticode in
+  addition to this manifest signature — see
+  [Distribution](/docs/building/distribution#signing--notarization). Without
+  `--sign`, Ed25519 is the update's only authenticity guarantee on Windows.
 </Callout>
 
 Keep `.murasaki/update-key` out of version control (`--keygen` gitignores it

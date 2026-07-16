@@ -22,6 +22,7 @@ import { DEFAULT_LOCALES } from '../menu-i18n.js'
 import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
 import { resolveAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
+import { signWindowsArtifact } from './windows-signing.js'
 
 export { loadUserConfig } from './load-config.js'
 
@@ -66,6 +67,12 @@ export default async function bundle(argv: string[]) {
   // certificate, so this only works once the app developer supplies their
   // own (config.sign.identity / $MURASAKI_SIGN_IDENTITY / their keychain).
   const shouldSign = argv.includes('--sign')
+  if (target.platform === 'win32' && shouldSign && process.platform !== 'win32') {
+    throw new Error(
+      'murasaki: Windows Authenticode signing requires Windows and SignTool. ' +
+        'Cross-bundle without --sign, then run the signed release job on Windows.',
+    )
+  }
   if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await build(argv)
   // Always (re)built — cheap relative to the client build, and must exist
   // before packaging even if dist/client was already up to date.
@@ -76,7 +83,7 @@ export default async function bundle(argv: string[]) {
   // produced from any host — including this one, for cross-bundling / CI
   // verification off a Mac.
   if (target.platform === 'win32') {
-    await bundleWin32(cwd, config, target.arch)
+    await bundleWin32(cwd, config, target.arch, shouldSign)
     return
   }
 
@@ -259,7 +266,12 @@ export default async function bundle(argv: string[]) {
  * Has no macOS-only dependency, so — unlike the `.app` path above — this can
  * run on any host, including this one for cross-bundling off a Mac.
  */
-async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Promise<void> {
+async function bundleWin32(
+  cwd: string,
+  config: MurasakiConfig,
+  arch: Arch,
+  shouldSign: boolean,
+): Promise<void> {
   const productName = config.productName
   const outDir = resolve(cwd, 'dist/bundle', productName)
   await rm(outDir, { recursive: true, force: true })
@@ -358,6 +370,13 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   await mkdir(dirname(nativeDest), { recursive: true })
   await copyNativeModule(nativeDir, nativeDest, { platform: 'win32', arch })
 
+  // Authenticode-sign the application-owned launcher only after PE resources
+  // and every bundle payload are final, but before the portable ZIP and
+  // installers consume it. The downloaded Node runtime carries its upstream
+  // signature and must not be re-signed as if it were app-owned code.
+  const appExecutable = join(outDir, `${productName}.exe`)
+  if (shouldSign) signWindowsArtifact(appExecutable, config, cwd)
+
   process.stdout.write(`\n${success(`bundle written  ${dim(outDir)}`)}\n\n`)
 
   // dist/bundle/<productName>-win32-<arch>.zip — a no-install "portable"
@@ -365,6 +384,7 @@ async function bundleWin32(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   // win32-*, cli/installer.ts): unzip anywhere and run <productName>.exe.
   const zipPath = await zipWin32Bundle(resolve(cwd, 'dist/bundle'), productName, arch)
   process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
+  if (!shouldSign) process.stdout.write(unsignedNote(zipPath))
 }
 
 /**

@@ -62,6 +62,33 @@ export interface FileAssociationConfig {
   mimeType?: string
 }
 
+/** Windows Authenticode settings used by `bundle --sign` and `installer --sign`. */
+export interface WindowsSigningConfig {
+  /** PFX/P12 certificate file. The optional password is read only from
+   * `MURASAKI_WINDOWS_CERTIFICATE_PASSWORD`, never from this config. */
+  certificateFile?: string
+  /** Subject-name selector for a certificate already imported into the Windows `My` store. */
+  certificateSubjectName?: string
+  /** 40-character SHA-1 thumbprint selector for a certificate in the Windows `My` store. */
+  certificateSha1?: string
+  /** Certificate-store scope. Defaults to the current user's store. */
+  certificateStore?: 'currentUser' | 'localMachine'
+  /** RFC 3161 timestamp URL. `false` disables timestamping. Defaults to the
+   * Microsoft Artifact Signing timestamp service for Artifact Signing and
+   * DigiCert's timestamp service otherwise. */
+  timestampUrl?: string | false
+  /** Explicit path to `signtool.exe`. Normally auto-detected from PATH or the Windows SDK. */
+  signToolPath?: string
+  /** Microsoft Artifact Signing (formerly Trusted Signing) SignTool provider.
+   * Authentication remains outside config (Azure CLI, workload identity, or managed identity). */
+  artifactSigning?: {
+    /** Path to `Azure.CodeSigning.Dlib.dll`. */
+    dlib: string
+    /** Path to Artifact Signing's non-secret account/profile metadata JSON. */
+    metadata: string
+  }
+}
+
 /**
  * `true` enables the updater with every default inferred (GitHub repo from
  * `package.json#repository`, public key from `.murasaki/update-key.pub`,
@@ -305,16 +332,17 @@ export interface MurasakiConfig {
     }
   }
 
-  /**
-   * macOS code-signing. murasaki signs with YOUR certificate — it ships none.
-   * Secrets (notarization credentials) are read from env vars, never here.
-   */
+  /** Code-signing. Murasaki signs with YOUR certificate/provider — it ships none.
+   * Secrets (notarization credentials and PFX passwords) are read from env vars, never here. */
   sign?: {
     /** Signing identity, e.g. "Developer ID Application: Name (TEAMID)". Defaults to
      *  $MURASAKI_SIGN_IDENTITY, then the first "Developer ID Application" in your keychain. */
     identity?: string
     /** Path to a custom entitlements .plist. Defaults to a Node-friendly hardened-runtime set. */
     entitlements?: string
+    /** Windows Authenticode signing for the application executable, portable ZIP payload,
+     * NSIS setup executable, and MSI installer. */
+    windows?: WindowsSigningConfig
   }
 }
 
@@ -410,6 +438,7 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   validateSecurityConfig(candidate.security)
   validateDevPort(candidate.devPort)
   validateUpdaterConfig(candidate.updater)
+  validateSignConfig(candidate.sign)
   resolveWindowDeclarations(candidate)
 }
 
@@ -486,6 +515,90 @@ function validateUpdaterConfig(value: unknown): void {
     const multiplier = unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000
     if (!Number.isSafeInteger(amount * multiplier)) {
       throw new TypeError('updater.checkInterval is too large')
+    }
+  }
+}
+
+function validateSignConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('sign must be an object')
+  }
+  const sign = value as Record<string, unknown>
+  for (const field of ['identity', 'entitlements'] as const) {
+    if (sign[field] !== undefined
+      && (typeof sign[field] !== 'string' || sign[field].trim().length === 0)) {
+      throw new TypeError(`sign.${field} must be a non-empty string`)
+    }
+  }
+  if (sign.windows === undefined) return
+  if (!sign.windows || typeof sign.windows !== 'object' || Array.isArray(sign.windows)) {
+    throw new TypeError('sign.windows must be an object')
+  }
+  const windows = sign.windows as Record<string, unknown>
+  for (const field of [
+    'certificateFile',
+    'certificateSubjectName',
+    'signToolPath',
+  ] as const) {
+    if (windows[field] !== undefined
+      && (typeof windows[field] !== 'string' || windows[field].trim().length === 0)) {
+      throw new TypeError(`sign.windows.${field} must be a non-empty string`)
+    }
+  }
+  if (windows.certificateSha1 !== undefined
+    && (typeof windows.certificateSha1 !== 'string'
+      || !/^[0-9a-f]{40}$/i.test(windows.certificateSha1.replace(/\s/g, '')))) {
+    throw new TypeError('sign.windows.certificateSha1 must be a 40-character SHA-1 thumbprint')
+  }
+  if (windows.certificateStore !== undefined
+    && windows.certificateStore !== 'currentUser'
+    && windows.certificateStore !== 'localMachine') {
+    throw new TypeError('sign.windows.certificateStore must be currentUser or localMachine')
+  }
+  if (windows.timestampUrl !== undefined && windows.timestampUrl !== false) {
+    if (typeof windows.timestampUrl !== 'string') {
+      throw new TypeError('sign.windows.timestampUrl must be an HTTP(S) URL or false')
+    }
+    let timestampUrl: URL
+    try {
+      timestampUrl = new URL(windows.timestampUrl)
+    } catch {
+      throw new TypeError('sign.windows.timestampUrl must be an HTTP(S) URL or false')
+    }
+    if (timestampUrl.protocol !== 'https:' && timestampUrl.protocol !== 'http:') {
+      throw new TypeError('sign.windows.timestampUrl must be an HTTP(S) URL or false')
+    }
+  }
+
+  const certificateSelectors = [
+    windows.certificateFile,
+    windows.certificateSubjectName,
+    windows.certificateSha1,
+  ].filter((selector) => selector !== undefined)
+  if (certificateSelectors.length > 1) {
+    throw new TypeError(
+      'sign.windows certificateFile, certificateSubjectName, and certificateSha1 are mutually exclusive',
+    )
+  }
+
+  if (windows.artifactSigning !== undefined) {
+    if (!windows.artifactSigning
+      || typeof windows.artifactSigning !== 'object'
+      || Array.isArray(windows.artifactSigning)) {
+      throw new TypeError('sign.windows.artifactSigning must be an object')
+    }
+    const artifactSigning = windows.artifactSigning as Record<string, unknown>
+    for (const field of ['dlib', 'metadata'] as const) {
+      if (typeof artifactSigning[field] !== 'string'
+        || artifactSigning[field].trim().length === 0) {
+        throw new TypeError(`sign.windows.artifactSigning.${field} must be a non-empty string`)
+      }
+    }
+    if (certificateSelectors.length > 0) {
+      throw new TypeError(
+        'sign.windows.artifactSigning is mutually exclusive with certificate file/store selectors',
+      )
     }
   }
 }

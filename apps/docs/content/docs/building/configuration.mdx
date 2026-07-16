@@ -52,7 +52,7 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `protocols` | `ProtocolConfig[]?` | Custom URL schemes registered by packaged macOS apps and Windows installers — see [below](#protocols). |
 | `fileAssociations` | `FileAssociationConfig[]?` | Document extensions registered by packaged macOS apps and Windows installers — see [below](#fileassociations). |
 | `installer` | `object?` | macOS DMG and Windows installer options — see [below](#installer). |
-| `sign` | `object?` | macOS code-signing — see [below](#sign). |
+| `sign` | `object?` | macOS Developer ID and Windows Authenticode signing — see [below](#sign). |
 
 ## `window`
 
@@ -336,15 +336,37 @@ Murasaki's defaults.
 
 ## `sign`
 
-macOS code-signing. Murasaki signs with **your** certificate — it ships none
-of its own. Notarization credentials are read from environment variables,
-never from this config — see
+Murasaki signs with **your** certificate/provider — it ships none of its own.
+Notarization credentials and PFX passwords are read from environment
+variables, never from this config — see
 [Distribution → Signing](/docs/building/distribution#signing--notarization).
+
+### macOS fields
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `identity` | `string?` | Signing identity, e.g. `"Developer ID Application: Name (TEAMID)"`. Defaults to `$MURASAKI_SIGN_IDENTITY`, then the first "Developer ID Application" identity in your keychain. |
 | `entitlements` | `string?` | Path to a custom entitlements `.plist`. Defaults to a Node-friendly hardened-runtime set (JIT + unsigned executable memory + disabled library validation). |
+
+### `sign.windows`
+
+`murasaki bundle --sign --target win32-x64` signs the app executable before
+the portable ZIP is made. `murasaki installer --sign --target win32-x64`
+also signs each generated NSIS setup and MSI, then verifies every signature
+with the Authenticode policy. This step runs on Windows with SignTool.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `certificateFile` | `string?` | PFX/P12 path. Its optional password comes only from `$MURASAKI_WINDOWS_CERTIFICATE_PASSWORD`. |
+| `certificateSubjectName` | `string?` | Subject-name selector for a certificate already imported into the Windows `My` store. |
+| `certificateSha1` | `string?` | 40-character certificate thumbprint in the Windows `My` store. Mutually exclusive with the file/subject selectors. |
+| `certificateStore` | `'currentUser' \| 'localMachine'` | Store scope for subject/thumbprint/automatic selection. Default `currentUser`. |
+| `timestampUrl` | `string \| false` | RFC 3161 timestamp URL; `false` disables timestamping. Defaults to DigiCert, or Microsoft's service with Artifact Signing. |
+| `signToolPath` | `string?` | Explicit `signtool.exe`; otherwise PATH and installed Windows SDKs are searched. |
+| `artifactSigning` | `{ dlib: string; metadata: string }?` | Microsoft Artifact Signing provider paths (`Azure.CodeSigning.Dlib.dll` and its non-secret account/profile metadata JSON). Mutually exclusive with certificate selectors. |
+
+All selectors also have CI environment overrides; see
+[Windows installers and signing](/docs/building/distribution#windows-installers-and-signing).
 
 ## Next
 

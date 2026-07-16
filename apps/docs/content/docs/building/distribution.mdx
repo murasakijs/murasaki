@@ -11,7 +11,7 @@ prebuilt binaries for Linux (x64/arm64); Linux app packaging is on the roadmap.
 | Target | Bundle | Installer | Public code signing |
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization built in |
-| Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Not implemented; use a separate Authenticode step |
+| Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Authenticode via SignTool built in |
 | Linux | — | — | Planned |
 
 <Callout type="warn">
@@ -85,9 +85,9 @@ claim operating-system defaults.
 ## Signing & notarization
 
 <Callout type="info">
-  This section is macOS-specific (Apple Developer ID + notarization). Windows
-  installers currently ship unsigned; Authenticode signing for the `.exe` /
-  `.msi` is a separate flow, tracked for a later release.
+  Murasaki owns the signing orchestration, not the publisher identity. Supply
+  your Apple Developer ID or Windows certificate/Artifact Signing profile;
+  `--sign` deliberately fails instead of silently publishing unsigned output.
 </Callout>
 
 By default, `murasaki bundle` produces an **ad-hoc signed** `.app`, and
@@ -157,14 +157,82 @@ The NSIS installer can be `perUser` (the default, no elevation) or
 [Configuration](/docs/building/configuration#installer) for branding and
 upgrade identity.
 
-Murasaki currently does not Authenticode-sign the application executable,
-NSIS installer, or MSI. Sign final Windows artifacts in your release pipeline
-with your certificate/provider and verify them on Windows before publication.
+Run the signed release on Windows (cross-building unsigned Windows artifacts
+still works elsewhere):
+
+```powershell
+pnpm exec murasaki bundle --target win32-x64 --sign
+pnpm exec murasaki installer --target win32-x64 --sign
+```
+
+The bundle command signs `<productName>.exe` before creating the portable ZIP.
+The installer command reuses that signed payload, then signs the generated NSIS
+setup and MSI. Every signing operation uses SHA-256, an RFC 3161 timestamp by
+default, and a separate `signtool verify /pa /v /tw` pass. A signing or
+verification failure stops the release.
+
+Choose one signer. Config values can be overridden in CI without editing the
+checkout:
+
+| Signer | Config | Environment override |
+| --- | --- | --- |
+| PFX/P12 | `sign.windows.certificateFile` | `MURASAKI_WINDOWS_CERTIFICATE_FILE` + optional `MURASAKI_WINDOWS_CERTIFICATE_PASSWORD` |
+| Imported certificate by subject | `sign.windows.certificateSubjectName` | `MURASAKI_WINDOWS_CERTIFICATE_SUBJECT` |
+| Imported certificate by thumbprint | `sign.windows.certificateSha1` | `MURASAKI_WINDOWS_CERTIFICATE_SHA1` |
+| Microsoft Artifact Signing | `sign.windows.artifactSigning.{dlib,metadata}` | `MURASAKI_WINDOWS_ARTIFACT_SIGNING_DLIB` + `MURASAKI_WINDOWS_ARTIFACT_SIGNING_METADATA` |
+
+With none of those selectors, SignTool `/a` chooses the best code-signing
+certificate from `CurrentUser/My`. Set `certificateStore: 'localMachine'` for
+the machine store. Override the SignTool executable with
+`MURASAKI_SIGNTOOL_PATH`, and the timestamp service with
+`MURASAKI_WINDOWS_TIMESTAMP_URL` (`false` disables it, which is not recommended
+for public releases).
+
+For Microsoft Artifact Signing, `dlib` points to
+`Azure.CodeSigning.Dlib.dll` and `metadata` to the non-secret account/profile
+JSON. Authentication stays in Azure CLI, workload identity, or managed
+identity; do not put credentials in that JSON or Murasaki config. Murasaki uses
+Microsoft's Artifact Signing timestamp authority by default for this provider.
+
 Do not treat the updater's Ed25519 manifest signature as an Authenticode
 replacement: it protects Murasaki's update channel, not Windows SmartScreen's
-publisher identity.
+publisher identity. A correctly signed new publisher can still see SmartScreen
+prompts while reputation develops.
 
-### Signed releases with GitHub Actions
+### Windows signed releases with GitHub Actions
+
+This minimal PFX example writes the certificate only into the runner temp
+directory. Prefer an imported store certificate or cloud/HSM provider when
+that matches your certificate policy:
+
+```yaml title=".github/workflows/release-windows.yml"
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Materialize signing certificate
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+        run: |
+          [IO.File]::WriteAllBytes(
+            "$env:RUNNER_TEMP\release.pfx",
+            [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
+          )
+      - name: Build signed installers
+        env:
+          MURASAKI_WINDOWS_CERTIFICATE_FILE: ${{ runner.temp }}\release.pfx
+          MURASAKI_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: pnpm exec murasaki installer --target win32-x64 --sign
+```
+
+### macOS signed releases with GitHub Actions
 
 Build + (optionally) sign + notarize a `.dmg` on tag push and attach it to a
 GitHub Release. Add this as `.github/workflows/release.yml` in your app:
@@ -235,7 +303,7 @@ Add these repository secrets to sign + notarize (omit them all for an unsigned
 - Test configured URL schemes and file associations for cold start and while
   the primary app instance is already running.
 - Exercise Node Main shutdown, offline startup, and failed network requests.
-- Verify macOS signatures/notarization or your external Windows signatures.
+- Verify macOS signatures/notarization and Windows Authenticode signatures.
 - Generate and sign the Murasaki update manifest only after final payloads are
   immutable.
 - Publish payloads, `latest.json`, and `latest.json.sig` together.

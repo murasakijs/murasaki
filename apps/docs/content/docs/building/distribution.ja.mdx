@@ -12,7 +12,7 @@ description: 本物のネイティブインストーラを出荷する — ク�
 | Target | Bundle | Installer | 公開 code signing |
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization を組み込み対応 |
-| Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`、Windows 上で WiX `.msi` | 未実装。別 Authenticode step を使用 |
+| Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`、Windows 上で WiX `.msi` | SignTool Authenticode を組み込み対応 |
 | Linux | — | — | 予定 |
 
 <Callout type="warn">
@@ -83,9 +83,9 @@ installation-free artifact が OS default を自動で取得することはあ�
 ## 署名と公証
 
 <Callout type="info">
-  このセクションは macOS 専用です(Apple Developer ID + 公証)。Windows のインストーラは
-  現状未署名で出荷されます。`.exe` / `.msi` の Authenticode 署名は別フローで、後日の
-  リリースで対応予定です。
+  Murasaki が提供するのは signing orchestration であり、publisher identity ではありません。
+  Apple Developer ID または Windows certificate / Artifact Signing profile を用意してください。
+  `--sign` は未署名成果物を黙って公開せず、署名できなければ失敗します。
 </Callout>
 
 既定では `murasaki bundle` は **ad-hoc signed** `.app` を生成し、`murasaki installer`
@@ -150,13 +150,74 @@ NSIS は `perUser`（既定、elevation なし）または `perMachine`、MSI �
 per-machine です。branding と upgrade identity は
 [設定](/ja/docs/building/configuration#installer)を参照してください。
 
-現状 Murasaki は application executable、NSIS installer、MSI を Authenticode-sign
-しません。release pipeline で証明書 / provider を使って最終 Windows artifact を署名し、
-公開前に Windows 上で検証してください。updater の Ed25519 manifest signature は
-Windows SmartScreen の publisher identity を確立しないため Authenticode の代わりには
-なりません。
+署名済み release は Windows 上で実行します(未署名 Windows artifact の cross-build は
+引き続き他 OS でも可能です):
 
-### GitHub Actions による署名済みリリース
+```powershell
+pnpm exec murasaki bundle --target win32-x64 --sign
+pnpm exec murasaki installer --target win32-x64 --sign
+```
+
+bundle command は portable ZIP を作る前に `<productName>.exe` を署名します。installer
+command はその署名済み payload を NSIS / MSI に格納し、生成した setup executable と
+MSI 自体も署名します。すべて SHA-256 と既定の RFC 3161 timestamp を使用し、別の
+`signtool verify /pa /v /tw` pass で検証します。署名または検証の失敗は release を停止します。
+
+signer は次の1つを選びます。CI では config を編集せず環境変数で override できます。
+
+| Signer | Config | 環境変数 override |
+| --- | --- | --- |
+| PFX/P12 | `sign.windows.certificateFile` | `MURASAKI_WINDOWS_CERTIFICATE_FILE` + 任意の `MURASAKI_WINDOWS_CERTIFICATE_PASSWORD` |
+| import 済み証明書の subject | `sign.windows.certificateSubjectName` | `MURASAKI_WINDOWS_CERTIFICATE_SUBJECT` |
+| import 済み証明書の thumbprint | `sign.windows.certificateSha1` | `MURASAKI_WINDOWS_CERTIFICATE_SHA1` |
+| Microsoft Artifact Signing | `sign.windows.artifactSigning.{dlib,metadata}` | `MURASAKI_WINDOWS_ARTIFACT_SIGNING_DLIB` + `MURASAKI_WINDOWS_ARTIFACT_SIGNING_METADATA` |
+
+selector を指定しない場合は SignTool `/a` が `CurrentUser/My` から最適な code-signing
+certificate を選択します。machine store は `certificateStore: 'localMachine'`、SignTool
+path は `MURASAKI_SIGNTOOL_PATH`、timestamp は `MURASAKI_WINDOWS_TIMESTAMP_URL` で
+override できます。`false` で timestamp を無効化できますが public release では非推奨です。
+
+Microsoft Artifact Signing では `dlib` に `Azure.CodeSigning.Dlib.dll`、`metadata` に
+非secretの account/profile JSON を指定します。認証は Azure CLI、workload identity、
+managed identity 側に残し、credential を JSON や Murasaki config に書かないでください。
+
+updater の Ed25519 manifest signature は Windows SmartScreen の publisher identity を
+確立しないため Authenticode の代わりにはなりません。正しく署名しても新規 publisher は
+reputation が育つまで SmartScreen prompt が出る場合があります。
+
+### GitHub Actions の Windows 署名済み release
+
+最小構成の PFX 例です。certificate は runner の一時ディレクトリだけに書きます。証明書
+policy に合う場合は import 済み store certificate または cloud/HSM provider を優先してください。
+
+```yaml title=".github/workflows/release-windows.yml"
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Materialize signing certificate
+        shell: pwsh
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+        run: |
+          [IO.File]::WriteAllBytes(
+            "$env:RUNNER_TEMP\release.pfx",
+            [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
+          )
+      - name: Build signed installers
+        env:
+          MURASAKI_WINDOWS_CERTIFICATE_FILE: ${{ runner.temp }}\release.pfx
+          MURASAKI_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: pnpm exec murasaki installer --target win32-x64 --sign
+```
+
+### GitHub Actions による macOS 署名済みリリース
 
 タグの push で `.dmg` をビルドし、(任意で)署名・公証して GitHub Release に添付しま
 す。あなたのアプリに `.github/workflows/release.yml` として次を追加してください:
@@ -226,7 +287,7 @@ base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
 - 公開する全 platform / architecture の clean target で install / update / uninstall
 - 設定した URL scheme / file association を cold start と primary app 起動中の両方で確認
 - Node Main shutdown、offline startup、network failure を確認
-- macOS signing / notarization、または外部 Windows signature を検証
+- macOS signing / notarization と Windows Authenticode signature を検証
 - 最終 payload が immutable になってから Murasaki update manifest を生成・署名
 - payload、`latest.json`、`latest.json.sig` を同時公開
 - signing credential / `MURASAKI_UPDATE_KEY` は CI secret に保存し、

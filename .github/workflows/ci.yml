@@ -639,6 +639,68 @@ jobs:
           -TimeoutSeconds 60
           -ExpectedMarker "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
 
+      - name: Create ephemeral trusted code-signing certificate
+        shell: pwsh
+        run: |
+          $certificate = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject 'CN=Murasaki CI Authenticode' `
+            -CertStoreLocation 'Cert:\CurrentUser\My' `
+            -KeyExportPolicy Exportable `
+            -NotAfter (Get-Date).AddDays(2)
+          $cerPath = Join-Path $env:RUNNER_TEMP 'murasaki-ci-signing.cer'
+          Export-Certificate -Cert $certificate -FilePath $cerPath | Out-Null
+          Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+          "MURASAKI_WINDOWS_CERTIFICATE_SHA1=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Keep PR CI independent of a public timestamp service. Unit tests
+          # cover /tr + /td ordering; release users timestamp by default.
+          'MURASAKI_WINDOWS_TIMESTAMP_URL=false' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install Windows installer toolchains
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          dotnet tool install --global wix --version 4.0.6
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Install WiX UI extension
+        shell: pwsh
+        run: wix extension add -g WixToolset.UI.wixext/4.0.6
+
+      - name: Build and Authenticode-sign portable, NSIS, and MSI artifacts
+        working-directory: examples/ci-win-app
+        run: pnpm exec murasaki installer --target win32-x64 --no-build --sign
+
+      - name: Verify signed artifacts and signed app startup
+        shell: pwsh
+        run: |
+          $app = (Resolve-Path 'examples/ci-win-app/dist/bundle/Murasaki CI Windows/Murasaki CI Windows.exe').Path
+          $setup = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0-setup.exe').Path
+          $msi = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0.msi').Path
+          foreach ($artifact in @($app, $setup, $msi)) {
+            $signature = Get-AuthenticodeSignature -FilePath $artifact
+            if ($signature.Status -ne 'Valid') {
+              Write-Error "Invalid Authenticode signature on $artifact`: $($signature.Status) $($signature.StatusMessage)"
+              exit 1
+            }
+          }
+
+          $zip = (Resolve-Path 'examples/ci-win-app/dist/bundle/Murasaki CI Windows-win32-x64.zip').Path
+          $expanded = Join-Path $env:RUNNER_TEMP 'murasaki-signed-portable'
+          Expand-Archive -LiteralPath $zip -DestinationPath $expanded -Force
+          $portableExe = Join-Path $expanded 'Murasaki CI Windows/Murasaki CI Windows.exe'
+          $portableSignature = Get-AuthenticodeSignature -FilePath $portableExe
+          if ($portableSignature.Status -ne 'Valid') {
+            Write-Error "Portable ZIP contains an invalid signature: $($portableSignature.Status)"
+            exit 1
+          }
+
+          .github/scripts/win-smoke-test.ps1 `
+            -ExePath $app `
+            -TimeoutSeconds 60 `
+            -ExpectedMarker 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened'
+
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

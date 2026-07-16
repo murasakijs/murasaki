@@ -24,7 +24,7 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 | Renderer → local Node | `/api/*` と `/__murasaki/*` は random 256-bit HttpOnly / SameSite=Strict cookie を要求し Host / Origin を検証。wire payload に上限 | 各 action / route / Main function 内で引数を検証し操作を認可 |
 | OS URL / file activation → Node Main | 設定済み scheme / extension だけを normalize して `openRequested()` target にし、認証付き app-local channel で配送 | URL / path をすべて attacker-controlled として扱い、操作前に intent、identifier、host、file content を検証 |
 | App → update host | manifest raw bytes の Ed25519 signature、その後 payload の SHA-256 を検証 | private update key を保護し、hash/signature を同時に公開 |
-| OS → installed app | macOS ad-hoc signature はローカル整合性を検証。Developer ID + notarization は公開配布の信頼を確立 | macOS 公開版を署名・公証し、Windows は外部 signing flow を用意 |
+| OS → installed app | macOS Developer ID / notarization と Windows Authenticode orchestration が最終 app-owned artifact を署名・検証 | platform certificate / provider を用意して保護し、clean machine で trust policy と installed artifact をテスト |
 
 本番は全 interface ではなく `127.0.0.1` だけで listen します。開発時は loopback の
 `localhost` / `127.0.0.1` / `[::1]` を許可し、cross-site Fetch Metadata を拒否します。
@@ -191,7 +191,7 @@ Node の TCP / WebSocket / HTTP listener を作れますが、Murasaki runtime-s
 Code signing は OS に「誰がこの executable を作ったか」を示します。Ed25519 update
 signature は Murasaki に「この manifest を app の update key 保有者が承認したか」を
 示します。本番 updater は両方を使ってください。OS artifact は Developer ID +
-notarization（Windows は外部 Authenticode flow）、更新は Murasaki manifest signature
+notarization または Murasaki の Windows Authenticode `--sign` flow、更新は manifest signature
 と payload hash で保護します。
 
 ## 既知の security gap
@@ -201,7 +201,8 @@ notarization（Windows は外部 Authenticode flow）、更新は Murasaki manif
 - 宣言windowは1つのapplication originと認証済みlocal Node sessionを共有する。native
   allowlistはServer Actions、`'use main'`、API route、updater endpointを隔離しないため、
   application code側で操作を認証・認可する必要がある
-- Windows Authenticode / Linux package signing が未実装
+- Linux package signing は未実装。Windows Authenticode には developer が用意した
+  certificate / Artifact Signing provider と Windows SDK SignTool が必要
 - Linux の protocol / file-association 登録は未実装。Windows portable archive は意図的に self-register しない
 - renderer native APIは `src/main.ts` から直接呼べない
 

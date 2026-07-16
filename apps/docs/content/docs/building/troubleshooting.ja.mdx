@@ -104,8 +104,9 @@ bundle が成功すれば `murasaki bundle --target win32-x64` は portable dire
 - `.msi`: WiX v4。Windows 上で実行
 
 どちらも `PATH` にない場合、installer は未生成と表示されます。portable zip を使うか
-必要 tool を install してください。Windows Authenticode は Murasaki 未実装なので、
-public release には別 signing step が必要です。
+必要 tool を install してください。`--sign` は Windows SDK SignTool も必要で、Windows
+上で実行します。失敗する場合は PFX / store / Artifact Signing source が1つだけ選択され、
+timestamp service へ接続でき、`signtool verify /pa /v /tw <artifact>` が成功するか確認します。
 
 ## Shutdown が止まる / 途中で切られる
 

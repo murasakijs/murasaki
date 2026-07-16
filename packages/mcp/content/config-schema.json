@@ -362,7 +362,33 @@
       "additionalProperties": false,
       "properties": {
         "identity": { "type": "string" },
-        "entitlements": { "type": "string" }
+        "entitlements": { "type": "string" },
+        "windows": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "certificateFile": { "type": "string" },
+            "certificateSubjectName": { "type": "string" },
+            "certificateSha1": { "type": "string", "pattern": "^(?:[0-9A-Fa-f]\\s*){40}$" },
+            "certificateStore": { "enum": ["currentUser", "localMachine"] },
+            "timestampUrl": {
+              "oneOf": [
+                { "type": "string", "format": "uri", "pattern": "^https?://" },
+                { "const": false }
+              ]
+            },
+            "signToolPath": { "type": "string" },
+            "artifactSigning": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["dlib", "metadata"],
+              "properties": {
+                "dlib": { "type": "string" },
+                "metadata": { "type": "string" }
+              }
+            }
+          }
+        }
       }
     }
   }

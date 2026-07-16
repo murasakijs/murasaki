@@ -43,14 +43,16 @@ macOS では `<productName>.app`、Windows では `<productName>.exe` を含む
 murasaki bundle                       # ホストのプラットフォーム + アーキテクチャ、未署名
 murasaki bundle --arch x64            # クロスアーキテクチャ(macOS): Apple Silicon 上で x64 の .app
 murasaki bundle --target win32-arm64  # クロスターゲット: arm64 の Windows バンドル
-murasaki bundle --sign                # macOS: .app を Developer ID で署名
+murasaki bundle --sign                # macOS Developer ID / Windows Authenticode 署名
 murasaki bundle --no-build            # 既存の dist/client を再利用する
 ```
 
 - **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — 対象アーキテクチャ /
   プラットフォーム(デフォルトはホスト)。Windows は `win32-x64` / `win32-arm64`。
-- **`--sign`** — macOS で `.app` を Developer ID 署名する(詳しくは
-  [Distribution](/docs/building/distribution#signing--notarization)を参照)。
+- **`--sign`** — macOS では `.app` を Developer ID 署名し、Windows では
+  portable ZIP 作成前に app executable を Authenticode 署名します。Windows 署名は
+  SignTool がある Windows 上で実行します。詳しくは
+  [Distribution](/ja/docs/building/distribution#signing--notarization)を参照してください。
 - **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップする。
 
 ## `murasaki installer`
@@ -64,12 +66,15 @@ DMG にフォールバック)、Windows ではポータブル `.zip`、NSIS `.ex
 murasaki installer                     # ホストプラットフォーム向けインストーラ(最初に再バンドル)
 murasaki installer --target win32-x64  # Windows x64 のインストーラ
 murasaki installer --sign --notarize   # macOS: Developer ID 署名 + 公証 + ステープル
+murasaki installer --target win32-x64 --sign # Windows: app + NSIS + MSI を署名
 murasaki installer --no-build          # 既存の dist/bundle を再利用する
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — `bundle` に転送されます。
-- **`--sign`** / **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary
-  サービスに提出し、チケットをステープルします(`--notarize` は `--sign` が必須)。
+- **`--sign`** — macOS の Developer ID または Windows の Authenticode 署名。
+  Windows では app executable、NSIS setup、MSI を署名して検証します。
+- **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary サービスに
+  提出し、チケットをステープルします(`--notarize` は `--sign` が必須)。
 
 ## `murasaki init`
 

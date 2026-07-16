@@ -112,9 +112,10 @@ and `.zip` when bundling succeeds. Installer formats require external tools:
 - WiX v4 for `.msi`—runs on Windows.
 
 If neither is on `PATH`, `murasaki installer` reports that no installer was
-produced; use the portable zip or install the required tool. Windows
-Authenticode signing is not implemented by Murasaki, so public releases need a
-separate signing step.
+produced; use the portable zip or install the required tool. `--sign` also
+requires Windows SDK SignTool and must run on Windows. If signing fails, check
+that exactly one PFX/store/Artifact Signing source is selected, timestamp
+network access works, and `signtool verify /pa /v /tw <artifact>` succeeds.
 
 ## Shutdown hangs or is cut off
 

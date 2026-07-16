@@ -273,9 +273,10 @@ jobs:
 あなたの CI シークレットの外に出ることはありません。
 
 <Callout type="warn">
-  このプロジェクトは Windows のコード署名(Authenticode)を一切同梱していません —
-  [配布](/docs/building/distribution#signing--notarization)を参照してください。その
-  ため Windows では、Ed25519 のマニフェスト署名が更新の**唯一の**真正性の保証です。
+  manifest signature に加えて `murasaki installer --target win32-x64 --sign` で
+  Authenticode を使用してください —
+  [配布](/ja/docs/building/distribution#signing--notarization)を参照してください。
+  `--sign` がなければ Windows update の真正性保証は Ed25519 だけです。
 </Callout>
 
 `.murasaki/update-key` はバージョン管理の外に置いてください(`--keygen` が自動的に

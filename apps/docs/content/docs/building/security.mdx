@@ -26,7 +26,7 @@ system.
 | Renderer → local Node | Privileged `/api/*` and `/__murasaki/*` endpoints require a random 256-bit HttpOnly, SameSite=Strict runtime cookie and validate Host/Origin; wire payloads are bounded | Validate arguments and authorize the requested operation inside every action/route/Main function |
 | OS URL/file activation → Node Main | Only configured schemes/extensions are normalized into `openRequested()` targets; delivery uses the authenticated app-local channel | Treat every URL and path as attacker-controlled; validate intent, identifiers, hosts, and file contents before acting |
 | App → update host | Ed25519 signature over raw manifest bytes, then SHA-256 verification of the selected payload | Protect the private update key and publish hashes/signatures together |
-| OS → installed app | macOS ad-hoc signature validates integrity locally; Developer ID + notarization establishes public trust | Sign and notarize public macOS releases; establish an external signing flow for Windows |
+| OS → installed app | macOS Developer ID/notarization and Windows Authenticode orchestration sign and verify final app-owned artifacts | Supply and protect your platform certificate/provider; test trust policy and installed artifacts on clean machines |
 
 Production listens on `127.0.0.1`, not all interfaces. Development accepts
 loopback `localhost`, `127.0.0.1`, or `[::1]` hosts and rejects cross-site Fetch
@@ -205,8 +205,8 @@ protection.
 Code signing answers “who produced this executable?” to the operating system.
 The Ed25519 update signature answers “did the holder of this app's update key
 authorize this manifest?” to Murasaki. A production updater should use both:
-Developer ID/notarization (or an external Windows Authenticode process) for the
-OS artifact, plus Murasaki's manifest signature and payload hash.
+Developer ID/notarization or Murasaki's Windows Authenticode `--sign` flow for
+the OS artifact, plus Murasaki's manifest signature and payload hash.
 
 ## Known security gaps
 
@@ -215,7 +215,8 @@ OS artifact, plus Murasaki's manifest signature and payload hash.
 - Declared windows share one application origin and authenticated local Node
   session. Native allowlists do not isolate Server Actions, `'use main'`, API
   routes, or updater endpoints; authorize those operations in application code.
-- Windows Authenticode and Linux package signing are not implemented.
+- Linux package signing is not implemented. Windows Authenticode requires a
+  developer-supplied certificate/Artifact Signing provider and Windows SDK SignTool.
 - Linux protocol/file-association registration is not implemented. Windows
   portable archives intentionally do not self-register.
 - Renderer native APIs are not callable directly from `src/main.ts`.

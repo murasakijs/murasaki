@@ -10,6 +10,7 @@ import bundle, { parseTarget, type Arch } from './bundle.js'
 import type { MurasakiConfig } from '../config.js'
 import { resolveAssociations, windowsProgId, type ResolvedAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
+import { signWindowsArtifact } from './windows-signing.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -30,6 +31,9 @@ export default async function installer(argv: string[]) {
   const target = parseTarget(argv, config)
 
   if (target.platform === 'win32') {
+    if (argv.includes('--notarize')) {
+      throw new Error('murasaki: --notarize is only available for macOS DMG installers.')
+    }
     await installerWin32(argv, cwd, config, target.arch)
     return
   }
@@ -65,7 +69,10 @@ export default async function installer(argv: string[]) {
   // an earlier run. `--no-build` reuses an existing bundle (and propagates to
   // `bundle`, which then also skips the client rebuild).
   const skipBuild = argv.includes('--no-build')
-  if (!skipBuild || !existsSync(appDir)) await bundle(argv)
+  // A reused bundle may only have the default ad-hoc signature. `--sign`
+  // must always re-enter bundle so the exact app placed in this DMG receives
+  // the requested Developer ID signature before the outer artifact is made.
+  if (!skipBuild || !existsSync(appDir) || shouldSign) await bundle(argv)
 
   const dmgPath = resolve(cwd, 'dist', `${productName}-${version}.dmg`)
   await rm(dmgPath, { force: true })
@@ -408,10 +415,14 @@ async function installerWin32(
   const productName = config.productName
   const version = config.version ?? '0.0.0'
   const bundleDir = resolve(cwd, 'dist/bundle', productName)
+  const shouldSign = argv.includes('--sign')
 
   // Same re-bundle-by-default / --no-build convention as the darwin path.
   const skipBuild = argv.includes('--no-build')
-  if (!skipBuild || !existsSync(bundleDir)) await bundle(argv)
+  // `bundle --sign` signs the app-owned executable before creating the
+  // portable ZIP. Force that pass even with --no-build so a stale unsigned
+  // folder/ZIP can never be wrapped by a signed installer.
+  if (!skipBuild || !existsSync(bundleDir) || shouldSign) await bundle(argv)
 
   await mkdir(resolve(cwd, 'dist'), { recursive: true })
 
@@ -419,10 +430,12 @@ async function installerWin32(
   // asset only warns a single time (rather than once per installer type).
   const branding = resolveWindowsBranding(cwd, config, bundleDir)
 
-  const madeNsis = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding })
-  const madeMsi = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
+  const nsisPath = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding })
+  if (shouldSign && nsisPath) signWindowsArtifact(nsisPath, config, cwd)
+  const msiPath = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
+  if (shouldSign && msiPath) signWindowsArtifact(msiPath, config, cwd)
 
-  if (!madeNsis && !madeMsi) {
+  if (!nsisPath && !msiPath) {
     process.stdout.write(
       `\n${warn('installer: neither makensis nor wix were found on PATH — no Windows installer produced.')}\n` +
         `${dim('  the portable folder/.zip from `murasaki bundle --target win32-x64` still works.')}\n` +
@@ -733,7 +746,7 @@ function uninstKillFailedText(productName: string, languageName: string): string
 
 /**
  * Generates the `.nsi` script and runs `makensis` against it to produce
- * `dist/<productName>-<version>-setup.exe`. Returns `false` (without
+ * `dist/<productName>-<version>-setup.exe`. Returns `null` (without
  * throwing) if `makensis` isn't on PATH or compilation fails, so the caller
  * can fall through to the "no installer produced" notice.
  */
@@ -744,7 +757,7 @@ async function buildNsisInstaller(opts: {
   version: string
   bundleDir: string
   branding: WindowsBranding
-}): Promise<boolean> {
+}): Promise<string | null> {
   const { cwd, config, productName, version, bundleDir, branding } = opts
 
   const makensis = resolveMakensis()
@@ -753,7 +766,7 @@ async function buildNsisInstaller(opts: {
       `\n${warn('installer: makensis not found — skipping the NSIS .exe installer.')}\n` +
         `${dim('  install NSIS: https://nsis.sourceforge.net/ (or `brew install makensis` on macOS, which can compile — but not run — the installer).')}\n\n`,
     )
-    return false
+    return null
   }
 
   const setupPath = resolve(cwd, 'dist', `${productName}-${version}-setup.exe`)
@@ -791,11 +804,11 @@ async function buildNsisInstaller(opts: {
       process.stdout.write(
         `\n${warn('installer: makensis failed, skipping the NSIS installer:')}\n${dim((result.stderr || result.stdout).trim())}\n\n`,
       )
-      return false
+      return null
     }
 
     process.stdout.write(`\n${success(`installer written  ${dim(setupPath)}`)}\n\n`)
-    return true
+    return setupPath
   } finally {
     await rm(nsiDir, { recursive: true, force: true })
   }
@@ -1328,7 +1341,7 @@ async function resolveMsiLicenseRtf(branding: WindowsBranding, wxsDir: string): 
 
 /**
  * Generates the `.wxs` (WiX v4) source and runs `wix build` to produce
- * `dist/<productName>-<version>.msi`. Returns `false` (without throwing) if
+ * `dist/<productName>-<version>.msi`. Returns `null` (without throwing) if
  * `wix` isn't on PATH (expected on macOS/Linux — WiX only runs on Windows;
  * verified in CI) or compilation fails.
  *
@@ -1356,7 +1369,7 @@ async function buildMsiInstaller(opts: {
   bundleDir: string
   arch: Arch
   branding: WindowsBranding
-}): Promise<boolean> {
+}): Promise<string | null> {
   const { cwd, config, productName, version, bundleDir, arch, branding } = opts
 
   if (!detectTool('wix', ['--version'])) {
@@ -1364,7 +1377,7 @@ async function buildMsiInstaller(opts: {
       `\n${warn('installer: wix not found — skipping the .msi installer (expected on macOS/Linux; WiX is Windows-only).')}\n` +
         `${dim('  install: dotnet tool install --global wix')}\n\n`,
     )
-    return false
+    return null
   }
 
   const msiPath = resolve(cwd, 'dist', `${productName}-${version}.msi`)
@@ -1410,11 +1423,11 @@ async function buildMsiInstaller(opts: {
       process.stdout.write(
         `\n${warn('installer: wix build failed, skipping the .msi installer:')}\n${dim((result.stderr || result.stdout).trim())}\n\n`,
       )
-      return false
+      return null
     }
 
     process.stdout.write(`\n${success(`installer written  ${dim(msiPath)}`)}\n\n`)
-    return true
+    return msiPath
   } finally {
     await rm(wxsDir, { recursive: true, force: true })
   }

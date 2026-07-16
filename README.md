@@ -280,8 +280,10 @@ Rust toolchain.
 
 - **Linux app packaging isn't implemented.** `murasaki dev` works on Linux, but
   there's no `bundle` or `installer` for it yet.
-- **Windows binaries are not Authenticode-signed.** murasaki doesn't wire that
-  up, so Windows will show a SmartScreen warning on first run.
+- **Windows Authenticode needs your own certificate or signing provider.**
+  `--sign` wires SignTool across the app executable, portable ZIP payload,
+  NSIS setup, and MSI, but Murasaki cannot establish publisher reputation for
+  you. A new publisher may still see SmartScreen prompts while reputation grows.
 - **macOS signing and notarization need your own paid Apple Developer ID** — see
   [Signing & distribution](#signing--distribution). Unsigned is the default.
 - **`mandatory` in the update manifest is advisory.** murasaki hands the flag to
@@ -304,6 +306,16 @@ Developer ID — murasaki ships no certificate of its own:
 murasaki bundle --sign                 # Developer ID-sign the .app
 murasaki installer --sign --notarize   # + submit the .dmg to Apple, staple the ticket
 ```
+
+On Windows, the same flag Authenticode-signs and verifies every app-owned
+artifact with a PFX/store certificate or Microsoft Artifact Signing provider:
+
+```powershell
+pnpm exec murasaki installer --target win32-x64 --sign
+```
+
+See [Distribution](https://murasaki.ichi10.com/docs/building/distribution) for
+certificate selectors, environment variables, timestamping, and CI examples.
 
 The signing identity resolves from `$MURASAKI_SIGN_IDENTITY`, then
 `config.sign.identity`, then the first "Developer ID Application" identity in
@@ -520,8 +532,9 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
   cross-compiled from macOS/Linux.
 - ✅ **Auto-update** — signed manifests, SHA-256-verified downloads, and
   in-place replacement + relaunch on macOS and Windows x64.
-- 🚧 **Next** — Linux packaging, Windows Authenticode signing, Windows arm64
-  auto-update, and v1.0 stabilization.
+- ✅ **Code signing** — macOS Developer ID + notarization and Windows
+  Authenticode (PFX/store certificates or Microsoft Artifact Signing).
+- 🚧 **Next** — Linux packaging, Windows arm64 auto-update, and v1.0 stabilization.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something

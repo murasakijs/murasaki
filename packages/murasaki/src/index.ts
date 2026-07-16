@@ -13,6 +13,7 @@ export type {
   ResolvedWindowConfig,
   SecondaryWindowConfig,
   UpdaterConfig,
+  WindowsSigningConfig,
   WindowConfig,
 } from './config.js'
 

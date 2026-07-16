@@ -52,7 +52,7 @@ export default defineConfig({
 | `protocols` | `ProtocolConfig[]?` | packaged macOS app / Windows installer が登録する custom URL scheme — [下記](#protocols)を参照。 |
 | `fileAssociations` | `FileAssociationConfig[]?` | packaged macOS app / Windows installer が登録する document extension — [下記](#fileassociations)を参照。 |
 | `installer` | `object?` | macOS DMG / Windows installer option — [下記](#installer)を参照。 |
-| `sign` | `object?` | macOS のコード署名 — [下記](#sign)を参照。 |
+| `sign` | `object?` | macOS Developer ID / Windows Authenticode 署名 — [下記](#sign)を参照。 |
 
 ## `window`
 
@@ -324,16 +324,37 @@ macOS DMG styling と Windows NSIS / MSI installer option です。省略時は 
 
 ## `sign`
 
-macOS のコード署名です。Murasaki は**あなた自身の**証明書で署名します — 独自の証明書
-は一切同梱していません。公証の認証情報はこの設定からではなく、常に環境変数から読み取ら
-れます — 詳しくは
+Murasaki は**あなた自身の**証明書または signing provider で署名し、独自の証明書は
+一切同梱しません。公証の認証情報と PFX password はこの設定ではなく、常に環境変数から
+読み取ります — 詳しくは
 [Distribution → Signing](/docs/building/distribution#signing--notarization)を参照
 してください。
+
+### macOS fields
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
 | `identity` | `string?` | 署名 identity、例: `"Developer ID Application: Name (TEAMID)"`。デフォルトは `$MURASAKI_SIGN_IDENTITY`、次にキーチェーン内の最初の "Developer ID Application" identity。 |
 | `entitlements` | `string?` | カスタムの entitlements `.plist` へのパス。デフォルトは、Node に優しいハードンドランタイムのセット(JIT + 未署名実行可能メモリ + ライブラリ検証の無効化)です。 |
+
+### `sign.windows`
+
+`murasaki bundle --sign --target win32-x64` は portable ZIP 作成前に app executable を
+署名します。`murasaki installer --sign --target win32-x64` は生成した NSIS setup と
+MSI も署名し、すべてを Authenticode policy で検証します。Windows と SignTool が必要です。
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `certificateFile` | `string?` | PFX/P12 のパス。password は `$MURASAKI_WINDOWS_CERTIFICATE_PASSWORD` からのみ読み取ります。 |
+| `certificateSubjectName` | `string?` | Windows の `My` store に import 済みの証明書を subject name で選択します。 |
+| `certificateSha1` | `string?` | `My` store 内の証明書の40文字 thumbprint。file / subject selector とは排他的です。 |
+| `certificateStore` | `'currentUser' \| 'localMachine'` | subject / thumbprint / 自動選択を行う store。デフォルトは `currentUser`。 |
+| `timestampUrl` | `string \| false` | RFC 3161 timestamp URL。`false` で無効。通常は DigiCert、Artifact Signing は Microsoft service がデフォルトです。 |
+| `signToolPath` | `string?` | 明示的な `signtool.exe`。未指定なら PATH と Windows SDK から探索します。 |
+| `artifactSigning` | `{ dlib: string; metadata: string }?` | Microsoft Artifact Signing の provider path (`Azure.CodeSigning.Dlib.dll` と非secretの account/profile metadata JSON)。証明書 selector とは排他的です。 |
+
+CI 用の環境変数 override は
+[Windows installer と signing](/ja/docs/building/distribution#windows-installers-and-signing)を参照してください。
 
 ## 次へ
 

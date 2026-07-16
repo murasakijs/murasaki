@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.50.0",
+  "frameworkVersion": "0.51.0",
   "features": [
     {
       "id": "file-routing",
@@ -299,19 +299,23 @@
       "status": "partial",
       "platforms": {
         "macos": "supported",
-        "windows": "planned",
+        "windows": "supported",
         "linux": "planned"
       },
       "limitations": [
         "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",
-        "Windows Authenticode and Linux package signing are not implemented. Ad-hoc macOS signatures do not establish user trust."
+        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Linux package signing is not implemented; ad-hoc macOS signatures do not establish user trust."
       ],
       "apiSymbols": [
         "MurasakiConfig.sign",
+        "WindowsSigningConfig",
         "murasaki bundle --sign",
+        "murasaki installer --sign",
         "murasaki installer --notarize"
       ],
-      "testEvidence": [],
+      "testEvidence": [
+        "packages/murasaki/test/windows-signing.test.mjs"
+      ],
       "docsSlug": "/docs/building/distribution"
     },
     {
