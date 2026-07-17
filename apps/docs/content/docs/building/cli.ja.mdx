@@ -113,8 +113,8 @@ murasaki release --sign
   Windows の `-setup-<arch>.exe` — win32-x64 については、suffixなしの旧
   `-setup.exe` という名前も引き続き認識します)を探してハッシュ化し、`generatedAt`
   タイムスタンプ付きで `dist/latest.json` を書き出します。見つからないターゲットは
-  エラーではなくスキップされます。`--rollout <0-100>` は、optionalなstaged
-  rollout percentageを書き込みます。
+  エラーではなくスキップされます。`--rollout <0-100>` は、任意の段階的
+  ロールアウト率(%)を書き込みます。
 - **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成します。
   鍵は `$MURASAKI_UPDATE_KEY`、なければ `.murasaki/update-key` から読み込まれます。
   `.murasaki/update-key.pub` が利用可能な場合、`keyId` rotationヒントもマニフェスト

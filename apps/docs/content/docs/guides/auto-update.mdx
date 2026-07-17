@@ -174,9 +174,9 @@ murasaki release --sign
   un-suffixed `-setup.exe` name is still recognized too, for win32-x64 assets
   published before arch-suffixed naming), hashes whichever exist, and writes
   `dist/latest.json` with a `generatedAt` timestamp. A missing target is
-  skipped, not an error — only zero payloads found is fatal. `--rollout
-  <0-100>` writes an optional staged-rollout percentage (see [Staged
-  rollout](#staged-rollout)).
+  skipped, not an error — only zero payloads found is fatal.
+  `--rollout <0-100>` writes an optional staged-rollout percentage (see
+  [Staged rollout](#staged-rollout)).
 - **`--sign`** — signs `dist/latest.json` into `dist/latest.json.sig`. Reads
   the private key from `$MURASAKI_UPDATE_KEY`, falling back to
   `.murasaki/update-key`. When `.murasaki/update-key.pub` is present, also

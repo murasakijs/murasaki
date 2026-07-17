@@ -175,7 +175,7 @@ murasaki release --sign
   suffixなしの旧 `-setup.exe` という名前も引き続き認識します)を探してハッシュ化し、
   `generatedAt` タイムスタンプ付きで `dist/latest.json` を書き出します。見つからない
   ターゲットはエラーではなくスキップされます — 何も見つからなかった場合のみエラーで
-  す。`--rollout <0-100>` は、optionalなstaged rollout percentageを書き込みます
+  す。`--rollout <0-100>` は、任意の段階的ロールアウト率(%)を書き込みます
   ([段階的ロールアウト](#staged-rollout)参照)。
 - **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成しま
   す。秘密鍵は `$MURASAKI_UPDATE_KEY` から、なければ `.murasaki/update-key` から読み
@@ -392,7 +392,7 @@ export default defineConfig({
 
 ## 段階的ロールアウト
 
-`murasaki release --manifest --rollout <0-100>` は、optionalな `rollout` percentage
+`murasaki release --manifest --rollout <0-100>` は、任意の `rollout` 率(%)
 をマニフェストへ書き込みます。未設定(または `100`)の場合、今まで通りすべてのクライ
 アントが即座に更新を確認できます。
 
