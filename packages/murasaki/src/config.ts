@@ -38,6 +38,18 @@ export interface WebviewConfig {
   proxy?: WebviewProxyConfig
 }
 
+/** Local crash report capture (Node, native, and prod renderer domains). Murasaki never transmits these. */
+export interface DiagnosticsConfig {
+  /**
+   * Capture uncaught exceptions/rejections (Node Main), native panics and
+   * unexpected exits, and prod renderer errors as local crash report files.
+   * Default `true`.
+   */
+  crashReports?: boolean
+  /** Newest crash reports retained per app. Default 20; out-of-range values are clamped to 1-100. */
+  keepReports?: number
+}
+
 export type MurasakiPluginCommand = 'dev' | 'build' | 'bundle'
 
 export type MurasakiDeepReadonly<T> = T extends (...args: never[]) => unknown
@@ -317,6 +329,9 @@ export interface MurasakiConfig {
     envPrefix?: string[]
   }
 
+  /** Local crash report capture. See `DiagnosticsConfig`. */
+  diagnostics?: DiagnosticsConfig
+
   /** Renderer security policy applied to framework- and user-owned HTML. */
   security?: {
     /**
@@ -576,6 +591,7 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   validatePlugins((config as { plugins?: unknown }).plugins)
   validateWebviewConfig((config as { webview?: unknown }).webview)
   validateBuildConfig((config as { build?: unknown }).build)
+  validateDiagnosticsConfig(candidate.diagnostics)
   validateSecurityConfig(candidate.security)
   validateSystemPermissionsConfig(candidate.systemPermissions)
   validateDevPort(candidate.devPort)
@@ -667,6 +683,45 @@ export function resolveWebviewNetworkConfig(
       ? { proxy: { ...config.webview.proxy } }
       : {}),
   }
+}
+
+const DEFAULT_KEEP_CRASH_REPORTS = 20
+const MIN_KEEP_CRASH_REPORTS = 1
+const MAX_KEEP_CRASH_REPORTS = 100
+
+function validateDiagnosticsConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('diagnostics must be an object')
+  }
+  const diagnostics = value as Record<string, unknown>
+  rejectUnknownFields(diagnostics, ['crashReports', 'keepReports'], 'diagnostics')
+  if (diagnostics.crashReports !== undefined && typeof diagnostics.crashReports !== 'boolean') {
+    throw new TypeError('diagnostics.crashReports must be a boolean')
+  }
+  if (diagnostics.keepReports !== undefined && !Number.isSafeInteger(diagnostics.keepReports)) {
+    throw new TypeError('diagnostics.keepReports must be a safe integer')
+  }
+}
+
+/**
+ * Fully-resolved `diagnostics` defaults shared by dev (`main-process.ts`
+ * passes `config.diagnostics` through as-is) and bundle metadata
+ * (`cli/bundle.ts`'s `metaJson` writes this resolved shape so
+ * `prod-server.mjs` and the native launcher never re-derive the defaults).
+ * Unlike most numeric config here, an out-of-range `keepReports` is clamped
+ * rather than rejected, matching `MainRuntimeOptions.diagnostics`'s runtime
+ * behavior.
+ */
+export function resolveDiagnosticsConfig(
+  config: Pick<MurasakiConfig, 'diagnostics'>,
+): { crashReports: boolean; keepReports: number } {
+  validateDiagnosticsConfig(config.diagnostics)
+  const raw = config.diagnostics
+  const keepReports = raw?.keepReports === undefined
+    ? DEFAULT_KEEP_CRASH_REPORTS
+    : Math.min(MAX_KEEP_CRASH_REPORTS, Math.max(MIN_KEEP_CRASH_REPORTS, raw.keepReports))
+  return { crashReports: raw?.crashReports ?? true, keepReports }
 }
 
 function validProxyHost(host: string): boolean {

@@ -8,6 +8,7 @@ export { defineConfig, defineMurasakiPlugin, resolveWindowDeclarations } from '.
 export type {
   BundleConfig,
   BundleResource,
+  DiagnosticsConfig,
   MurasakiConfig,
   MurasakiBuildTarget,
   MurasakiDeepReadonly,
