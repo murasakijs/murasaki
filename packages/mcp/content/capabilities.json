@@ -12,7 +12,7 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Page, layout, loading, error, not-found, route-group, and single dynamic segments ship today; catch-all page segments are not implemented.",
+        "Page, layout, loading, error, not-found, route-group, single dynamic segments, and catch-all/optional catch-all page segments ([...slug], [[...slug]]) ship today.",
         "The router is client-side and does not provide the full Next.js App Router or React Server Components runtime."
       ],
       "apiSymbols": [
@@ -20,9 +20,13 @@
         "Link",
         "useRouter",
         "usePathname",
-        "useParams"
+        "useParams",
+        "useSearchParams"
       ],
-      "testEvidence": [],
+      "testEvidence": [
+        "packages/murasaki/test/routing-catchall.test.mjs",
+        "packages/murasaki/test/router-searchparams.test.mjs"
+      ],
       "docsSlug": "/docs/guides/routing"
     },
     {
@@ -82,7 +86,7 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Middleware runs in the renderer before client navigation and only receives pathname.",
+        "Middleware runs in the renderer before client navigation and only receives the pathname and query string being navigated to.",
         "Request headers, response headers, cookies, edge execution, and matcher configuration are not available."
       ],
       "apiSymbols": [
@@ -90,7 +94,9 @@
         "MiddlewareContext",
         "MiddlewareResult"
       ],
-      "testEvidence": [],
+      "testEvidence": [
+        "packages/murasaki/test/router-searchparams.test.mjs"
+      ],
       "docsSlug": "/docs/guides/middleware"
     },
     {
@@ -103,8 +109,8 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Document title, description, favicon, and a small Open Graph subset are applied in the renderer.",
-        "The metadata shape is not Next.js-compatible in full, and document metadata does not update the native window title."
+        "Document title, description, favicon, and a small Open Graph subset are applied in the renderer; the title is additionally mirrored onto the native window title (best-effort, requires the window:setTitle capability).",
+        "The metadata shape is not Next.js-compatible in full."
       ],
       "apiSymbols": [
         "Metadata",
@@ -282,12 +288,12 @@
       "status": "partial",
       "platforms": {
         "macos": "supported",
-        "windows": "partial",
+        "windows": "supported",
         "linux": "unsupported"
       },
       "limitations": [
-        "Signed manifests, bounded downloads, SHA-256 payload verification, staged handoff, and relaunch are implemented for packaged apps.",
-        "Linux packaging and updates are unavailable; Windows arm64 update publishing is not supported by the current artifact naming and manifest scan."
+        "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS and Windows (x64 and arm64) apps.",
+        "A custom self-hosted endpoint must be https (loopback http is allowed for local testing only); delta/differential updates are not implemented; Linux packaging and updates remain unavailable."
       ],
       "apiSymbols": [
         "useUpdate",
