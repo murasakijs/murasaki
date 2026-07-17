@@ -1,0 +1,94 @@
+# cargo-deny configuration for the murasaki-native crate.
+#
+# Run locally with `cargo install cargo-deny --locked && cargo deny check`
+# (from crates/native). CI runs this via EmbarkStudios/cargo-deny-action in
+# .github/workflows/security.yml.
+#
+# Reference: https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+# https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
+#
+# Vulnerabilities are always denied by cargo-deny 0.20 (no config toggle);
+# `ignore` below is the only way to accept a specific one, and each entry
+# must justify why it isn't reachable at runtime.
+#
+# `unmaintained` no longer has an in-config lint level in this cargo-deny
+# version (the old `unmaintained = "warn"` key was removed upstream) — it is
+# downgraded to a warning via the `-W unmaintained` CLI flag passed in
+# .github/workflows/security.yml instead, so this file just leaves the
+# default scope (`all`) in place.
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+unmaintained = "all"
+ignore = [
+    # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quadratic-time attribute checks
+    # and unbounded namespace-declaration allocation in quick-xml's *parsing*
+    # path (`Reader`/`NsReader`/`BytesStart::attributes()`) when fed
+    # attacker-controlled XML. Neither reaches murasaki-native at runtime:
+    #   - quick-xml 0.39.4 is pulled in only by `wayland-scanner`, a
+    #     proc-macro build-dependency that parses vendored, trusted Wayland
+    #     protocol XML at compile time on Linux — never runtime input.
+    #   - quick-xml 0.37.5 is pulled in by `tauri-winrt-notification` (via
+    #     `notify-rust`, Windows toast notifications), which only calls
+    #     `quick_xml::escape::escape` to escape text into a template it
+    #     writes; it never parses XML, so the vulnerable reader code is
+    #     never exercised.
+    # Re-evaluate if either dependency starts parsing untrusted XML, or when
+    # an upstream release satisfies both crates' `quick-xml >=0.41` fix.
+    { id = "RUSTSEC-2026-0194", reason = "parsing-only bug in a build-time codegen dep (wayland-scanner) and a write-only quick-xml user (tauri-winrt-notification); not reachable at runtime" },
+    { id = "RUSTSEC-2026-0195", reason = "parsing-only bug in a build-time codegen dep (wayland-scanner) and a write-only quick-xml user (tauri-winrt-notification); not reachable at runtime" },
+]
+
+# https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
+[licenses]
+# Every SPDX identifier below is actually present somewhere in the crate's
+# resolved dependency graph (`cargo deny check licenses`, iterated locally
+# until green). murasaki-native itself is MIT (see Cargo.toml).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "0BSD",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "BSL-1.0",
+    "CC0-1.0",
+    "MIT-0",
+    "Unlicense",
+    "Zlib",
+    "Unicode-3.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+# https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow-workspace = false
+
+# https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []
