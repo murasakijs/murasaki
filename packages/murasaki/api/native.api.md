@@ -25,19 +25,48 @@ export const appWindow: {
     isFocused(): Promise<boolean>;
     isMaximized(): Promise<boolean>;
     isMinimized(): Promise<boolean>;
+    startDragging(): Promise<void>;
+    setFullscreen(fullscreen: boolean): Promise<void>;
+    isFullscreen(): Promise<boolean>;
+    setMaxSize(size?: {
+        width?: number | null;
+        height?: number | null;
+    }): Promise<void>;
+    getMonitors(): Promise<{
+        monitors: WindowMonitorInfo[];
+    }>;
 };
 
 // @public (undocumented)
 export const clipboard: {
     readText(): Promise<string>;
     writeText(text: string): Promise<void>;
+    readImage(): Promise<ClipboardImageData | null>;
+    writeImage(image: {
+        pngBase64: string;
+    }): Promise<void>;
+    writeHtml(html: {
+        html: string;
+        altText?: string;
+    }): Promise<void>;
 };
+
+// @public (undocumented)
+export interface ClipboardImageData {
+    // (undocumented)
+    height: number;
+    // (undocumented)
+    pngBase64: string;
+    // (undocumented)
+    width: number;
+}
 
 // @public (undocumented)
 export const dialog: {
     openFile(options?: OpenFileOptions): Promise<string[]>;
     openDirectory(options?: Omit<OpenFileOptions, "multiple" | "filters">): Promise<string | null>;
     saveFile(options?: SaveFileOptions): Promise<string | null>;
+    showMessage(options: MessageDialogOptions): Promise<MessageDialogResult>;
 };
 
 // @public
@@ -64,8 +93,23 @@ export interface GlobalShortcutRegistration {
 }
 
 // @public (undocumented)
+export interface MessageDialogOptions {
+    // (undocumented)
+    buttons?: 'ok' | 'okCancel' | 'yesNo';
+    // (undocumented)
+    level?: 'info' | 'warning' | 'error';
+    // (undocumented)
+    message: string;
+    // (undocumented)
+    title?: string;
+}
+
+// @public (undocumented)
+export type MessageDialogResult = 'ok' | 'cancel' | 'yes' | 'no';
+
+// @public (undocumented)
 export const notification: {
-    show(options: NotificationOptions_2): Promise<void>;
+    show(options: NotificationOptions_2): Promise<string>;
 };
 
 // @public (undocumented)
@@ -116,6 +160,8 @@ export const secureStorage: {
 export const shell: {
     openExternal(target: string): Promise<void>;
     showItemInFolder(target: string): Promise<void>;
+    trashItem(path: string): Promise<void>;
+    openPath(path: string): Promise<void>;
 };
 
 // @public
@@ -174,6 +220,55 @@ export interface TrayOptions {
 }
 
 // @public
+export const webview: {
+    getCookies(options?: {
+        url?: string;
+    }): Promise<{
+        cookies: WebviewCookie[];
+    }>;
+    setCookie(options: WebviewSetCookieOptions): Promise<void>;
+    deleteCookie(options: {
+        url: string;
+        name: string;
+    }): Promise<void>;
+    setZoom(factor: number): Promise<void>;
+    print(): Promise<void>;
+};
+
+// @public
+export interface WebviewCookie {
+    // (undocumented)
+    domain: string | null;
+    expiresAt?: number;
+    // (undocumented)
+    httpOnly: boolean;
+    // (undocumented)
+    name: string;
+    // (undocumented)
+    path: string | null;
+    // (undocumented)
+    secure: boolean;
+    // (undocumented)
+    value: string;
+}
+
+// @public (undocumented)
+export interface WebviewSetCookieOptions {
+    domain?: string;
+    expiresAt?: number;
+    // (undocumented)
+    httpOnly?: boolean;
+    // (undocumented)
+    name: string;
+    path?: string;
+    // (undocumented)
+    secure?: boolean;
+    url: string;
+    // (undocumented)
+    value: string;
+}
+
+// @public
 export interface WindowInfo {
     // (undocumented)
     focused: boolean;
@@ -187,6 +282,26 @@ export interface WindowInfo {
     primary: boolean;
     // (undocumented)
     visible: boolean;
+}
+
+// @public
+export interface WindowMonitorInfo {
+    // (undocumented)
+    height: number;
+    // (undocumented)
+    isCurrent: boolean;
+    // (undocumented)
+    isPrimary: boolean;
+    // (undocumented)
+    name: string | null;
+    // (undocumented)
+    scaleFactor: number;
+    // (undocumented)
+    width: number;
+    // (undocumented)
+    x: number;
+    // (undocumented)
+    y: number;
 }
 
 // @public

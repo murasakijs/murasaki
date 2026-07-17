@@ -9,6 +9,7 @@ import { ButtonProps } from '@murasakijs/ui';
 import type { ComponentType } from 'react';
 import { JSX } from 'react';
 import type { PluginOption } from 'vite';
+import type { PointerEvent as PointerEvent_2 } from 'react';
 import type { ReactElement } from 'react';
 import type { ReactNode } from 'react';
 
@@ -196,10 +197,17 @@ export function defineConfig(config: MurasakiConfig): MurasakiConfig;
 export function defineMurasakiPlugin(plugin: MurasakiPlugin): MurasakiPlugin;
 
 // @public
-export interface DiagnosticsConfig {
-    crashReports?: boolean;
-    keepReports?: number;
-}
+export type DownloadEvent = {
+    type: 'started';
+    id: string;
+    url: string;
+    path: string;
+} | {
+    type: 'completed';
+    url: string;
+    path: string | null;
+    success: boolean;
+};
 
 // @public
 export interface FileAssociationConfig {
@@ -211,12 +219,31 @@ export interface FileAssociationConfig {
 }
 
 // @public
+export type FileDropEvent = {
+    type: 'enter';
+    paths: string[];
+    x: number;
+    y: number;
+} | {
+    type: 'over';
+    x: number;
+    y: number;
+} | {
+    type: 'drop';
+    paths: string[];
+    x: number;
+    y: number;
+} | {
+    type: 'leave';
+};
+
+// @public
 export type GenerateMetadata = (ctx: GenerateMetadataContext) => Metadata | Promise<Metadata>;
 
 // @public
 export interface GenerateMetadataContext {
     // (undocumented)
-    params: Record<string, string | string[]>;
+    params: Record<string, string>;
 }
 
 // @public (undocumented)
@@ -287,7 +314,6 @@ export type Middleware = (ctx: MiddlewareContext) => MiddlewareResult | Promise<
 export interface MiddlewareContext {
     // (undocumented)
     pathname: string;
-    search: string;
 }
 
 // @public (undocumented)
@@ -313,7 +339,6 @@ export interface MurasakiConfig {
     copyright?: string;
     description?: string;
     devPort?: number;
-    diagnostics?: DiagnosticsConfig;
     fileAssociations?: FileAssociationConfig[];
     homepage?: string;
     icon?: string;
@@ -465,6 +490,12 @@ export type SecondaryWindowConfig = Omit<WindowConfig, 'console'> & {
 };
 
 // @public
+export function subscribeDownloads(handler: (event: DownloadEvent) => void): () => void;
+
+// @public
+export function subscribeFileDrops(handler: (event: FileDropEvent) => void): () => void;
+
+// @public
 export interface SystemPermissionsConfig {
     // (undocumented)
     macOS?: MacOSSystemPermissionsConfig;
@@ -497,8 +528,6 @@ export type UpdaterConfig = boolean | {
     checkOnStart?: boolean;
     checkInterval?: string | false;
     publicKey?: string;
-    publicKeys?: string[];
-    maxManifestAgeDays?: number;
 };
 
 // @public (undocumented)
@@ -529,13 +558,20 @@ export function useContextMenu(items: ContextMenuItemSpec[]): void;
 // @public (undocumented)
 export function useContextMenu(id: string, items: ContextMenuItemSpec[]): void;
 
+// @public
+export function useFileDrop(onDrop: (event: {
+    paths: string[];
+    x: number;
+    y: number;
+}) => void): void;
+
 // Warning: (ae-forgotten-export) The symbol "ContextMenuItem" needs to be exported by the entry point index.d.ts
 //
 // @public (undocumented)
 export function useGlobalContextMenu(items: ContextMenuItem[] | ((target: EventTarget | null) => ContextMenuItem[]), onSelect?: (id: string) => void): void;
 
 // @public
-export function useParams(): Record<string, string | string[]>;
+export function useParams(): Record<string, string>;
 
 // @public (undocumented)
 export function usePathname(): string;
@@ -544,9 +580,6 @@ export function usePathname(): string;
 //
 // @public (undocumented)
 export function useRouter(): RouterCtx;
-
-// @public
-export function useSearchParams(): URLSearchParams;
 
 // Warning: (ae-forgotten-export) The symbol "ThemeCtx" needs to be exported by the entry point index.d.ts
 //
@@ -561,11 +594,24 @@ export function useUpdate(): UpdateState & {
     dismiss(): void;
 };
 
+// @public (undocumented)
+export function useWindowDrag(): {
+    onPointerDown: (event: PointerEvent_2) => void;
+};
+
 // @public
 export interface WebviewConfig {
+    downloads?: WebviewDownloadsConfig;
+    hotkeysZoom?: boolean;
     incognito?: boolean;
+    initScripts?: string[];
     proxy?: WebviewProxyConfig;
     userAgent?: string;
+}
+
+// @public
+export interface WebviewDownloadsConfig {
+    directory?: string;
 }
 
 // @public (undocumented)
@@ -579,8 +625,13 @@ export interface WebviewProxyConfig {
 export interface WindowConfig {
     capabilities?: NativeCapabilityGrant[];
     console?: boolean;
+    decorations?: boolean;
+    fullscreen?: boolean;
     // (undocumented)
     height?: number;
+    // (undocumented)
+    maxHeight?: number;
+    maxWidth?: number;
     // (undocumented)
     minHeight?: number;
     // (undocumented)
@@ -590,6 +641,7 @@ export interface WindowConfig {
     route?: string;
     // (undocumented)
     title?: string;
+    titleBarStyle?: 'default' | 'hidden';
     // (undocumented)
     transparent?: boolean;
     vibrancy?: 'hud' | 'sidebar' | 'popover' | null;

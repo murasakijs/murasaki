@@ -126,6 +126,92 @@ Node Main window manager to create that declaration first.
   an application quit request. See [Node Main](/docs/guides/node-main#control-declared-windows-from-node-main).
 </Callout>
 
+## Frameless windows and custom titlebars
+
+Set `decorations: false` to remove the OS window chrome on every platform, or
+macOS's `titleBarStyle: 'hidden'` to keep the traffic-light buttons but hide
+the title text and extend the WebView underneath them:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    decorations: false, // frameless on every platform
+    // titleBarStyle: 'hidden', // macOS only; accepted (and ignored, with a
+    //                          // config warning) on Windows/Linux
+  },
+})
+```
+
+Without a native titlebar, the OS has nothing left to drag the window by —
+opt a region back in with `useWindowDrag()`:
+
+```tsx
+'use client'
+
+import { appWindow } from 'murasaki/native'
+import { useWindowDrag } from 'murasaki'
+
+function Titlebar() {
+  const drag = useWindowDrag()
+  return (
+    <header {...drag} style={{ WebkitUserSelect: 'none' }}>
+      <span>My App</span>
+      <button data-murasaki-no-drag onClick={() => appWindow.close()}>
+        ×
+      </button>
+    </header>
+  )
+}
+```
+
+`useWindowDrag()` starts a native drag on primary-button pointerdown, skipping
+interactive targets (`button`, `input`, `a`, `select`, `textarea`, or anything
+marked `data-murasaki-no-drag`) so titlebar controls underneath the draggable
+region keep working. It is a silent no-op outside the native renderer and
+when the OS declines the drag (for example, outside an active mouse-down).
+
+## Fullscreen, max size, and monitors
+
+| API | Capability | Behavior |
+| --- | --- | --- |
+| `appWindow.startDragging()` | `window:manage` | Starts an OS window drag — see `useWindowDrag()` above. |
+| `appWindow.setFullscreen(bool)` / `isFullscreen()` | `window:manage` | Enters/exits borderless fullscreen on the window's current monitor. Exclusive (dedicated-video-mode) fullscreen is not supported. |
+| `appWindow.setMaxSize({ width?, height? })` | `window:manage` | Sets the maximum inner size. Both omitted or `null` clears it; a single axis is rejected — provide both or neither. |
+| `appWindow.getMonitors()` | `window:manage` | Returns every OS display visible to the window, in **physical pixels**. |
+
+These act on the calling renderer's own window, so `window:manage` gates them
+by simple grant membership — unlike `windows.show/hide/focus/close(label)`
+above, there is no other-window `label` argument for a scoped grant to apply to.
+
+`window.fullscreen` (also under `windows.<label>`) sets the initial state at
+launch; `window.maxWidth`/`maxHeight` set the initial maximum size and must be
+greater than or equal to `minWidth`/`minHeight` when both are configured:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: { maxWidth: 1600, maxHeight: 1200 },
+})
+```
+
+`getMonitors()` resolves `{ monitors: WindowMonitorInfo[] }`:
+
+```ts
+interface WindowMonitorInfo {
+  name: string | null
+  isPrimary: boolean
+  isCurrent: boolean
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
+}
+```
+
 ## Primary close and application lifecycle
 
 Using the OS close control or `appWindow.close()` on a secondary hides that

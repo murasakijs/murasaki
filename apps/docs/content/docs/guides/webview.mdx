@@ -1,0 +1,205 @@
+---
+title: WebView Content Features
+description: Downloads, file drag-and-drop, init scripts, zoom, print, and cookies for the native WebView.
+---
+
+Beyond session/network settings (User-Agent, incognito, proxy — see
+[Configuration](/docs/building/configuration#webview)), Murasaki exposes six
+WebView content features: downloads, file drag-and-drop, trusted init
+scripts, page zoom, printing, and cookies. All but init scripts are gated by
+their own deny-by-default `webview:*` capability.
+
+## Downloads
+
+Grant `webview:download` and a native `with_download_started_handler` is
+installed; without it, every download is denied (unchanged default). The
+suggested filename is sanitized down to a safe basename (directory
+components, control characters, and leading dots stripped; empty becomes
+`download`), and the final path is confined inside the configured directory
+— a name collision gets ` (n)` appended before the extension, matching
+Wry's own behavior.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  webview: {
+    downloads: { directory: '/Users/example/Documents/MyApp Downloads' },
+  },
+  capabilities: ['webview:download'],
+})
+```
+
+`downloads.directory` is optional and must be an absolute path; omitted, it
+resolves to the OS user Downloads folder. Subscribe to both lifecycle events
+with one typed helper:
+
+```tsx
+import { subscribeDownloads } from 'murasaki'
+
+const unsubscribe = subscribeDownloads((event) => {
+  if (event.type === 'started') console.log('downloading', event.url, event.path)
+  if (event.type === 'completed') console.log('done', event.success, event.path)
+})
+```
+
+<Callout type="warning">
+  There is no reliable id linking a `started` event to the `completed` event
+  that follows it — Wry's completed handler only reports url/path/success, not
+  the id — so concurrent downloads of the same URL can be ambiguous to tell
+  apart from `completed` alone. On macOS, `completed`'s `path` is always
+  `null` (an upstream WebKit API limitation).
+</Callout>
+
+## File drag-and-drop
+
+Grant `webview:dragDrop` to receive drag/drop events for files dragged onto
+the window. The native handler always lets the OS default proceed — it never
+blocks — so `<input type="file">` keeps working whether or not this
+capability is granted.
+
+```tsx
+import { useFileDrop } from 'murasaki'
+
+function Dropzone() {
+  useFileDrop(({ paths }) => importFiles(paths))
+  return <div>Drop files here</div>
+}
+```
+
+For `enter`/`over`/`leave` as well as `drop`, use `subscribeFileDrops`:
+
+```ts
+import { subscribeFileDrops } from 'murasaki'
+
+const unsubscribe = subscribeFileDrops((event) => {
+  if (event.type === 'over') setHighlighted(true)
+  if (event.type === 'leave') setHighlighted(false)
+})
+```
+
+`over` is throttled to at most 20 dispatched events per second — the OS
+reports drag-move far more often than a page needs to reposition a
+drop-target highlight.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  capabilities: ['webview:dragDrop'],
+})
+```
+
+## Trusted init scripts
+
+`webview.initScripts` runs project-authored JavaScript before every page load
+— config-owned and trusted, so it needs no capability (unlike everything else
+on this page). Paths are project-root-relative; contents are read and
+embedded at dev/bundle time, applied in declaration order.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  webview: {
+    initScripts: ['scripts/polyfills.js', 'scripts/telemetry-bootstrap.js'],
+  },
+})
+```
+
+Each file is bounded to 256 KiB and the combined total to 1 MiB, enforced
+when the project loads (a missing file or an oversized script fails the
+`murasaki dev`/`murasaki bundle` command with a clear error, not silently).
+
+## Page zoom
+
+`webview.setZoom({ factor })` sets the page zoom level (0.25 to 5.0
+inclusive); `webview:zoom` gates the call.
+
+```ts
+import { webview } from 'murasaki/native'
+
+await webview.setZoom(1.25)
+```
+
+<Callout type="info">
+  Zoom is available on macOS 11+ and iOS 14+ only (older macOS silently fails
+  the call, which surfaces as a rejected Promise); Android is unsupported.
+  Separately, `webview.hotkeysZoom` (config, not a capability) enables OS
+  zoom hotkeys/gestures — effective on Windows (WebView2) only; a no-op on
+  macOS/Linux.
+</Callout>
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  webview: { hotkeysZoom: true },
+  capabilities: ['webview:zoom'],
+})
+```
+
+## Print
+
+`webview.print()` opens the platform's native print dialog for the current
+page. Requires `webview:print`.
+
+```ts
+import { webview } from 'murasaki/native'
+
+await webview.print()
+```
+
+<Callout type="info">
+  There is no find-in-page API — Wry has none to expose. This is out of
+  scope until an upstream API exists.
+</Callout>
+
+## Cookies
+
+`webview:readCookies` gates `webview.getCookies()`; `webview:writeCookies`
+gates both `webview.setCookie()` and `webview.deleteCookie()`.
+
+```ts
+import { webview } from 'murasaki/native'
+
+const { cookies } = await webview.getCookies({ url: 'https://example.com/' })
+await webview.setCookie({
+  url: 'https://example.com/',
+  name: 'theme',
+  value: 'dark',
+  secure: true,
+})
+await webview.deleteCookie({ url: 'https://example.com/', name: 'theme' })
+```
+
+`getCookies()` returns at most 1000 entries, each `value` truncated at 4 KiB.
+`setCookie`/`deleteCookie` validate the cookie name against the RFC 6265
+token charset, bound `value` to 4 KiB, and require an `http`/`https` `url`.
+`deleteCookie` matches by name, the URL's host as domain, and the default `/`
+path — a cookie set with a non-default `path` is not addressable through
+`deleteCookie`.
+
+<Callout type="warning">
+  **Security:** Murasaki's own runtime session-auth cookie is invisible and
+  immutable through this API — it never appears in `getCookies()` results,
+  and `setCookie`/`deleteCookie` targeting it (case-insensitively) are
+  rejected with a structured error, regardless of granted capabilities.
+</Callout>
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  capabilities: ['webview:readCookies', 'webview:writeCookies'],
+})
+```
+
+## In-page permission requests
+
+`getUserMedia()`/`geolocation` calls from page JavaScript are not intercepted
+by Murasaki today — see [Security](/docs/building/security#in-page-permission-requests-getusermedia-geolocation)
+for the full explanation and macOS TCC interaction.
+
+## Next
+
+<Cards>
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="Dialogs, clipboard, notifications, shell, tray, and more." />
+  <Card title="Configuration" href="/docs/building/configuration" description="Application-wide WebView session/network settings." />
+  <Card title="Security" href="/docs/building/security" description="Trust boundaries and known gaps." />
+</Cards>

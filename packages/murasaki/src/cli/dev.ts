@@ -10,6 +10,7 @@ import { resolveWebviewNetworkConfig, type MurasakiConfig } from '../config.js'
 import { loadUserConfig } from './load-config.js'
 import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
 import { serializeWindowTemplates } from './window-metadata.js'
+import { resolveInitScripts } from './init-scripts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -94,6 +95,7 @@ export function createDevWindowTemplates(
   url: string,
 ): RuntimeWindowTemplate[] {
   const webviewNetwork = resolveWebviewNetworkConfig(config)
+  const initScripts = resolveInitScripts(config, cwd)
   return serializeWindowTemplates(config).map((declaration) => ({
     window: {
       label: declaration.label,
@@ -103,9 +105,14 @@ export function createDevWindowTemplates(
       height: declaration.height ?? 800,
       minWidth: declaration.minWidth,
       minHeight: declaration.minHeight,
+      maxWidth: declaration.maxWidth,
+      maxHeight: declaration.maxHeight,
       resizable: declaration.resizable,
       transparent: declaration.transparent,
       visible: declaration.visible,
+      decorations: declaration.decorations,
+      titleBarStyle: declaration.titleBarStyle,
+      fullscreen: declaration.fullscreen,
       // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
       // undefined: napi's Option<String> maps undefined to None but rejects an
       // explicit null with "Failed to convert Null into String".
@@ -123,6 +130,7 @@ export function createDevWindowTemplates(
       devtools: true,
       appId: config.appId,
       ...webviewNetwork,
+      initScripts,
       capabilities: declaration.capabilities,
       capabilityPolicy: declaration.capabilityPolicy,
       trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,

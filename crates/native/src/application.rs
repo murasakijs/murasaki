@@ -189,6 +189,11 @@ impl Application {
             homepage: None,
             authors: None,
             menu_labels: None,
+            decorations: None,
+            title_bar_style: None,
+            max_width: None,
+            max_height: None,
+            fullscreen: None,
         });
         let label = opts.label.clone().unwrap_or_else(|| "main".to_string());
         let primary = opts.primary.unwrap_or(label == "main");
@@ -248,6 +253,7 @@ impl Application {
         if opts.transparent.unwrap_or(false) || transparent_webview {
             builder = builder.with_transparent(true);
         }
+        builder = crate::window::apply_window_builder_options(builder, &opts);
 
         let window = builder
             .build(event_loop)
@@ -256,7 +262,11 @@ impl Application {
         crate::window::apply_window_vibrancy(&window, opts.vibrancy.as_deref())
             .map_err(|error| Error::new(Status::InvalidArg, error))?;
 
-        crate::window::center_on_primary_monitor(&window);
+        // See `RuntimeWindowManager::create_known`'s matching guard: don't
+        // fight an initial `fullscreen: true` with a redundant position reset.
+        if !opts.fullscreen.unwrap_or(false) {
+            crate::window::center_on_primary_monitor(&window);
+        }
 
         // Install the native Win32 menu bar (File/Edit/Window) once, on the
         // primary window — same "install once" semantics as the macOS app menu

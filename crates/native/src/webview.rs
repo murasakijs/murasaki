@@ -37,30 +37,54 @@ use napi_derive::napi;
 use std::collections::VecDeque;
 use std::{
     borrow::Cow,
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
+    time::{Duration, Instant},
 };
 
 use tray_icon::{Icon as TrayIconImage, TrayIconBuilder, TrayIconEvent};
 use wry::{
+    cookie,
     http::{header::CONTENT_TYPE, Response, StatusCode},
-    NewWindowResponse, ProxyConfig, ProxyEndpoint, WebContext, WebView, WebViewBuilder,
+    DragDropEvent, NewWindowResponse, ProxyConfig, ProxyEndpoint, WebContext, WebView,
+    WebViewBuilder,
 };
 
 use crate::{
     capability_policy::{CapabilityPolicy, CapabilityResource},
+    download,
     menu::{build_menu, AppMenuSpec, SharedMenu},
     types::{MenuItemOptions, MenuOptions, Position, WebviewOptions},
     window::{SharedProcessTray, SharedWindow, SharedWindowRegistry, WindowRegistry},
 };
 
-const MAX_IPC_BODY_BYTES: usize = 256 * 1024;
+/// Coarse gate applied to every renderer IPC message *before* its `kind` (and,
+/// for `nativeCall`, its `method`) is known — see `with_ipc_handler` below.
+/// Deliberately generous (16 MiB) so a `clipboard.writeImage` body can be
+/// parsed at all; the real per-message ceiling is enforced afterward by
+/// `DEFAULT_MAX_METHOD_BODY_BYTES`/`max_native_call_body_bytes` once the
+/// message kind/method is known, exactly as `MAX_IPC_BODY_BYTES` alone used
+/// to (pre-0.38, this constant *was* that ceiling).
+const MAX_IPC_PREPARSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// Per-method cap applied to every renderer `nativeCall`, plus every
+/// `contextMenu`/`appMenu` message and the plain Node-forwarded IPC channel —
+/// the original blanket ceiling every one of those relied on before the
+/// pre-parse gate above was raised to accommodate large `nativeCall` bodies.
+const DEFAULT_MAX_METHOD_BODY_BYTES: usize = 256 * 1024;
+/// `clipboard.writeImage` carries a base64-encoded PNG (see `clipboard.rs`);
+/// its wire budget matches `clipboard::MAX_CLIPBOARD_READ_IMAGE_PNG_BYTES` so
+/// the read and write directions share one round-trip size budget.
+const MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// `clipboard.writeHtml` carries HTML plus an optional plain-text alternative
+/// (see `clipboard::MAX_CLIPBOARD_HTML_BYTES`/`MAX_CLIPBOARD_HTML_ALT_TEXT_BYTES`),
+/// with headroom for JSON-string escaping overhead.
+const MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_MENU_ITEMS: usize = 256;
 const MAX_MENU_DEPTH: usize = 8;
 const MAX_MENU_STRING_BYTES: usize = 1024;
@@ -120,7 +144,22 @@ impl ProcessWebContext {
 }
 
 fn ipc_body_is_allowed(len: usize) -> bool {
-    len <= MAX_IPC_BODY_BYTES
+    len <= MAX_IPC_PREPARSE_BODY_BYTES
+}
+
+/// Per-method cap for a `nativeCall`'s raw IPC body length — measured the
+/// same way as `ipc_body_is_allowed` above, just against a tighter,
+/// method-specific ceiling once `method` is known.
+fn max_native_call_body_bytes(method: &str) -> usize {
+    match method {
+        "clipboard.writeImage" => MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES,
+        "clipboard.writeHtml" => MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
+        _ => DEFAULT_MAX_METHOD_BODY_BYTES,
+    }
+}
+
+fn native_call_body_is_allowed(method: &str, body_len: usize) -> bool {
+    body_len <= max_native_call_body_bytes(method)
 }
 
 /// Just enough of the IPC envelope to dispatch on `kind` before deciding
@@ -752,11 +791,17 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
         "dialog.openFile" => Some("dialog:openFile"),
         "dialog.openDirectory" => Some("dialog:openDirectory"),
         "dialog.saveFile" => Some("dialog:saveFile"),
+        "dialog.showMessage" => Some("dialog:message"),
         "clipboard.readText" => Some("clipboard:readText"),
         "clipboard.writeText" => Some("clipboard:writeText"),
+        "clipboard.readImage" => Some("clipboard:readImage"),
+        "clipboard.writeImage" => Some("clipboard:writeImage"),
+        "clipboard.writeHtml" => Some("clipboard:writeHtml"),
         "notification.show" => Some("notification:show"),
         "shell.openExternal" => Some("shell:openExternal"),
         "shell.showItemInFolder" => Some("shell:showItemInFolder"),
+        "shell.trashItem" => Some("shell:trashItem"),
+        "shell.openPath" => Some("shell:openPath"),
         "secureStorage.get" => Some("secureStorage:get"),
         "secureStorage.set" => Some("secureStorage:set"),
         "secureStorage.delete" => Some("secureStorage:delete"),
@@ -781,6 +826,11 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
         "window.showOther" | "window.hideOther" | "window.focusOther" | "window.closeOther" => {
             Some("window:manage")
         }
+        "window.startDragging"
+        | "window.setFullscreen"
+        | "window.isFullscreen"
+        | "window.setMaxSize"
+        | "window.getMonitors" => Some("window:manage"),
         "globalShortcut.register" => Some("globalShortcut:register"),
         "globalShortcut.unregister" | "globalShortcut.unregisterAll" => {
             Some("globalShortcut:unregister")
@@ -790,6 +840,10 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
         "tray.setTooltip" => Some("tray:setTooltip"),
         "tray.setIcon" => Some("tray:setIcon"),
         "tray.setMenu" => Some("tray:setMenu"),
+        "webview.getCookies" => Some("webview:readCookies"),
+        "webview.setCookie" | "webview.deleteCookie" => Some("webview:writeCookies"),
+        "webview.setZoom" => Some("webview:zoom"),
+        "webview.print" => Some("webview:print"),
         _ => None,
     }
 }
@@ -875,6 +929,21 @@ impl Webview {
         let webview_slot: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
         let tray_slot = windows.borrow().tray();
 
+        // Resolved up front (rather than down by the IPC handler, as before)
+        // so the download/drag-drop/zoom-hotkey builder options below — which,
+        // unlike `nativeCall` dispatch, must be decided before
+        // `WebViewBuilder::build()` — can gate on the same capability list and
+        // policy the IPC handler uses later.
+        let capability_policy = CapabilityPolicy::parse(opts.capability_policy.as_deref())
+            .map_err(|error| {
+                Error::new(
+                    Status::InvalidArg,
+                    format!("rejected malformed native capability policy: {error}"),
+                )
+            })?;
+        let mut capabilities = opts.capabilities.clone().unwrap_or_default();
+        capabilities.retain(|permission| capability_policy.grants_permission(permission));
+
         let mut web_context_borrow = web_context.borrow_mut();
         let process_context = web_context_borrow
             .context_for(opts.app_id.as_deref(), network.incognito)
@@ -883,13 +952,67 @@ impl Webview {
             .with_devtools(opts.devtools.unwrap_or(cfg!(debug_assertions)))
             .with_transparent(opts.transparent.unwrap_or(false))
             .with_incognito(network.incognito)
-            .with_download_started_handler(|_url, _destination| false)
-            .with_new_window_req_handler(|_url, _features| NewWindowResponse::Deny);
+            .with_new_window_req_handler(|_url, _features| NewWindowResponse::Deny)
+            // Windows-only effect (WebView2); no-op elsewhere — see
+            // `WebviewOptions::hotkeys_zoom`'s doc comment. Config-owned, not
+            // capability-gated, so it's applied unconditionally.
+            .with_hotkeys_zoom(opts.hotkeys_zoom.unwrap_or(false));
         if let Some(user_agent) = network.user_agent {
             builder = builder.with_user_agent(user_agent);
         }
         if let Some(proxy) = network.proxy {
             builder = builder.with_proxy_config(wry_proxy(proxy));
+        }
+
+        // `webview:download` — `webview_slot` is still empty here, same as
+        // `ipc_webview_slot` below: neither handler can fire before the page
+        // has loaded, which can't happen before `build()` fills the slot.
+        if has_capability(&capabilities, "webview:download") {
+            let downloads_dir = opts
+                .downloads
+                .as_ref()
+                .and_then(|downloads| downloads.directory.as_deref())
+                .map(PathBuf::from)
+                .or_else(download::default_downloads_dir);
+            if let Some(downloads_dir) = downloads_dir {
+                let started_webview_slot = webview_slot.clone();
+                builder = builder.with_download_started_handler(move |url, destination| {
+                    handle_download_started(&downloads_dir, &started_webview_slot, url, destination)
+                });
+                let completed_webview_slot = webview_slot.clone();
+                builder = builder.with_download_completed_handler(move |url, path, success| {
+                    handle_download_completed(&completed_webview_slot, url, path, success);
+                });
+            } else {
+                // Granted, but no configured directory and no resolvable OS
+                // default (for example `$HOME`/`%USERPROFILE%` unset) — deny
+                // rather than saving somewhere unconfined.
+                builder = builder.with_download_started_handler(|_url, _destination| false);
+            }
+        } else {
+            builder = builder.with_download_started_handler(|_url, _destination| false);
+        }
+
+        // `webview:dragDrop` — always returns `false` (never blocks the OS
+        // default; see the module doc comment above `Webview::new`), so file
+        // inputs keep working whether or not this capability is granted. Not
+        // installed at all when denied, rather than installed-and-denying.
+        if has_capability(&capabilities, "webview:dragDrop") {
+            let drag_webview_slot = webview_slot.clone();
+            let last_dragover: Rc<Cell<Option<Instant>>> = Rc::new(Cell::new(None));
+            builder = builder.with_drag_drop_handler(move |event| {
+                handle_drag_drop_event(&drag_webview_slot, &last_dragover, event);
+                false
+            });
+        }
+
+        // `webview.initScripts` — config-owned and trusted, not
+        // capability-gated (like `userAgent`/`incognito`/`proxy` above).
+        // Applied in declaration order; empty entries are already filtered
+        // out at config load, but `with_initialization_script_for_main_only`
+        // also no-ops on an empty string regardless.
+        for script in opts.init_scripts.iter().flatten() {
+            builder = builder.with_initialization_script_for_main_only(script.clone(), true);
         }
 
         // IPC: JS calls window.ipc.postMessage(str). Context menus and app-menu
@@ -906,15 +1029,8 @@ impl Webview {
         // after this point.
         let ipc_app_menu = app_menu;
         let ipc_trusted_origin = trusted_origin.clone();
-        let ipc_capability_policy = CapabilityPolicy::parse(opts.capability_policy.as_deref())
-            .map_err(|error| {
-                Error::new(
-                    Status::InvalidArg,
-                    format!("rejected malformed native capability policy: {error}"),
-                )
-            })?;
-        let mut ipc_capabilities = opts.capabilities.clone().unwrap_or_default();
-        ipc_capabilities.retain(|permission| ipc_capability_policy.grants_permission(permission));
+        let ipc_capability_policy = capability_policy.clone();
+        let ipc_capabilities = capabilities.clone();
         let ipc_app_id = opts.app_id.clone();
         let ipc_label = label.clone();
         let ipc_windows = windows.clone();
@@ -930,12 +1046,21 @@ impl Webview {
                 return;
             }
             let body = request.body().clone();
+            let body_len = body.len();
 
             let kind = serde_json::from_str::<IpcEnvelope>(&body)
                 .ok()
                 .and_then(|e| e.kind);
 
             if kind.as_deref() == Some("contextMenu") {
+                // contextMenu/appMenu don't carry a per-method cap of their
+                // own (see `max_native_call_body_bytes`); re-enforce the
+                // original blanket ceiling here now that the pre-parse gate
+                // above has been raised for `nativeCall`'s sake.
+                if body_len > DEFAULT_MAX_METHOD_BODY_BYTES {
+                    eprintln!("murasaki: rejected oversized contextMenu payload");
+                    return;
+                }
                 if !context_menu_is_allowed(&ipc_capabilities) {
                     return;
                 }
@@ -956,6 +1081,10 @@ impl Webview {
             }
 
             if kind.as_deref() == Some("appMenu") {
+                if body_len > DEFAULT_MAX_METHOD_BODY_BYTES {
+                    eprintln!("murasaki: rejected oversized appMenu payload");
+                    return;
+                }
                 if !app_menu_is_allowed(&ipc_label, &ipc_capabilities) {
                     return;
                 }
@@ -970,6 +1099,13 @@ impl Webview {
 
             if kind.as_deref() == Some("nativeCall") {
                 if let Ok(payload) = serde_json::from_str::<NativeCallPayload>(&body) {
+                    if !native_call_body_is_allowed(&payload.method, body_len) {
+                        eprintln!(
+                            "murasaki: rejected oversized nativeCall payload for {}",
+                            payload.method
+                        );
+                        return;
+                    }
                     handle_native_call(
                         NativeCallContext {
                             window_slot: &ipc_window_slot,
@@ -989,6 +1125,12 @@ impl Webview {
                 return;
             }
 
+            // Plain Node-forwarded messages (`onIpcMessage`) never had a
+            // per-kind cap beyond the original blanket ceiling either.
+            if body_len > DEFAULT_MAX_METHOD_BODY_BYTES {
+                eprintln!("murasaki: rejected oversized forwarded IPC payload");
+                return;
+            }
             if let Some(tsf) = ipc_slot.borrow().as_ref() {
                 let _ = tsf.call(Ok(body), ThreadsafeFunctionCallMode::NonBlocking);
             }
@@ -1124,6 +1266,309 @@ fn apply_menu_outcome(
     }
 }
 
+/// Dispatches `name` as a `CustomEvent` with the given JSON `detail` into the
+/// webview. Shared plumbing for every native -> renderer event fired from
+/// this file outside the request-correlated `nativeCall` response above
+/// (downloads, drag-drop, and — pre-existing — global shortcuts, tray, menu
+/// clicks).
+fn dispatch_custom_event(
+    webview_slot: &Rc<RefCell<Option<WebView>>>,
+    name: &str,
+    detail: serde_json::Value,
+) {
+    let Ok(detail_json) = serde_json::to_string(&detail) else {
+        return;
+    };
+    let script =
+        format!("window.dispatchEvent(new CustomEvent('{name}',{{detail:{detail_json}}}))");
+    if let Some(webview) = webview_slot.borrow().as_ref() {
+        let _ = webview.evaluate_script(&script);
+    }
+}
+
+/// `webview:download`'s URL bound: a `data:` download URL can be megabytes
+/// long, and dispatching it whole as a `CustomEvent` detail would spam the
+/// page with a huge JSON payload for no benefit (the id/path already identify
+/// the download). Only `data:` URLs are bounded — ordinary http(s) download
+/// URLs stay far under this regardless. The download itself always proceeds;
+/// this only gates whether an event is dispatched about it.
+const MAX_EVENTABLE_DATA_URL_BYTES: usize = 4 * 1024;
+
+fn download_event_url_is_eventable(url: &str) -> bool {
+    !(url.starts_with("data:") && url.len() > MAX_EVENTABLE_DATA_URL_BYTES)
+}
+
+/// `with_download_started_handler` callback installed when `webview:download`
+/// is granted (see `Webview::new_internal`). Sanitizes wry's suggested
+/// filename down to a safe basename, confines it inside `downloads_dir`,
+/// mutates `destination` in place, and reports `murasaki:downloadstarted`.
+fn handle_download_started(
+    downloads_dir: &Path,
+    webview_slot: &Rc<RefCell<Option<WebView>>>,
+    url: String,
+    destination: &mut PathBuf,
+) -> bool {
+    let suggested = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    let filename = download::sanitize_filename(suggested);
+    let confined = match download::confine_download_path(downloads_dir, &filename) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("murasaki: rejected download destination: {error}");
+            return false;
+        }
+    };
+    if download_event_url_is_eventable(&url) {
+        let id = download::generate_download_id().unwrap_or_default();
+        dispatch_custom_event(
+            webview_slot,
+            "murasaki:downloadstarted",
+            serde_json::json!({ "id": id, "url": url, "path": confined.display().to_string() }),
+        );
+    }
+    *destination = confined;
+    true
+}
+
+/// `with_download_completed_handler` callback installed alongside the started
+/// handler above. Fires whether the download succeeded or not. `path` is
+/// always `None` on macOS — an upstream wry/WebKit API limitation, not a bug
+/// here (see `with_download_completed_handler`'s doc comment) — and there is
+/// no reliable id to correlate this event with the `murasaki:downloadstarted`
+/// event it followed (see `capabilities.json`'s `webview-session-network`
+/// limitations); concurrent same-URL downloads may be ambiguous to the page.
+fn handle_download_completed(
+    webview_slot: &Rc<RefCell<Option<WebView>>>,
+    url: String,
+    path: Option<PathBuf>,
+    success: bool,
+) {
+    if !download_event_url_is_eventable(&url) {
+        return;
+    }
+    dispatch_custom_event(
+        webview_slot,
+        "murasaki:downloadcompleted",
+        serde_json::json!({
+            "url": url,
+            "path": path.map(|path| path.display().to_string()),
+            "success": success,
+        }),
+    );
+}
+
+/// Minimum interval between dispatched `murasaki:dragover` events — caps the
+/// rate at 20/sec. Without this, `DragDropEvent::Over` fires on every OS
+/// drag-move tick, which is far more often than a page needs to reposition a
+/// drop-target highlight.
+const MIN_DRAGOVER_INTERVAL: Duration = Duration::from_millis(50);
+
+fn drag_drop_paths_to_json(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect()
+}
+
+/// Whether a `murasaki:dragover` event should be dispatched now, given the
+/// previous dispatch time (`None` — never dispatched yet — always allows).
+/// Factored out of `handle_drag_drop_event` so the throttle boundary is
+/// unit-testable without a real `Instant::now()` clock.
+fn should_dispatch_dragover(last_dispatched: Option<Instant>, now: Instant) -> bool {
+    last_dispatched.is_none_or(|previous| now.duration_since(previous) >= MIN_DRAGOVER_INTERVAL)
+}
+
+/// Pure `DragDropEvent` -> (`CustomEvent` name, JSON detail) mapping, factored
+/// out of `handle_drag_drop_event` so the wry event -> murasaki event contract
+/// is unit-testable without constructing a real `WebView`. An empty name
+/// means "no event" (the `#[non_exhaustive]` catch-all below).
+fn drag_drop_event_payload(event: &DragDropEvent) -> (&'static str, serde_json::Value) {
+    match event {
+        DragDropEvent::Enter { paths, position } => (
+            "murasaki:dragenter",
+            serde_json::json!({
+                "paths": drag_drop_paths_to_json(paths),
+                "x": position.0,
+                "y": position.1,
+            }),
+        ),
+        DragDropEvent::Over { position } => (
+            "murasaki:dragover",
+            serde_json::json!({ "x": position.0, "y": position.1 }),
+        ),
+        DragDropEvent::Drop { paths, position } => (
+            "murasaki:dragdrop",
+            serde_json::json!({
+                "paths": drag_drop_paths_to_json(paths),
+                "x": position.0,
+                "y": position.1,
+            }),
+        ),
+        DragDropEvent::Leave => ("murasaki:dragleave", serde_json::json!({})),
+        // `DragDropEvent` is `#[non_exhaustive]` — treat any future variant as
+        // a silent no-op rather than failing to compile on a wry upgrade.
+        _ => ("", serde_json::Value::Null),
+    }
+}
+
+/// `with_drag_drop_handler` callback installed when `webview:dragDrop` is
+/// granted (see `Webview::new_internal`). The caller always returns `false`
+/// regardless of what happens here — this handler only ever observes.
+fn handle_drag_drop_event(
+    webview_slot: &Rc<RefCell<Option<WebView>>>,
+    last_dragover: &Rc<Cell<Option<Instant>>>,
+    event: DragDropEvent,
+) {
+    if matches!(event, DragDropEvent::Over { .. }) {
+        let now = Instant::now();
+        if !should_dispatch_dragover(last_dragover.get(), now) {
+            return;
+        }
+        last_dragover.set(Some(now));
+    }
+    let (name, detail) = drag_drop_event_payload(&event);
+    if name.is_empty() {
+        return;
+    }
+    dispatch_custom_event(webview_slot, name, detail);
+}
+
+/// The murasaki runtime session auth cookie — see
+/// `packages/murasaki/src/vite-plugin/runtime-security.ts`'s `RUNTIME_COOKIE`
+/// and `assets/prod-server.mjs`'s identically-named constant. Invisible and
+/// immutable through `webview.getCookies`/`setCookie`/`deleteCookie` (see the
+/// cookie handlers in `handle_native_call` below), so a compromised renderer
+/// holding `webview:readCookies`/`webview:writeCookies` can never read or
+/// forge the app's own privileged session.
+const PROTECTED_SESSION_COOKIE_NAME: &str = "murasaki_runtime";
+
+const MAX_COOKIES_RESULT: usize = 1000;
+const MAX_COOKIE_VALUE_BYTES: usize = 4 * 1024;
+const MAX_COOKIE_NAME_BYTES: usize = 256;
+
+fn is_protected_cookie_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case(PROTECTED_SESSION_COOKIE_NAME)
+}
+
+/// RFC 6265's `cookie-name` is an RFC 2616 `token`: visible US-ASCII
+/// characters excluding separators and space. Enforcing that here (rather
+/// than trusting whatever the underlying platform cookie store accepts) keeps
+/// a malformed name from smuggling separator/control characters into the
+/// native CookieManager API.
+fn is_valid_cookie_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_COOKIE_NAME_BYTES
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
+}
+
+/// A conservative `cookie-value` charset: printable ASCII excluding the `;`
+/// wire separator (RFC 6265's DQUOTE-wrapped/backslash forms are rejected
+/// rather than accepted-but-mishandled).
+fn is_valid_cookie_value(value: &str) -> bool {
+    value.len() <= MAX_COOKIE_VALUE_BYTES
+        && value
+            .bytes()
+            .all(|byte| (0x21..0x7f).contains(&byte) && byte != b';')
+}
+
+fn parse_cookie_url(url: &str) -> std::result::Result<url::Url, String> {
+    let parsed = url::Url::parse(url).map_err(|_| "url must be an absolute URL".to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("url must be an http or https URL".to_string());
+    }
+    Ok(parsed)
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
+}
+
+/// Projects a wry/platform cookie into the wire shape returned by
+/// `webview.getCookies` — see `packages/murasaki/src/native/index.ts`'s
+/// `WebviewCookie`. The caller (`handle_native_call`) has already filtered out
+/// `PROTECTED_SESSION_COOKIE_NAME` before this runs.
+fn cookie_to_json(entry: &cookie::Cookie<'static>) -> serde_json::Value {
+    let expires_at = match entry.expires() {
+        Some(cookie::Expiration::DateTime(at)) => Some(at.unix_timestamp().saturating_mul(1000)),
+        _ => None,
+    };
+    serde_json::json!({
+        "name": entry.name(),
+        "value": truncate_utf8(entry.value(), MAX_COOKIE_VALUE_BYTES),
+        "domain": entry.domain(),
+        "path": entry.path(),
+        "secure": entry.secure().unwrap_or(false),
+        "httpOnly": entry.http_only().unwrap_or(false),
+        "expiresAt": expires_at,
+    })
+}
+
+/// Builds an owned (`'static`) cookie for `webview.setCookie`/`deleteCookie`.
+/// The caller has already rejected `PROTECTED_SESSION_COOKIE_NAME` and
+/// validated `name`/`value` before this runs.
+#[allow(clippy::too_many_arguments)]
+fn build_writable_cookie(
+    name: String,
+    value: String,
+    domain: String,
+    path: String,
+    secure: bool,
+    http_only: bool,
+    expires_at: Option<i64>,
+) -> std::result::Result<cookie::Cookie<'static>, String> {
+    let mut builder = cookie::Cookie::build((name, value))
+        .domain(domain)
+        .path(path)
+        .secure(secure)
+        .http_only(http_only);
+    if let Some(expires_at) = expires_at {
+        let seconds = expires_at.div_euclid(1000);
+        let datetime = cookie::time::OffsetDateTime::from_unix_timestamp(seconds)
+            .map_err(|_| "expiresAt is out of range".to_string())?;
+        builder = builder.expires(datetime);
+    }
+    Ok(builder.build())
+}
+
+/// `webview.setZoom`'s bound. `RangeInclusive::contains` already rejects NaN
+/// (every comparison with NaN is false) and infinities (outside the range),
+/// so no separate finiteness check is needed.
+fn is_valid_zoom_factor(factor: f64) -> bool {
+    (0.25..=5.0).contains(&factor)
+}
+
+/// `window.setMaxSize`'s `{ width?, height? }` resolves to either "clamp to
+/// this bound" or "clear the bound" (`None`) — never a partial pair. One axis
+/// set and the other omitted/null has no coherent meaning (tao's constraint is
+/// inherently two-dimensional), so it's rejected outright rather than
+/// guessing a default for the unset axis.
+fn resolve_max_size_bound(
+    width: Option<f64>,
+    height: Option<f64>,
+) -> std::result::Result<Option<(f64, f64)>, String> {
+    match (width, height) {
+        (None, None) => Ok(None),
+        (Some(width), Some(height)) => {
+            if !width.is_finite() || !height.is_finite() || width < 1.0 || height < 1.0 {
+                return Err("width and height must be positive finite numbers".to_string());
+            }
+            Ok(Some((width, height)))
+        }
+        _ => Err("setMaxSize requires both width and height, or neither".to_string()),
+    }
+}
+
 /// Execute the stable renderer-facing native API synchronously on the UI
 /// thread, then resolve the caller's Promise inside the webview. Keeping this
 /// in Rust makes dev and packaged apps use the same implementation; it also
@@ -1148,6 +1593,11 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
     #[derive(serde::Deserialize)]
     struct TargetArg {
         target: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct PathArg {
+        path: String,
     }
     #[derive(serde::Deserialize)]
     struct TitleArg {
@@ -1217,6 +1667,53 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
     struct GlobalShortcutIdArg {
         id: String,
     }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SetFullscreenArg {
+        fullscreen: bool,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SetMaxSizeArg {
+        #[serde(default)]
+        width: Option<f64>,
+        #[serde(default)]
+        height: Option<f64>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct WebviewGetCookiesArg {
+        #[serde(default)]
+        url: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct WebviewSetCookieArg {
+        url: String,
+        name: String,
+        value: String,
+        #[serde(default)]
+        domain: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        secure: Option<bool>,
+        #[serde(default)]
+        http_only: Option<bool>,
+        #[serde(default)]
+        expires_at: Option<i64>,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct WebviewDeleteCookieArg {
+        url: String,
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct WebviewSetZoomArg {
+        factor: f64,
+    }
 
     if !native_method_is_allowed(&payload.method, capabilities) {
         dispatch_native_response(
@@ -1255,6 +1752,12 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 .map(|value| serde_json::to_value(value).unwrap_or(serde_json::Value::Null))
                 .map_err(|e| e.to_string())
         }
+        "dialog.showMessage" => {
+            let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            crate::dialog::show_message_dialog(opts)
+                .map(serde_json::Value::from)
+                .map_err(|e| e.to_string())
+        }
         "clipboard.readText" => crate::clipboard::clipboard_read()
             .map(serde_json::Value::from)
             .map_err(|e| e.to_string()),
@@ -1264,10 +1767,25 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 .map(|_| serde_json::Value::Null)
                 .map_err(|e| e.to_string())
         }
+        "clipboard.readImage" => crate::clipboard::clipboard_read_image()
+            .map(|image| serde_json::to_value(image).unwrap_or(serde_json::Value::Null))
+            .map_err(|e| e.to_string()),
+        "clipboard.writeImage" => {
+            let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            crate::clipboard::clipboard_write_image(opts)
+                .map(|_| serde_json::Value::Null)
+                .map_err(|e| e.to_string())
+        }
+        "clipboard.writeHtml" => {
+            let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            crate::clipboard::clipboard_write_html(opts)
+                .map(|_| serde_json::Value::Null)
+                .map_err(|e| e.to_string())
+        }
         "notification.show" => {
             let args = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             crate::notification::show_notification(args)
-                .map(|_| serde_json::Value::Null)
+                .map(serde_json::Value::from)
                 .map_err(|e| e.to_string())
         }
         "shell.openExternal" => {
@@ -1306,6 +1824,24 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             crate::shell::shell_show_item_in_folder(args.target)
                 .map(|_| serde_json::Value::Null)
                 .map_err(|e| e.to_string())
+        }
+        "shell.trashItem" => {
+            let args: PathArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("shell:trashItem", CapabilityResource::Path(&args.path)) {
+                return Err(
+                    "shell.trashItem requires an allowed absolute non-traversing path".to_string(),
+                );
+            }
+            crate::shell::shell_trash_item(&args.path).map(|_| serde_json::Value::Null)
+        }
+        "shell.openPath" => {
+            let args: PathArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("shell:openPath", CapabilityResource::Path(&args.path)) {
+                return Err(
+                    "shell.openPath requires an allowed absolute non-traversing path".to_string(),
+                );
+            }
+            crate::shell::shell_open_path(&args.path).map(|_| serde_json::Value::Null)
         }
         "secureStorage.get" => {
             let args: SecureStorageKeyArg =
@@ -1507,6 +2043,56 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             }
             Ok(serde_json::Value::Null)
         }
+        "window.startDragging" => {
+            if let Some(window) = window_slot.borrow().as_ref() {
+                // Legitimately fails outside an active mouse-down (for example
+                // a synthetic/programmatic call); the TS wrapper swallows the
+                // rejection rather than surfacing it as an app-facing error.
+                window.drag_window().map_err(|e| e.to_string())?;
+            }
+            Ok(serde_json::Value::Null)
+        }
+        "window.setFullscreen" => {
+            let args: SetFullscreenArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if let Some(window) = window_slot.borrow().as_ref() {
+                window.set_fullscreen(if args.fullscreen {
+                    // Borderless on the window's current monitor. Exclusive
+                    // fullscreen (a dedicated video mode) is out of scope.
+                    Some(tao::window::Fullscreen::Borderless(None))
+                } else {
+                    None
+                });
+            }
+            Ok(serde_json::Value::Null)
+        }
+        "window.isFullscreen" => Ok(window_slot
+            .borrow()
+            .as_ref()
+            .map(|window| serde_json::Value::Bool(window.fullscreen().is_some()))
+            .unwrap_or(serde_json::Value::Bool(false))),
+        "window.setMaxSize" => {
+            let args: SetMaxSizeArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            let bound = resolve_max_size_bound(args.width, args.height)?;
+            if let Some(window) = window_slot.borrow().as_ref() {
+                match bound {
+                    Some((width, height)) => {
+                        window.set_max_inner_size(Some(tao::dpi::LogicalSize::new(width, height)))
+                    }
+                    None => window.set_max_inner_size(None::<tao::dpi::LogicalSize<f64>>),
+                }
+            }
+            Ok(serde_json::Value::Null)
+        }
+        "window.getMonitors" => {
+            let monitors = window_slot
+                .borrow()
+                .as_ref()
+                .map(crate::window::window_monitors)
+                .unwrap_or_default();
+            Ok(serde_json::json!({ "monitors": monitors }))
+        }
         "globalShortcut.register" => {
             let args: GlobalShortcutRegisterArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
@@ -1628,6 +2214,127 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 .ok_or_else(|| "tray icon has not been created".to_string())?;
             tray.set_menu(Some(Box::new(menu)));
             state.menu_items = menu_items;
+            Ok(serde_json::Value::Null)
+        }
+        "webview.getCookies" => {
+            let args: WebviewGetCookiesArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            let url = args.url.as_deref().map(parse_cookie_url).transpose()?;
+            let webview_ref = webview_slot.borrow();
+            let webview = webview_ref
+                .as_ref()
+                .ok_or_else(|| "webview is unavailable".to_string())?;
+            let cookies = match &url {
+                Some(url) => webview.cookies_for_url(url.as_str()),
+                None => webview.cookies(),
+            }
+            .map_err(|e| e.to_string())?;
+            let cookies = cookies
+                .iter()
+                .filter(|cookie| !is_protected_cookie_name(cookie.name()))
+                .take(MAX_COOKIES_RESULT)
+                .map(cookie_to_json)
+                .collect::<Vec<_>>();
+            Ok(serde_json::json!({ "cookies": cookies }))
+        }
+        "webview.setCookie" => {
+            let args: WebviewSetCookieArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if is_protected_cookie_name(&args.name) {
+                return Err(
+                    "cannot modify the reserved murasaki runtime session cookie".to_string()
+                );
+            }
+            if !is_valid_cookie_name(&args.name) {
+                return Err(
+                    "cookie name contains characters outside the allowed token charset".to_string(),
+                );
+            }
+            if !is_valid_cookie_value(&args.value) {
+                return Err(format!(
+                    "cookie value must be at most {MAX_COOKIE_VALUE_BYTES} bytes of printable ASCII without ';'"
+                ));
+            }
+            let parsed_url = parse_cookie_url(&args.url)?;
+            let domain = args
+                .domain
+                .clone()
+                .or_else(|| parsed_url.host_str().map(str::to_string))
+                .ok_or_else(|| "url must include a host".to_string())?;
+            let path = args.path.clone().unwrap_or_else(|| "/".to_string());
+            let cookie = build_writable_cookie(
+                args.name,
+                args.value,
+                domain,
+                path,
+                args.secure.unwrap_or(false),
+                args.http_only.unwrap_or(false),
+                args.expires_at,
+            )?;
+            let webview_ref = webview_slot.borrow();
+            let webview = webview_ref
+                .as_ref()
+                .ok_or_else(|| "webview is unavailable".to_string())?;
+            webview.set_cookie(&cookie).map_err(|e| e.to_string())?;
+            Ok(serde_json::Value::Null)
+        }
+        "webview.deleteCookie" => {
+            let args: WebviewDeleteCookieArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if is_protected_cookie_name(&args.name) {
+                return Err(
+                    "cannot modify the reserved murasaki runtime session cookie".to_string()
+                );
+            }
+            if !is_valid_cookie_name(&args.name) {
+                return Err(
+                    "cookie name contains characters outside the allowed token charset".to_string(),
+                );
+            }
+            let parsed_url = parse_cookie_url(&args.url)?;
+            let domain = parsed_url
+                .host_str()
+                .map(str::to_string)
+                .ok_or_else(|| "url must include a host".to_string())?;
+            // No domain/path overrides on delete (unlike setCookie) — matching
+            // RFC 6265 default-path semantics keeps this addressable for the
+            // common case; see `capabilities.json`'s documented limitation for
+            // cookies set with a non-default path.
+            let cookie = build_writable_cookie(
+                args.name,
+                String::new(),
+                domain,
+                "/".to_string(),
+                false,
+                false,
+                None,
+            )?;
+            let webview_ref = webview_slot.borrow();
+            let webview = webview_ref
+                .as_ref()
+                .ok_or_else(|| "webview is unavailable".to_string())?;
+            webview.delete_cookie(&cookie).map_err(|e| e.to_string())?;
+            Ok(serde_json::Value::Null)
+        }
+        "webview.setZoom" => {
+            let args: WebviewSetZoomArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !is_valid_zoom_factor(args.factor) {
+                return Err("factor must be a finite number between 0.25 and 5.0".to_string());
+            }
+            let webview_ref = webview_slot.borrow();
+            let webview = webview_ref
+                .as_ref()
+                .ok_or_else(|| "webview is unavailable".to_string())?;
+            webview.zoom(args.factor).map_err(|e| e.to_string())?;
+            Ok(serde_json::Value::Null)
+        }
+        "webview.print" => {
+            let webview_ref = webview_slot.borrow();
+            let webview = webview_ref
+                .as_ref()
+                .ok_or_else(|| "webview is unavailable".to_string())?;
+            webview.print().map_err(|e| e.to_string())?;
             Ok(serde_json::Value::Null)
         }
         _ => Err(format!("unknown native method: {method}")),
@@ -2465,12 +3172,16 @@ fn mime_for(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        app_menu_is_allowed, context_menu_is_allowed, ipc_body_is_allowed, ipc_origin_is_trusted,
-        native_method_is_allowed, navigation_policy, prepare_tray_menu_items,
-        sanitize_profile_name, valid_proxy_host, validate_app_menu_payload,
-        validate_context_menu_payload, validate_webview_network, wry_proxy, AppMenuPayload,
-        ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol, MAX_IPC_BODY_BYTES,
-        TRAY_MENU_ID_PREFIX,
+        app_menu_is_allowed, context_menu_is_allowed, download_event_url_is_eventable,
+        drag_drop_event_payload, ipc_body_is_allowed, ipc_origin_is_trusted,
+        is_protected_cookie_name, is_valid_cookie_name, is_valid_cookie_value,
+        is_valid_zoom_factor, max_native_call_body_bytes, native_call_body_is_allowed,
+        native_method_is_allowed, navigation_policy, parse_cookie_url, prepare_tray_menu_items,
+        resolve_max_size_bound, sanitize_profile_name, should_dispatch_dragover, truncate_utf8,
+        valid_proxy_host, validate_app_menu_payload, validate_context_menu_payload,
+        validate_webview_network, wry_proxy, AppMenuPayload, ContextMenuPayload, NavigationPolicy,
+        ValidatedProxyProtocol, DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
+        MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES, MAX_IPC_PREPARSE_BODY_BYTES, TRAY_MENU_ID_PREFIX,
     };
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     use super::{retain_owned_menu_events, split_first_owned_menu_event, tray_event_is_current};
@@ -2478,7 +3189,12 @@ mod tests {
         menu::AppMenuSpec,
         types::{MenuItemOptions, WebviewOptions, WebviewProxyOptions},
     };
-    use std::collections::HashSet;
+    use std::{
+        collections::HashSet,
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
+    use wry::DragDropEvent;
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
@@ -2645,6 +3361,11 @@ mod tests {
             "window.hideOther",
             "window.focusOther",
             "window.closeOther",
+            "window.startDragging",
+            "window.setFullscreen",
+            "window.isFullscreen",
+            "window.setMaxSize",
+            "window.getMonitors",
         ] {
             assert!(native_method_is_allowed(
                 method,
@@ -2669,6 +3390,31 @@ mod tests {
                 &["globalShortcut:register".to_string()]
             ));
         }
+        for (method, permission) in [
+            ("dialog.showMessage", "dialog:message"),
+            ("clipboard.readImage", "clipboard:readImage"),
+            ("clipboard.writeImage", "clipboard:writeImage"),
+            ("clipboard.writeHtml", "clipboard:writeHtml"),
+            ("shell.trashItem", "shell:trashItem"),
+            ("shell.openPath", "shell:openPath"),
+        ] {
+            assert!(!native_method_is_allowed(method, &[]));
+            assert!(native_method_is_allowed(method, &[permission.to_string()]));
+        }
+    }
+
+    #[test]
+    fn set_max_size_requires_both_axes_or_neither() {
+        assert_eq!(resolve_max_size_bound(None, None), Ok(None));
+        assert_eq!(
+            resolve_max_size_bound(Some(800.0), Some(600.0)),
+            Ok(Some((800.0, 600.0)))
+        );
+        assert!(resolve_max_size_bound(Some(800.0), None).is_err());
+        assert!(resolve_max_size_bound(None, Some(600.0)).is_err());
+        assert!(resolve_max_size_bound(Some(0.0), Some(600.0)).is_err());
+        assert!(resolve_max_size_bound(Some(f64::NAN), Some(600.0)).is_err());
+        assert!(resolve_max_size_bound(Some(f64::INFINITY), Some(600.0)).is_err());
     }
 
     #[test]
@@ -2688,8 +3434,8 @@ mod tests {
 
     #[test]
     fn renderer_ipc_and_menu_complexity_are_bounded() {
-        assert!(ipc_body_is_allowed(MAX_IPC_BODY_BYTES));
-        assert!(!ipc_body_is_allowed(MAX_IPC_BODY_BYTES + 1));
+        assert!(ipc_body_is_allowed(MAX_IPC_PREPARSE_BODY_BYTES));
+        assert!(!ipc_body_is_allowed(MAX_IPC_PREPARSE_BODY_BYTES + 1));
 
         let mut nested = MenuItemOptions::default();
         for _ in 0..9 {
@@ -2728,6 +3474,57 @@ mod tests {
             y: None,
         };
         assert!(validate_context_menu_payload(&too_many, &[]).is_err());
+    }
+
+    #[test]
+    fn native_call_bodies_are_capped_per_method_after_the_coarse_preparse_gate() {
+        // A normal method (no special entry in `max_native_call_body_bytes`)
+        // stays capped at the original 256 KiB ceiling even though the
+        // pre-parse gate above now allows up to 16 MiB through to be parsed.
+        assert_eq!(
+            max_native_call_body_bytes("clipboard.writeText"),
+            DEFAULT_MAX_METHOD_BODY_BYTES
+        );
+        assert!(native_call_body_is_allowed(
+            "clipboard.writeText",
+            DEFAULT_MAX_METHOD_BODY_BYTES
+        ));
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeText",
+            DEFAULT_MAX_METHOD_BODY_BYTES + 1
+        ));
+        // An oversized body for a normal method is rejected well below the
+        // raised 16 MiB pre-parse ceiling, not just above it.
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeText",
+            MAX_IPC_PREPARSE_BODY_BYTES
+        ));
+
+        assert_eq!(
+            max_native_call_body_bytes("clipboard.writeImage"),
+            MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES
+        );
+        assert!(native_call_body_is_allowed(
+            "clipboard.writeImage",
+            MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES
+        ));
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeImage",
+            MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES + 1
+        ));
+
+        assert_eq!(
+            max_native_call_body_bytes("clipboard.writeHtml"),
+            MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES
+        );
+        assert!(native_call_body_is_allowed(
+            "clipboard.writeHtml",
+            MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES
+        ));
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeHtml",
+            MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES + 1
+        ));
     }
 
     #[test]
@@ -3006,5 +3803,125 @@ mod tests {
             })
             .is_err());
         }
+    }
+
+    #[test]
+    fn zoom_factor_is_bounded_and_rejects_non_finite_values() {
+        assert!(is_valid_zoom_factor(0.25));
+        assert!(is_valid_zoom_factor(1.0));
+        assert!(is_valid_zoom_factor(5.0));
+        assert!(!is_valid_zoom_factor(0.24));
+        assert!(!is_valid_zoom_factor(5.01));
+        assert!(!is_valid_zoom_factor(f64::NAN));
+        assert!(!is_valid_zoom_factor(f64::INFINITY));
+        assert!(!is_valid_zoom_factor(f64::NEG_INFINITY));
+    }
+
+    #[test]
+    fn drag_drop_events_map_to_their_documented_custom_events() {
+        let enter = DragDropEvent::Enter {
+            paths: vec![PathBuf::from("/tmp/a.txt"), PathBuf::from("/tmp/b.txt")],
+            position: (10, 20),
+        };
+        let (name, detail) = drag_drop_event_payload(&enter);
+        assert_eq!(name, "murasaki:dragenter");
+        assert_eq!(
+            detail,
+            serde_json::json!({ "paths": ["/tmp/a.txt", "/tmp/b.txt"], "x": 10, "y": 20 })
+        );
+
+        let over = DragDropEvent::Over { position: (1, 2) };
+        let (name, detail) = drag_drop_event_payload(&over);
+        assert_eq!(name, "murasaki:dragover");
+        assert_eq!(detail, serde_json::json!({ "x": 1, "y": 2 }));
+
+        let drop = DragDropEvent::Drop {
+            paths: vec![PathBuf::from("/tmp/c.txt")],
+            position: (3, 4),
+        };
+        let (name, detail) = drag_drop_event_payload(&drop);
+        assert_eq!(name, "murasaki:dragdrop");
+        assert_eq!(
+            detail,
+            serde_json::json!({ "paths": ["/tmp/c.txt"], "x": 3, "y": 4 })
+        );
+
+        let leave = DragDropEvent::Leave;
+        let (name, detail) = drag_drop_event_payload(&leave);
+        assert_eq!(name, "murasaki:dragleave");
+        assert_eq!(detail, serde_json::json!({}));
+    }
+
+    #[test]
+    fn dragover_dispatch_is_throttled_to_20_per_second() {
+        let t0 = Instant::now();
+        assert!(should_dispatch_dragover(None, t0));
+        let t1 = t0 + Duration::from_millis(10);
+        assert!(!should_dispatch_dragover(Some(t0), t1));
+        let t2 = t0 + Duration::from_millis(49);
+        assert!(!should_dispatch_dragover(Some(t0), t2));
+        let t3 = t0 + Duration::from_millis(50);
+        assert!(should_dispatch_dragover(Some(t0), t3));
+    }
+
+    #[test]
+    fn data_url_download_events_are_bounded_but_the_download_itself_is_not() {
+        assert!(download_event_url_is_eventable(
+            "https://example.com/file.zip"
+        ));
+        assert!(download_event_url_is_eventable(&format!(
+            "data:text/plain,{}",
+            "x".repeat(1000)
+        )));
+        assert!(!download_event_url_is_eventable(&format!(
+            "data:text/plain,{}",
+            "x".repeat(5000)
+        )));
+    }
+
+    #[test]
+    fn cookie_names_and_values_are_strictly_validated() {
+        assert!(is_valid_cookie_name("session_id"));
+        assert!(is_valid_cookie_name("X-Custom.Name"));
+        assert!(!is_valid_cookie_name(""));
+        assert!(!is_valid_cookie_name("has space"));
+        assert!(!is_valid_cookie_name("semi;colon"));
+        assert!(!is_valid_cookie_name("a".repeat(257).as_str()));
+
+        assert!(is_valid_cookie_value("normal-value_123"));
+        assert!(!is_valid_cookie_value("has;semicolon"));
+        assert!(!is_valid_cookie_value("has control\u{0}char"));
+        assert!(!is_valid_cookie_value(&"x".repeat(4097)));
+        assert!(is_valid_cookie_value(&"x".repeat(4096)));
+    }
+
+    #[test]
+    fn the_murasaki_runtime_session_cookie_is_protected_case_insensitively() {
+        assert!(is_protected_cookie_name("murasaki_runtime"));
+        assert!(is_protected_cookie_name("MURASAKI_RUNTIME"));
+        assert!(is_protected_cookie_name("Murasaki_Runtime"));
+        assert!(!is_protected_cookie_name("murasaki_runtime2"));
+        assert!(!is_protected_cookie_name("session_id"));
+    }
+
+    #[test]
+    fn cookie_urls_are_restricted_to_http_and_https() {
+        assert!(parse_cookie_url("https://example.com/").is_ok());
+        assert!(parse_cookie_url("http://example.com/").is_ok());
+        assert!(parse_cookie_url("ftp://example.com/").is_err());
+        assert!(parse_cookie_url("not a url").is_err());
+        assert!(parse_cookie_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn cookie_values_are_truncated_at_a_utf8_char_boundary() {
+        assert_eq!(truncate_utf8("hello", 10), "hello");
+        assert_eq!(truncate_utf8("hello world", 5), "hello");
+        // A 3-byte UTF-8 character sitting right at the boundary must not be
+        // split in the middle of its encoding.
+        let value = format!("{}\u{3042}", "x".repeat(4)); // 4 ASCII + 'あ' (3 bytes)
+        assert_eq!(truncate_utf8(&value, 5), "xxxx");
+        assert_eq!(truncate_utf8(&value, 6), "xxxx");
+        assert_eq!(truncate_utf8(&value, 7), value);
     }
 }

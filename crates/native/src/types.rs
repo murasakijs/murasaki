@@ -42,6 +42,24 @@ pub struct WindowOptions {
     /// (see `crate::menu::build_windows_menu_bar`). Falls back to English when
     /// absent. Unused on Linux (no default menu bar there yet).
     pub menu_labels: Option<MenuLabels>,
+    /// Whether the OS window chrome (titlebar + borders) is shown. Defaults
+    /// to true; `false` produces a frameless window on every platform.
+    pub decorations: Option<bool>,
+    /// macOS only. `'hidden'` keeps the traffic-light buttons but hides the
+    /// title text and extends the WebView under the titlebar (transparent
+    /// titlebar + full-size content view). Windows/Linux accept and ignore
+    /// this field. Values: 'default' | 'hidden'.
+    pub title_bar_style: Option<String>,
+    /// Maximum inner width/height in logical pixels. Both must be present
+    /// together (see `window::RuntimeWindowManager::create_known`); a
+    /// solitary axis is rejected before it reaches the native host — see
+    /// `resolveWindowDeclarations` in `config.ts`.
+    pub max_width: Option<i32>,
+    pub max_height: Option<i32>,
+    /// Initial borderless-fullscreen state
+    /// (`tao::window::Fullscreen::Borderless(None)`). Exclusive fullscreen is
+    /// not supported.
+    pub fullscreen: Option<bool>,
 }
 
 /// Immutable native window template configured before the event loop starts.
@@ -111,6 +129,18 @@ pub struct WebviewOptions {
     /// `Application::run()` blocks Node's event loop. Takes priority over
     /// `url`/`html` when set.
     pub serve_dir: Option<String>,
+    /// Confines `webview:download`-granted downloads to this directory.
+    /// Omitted/absent `directory` resolves to the OS user Downloads folder.
+    pub downloads: Option<WebviewDownloadsOptions>,
+    /// Trusted, project-authored JavaScript injected before every page load
+    /// (`with_initialization_script_for_main_only`), in declaration order.
+    /// Content, not paths — resolved from `config.webview.initScripts` at
+    /// dev/bundle time. Not capability-gated: this is config-owned, not
+    /// renderer-triggerable.
+    pub init_scripts: Option<Vec<String>>,
+    /// Whether OS zoom hotkeys/gestures are enabled. Effective on Windows
+    /// only (WebView2); no-op elsewhere. Not capability-gated — config-owned.
+    pub hotkeys_zoom: Option<bool>,
 }
 
 #[napi(object)]
@@ -120,6 +150,15 @@ pub struct WebviewProxyOptions {
     pub protocol: String,
     pub host: String,
     pub port: u32,
+}
+
+/// `webview:download`'s confinement directory — see `config.ts`'s
+/// `WebviewConfig.downloads` and `crate::download`.
+#[napi(object)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct WebviewDownloadsOptions {
+    pub directory: Option<String>,
 }
 
 /// Also parsed straight out of the IPC JSON payload (`kind: "contextMenu"`)
@@ -191,4 +230,46 @@ pub struct NotificationOptions {
     pub body: Option<String>,
     pub icon: Option<String>,
     pub sound: Option<bool>,
+}
+
+/// `dialog.showMessage` options. `level` and `buttons` are validated and
+/// defaulted (`'info'`/`'ok'`) in `dialog::show_message_dialog` rather than
+/// here, so invalid values surface as a normal rejected Promise instead of an
+/// N-API argument-conversion panic.
+#[napi(object)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageDialogOptions {
+    pub title: Option<String>,
+    pub message: String,
+    pub level: Option<String>,
+    pub buttons: Option<String>,
+}
+
+/// `clipboard.readImage`'s result shape — decoded clipboard pixels
+/// re-encoded as a PNG and base64-wrapped for the wire (see
+/// `clipboard::clipboard_read_image`). Serialize-only: this never crosses the
+/// JS -> Rust direction.
+#[napi(object)]
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardImageData {
+    pub width: i32,
+    pub height: i32,
+    pub png_base64: String,
+}
+
+#[napi(object)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardWriteImageOptions {
+    pub png_base64: String,
+}
+
+#[napi(object)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardWriteHtmlOptions {
+    pub html: String,
+    pub alt_text: Option<String>,
 }

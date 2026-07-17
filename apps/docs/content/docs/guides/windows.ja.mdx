@@ -119,6 +119,92 @@ rejectします。先にNode Mainのwindow managerでその宣言を作成して
   [Node Main](/ja/docs/guides/node-main#node-mainから宣言windowを操作する)も参照してください。
 </Callout>
 
+## フレームレスウィンドウとカスタムタイトルバー
+
+`decorations: false`を指定すると、全platformでOS window chromeを取り除けます。
+macOSの`titleBarStyle: 'hidden'`はtraffic light buttonsを残したままtitle text
+を隠し、WebViewをその下まで広げます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    decorations: false, // 全platformでframeless
+    // titleBarStyle: 'hidden', // macOS専用。Windows/Linuxではconfig warning
+    //                          // 付きで無視されます
+  },
+})
+```
+
+native titlebarがないと、OS側にwindowをdragするための領域がなくなります。
+`useWindowDrag()`でregionをdrag可能にしてください。
+
+```tsx
+'use client'
+
+import { appWindow } from 'murasaki/native'
+import { useWindowDrag } from 'murasaki'
+
+function Titlebar() {
+  const drag = useWindowDrag()
+  return (
+    <header {...drag} style={{ WebkitUserSelect: 'none' }}>
+      <span>My App</span>
+      <button data-murasaki-no-drag onClick={() => appWindow.close()}>
+        ×
+      </button>
+    </header>
+  )
+}
+```
+
+`useWindowDrag()`はprimary buttonのpointerdownでnative dragを開始します。
+interactive target(`button`、`input`、`a`、`select`、`textarea`、または
+`data-murasaki-no-drag`が付いた要素)はskipするため、draggable region内の
+titlebar controlも問題なく動作します。native renderer外や、OSがdragを拒否
+した場合(例: mouse-down中でない場合)は何もしません。
+
+## Fullscreen、max size、monitors
+
+| API | Capability | 動作 |
+| --- | --- | --- |
+| `appWindow.startDragging()` | `window:manage` | OS window dragを開始する。上記`useWindowDrag()`を参照。 |
+| `appWindow.setFullscreen(bool)` / `isFullscreen()` | `window:manage` | windowの現在のmonitorでborderless fullscreenを開始・終了する。専用video modeのexclusive fullscreenは未対応。 |
+| `appWindow.setMaxSize({ width?, height? })` | `window:manage` | maximum inner sizeを設定する。両方省略または`null`でclear。片方だけの指定はrejectされ、両方またはどちらも指定しない必要がある。 |
+| `appWindow.getMonitors()` | `window:manage` | windowから見える全OS displayを**physical pixels**で返す。 |
+
+これらは呼び出したrenderer自身のwindowを操作するため、`window:manage`はgrant
+の有無だけで判定します。上記の`windows.show/hide/focus/close(label)`と異なり、
+scoped grantが適用対象とする別windowの`label`引数がありません。
+
+`window.fullscreen`(`windows.<label>`配下も同様)は起動時のinitial stateを
+設定します。`window.maxWidth`/`maxHeight`はinitialなmaximum sizeを設定し、
+両方指定した場合は`minWidth`/`minHeight`以上である必要があります。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: { maxWidth: 1600, maxHeight: 1200 },
+})
+```
+
+`getMonitors()`は`{ monitors: WindowMonitorInfo[] }`をresolveします。
+
+```ts
+interface WindowMonitorInfo {
+  name: string | null
+  isPrimary: boolean
+  isCurrent: boolean
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
+}
+```
+
 ## Primary closeとアプリライフサイクル
 
 secondaryでOSのclose controlまたは `appWindow.close()` を使うと、そのwindowだけが

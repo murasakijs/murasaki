@@ -73,9 +73,36 @@ export declare class Webview {
   dispose(): void
 }
 
+/**
+ * `clipboard.readImage`'s result shape — decoded clipboard pixels
+ * re-encoded as a PNG and base64-wrapped for the wire (see
+ * `clipboard::clipboard_read_image`). Serialize-only: this never crosses the
+ * JS -> Rust direction.
+ */
+export interface ClipboardImageData {
+  width: number
+  height: number
+  pngBase64: string
+}
+
 export declare function clipboardRead(): string
 
+export declare function clipboardReadImage(): ClipboardImageData | null
+
 export declare function clipboardWrite(text: string): void
+
+export declare function clipboardWriteHtml(opts: ClipboardWriteHtmlOptions): void
+
+export interface ClipboardWriteHtmlOptions {
+  html: string
+  altText?: string
+}
+
+export declare function clipboardWriteImage(opts: ClipboardWriteImageOptions): void
+
+export interface ClipboardWriteImageOptions {
+  pngBase64: string
+}
 
 export interface DialogFilter {
   name: string
@@ -134,6 +161,19 @@ export interface MenuOptions {
   items: Array<MenuItemOptions>
 }
 
+/**
+ * `dialog.showMessage` options. `level` and `buttons` are validated and
+ * defaulted (`'info'`/`'ok'`) in `dialog::show_message_dialog` rather than
+ * here, so invalid values surface as a normal rejected Promise instead of an
+ * N-API argument-conversion panic.
+ */
+export interface MessageDialogOptions {
+  title?: string
+  message: string
+  level?: string
+  buttons?: string
+}
+
 export interface NotificationOptions {
   title: string
   body?: string
@@ -180,9 +220,24 @@ export declare function shellOpenExternal(target: string): void
 
 export declare function shellShowItemInFolder(path: string): void
 
-export declare function showNotification(opts: NotificationOptions): void
+/**
+ * Blocking, main-thread rfd message box — called synchronously from
+ * `handle_native_call` exactly like `open_file_dialog`/`save_file_dialog`
+ * above (no spawned thread or channel of its own).
+ */
+export declare function showMessageDialog(opts: MessageDialogOptions): string
+
+export declare function showNotification(opts: NotificationOptions): string
 
 export declare function version(): string
+
+/**
+ * `webview:download`'s confinement directory — see `config.ts`'s
+ * `WebviewConfig.downloads` and `crate::download`.
+ */
+export interface WebviewDownloadsOptions {
+  directory?: string
+}
 
 export interface WebviewOptions {
   url?: string
@@ -220,6 +275,24 @@ export interface WebviewOptions {
    * `url`/`html` when set.
    */
   serveDir?: string
+  /**
+   * Confines `webview:download`-granted downloads to this directory.
+   * Omitted/absent `directory` resolves to the OS user Downloads folder.
+   */
+  downloads?: WebviewDownloadsOptions
+  /**
+   * Trusted, project-authored JavaScript injected before every page load
+   * (`with_initialization_script_for_main_only`), in declaration order.
+   * Content, not paths — resolved from `config.webview.initScripts` at
+   * dev/bundle time. Not capability-gated: this is config-owned, not
+   * renderer-triggerable.
+   */
+  initScripts?: Array<string>
+  /**
+   * Whether OS zoom hotkeys/gestures are enabled. Effective on Windows
+   * only (WebView2); no-op elsewhere. Not capability-gated — config-owned.
+   */
+  hotkeysZoom?: boolean
 }
 
 export interface WebviewProxyOptions {
@@ -273,4 +346,30 @@ export interface WindowOptions {
    * absent. Unused on Linux (no default menu bar there yet).
    */
   menuLabels?: MenuLabels
+  /**
+   * Whether the OS window chrome (titlebar + borders) is shown. Defaults
+   * to true; `false` produces a frameless window on every platform.
+   */
+  decorations?: boolean
+  /**
+   * macOS only. `'hidden'` keeps the traffic-light buttons but hides the
+   * title text and extends the WebView under the titlebar (transparent
+   * titlebar + full-size content view). Windows/Linux accept and ignore
+   * this field. Values: 'default' | 'hidden'.
+   */
+  titleBarStyle?: string
+  /**
+   * Maximum inner width/height in logical pixels. Both must be present
+   * together (see `window::RuntimeWindowManager::create_known`); a
+   * solitary axis is rejected before it reaches the native host — see
+   * `resolveWindowDeclarations` in `config.ts`.
+   */
+  maxWidth?: number
+  maxHeight?: number
+  /**
+   * Initial borderless-fullscreen state
+   * (`tao::window::Fullscreen::Borderless(None)`). Exclusive fullscreen is
+   * not supported.
+   */
+  fullscreen?: boolean
 }

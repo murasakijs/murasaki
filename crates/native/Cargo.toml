@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.37.0"
+version = "0.38.0"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
@@ -47,6 +47,10 @@ notify-rust = "4"
 open = "5"
 png = "0.17"
 url = "2"
+# clipboard.readImage/writeImage's PNG<->base64 wire encoding (see clipboard.rs).
+base64 = "0.22"
+# shell.trashItem — moves a file/directory to the OS trash/recycle bin.
+trash = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 global-hotkey = "0.8"

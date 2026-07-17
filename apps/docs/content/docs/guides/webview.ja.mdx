@@ -1,0 +1,204 @@
+---
+title: WebView コンテンツ機能
+description: ネイティブ WebView のダウンロード、ファイルドラッグ&ドロップ、init script、zoom、印刷、cookie。
+---
+
+session/network 設定(User-Agent、incognito、proxy — [Configuration](/docs/building/configuration#webview)
+参照)に加えて、Murasaki は 6 つの WebView コンテンツ機能を提供します: ダウンロード、
+ファイルドラッグ&ドロップ、信頼済み init script、page zoom、印刷、cookie です。
+init script 以外は、それぞれ専用の deny-by-default な `webview:*` capability で
+ゲートされています。
+
+## ダウンロード
+
+`webview:download` を許可すると、native の `with_download_started_handler` が
+インストールされます。許可しない場合、すべてのダウンロードは拒否されます(既定挙動は
+変わりません)。提案されたファイル名は安全な basename へサニタイズされ(ディレクトリ
+部分・制御文字・先頭のドットは除去、空になった場合は `download`)、最終的な path は
+設定した directory の内側に閉じ込められます — 名前が衝突した場合は Wry 自身の挙動と
+同様、拡張子の前に ` (n)` が付与されます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  webview: {
+    downloads: { directory: '/Users/example/Documents/MyApp Downloads' },
+  },
+  capabilities: ['webview:download'],
+})
+```
+
+`downloads.directory` は任意で、絶対パスである必要があります。省略した場合は OS の
+ユーザー Downloads フォルダに解決されます。両方のライフサイクルイベントを 1 つの型付き
+ヘルパーで購読できます。
+
+```tsx
+import { subscribeDownloads } from 'murasaki'
+
+const unsubscribe = subscribeDownloads((event) => {
+  if (event.type === 'started') console.log('downloading', event.url, event.path)
+  if (event.type === 'completed') console.log('done', event.success, event.path)
+})
+```
+
+<Callout type="warning">
+  `started` イベントとその後に続く `completed` イベントを結び付ける信頼できる id は
+  ありません — Wry の completed handler は url/path/success しか報告せず、id は
+  報告しないためです。そのため同一 URL の同時ダウンロードは `completed` だけからでは
+  区別が曖昧になり得ます。macOS では `completed` の `path` は常に `null` です
+  (upstream の WebKit API の制約です)。
+</Callout>
+
+## ファイルドラッグ&ドロップ
+
+`webview:dragDrop` を許可すると、window にドラッグされたファイルのイベントを受け取れ
+ます。native handler は常に OS の default 処理を通します — 決してブロックしません —
+そのため、この capability の有無に関わらず `<input type="file">` は動作し続けます。
+
+```tsx
+import { useFileDrop } from 'murasaki'
+
+function Dropzone() {
+  useFileDrop(({ paths }) => importFiles(paths))
+  return <div>Drop files here</div>
+}
+```
+
+`drop` に加えて `enter` / `over` / `leave` も使う場合は `subscribeFileDrops` を
+使ってください。
+
+```ts
+import { subscribeFileDrops } from 'murasaki'
+
+const unsubscribe = subscribeFileDrops((event) => {
+  if (event.type === 'over') setHighlighted(true)
+  if (event.type === 'leave') setHighlighted(false)
+})
+```
+
+`over` は毎秒最大 20 回までスロットルされます — OS は drop-target のハイライトを
+再配置するのに必要な頻度よりもずっと高い頻度で drag-move を報告してくるためです。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  capabilities: ['webview:dragDrop'],
+})
+```
+
+## 信頼済み init script
+
+`webview.initScripts` は、すべてのページ読み込み前に project 側が書いた JavaScript を
+実行します — config 側が所有する信頼済みコードなので、このページの他の機能と違い
+capability は不要です。path は project root からの相対パスで、内容は dev / bundle 時に
+読み込まれて埋め込まれ、宣言順に適用されます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  webview: {
+    initScripts: ['scripts/polyfills.js', 'scripts/telemetry-bootstrap.js'],
+  },
+})
+```
+
+各ファイルは 256 KiB、合計では 1 MiB を上限とし、project 読み込み時に検証されます
+(ファイルが見つからない場合やサイズ超過の場合は、`murasaki dev` / `murasaki bundle`
+コマンドが黙って無視するのではなく、明確なエラーで失敗します)。
+
+## Page zoom
+
+`webview.setZoom({ factor })` は page zoom level を設定します(0.25 から 5.0 まで)。
+`webview:zoom` がこの呼び出しをゲートします。
+
+```ts
+import { webview } from 'murasaki/native'
+
+await webview.setZoom(1.25)
+```
+
+<Callout type="info">
+  zoom が使えるのは macOS 11+ と iOS 14+ のみです(古い macOS では呼び出しが黙って
+  失敗し、rejected な Promise として現れます)。Android は unsupported です。
+  別途 `webview.hotkeysZoom`(capability ではなく config)は OS の zoom hotkey /
+  ジェスチャーを有効にします — 効果があるのは Windows(WebView2)のみで、
+  macOS / Linux では no-op です。
+</Callout>
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  webview: { hotkeysZoom: true },
+  capabilities: ['webview:zoom'],
+})
+```
+
+## 印刷
+
+`webview.print()` は現在のページに対して platform 標準の印刷ダイアログを開きます。
+`webview:print` が必要です。
+
+```ts
+import { webview } from 'murasaki/native'
+
+await webview.print()
+```
+
+<Callout type="info">
+  find-in-page API はありません — Wry 側に該当 API が存在しないためです。upstream に
+  API ができるまでスコープ外とします。
+</Callout>
+
+## Cookie
+
+`webview:readCookies` は `webview.getCookies()` を、`webview:writeCookies` は
+`webview.setCookie()` と `webview.deleteCookie()` の両方をゲートします。
+
+```ts
+import { webview } from 'murasaki/native'
+
+const { cookies } = await webview.getCookies({ url: 'https://example.com/' })
+await webview.setCookie({
+  url: 'https://example.com/',
+  name: 'theme',
+  value: 'dark',
+  secure: true,
+})
+await webview.deleteCookie({ url: 'https://example.com/', name: 'theme' })
+```
+
+`getCookies()` は最大 1000 件を返し、各 `value` は 4 KiB で truncate されます。
+`setCookie` / `deleteCookie` は cookie name を RFC 6265 の token 文字集合で検証し、
+`value` を 4 KiB に制限し、`url` が `http` / `https` であることを要求します。
+`deleteCookie` は name・URL の host を domain として・既定の `/` path で一致判定を
+行うため、既定以外の `path` で設定された cookie は `deleteCookie` からはアドレス
+できません。
+
+<Callout type="warning">
+  **セキュリティ:** Murasaki 自身の runtime session 認証 cookie は、この API からは
+  見えず、変更もできません — `getCookies()` の結果には決して現れず、
+  `setCookie` / `deleteCookie` でこの cookie を(大文字小文字を区別せず)対象にすると、
+  許可された capability に関わらず構造化されたエラーで拒否されます。
+</Callout>
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  capabilities: ['webview:readCookies', 'webview:writeCookies'],
+})
+```
+
+## In-page permission requests
+
+page の JavaScript からの `getUserMedia()` / `geolocation` 呼び出しは、現時点では
+Murasaki によって intercept されません — 詳しい説明と macOS TCC との関係は
+[Security](/docs/building/security#in-page-permission-requestsgetusermedia-geolocation)
+を参照してください。
+
+## 次へ
+
+<Cards>
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="dialog、clipboard、notification、shell、tray など。" />
+  <Card title="Configuration" href="/docs/building/configuration" description="アプリ全体の WebView session / network 設定。" />
+  <Card title="Security" href="/docs/building/security" description="trust boundary と既知の gap。" />
+</Cards>

@@ -21,6 +21,7 @@ import {
   type MurasakiBuildTarget,
 } from '../config.js'
 import { serializeWindowTemplates } from './window-metadata.js'
+import { resolveInitScripts } from './init-scripts.js'
 import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
@@ -534,6 +535,8 @@ export function metaJson(
   const associations = resolveAssociations(config)
   const windows = serializeWindowTemplates(config)
   const primaryWindow = windows[0]
+  const webviewNetwork = resolveWebviewNetworkConfig(config)
+  const initScripts = resolveInitScripts(config, cwd)
   return JSON.stringify(
     {
       appId: config.appId,
@@ -553,12 +556,19 @@ export function metaJson(
       height: primaryWindow.height,
       minWidth: primaryWindow.minWidth,
       minHeight: primaryWindow.minHeight,
+      maxWidth: primaryWindow.maxWidth,
+      maxHeight: primaryWindow.maxHeight,
       resizable: primaryWindow.resizable,
       transparent: primaryWindow.transparent,
+      decorations: primaryWindow.decorations,
+      titleBarStyle: primaryWindow.titleBarStyle,
+      fullscreen: primaryWindow.fullscreen,
       capabilities: primaryWindow.capabilities,
       capabilityPolicy: primaryWindow.capabilityPolicy,
       systemPermissionsOnLaunch: resolveStartupSystemPermissions(config),
-      webview: resolveWebviewNetworkConfig(config),
+      webview: webviewNetwork
+        ? { ...webviewNetwork, ...(initScripts.length > 0 ? { initScripts } : {}) }
+        : undefined,
       mainShutdownTimeoutMs,
       vibrancy: primaryWindow.vibrancy,
       console: config.window?.console,

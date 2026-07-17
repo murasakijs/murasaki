@@ -26,6 +26,21 @@ export interface NotificationOptions {
   sound?: boolean
 }
 
+export interface MessageDialogOptions {
+  title?: string
+  message: string
+  level?: 'info' | 'warning' | 'error'
+  buttons?: 'ok' | 'okCancel' | 'yesNo'
+}
+
+export type MessageDialogResult = 'ok' | 'cancel' | 'yes' | 'no'
+
+export interface ClipboardImageData {
+  width: number
+  height: number
+  pngBase64: string
+}
+
 export type SystemPermissionName =
   | 'camera'
   | 'microphone'
@@ -89,6 +104,19 @@ export interface WindowInfo {
   focused: boolean
   minimized: boolean
   maximized: boolean
+}
+
+/** One OS display, as returned by `appWindow.getMonitors()`. Geometry is in
+ * physical pixels — divide by `scaleFactor` for logical/CSS pixels. */
+export interface WindowMonitorInfo {
+  name: string | null
+  isPrimary: boolean
+  isCurrent: boolean
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
 }
 
 export const app = {
@@ -187,6 +215,10 @@ export const dialog = {
   saveFile(options: SaveFileOptions = {}): Promise<string | null> {
     return invokeNative('dialog.saveFile', options)
   },
+  /** Native message box. Defaults to an info-level dialog with a single OK button. */
+  showMessage(options: MessageDialogOptions): Promise<MessageDialogResult> {
+    return invokeNative('dialog.showMessage', options)
+  },
 }
 
 export const clipboard = {
@@ -196,10 +228,25 @@ export const clipboard = {
   writeText(text: string): Promise<void> {
     return invokeNative('clipboard.writeText', { text })
   },
+  /** Reads the clipboard's image, PNG-encoded, or null when it holds no image. */
+  readImage(): Promise<ClipboardImageData | null> {
+    return invokeNative('clipboard.readImage')
+  },
+  /** Writes a PNG (base64-encoded) to the clipboard as an image. */
+  writeImage(image: { pngBase64: string }): Promise<void> {
+    return invokeNative('clipboard.writeImage', image)
+  },
+  /** Writes HTML, with an optional plain-text fallback, to the clipboard. */
+  writeHtml(html: { html: string; altText?: string }): Promise<void> {
+    return invokeNative('clipboard.writeHtml', html)
+  },
 }
 
 export const notification = {
-  show(options: NotificationOptions): Promise<void> {
+  /** Shows a system notification and returns a generated id for local bookkeeping.
+   * Upstream notify-rust cannot deliver click/action callbacks on macOS or Windows,
+   * so this id does not correlate with any later event. */
+  show(options: NotificationOptions): Promise<string> {
     return invokeNative('notification.show', options)
   },
 }
@@ -210,6 +257,15 @@ export const shell = {
   },
   showItemInFolder(target: string): Promise<void> {
     return invokeNative('shell.showItemInFolder', { target })
+  },
+  /** Moves an existing absolute, non-traversing path to the OS trash/recycle bin. */
+  trashItem(path: string): Promise<void> {
+    return invokeNative('shell.trashItem', { path })
+  },
+  /** Opens an existing local file/directory with the OS default handler. Paths
+   * only — URLs and UNC/device paths are rejected; use `shell.openExternal` for URLs. */
+  openPath(path: string): Promise<void> {
+    return invokeNative('shell.openPath', { path })
   },
 }
 
@@ -281,6 +337,31 @@ export const appWindow = {
   },
   isMinimized(): Promise<boolean> {
     return invokeNative('window.isMinimized')
+  },
+  /**
+   * Starts an OS window drag from a custom (frameless) titlebar region. Call
+   * on primary-button pointerdown — see `useWindowDrag()` for the typical
+   * caller. Resolves silently even when the native drag could not start (for
+   * example outside an active mouse-down); that failure is not surfaced.
+   */
+  startDragging(): Promise<void> {
+    return invokeNative<void>('window.startDragging').catch(() => undefined)
+  },
+  /** Enters/exits borderless fullscreen on the window's current monitor. */
+  setFullscreen(fullscreen: boolean): Promise<void> {
+    return invokeNative('window.setFullscreen', { fullscreen })
+  },
+  isFullscreen(): Promise<boolean> {
+    return invokeNative('window.isFullscreen')
+  },
+  /** Sets the maximum inner size. Both `width`/`height` omitted or `null`
+   * clears the bound; a single axis is rejected — provide both or neither. */
+  setMaxSize(size: { width?: number | null; height?: number | null } = {}): Promise<void> {
+    return invokeNative('window.setMaxSize', size)
+  },
+  /** Every OS display visible to this window, in physical pixels. */
+  getMonitors(): Promise<{ monitors: WindowMonitorInfo[] }> {
+    return invokeNative('window.getMonitors')
   },
 }
 
@@ -358,5 +439,64 @@ export const tray = {
     const handler = (event: Event) => listener((event as CustomEvent<string>).detail)
     window.addEventListener('murasaki:traymenuclick', handler)
     return () => window.removeEventListener('murasaki:traymenuclick', handler)
+  },
+}
+
+/** A cookie as returned by `webview.getCookies()`. The murasaki runtime's own
+ * session auth cookie is always filtered out and never appears here. */
+export interface WebviewCookie {
+  name: string
+  value: string
+  domain: string | null
+  path: string | null
+  secure: boolean
+  httpOnly: boolean
+  /** Unix epoch milliseconds, or absent for a session cookie. */
+  expiresAt?: number
+}
+
+export interface WebviewSetCookieOptions {
+  /** Absolute http/https URL the cookie applies to. */
+  url: string
+  name: string
+  value: string
+  /** Defaults to the URL's host. */
+  domain?: string
+  /** Defaults to `/`. */
+  path?: string
+  secure?: boolean
+  httpOnly?: boolean
+  /** Unix epoch milliseconds. Omitted creates a session cookie. */
+  expiresAt?: number
+}
+
+/** WebView content features: cookies, page zoom, and printing. */
+export const webview = {
+  /** Reads the WebView's cookies, optionally scoped to `url`. Capped at 1000
+   * entries with each value truncated at 4 KiB. The murasaki runtime's own
+   * session cookie is never included. Requires `webview:readCookies`. */
+  getCookies(options: { url?: string } = {}): Promise<{ cookies: WebviewCookie[] }> {
+    return invokeNative('webview.getCookies', options)
+  },
+  /** Creates or replaces a cookie. Requires `webview:writeCookies`. Rejects
+   * the murasaki runtime's own reserved session cookie name. */
+  setCookie(options: WebviewSetCookieOptions): Promise<void> {
+    return invokeNative('webview.setCookie', options)
+  },
+  /** Deletes a cookie (matched by name, the URL's host as domain, and the
+   * default `/` path). Requires `webview:writeCookies`. Rejects the murasaki
+   * runtime's own reserved session cookie name. */
+  deleteCookie(options: { url: string; name: string }): Promise<void> {
+    return invokeNative('webview.deleteCookie', options)
+  },
+  /** Sets the page zoom factor, from 0.25 to 5.0 inclusive. Requires
+   * `webview:zoom`. */
+  setZoom(factor: number): Promise<void> {
+    return invokeNative('webview.setZoom', { factor })
+  },
+  /** Opens the native print dialog for the current page. Requires
+   * `webview:print`. */
+  print(): Promise<void> {
+    return invokeNative('webview.print')
   },
 }

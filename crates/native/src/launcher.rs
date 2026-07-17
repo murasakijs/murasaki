@@ -52,7 +52,7 @@ pub(crate) mod shared {
     use fs2::FileExt;
     use serde::{Deserialize, Serialize};
 
-    use crate::types::{MenuLabels, WebviewProxyOptions};
+    use crate::types::{MenuLabels, WebviewDownloadsOptions, WebviewProxyOptions};
     use crate::window::{WindowControlCommand, WindowLifecycleEvent};
 
     const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 10_000;
@@ -109,6 +109,16 @@ pub(crate) mod shared {
         #[serde(default)]
         pub(super) vibrancy: Option<String>,
         #[serde(default)]
+        pub(super) decorations: Option<bool>,
+        #[serde(default)]
+        pub(super) title_bar_style: Option<String>,
+        #[serde(default)]
+        pub(super) max_width: Option<i32>,
+        #[serde(default)]
+        pub(super) max_height: Option<i32>,
+        #[serde(default)]
+        pub(super) fullscreen: Option<bool>,
+        #[serde(default)]
         pub(super) icon: Option<String>,
         #[serde(default)]
         pub(super) webview: WebviewMeta,
@@ -145,6 +155,12 @@ pub(crate) mod shared {
         pub(super) incognito: Option<bool>,
         #[serde(default)]
         pub(super) proxy: Option<WebviewProxyOptions>,
+        #[serde(default)]
+        pub(super) downloads: Option<WebviewDownloadsOptions>,
+        #[serde(default)]
+        pub(super) init_scripts: Option<Vec<String>>,
+        #[serde(default)]
+        pub(super) hotkeys_zoom: Option<bool>,
     }
 
     /// Fully-resolved by `cli/bundle.ts`'s `resolveDiagnosticsConfig` (defaults
@@ -202,6 +218,16 @@ pub(crate) mod shared {
         #[serde(default)]
         pub(super) vibrancy: Option<String>,
         #[serde(default)]
+        pub(super) decorations: Option<bool>,
+        #[serde(default)]
+        pub(super) title_bar_style: Option<String>,
+        #[serde(default)]
+        pub(super) max_width: Option<i32>,
+        #[serde(default)]
+        pub(super) max_height: Option<i32>,
+        #[serde(default)]
+        pub(super) fullscreen: Option<bool>,
+        #[serde(default)]
         pub(super) capabilities: Option<Vec<String>>,
         #[serde(default)]
         pub(super) capability_policy: Option<String>,
@@ -237,6 +263,11 @@ pub(crate) mod shared {
                 resizable: meta.resizable,
                 transparent: meta.transparent,
                 vibrancy: meta.vibrancy.clone(),
+                decorations: meta.decorations,
+                title_bar_style: meta.title_bar_style.clone(),
+                max_width: meta.max_width,
+                max_height: meta.max_height,
+                fullscreen: meta.fullscreen,
                 capabilities: meta.capabilities.clone(),
                 capability_policy: meta.capability_policy.clone(),
             }]
@@ -2164,6 +2195,55 @@ pub(crate) mod shared {
         }
 
         #[test]
+        fn window_metadata_parses_frameless_titlebar_max_size_and_fullscreen_fields() {
+            let meta: Meta = serde_json::from_value(serde_json::json!({
+              "productName": "Frameless",
+              "windows": [
+                {
+                  "label": "main",
+                  "primary": true,
+                  "decorations": false,
+                  "titleBarStyle": "hidden",
+                  "maxWidth": 1600,
+                  "maxHeight": 1200,
+                  "fullscreen": true
+                },
+                { "label": "settings" }
+              ]
+            }))
+            .unwrap();
+            let windows = resolve_windows(&meta).unwrap();
+            assert_eq!(windows[0].decorations, Some(false));
+            assert_eq!(windows[0].title_bar_style.as_deref(), Some("hidden"));
+            assert_eq!(windows[0].max_width, Some(1600));
+            assert_eq!(windows[0].max_height, Some(1200));
+            assert_eq!(windows[0].fullscreen, Some(true));
+            // Unset on a declaration that never mentions these keys.
+            assert_eq!(windows[1].decorations, None);
+            assert_eq!(windows[1].title_bar_style, None);
+            assert_eq!(windows[1].max_width, None);
+            assert_eq!(windows[1].fullscreen, None);
+
+            // The legacy single-window fallback (no `windows` array) carries the
+            // same top-level fields through onto the synthesized `main` entry.
+            let legacy: Meta = serde_json::from_value(serde_json::json!({
+              "productName": "Legacy Frameless",
+              "decorations": false,
+              "titleBarStyle": "hidden",
+              "maxWidth": 2000,
+              "maxHeight": 1500,
+              "fullscreen": true
+            }))
+            .unwrap();
+            let legacy_windows = resolve_windows(&legacy).unwrap();
+            assert_eq!(legacy_windows[0].decorations, Some(false));
+            assert_eq!(legacy_windows[0].title_bar_style.as_deref(), Some("hidden"));
+            assert_eq!(legacy_windows[0].max_width, Some(2000));
+            assert_eq!(legacy_windows[0].max_height, Some(1500));
+            assert_eq!(legacy_windows[0].fullscreen, Some(true));
+        }
+
+        #[test]
         fn rejects_unsafe_or_ambiguous_window_metadata() {
             for windows in [
                 serde_json::json!([
@@ -2580,6 +2660,11 @@ mod imp_macos {
                         resizable: declaration.resizable,
                         transparent: declaration.transparent,
                         vibrancy: declaration.vibrancy,
+                        decorations: declaration.decorations,
+                        title_bar_style: declaration.title_bar_style,
+                        max_width: declaration.max_width,
+                        max_height: declaration.max_height,
+                        fullscreen: declaration.fullscreen,
                         icon: icon_path
                             .as_ref()
                             .and_then(|path| path.to_str())
@@ -2607,6 +2692,9 @@ mod imp_macos {
                             .and_then(|path| path.to_str())
                             .map(String::from),
                         serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
@@ -3540,6 +3628,11 @@ mod imp_win {
                         resizable: declaration.resizable,
                         transparent: declaration.transparent,
                         vibrancy: declaration.vibrancy,
+                        decorations: declaration.decorations,
+                        title_bar_style: declaration.title_bar_style,
+                        max_width: declaration.max_width,
+                        max_height: declaration.max_height,
+                        fullscreen: declaration.fullscreen,
                         icon: None,
                         version: meta.version.clone(),
                         description: meta.description.clone(),
@@ -3564,6 +3657,9 @@ mod imp_win {
                             .as_ref()
                             .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
                         serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
