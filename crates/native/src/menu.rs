@@ -61,6 +61,12 @@ pub(crate) fn build_menu(items: &[MenuItemOptions]) -> Result<Menu> {
 /// macOS and Windows/Linux render different subsets of its fields.
 pub(crate) struct AboutInfo<'a> {
     pub name: &'a str,
+    /// Only ever read by macOS's `build_macos_app_submenu` (the About panel's
+    /// icon) — Windows/Linux's `build_menu_bar_help_submenu` never reads it
+    /// (see that function's doc comment), so `imp_win`/`imp_linux` always
+    /// construct this with `None`, making the field otherwise dead weight on
+    /// those targets.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub icon_path: Option<&'a str>,
     pub version: Option<&'a str>,
     pub description: Option<&'a str>,
@@ -75,7 +81,10 @@ pub(crate) struct AboutInfo<'a> {
 /// lifetime of the `Webview`, so a `{ kind: "appMenu" }` IPC message arriving
 /// long after startup can still prepend the standard app-name submenu (see
 /// `build_macos_app_menu_from_spec`) using the same info the startup default
-/// menu was built from.
+/// menu was built from. macOS only: `AppMenuContext.about_info` (the sole
+/// field that ever holds one of these) is itself macOS-only — Windows/Linux
+/// have no equivalent "prepend the about-name submenu" step.
+#[cfg(target_os = "macos")]
 #[derive(Clone)]
 pub(crate) struct AboutInfoOwned {
     pub name: String,
@@ -87,6 +96,7 @@ pub(crate) struct AboutInfoOwned {
     pub authors: Option<Vec<String>>,
 }
 
+#[cfg(target_os = "macos")]
 impl AboutInfoOwned {
     pub(crate) fn as_ref(&self) -> AboutInfo<'_> {
         AboutInfo {

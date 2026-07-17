@@ -457,6 +457,19 @@ async function bundleLinux(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   await copyFile(launcherBinary, launcherDest)
   await chmod(launcherDest, 0o755)
 
+  // usr/bin/.<execName>.murasaki-appid — a plain-text sidecar recording this
+  // app's sanitized appId, read by the launcher binary (launcher.rs's
+  // `imp_linux::resolve_resources_dir`) to find `usr/lib/<appId>/resources`
+  // relative to its own path. The launcher can't re-derive `appId` from
+  // `execName` (sanitized independently, see `sanitizeLinuxExecName` vs
+  // `sanitizeLinuxAppId` above, and they may differ), and can't safely assume
+  // it's the only entry under `usr/lib` either — that holds inside an
+  // isolated AppDir mount, but a real `.deb`-installed `/usr/lib` hosts many
+  // unrelated packages' directories. Shipped as an ordinary file under
+  // `usr/bin/`, so both the AppImage (squashfs) and the `.deb` (which tars up
+  // this exact `usr/` tree, see installer.ts) carry it for free.
+  await writeFile(join(binDir, `.${execName}.murasaki-appid`), appId)
+
   // resources/node — a downloaded, target-specific Node runtime (official
   // nodejs.org linux build, checksum-verified and cached under
   // ~/.murasaki/node/, see node-runtime.ts), fetched even when bundling from

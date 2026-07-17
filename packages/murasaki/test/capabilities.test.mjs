@@ -19,9 +19,17 @@ test('the checked-in capabilities manifest is valid', () => {
 })
 
 test('planned features cannot claim shipping platform support', () => {
+  // Synthesized rather than found in the live manifest: which (if any) real
+  // feature has overall status "planned" varies release to release (e.g.
+  // linux-distribution graduated to "partial" in RFC 0002 phase L2a), so
+  // this constructs the invalid shape directly instead of depending on one
+  // existing.
   const invalid = structuredClone(manifest)
-  const planned = invalid.features.find((feature) => feature.status === 'planned')
-  assert.ok(planned)
+  const planned = invalid.features[0]
+  planned.status = 'planned'
+  planned.apiSymbols = []
+  planned.testEvidence = []
+  planned.platforms = { macos: 'planned', windows: 'planned', linux: 'planned' }
   planned.platforms.macos = 'supported'
 
   assert.throws(

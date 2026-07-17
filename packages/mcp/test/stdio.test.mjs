@@ -26,7 +26,9 @@ test('stdio server negotiates MCP and exposes only the intended read-only tools'
     assert.ok(tools.every((tool) => tool.annotations?.readOnlyHint === true))
     assert.ok(tools.every((tool) => tool.annotations?.destructiveHint === false))
 
-    const response = await client.callTool({ name: 'check_compatibility', arguments: { features: ['linux-distribution'], platform: 'linux' } })
+    // code-signing is still genuinely "planned" on Linux (linux-distribution
+    // itself graduated to "partial" in RFC 0002 phase L2a).
+    const response = await client.callTool({ name: 'check_compatibility', arguments: { features: ['code-signing'], platform: 'linux' } })
     assert.equal(response.isError, undefined)
     const parsed = JSON.parse(response.content[0].text)
     assert.equal(parsed.overall, 'planned')

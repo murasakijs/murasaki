@@ -4,8 +4,9 @@ description: Register URL schemes and document types, then handle every open req
 ---
 
 Murasaki can register custom URL schemes and document extensions for packaged
-macOS and Windows applications. Both a cold launch and a request delivered to
-an already-running app arrive at the same `openRequested()` Node Main hook.
+macOS, Windows, and Linux applications. Both a cold launch and a request
+delivered to an already-running app arrive at the same `openRequested()` Node
+Main hook.
 
 ## Configure handlers
 
@@ -114,7 +115,7 @@ handling.
 | Windows NSIS `.exe` | The installer writes per-user or per-machine protocol and file-association registration according to `installer.windows.installMode`. A launched URL/file is normalized from argv. |
 | Windows MSI | The MSI writes per-machine protocol and file-association registration. A launched URL/file is normalized from argv. |
 | Windows portable archive | No registry entries are installed. `protocols` and `fileAssociations` do not make the archive an OS handler. |
-| Linux | Protocol and MIME registration is not implemented yet. Do not advertise Linux deep-link/file-association support. |
+| Linux AppDir / `.AppImage` / `.deb` | `murasaki bundle` writes `x-scheme-handler/<scheme>` and `application/x-<extension>` `MimeType=` entries into the `.desktop` file. The `.deb` installs it under `usr/share/applications/` and refreshes the desktop database on install/remove (`update-desktop-database`); a manually-extracted AppDir/`.AppImage` has no equivalent OS-level registration step, but cold-start argv (`%U`/`%F` from the `.desktop` `Exec=` line) and second-instance activation both still work when launched directly. |
 | `murasaki dev` | Does not install system handler metadata. Test the installed/package artifact for OS integration. |
 
 Windows registration makes the app an available handler; it does not silently

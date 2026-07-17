@@ -3,18 +3,19 @@ title: 配布
 description: 本物のネイティブインストーラを出荷する — クロスアーキテクチャビルド、署名、公証、CI。
 ---
 
-`murasaki bundle` / `murasaki installer` は、**macOS**(`.app` / `.dmg`)と
-**Windows**(ポータブル `.zip`、NSIS `.exe`、MSI `.msi`)で本物のインストーラを
-出力します。いずれもクロスアーキテクチャ(arm64 / x64)対応です。`murasaki bundle`/
-`installer` は Linux 向け artifact(AppDir + `.AppImage` と `.deb`)も生成します
-が、ネイティブランチャーには Linux runtime がまだ無いため、それらの artifact は
-まだ動作しません(下記の「Linux: AppImage と .deb」セクションを参照)。
+`murasaki bundle` / `murasaki installer` は、**macOS**(`.app` / `.dmg`)、
+**Windows**(ポータブル `.zip`、NSIS `.exe`、MSI `.msi`)、**Linux**
+(AppDir + `.AppImage`、`.deb`)で本物のインストーラを出力します。いずれも
+クロスアーキテクチャ(arm64 / x64)対応です。Linux の `.AppImage` は
+macOS/Windows の成果物と同じように起動・自己更新できます。更新の仕組みや
+`.deb` の system package manager 上の制約、コンテナ/CI で AppImage を動かす際の
+FUSE に関する注意点は、下記の「Linux: AppImage と .deb」セクションを参照してください。
 
 | Target | Bundle | Installer | 公開 code signing |
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization を組み込み対応 |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`、Windows 上で WiX `.msi` | SignTool Authenticode を組み込み対応 |
-| Linux x64 / arm64 | AppDir + `.AppImage`(artifact のみ) | `.deb`(artifact のみ) | 予定 |
+| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | 未実装(未署名) |
 
 <Callout type="warn">
   ファイルが生成されたことは distribution-ready を意味しません。clean machine で
@@ -68,7 +69,7 @@ target ごとの登録結果は次のとおりです。
 | Windows NSIS `.exe` | protocol、ProgID、Open With entry、Default Apps capability を既定で per-user、`installMode: 'perMachine'` で per-machine 登録 |
 | Windows WiX `.msi` | 同じ handler を per-machine 登録 |
 | Windows portable folder / `.zip` | registry を変更せず、自動登録しない |
-| Linux AppDir / `.AppImage` / `.deb` | `.desktop` ファイルに `MimeType=` 行(protocol ごとに `x-scheme-handler/<scheme>`、file association の拡張子ごとに `application/x-<extension>`)を書き込みますが、activation を実際に処理する launcher runtime がまだありません — 下記参照 |
+| Linux AppDir / `.AppImage` / `.deb` | `.desktop` ファイルに `MimeType=` 行(protocol ごとに `x-scheme-handler/<scheme>`、file association の拡張子ごとに `application/x-<extension>`)を書き込む。`.deb` は `usr/share/applications/` にインストールし、インストール/削除時に desktop database を更新する。手動展開した AppDir/`.AppImage` には OS レベルの登録手順は無い。cold-start 時の argv(`.desktop` の `Exec=` 行が展開する `%U`/`%F`)と 2 回目起動時の activation はどちらの場合も動作する — 下記参照 |
 
 cold start、2 回目の起動、macOS open event のいずれでも、一致した URL / file は
 `ready()` 完了後に Node Main の `openRequested()` hook へ渡されます。Windows
@@ -283,12 +284,12 @@ base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
 
 ## Linux: AppImage と .deb
 
-<Callout type="warn">
-  Linux 向け artifact の組み立ては実装済みですが、ネイティブランチャーには
-  Linux runtime がまだありません — 生成した AppDir / `.AppImage` / `.deb` は
-  動作しません。後続の runtime 実装が、固定された実際のレイアウトに対してビルド・
-  テストできるよう、パッケージングを先に用意しているという位置づけです。runtime が
-  出荷されるまでは、これらの artifact を「構造のみ」として扱ってください。
+<Callout type="info">
+  ネイティブランチャーは生成した AppDir / `.AppImage` / `.deb` を実際に動かします
+  — window、webview、single-instance ロック、deep link、graceful shutdown、
+  crash reporting はすべて macOS/Windows と同じように動作します。signing、
+  `.rpm`、repository metadata はまだ実装されていません — 下記の
+  「まだ実装されていないこと」を参照してください。
 </Callout>
 
 ```bash
@@ -318,25 +319,44 @@ Linux desktop が期待する freedesktop.org 由来の要素 — `AppRun`、roo
 `usr/share/applications/<appId>.desktop`、`config.icon` から生成する
 `usr/share/icons/hicolor/` アイコンテーマ一式(16〜512px)— も含みます。
 
+### AppImage を FUSE なしで動かす
+
+AppImage は通常、自身を FUSE でマウントします。CI runner や最小構成の
+container など、一部の host には動作する `/dev/fuse` がありません。通常の
+FUSE マウント経路には `libfuse2`(Ubuntu 24.04 以降では `libfuse2t64`)を
+インストールしてください。あるいは `--appimage-extract-and-run` を渡すと、
+AppImage runtime が自身を一時ディレクトリへ展開してそこから実行します —
+FUSE 不要になりますが、起動は遅くなります。Murasaki 自身の CI
+(`.github/workflows/app-package-linux.yml`)も、まさにこの理由で常に
+`--appimage-extract-and-run` を使っています。
+
 ### AppImage と .deb: update の扱いの違い
 
-- **`.AppImage`** は Murasaki 自身の self-contained update payload です —
-  Linux runtime が出荷されれば、macOS の `.app.zip` / Windows の NSIS setup
-  と同じ方法で update を適用します(`murasaki release --manifest` は既に
+- **`.AppImage`** は Murasaki 自身の self-contained update payload であり
+  self-update の対象でもあります — `useUpdate()` の `install()` は実行中の
+  `.AppImage` ファイル自体を journal 方式でその場に swap し(macOS の
+  `.app.zip` / Windows の NSIS setup と同じ same-volume backup +
+  startup health acknowledgement の保証)、`--appimage-extract-and-run`
+  で再起動します(host に FUSE があってもなくても動作します)。update 後の
+  最初の起動が失敗した場合は自動的に前バージョンへロールバックします。
+  `murasaki release --manifest` は
   `<Name>-<version>-linux-{x64,arm64}.AppImage` をスキャンします。
-  [自動更新](/ja/docs/guides/auto-update) を参照)。
+  [自動更新](/ja/docs/guides/auto-update) を参照。
 - **`.deb`** はパッケージマネージャが所有します。update payload には決して
   なりません — upgrade は apt/dpkg の仕事で、OS のパッケージマネージャが他の
   installed package のライフサイクルを所有するのと同じです。
-  `murasaki release --manifest` が `.deb` を探すことはありません。
+  `murasaki release --manifest` が `.deb` を探すことはなく、`.deb` で
+  インストールした(または手動展開した bare AppDir の)app の
+  `useUpdate().check()` は manifest を確認する代わりに「update はシステムの
+  パッケージマネージャが管理しています」という構造化された結果を返します
+  — エラーにはなりません。
 
 ### まだ実装されていないこと
 
-- launcher runtime がない — 生成した AppDir / `.AppImage` / `.deb` は起動しません。
 - `.rpm` や repository metadata(apt/dnf repo index)はありません。
-- Linux code signing(`debsign` / AppImage signing)と、`.AppImage` の
-  auto-update apply path はありません(上記の manifest scan は用意済みですが、
-  適用は runtime 待ちで未実装です)。
+- Linux code signing(`debsign` / AppImage signing)はありません。
+- `.deb` や手動展開した bare AppDir の self-update はありません —
+  swap できるファイルを持つのは `.AppImage` だけです(上記参照)。
 
 ## Release checklist
 

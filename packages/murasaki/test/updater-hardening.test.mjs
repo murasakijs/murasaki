@@ -7,6 +7,19 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { createUpdaterEngine } from '../dist/runtime/updater.js'
 
+// This suite exercises `mode: 'prod'` engine behavior against whatever the
+// real host OS happens to be (see the assets keyed by
+// `${process.platform}-${process.arch}` throughout) — but a genuinely
+// packaged Linux launch short-circuits `check()` to
+// `not-available`/`system-package-manager` unless `$APPIMAGE` is set (see
+// `runCheck()`'s Linux guard in runtime/updater.ts). Set it once for this
+// whole file (each `node --test` file is its own process, so this can't leak
+// into other test files) so these generic, platform-agnostic engine tests
+// keep exercising the manifest-fetch path on Linux CI; the dedicated
+// Linux-packaging-format tests near the bottom of this file manage
+// `process.env.APPIMAGE` themselves.
+process.env.APPIMAGE ??= join(tmpdir(), 'murasaki-test.AppImage')
+
 function signingKey() {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   const spki = publicKey.export({ format: 'der', type: 'spki' })
@@ -494,4 +507,87 @@ test('win32-arm64 resolves as a platform key like any other platform-arch combin
   const state = await checkManifest(t, privateKey, { version: '2.0.0', generatedAt, assets: asset }, publicKey)
   assert.equal(state.status, 'available')
   assert.equal(state.latest, '2.0.0')
+})
+
+// ── Linux packaging-format guard (AppImage self-update only) ──────────────
+
+function forceLinuxPlatform(t) {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+  Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+  t.after(() => Object.defineProperty(process, 'platform', originalPlatform))
+}
+
+function withAppImageEnv(t, value) {
+  const original = process.env.APPIMAGE
+  if (value === undefined) delete process.env.APPIMAGE
+  else process.env.APPIMAGE = value
+  t.after(() => {
+    if (original === undefined) delete process.env.APPIMAGE
+    else process.env.APPIMAGE = original
+  })
+}
+
+test('prod check() on Linux without $APPIMAGE reports system-package-manager, never an error, even with no updater configured', async (t) => {
+  forceLinuxPlatform(t)
+  withAppImageEnv(t, undefined)
+
+  const unconfigured = createUpdaterEngine({ resolvedUpdater: null, currentVersion: '1.0.0', mode: 'prod' })
+  const unconfiguredState = await unconfigured.check()
+  assert.equal(unconfiguredState.status, 'not-available')
+  assert.equal(unconfiguredState.reason, 'system-package-manager')
+  assert.equal(unconfiguredState.error, undefined)
+
+  const { privateKey, publicKey } = signingKey()
+  const asset = { [`linux-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) } }
+  const configuredState = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', generatedAt: new Date().toISOString(), assets: asset },
+    publicKey,
+  )
+  assert.equal(configuredState.status, 'not-available')
+  assert.equal(configuredState.reason, 'system-package-manager')
+  assert.equal(configuredState.error, undefined)
+})
+
+test('prod check() on Linux proceeds normally once $APPIMAGE is set', async (t) => {
+  forceLinuxPlatform(t)
+  withAppImageEnv(t, join(tmpdir(), 'murasaki-appimage-check-test.AppImage'))
+
+  const { privateKey, publicKey } = signingKey()
+  const asset = { [`linux-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) } }
+  const state = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', generatedAt: new Date().toISOString(), assets: asset },
+    publicKey,
+  )
+  assert.equal(state.status, 'available')
+  assert.equal(state.reason, undefined)
+})
+
+test('dev mode check() on Linux is unaffected by the AppImage guard (there is no bundle to be one yet)', async (t) => {
+  forceLinuxPlatform(t)
+  withAppImageEnv(t, undefined)
+
+  const { privateKey, publicKey } = signingKey()
+  const asset = { [`linux-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) } }
+  const { bytes, signature } = signedManifest(privateKey, {
+    version: '2.0.0',
+    generatedAt: new Date().toISOString(),
+    assets: asset,
+  })
+  const origin = await listen(t, (req, res) => {
+    if (req.url === '/latest.json') return res.end(bytes)
+    if (req.url === '/latest.json.sig') return res.end(signature)
+    res.writeHead(404).end()
+  })
+  const engine = createUpdaterEngine({
+    resolvedUpdater: updaterConfig(`${origin}/latest.json`, publicKey),
+    currentVersion: '1.0.0',
+    mode: 'dev',
+  })
+  const state = await engine.check()
+  assert.equal(state.status, 'available')
+  assert.equal(state.reason, undefined)
 })

@@ -61,6 +61,7 @@ pub struct Application {
     /// underlying NSMenu on drop, so this must outlive the app, not just the
     /// `create_window()` call that installs it. `None` until the primary window
     /// is created; also doubles as the "already installed" guard.
+    #[cfg(target_os = "macos")]
     app_menu: Rc<RefCell<Option<muda::Menu>>>,
     /// Windows/Linux only: same reasoning as `app_menu` above, just for the
     /// native File/Edit/Window menu bar (`menu::attach_menu_bar`) instead of
@@ -116,6 +117,7 @@ impl Application {
         Ok(Self {
             event_loop: Rc::new(RefCell::new(Some(event_loop))),
             on_quit: Rc::new(RefCell::new(None)),
+            #[cfg(target_os = "macos")]
             app_menu: Rc::new(RefCell::new(None)),
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             menu_bar: Rc::new(RefCell::new(None)),

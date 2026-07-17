@@ -100,10 +100,15 @@ windows = { version = "0.62", features = [
 #    picks zbus's bundled async-io reactor (no external Tokio runtime needed
 #    from this synchronous napi addon); `crypto-rust` avoids an OpenSSL
 #    dependency, matching macOS/Windows' no-OpenSSL native crypto.
+#  - libc: `--apply-update`'s `--wait-pid` liveness check (updater.rs) —
+#    `libc::kill(pid, 0)`, same as macOS above — and `launcher.rs`'s
+#    process-group teardown of the bundled Node backend tree (`imp_linux`'s
+#    `terminate_and_wait_child`).
 [target.'cfg(target_os = "linux")'.dependencies]
 global-hotkey = "0.8"
 gtk = "0.18"
 secret-service = { version = "5", default-features = false, features = ["rt-async-io-crypto-rust"] }
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"

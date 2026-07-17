@@ -4,17 +4,19 @@ description: Shipping real native installers — cross-arch builds, signing, not
 ---
 
 `murasaki bundle` / `murasaki installer` ship real installers on **macOS**
-(`.app` / `.dmg`) and **Windows** (a portable `.zip`, an NSIS `.exe`, and an
-MSI `.msi`), cross-arch (arm64 / x64) on both. `murasaki bundle`/`installer`
-also produce Linux artifacts — an AppDir + `.AppImage` and a `.deb` — but the
-native launcher has no Linux runtime yet, so those artifacts don't run yet
-(see [Linux: AppImage and .deb](#linux-appimage-and-deb) below).
+(`.app` / `.dmg`), **Windows** (a portable `.zip`, an NSIS `.exe`, and an
+MSI `.msi`), and **Linux** (an AppDir + `.AppImage`, and a `.deb`),
+cross-arch (arm64 / x64) on all three. The Linux `.AppImage` runs and
+self-updates like the macOS/Windows payloads do; see
+[Linux: AppImage and .deb](#linux-appimage-and-deb) below for its update
+story, the `.deb`'s system-package-manager caveat, and the FUSE note for
+running an AppImage in a container/CI.
 
 | Target | Bundle | Installer | Public code signing |
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization built in |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Authenticode via SignTool built in |
-| Linux x64 / arm64 | AppDir + `.AppImage` (artifacts only) | `.deb` (artifacts only) | Planned |
+| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | Not implemented (unsigned) |
 
 <Callout type="warn">
   A generated file is not automatically distribution-ready. Test the
@@ -69,7 +71,7 @@ The packaging result differs by target:
 | Windows NSIS `.exe` | Registers protocols, ProgIDs, Open With entries, and Default Apps capabilities per-user by default, or per-machine with `installMode: 'perMachine'`. |
 | Windows WiX `.msi` | Registers the same handlers per-machine. |
 | Windows portable folder / `.zip` | Does not modify the registry or register itself automatically. |
-| Linux AppDir / `.AppImage` / `.deb` | `MimeType=` lines (`x-scheme-handler/<scheme>` per protocol, `application/x-<extension>` per file-association extension) are written into the `.desktop` file, but there's no launcher runtime yet to actually handle an activation — see below. |
+| Linux AppDir / `.AppImage` / `.deb` | `MimeType=` lines (`x-scheme-handler/<scheme>` per protocol, `application/x-<extension>` per file-association extension) are written into the `.desktop` file. The `.deb` installs it under `usr/share/applications/` and refreshes the desktop database on install/remove; a manually-extracted AppDir/`.AppImage` has no equivalent OS-level registration step. Cold-start argv (the `%U`/`%F` the `.desktop` `Exec=` line expands to) and second-instance activation both work either way — see below. |
 
 Matching cold-start, second-instance, and macOS open events are delivered to
 Node Main's `openRequested()` hook after `ready()`. The Windows portable build
@@ -298,12 +300,12 @@ Add these repository secrets to sign + notarize (omit them all for an unsigned
 
 ## Linux: AppImage and .deb
 
-<Callout type="warn">
-  Linux artifact assembly is implemented, but the native launcher has no
-  Linux runtime yet — a produced AppDir/`.AppImage`/`.deb` does not run.
-  Packaging is ready so the runtime work that follows can build and test
-  against a fixed, real layout; treat these artifacts as structural-only
-  until the runtime ships.
+<Callout type="info">
+  The native launcher runs the produced AppDir/`.AppImage`/`.deb`: window,
+  webview, single-instance locking, deep links, graceful shutdown, and
+  crash reporting all work the same way they do on macOS/Windows. Signing,
+  `.rpm`, and repository metadata are not implemented yet — see "What's not
+  implemented yet" below.
 </Callout>
 
 ```bash
@@ -334,25 +336,42 @@ Linux desktop expects: `AppRun`, a root and `usr/share/applications/
 <appId>.desktop`, and a `usr/share/icons/hicolor/` icon-theme fan-out
 generated from `config.icon` (16 through 512px).
 
+### Running an AppImage without FUSE
+
+AppImages normally mount themselves via FUSE. Some hosts — notably CI
+runners and minimal containers — don't reliably have a working
+`/dev/fuse`. Install `libfuse2` (`libfuse2t64` on Ubuntu 24.04+) for the
+normal FUSE-mount path, or pass `--appimage-extract-and-run` to have the
+AppImage runtime extract itself to a temp directory and run from there
+instead — no FUSE required, at the cost of a slower startup. Murasaki's own
+CI (`.github/workflows/app-package-linux.yml`) always uses
+`--appimage-extract-and-run` for exactly this reason.
+
 ### AppImage vs .deb: different update stories
 
-- **`.AppImage`** is murasaki's self-contained update payload — once the
-  Linux runtime ships, it applies updates the same way the macOS `.app.zip`/
-  Windows NSIS setup do (`murasaki release --manifest` already scans for
+- **`.AppImage`** is murasaki's self-contained update payload and self-update
+  target: `useUpdate()`'s `install()` journal-swaps the *running* `.AppImage`
+  file in place (same same-volume-backup + startup-health-acknowledgement
+  guarantees as the macOS `.app.zip`/Windows NSIS setup swap), then relaunches
+  it with `--appimage-extract-and-run` (works whether or not the host has
+  FUSE). A failed first launch after an update automatically rolls back to
+  the previous version. `murasaki release --manifest` scans for
   `<Name>-<version>-linux-{x64,arm64}.AppImage`, see
-  [Auto-update](/docs/guides/auto-update)).
+  [Auto-update](/docs/guides/auto-update).
 - **`.deb`** is package-manager-owned. It's never an update payload —
   upgrades are apt/dpkg's job, the same way an OS package manager owns any
   other installed package's lifecycle. `murasaki release --manifest` never
-  looks for a `.deb`.
+  looks for a `.deb`, and a `.deb`-installed (or manually-extracted, bare
+  AppDir) app's `useUpdate().check()` reports a structured "updates are
+  managed by the system package manager" result instead of checking a
+  manifest — never an error.
 
 ### What's not implemented yet
 
-- No launcher runtime — the produced AppDir/`.AppImage`/`.deb` don't launch.
 - No `.rpm` or repository metadata (apt/dnf repo indexes).
-- No Linux code signing (`debsign`/AppImage signing) and no auto-update
-  application path for the `.AppImage` (the manifest scan above is ready;
-  applying it isn't, pending the runtime).
+- No Linux code signing (`debsign`/AppImage signing).
+- No self-update for the `.deb` or a bare/manually-extracted AppDir — only
+  the `.AppImage` has a file to swap (see above).
 
 ## Release checklist
 
