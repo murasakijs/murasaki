@@ -616,8 +616,9 @@ function desktopEscape(value: string): string {
  * `fileAssociations`. `StartupWMClass=<execName>` lets the window manager
  * associate the running window with this launcher entry (taskbar
  * grouping/pinning). `MimeType` is only emitted when protocols/file
- * associations are declared: `x-scheme-handler/<scheme>` per protocol,
- * `application/x-<extension>` per file-association extension — mirroring
+ * associations are declared: `x-scheme-handler/<scheme>` per protocol, and
+ * per file association the declared `mimeType` when present, else
+ * `application/x-<extension>` per extension — mirroring
  * the macOS/Windows association registration in `infoPlist`/
  * `nsisAssociationRegistry`/`wixAssociationComponents`, but the `.desktop`
  * file is the whole of Linux's declaration surface here (there's no OS-level
@@ -642,7 +643,9 @@ export function linuxDesktopEntry(
   ]
   const mimeTypes = [
     ...associations.protocols.map((protocol) => `x-scheme-handler/${protocol.scheme}`),
-    ...associations.files.flatMap((file) => file.extensions.map((extension) => `application/x-${extension}`)),
+    ...associations.files.flatMap((file) =>
+      file.mimeType ? [file.mimeType] : file.extensions.map((extension) => `application/x-${extension}`),
+    ),
   ]
   if (mimeTypes.length > 0) {
     lines.push(`MimeType=${mimeTypes.map((type) => `${type};`).join('')}`)

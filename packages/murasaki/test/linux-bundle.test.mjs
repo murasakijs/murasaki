@@ -85,6 +85,10 @@ const desktopConfig = {
     description: 'A notes document',
     role: 'editor',
     mimeType: 'application/x-example-note',
+  }, {
+    extensions: ['entxt'],
+    name: 'Notes text export',
+    role: 'viewer',
   }],
 }
 
@@ -100,10 +104,10 @@ test('linuxDesktopEntry emits the required fields plus MimeType lines for protoc
   assert.match(entry, /\nType=Application\n/)
   assert.match(entry, /\nCategories=Utility;\n/)
   assert.match(entry, new RegExp(`\\nStartupWMClass=${execName}\\n`))
-  // x-scheme-handler/<scheme> for the declared protocol, application/x-<ext>
-  // per file-association extension (extensions are already lowercased by
-  // resolveAssociations).
-  assert.match(entry, /MimeType=x-scheme-handler\/example-notes;application\/x-enote;application\/x-enotex;\n/)
+  // x-scheme-handler/<scheme> for the declared protocol; per file association
+  // the declared mimeType wins, and only mimeType-less associations fall back
+  // to application/x-<ext> per extension (lowercased by resolveAssociations).
+  assert.match(entry, /MimeType=x-scheme-handler\/example-notes;application\/x-example-note;application\/x-entxt;\n/)
 })
 
 test('linuxDesktopEntry falls back to a generic Comment and omits MimeType when nothing is declared', () => {
