@@ -80,6 +80,7 @@ on macOS and HMENU on Windows), not an HTML popup.
 - [API Routes](#api-routes)
 - [Architecture](#architecture)
 - [Roadmap](#roadmap)
+- [Repository layout](#repository-layout)
 - [Contributing](#contributing)
 - [Code of Conduct](#code-of-conduct)
 - [Security](#security)
@@ -589,6 +590,20 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something
   planned for a near-term phase.
+
+---
+
+## Repository layout
+
+This monorepo is the single source of truth for every package murasaki
+publishes — [`murasaki`](https://www.npmjs.com/package/murasaki),
+[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native),
+[`create-murasaki`](https://www.npmjs.com/package/create-murasaki),
+[`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui), and
+[`@murasakijs/mcp`](https://www.npmjs.com/package/@murasakijs/mcp) all live
+here and release from here, each via its own tag-triggered GitHub Actions
+workflow. See [CONTRIBUTING.md](https://github.com/murasakijs/murasaki/blob/main/CONTRIBUTING.md#repository-layout)
+for the package-by-package map.
 
 ---
 

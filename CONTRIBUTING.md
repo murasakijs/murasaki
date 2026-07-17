@@ -22,6 +22,7 @@ There are lots of ways to contribute — you don't have to write code:
 - [Development workflow](#development-workflow)
 - [Reporting issues](#reporting-issues)
 - [Feature requests](#feature-requests)
+- [Plugins](#plugins)
 - [Pull requests](#pull-requests)
 - [Coding style](#coding-style)
 - [Testing manually](#testing-manually)
@@ -42,13 +43,13 @@ Prerequisites:
 git clone https://github.com/murasakijs/murasaki.git
 cd murasaki
 pnpm install
-pnpm --filter murasaki tsc -p tsconfig.build.json
-cd examples/app-router
+pnpm --filter murasaki build
+cd examples/violet-notes
 pnpm dev
 ```
 
 The dev server opens a WebView window and reloads on file changes. Edit
-files under `src/` in the root of the repo or under `examples/app-router/src/`
+files under `packages/murasaki/src/` or under `examples/violet-notes/src/`
 — both hot-reload.
 
 ### Optional tooling for cross-compile
@@ -69,30 +70,19 @@ or `.tar.gz`.
 
 ## Repository layout
 
-```
-murasaki/
-├── bin/
-│   └── murasaki.js           CLI entry point (dev/build/bundle/installer)
-├── src/
-│   ├── index.ts              Public API (components, hooks, defineAction, defineConfig)
-│   ├── dev.tsx               Development server (HMR, file watcher)
-│   ├── prod.tsx              Production boot (used inside dist/server.cjs)
-│   ├── build.ts              Build pipeline (esbuild → pack → installer)
-│   ├── config.ts             murasaki.config.ts loader + resolveAppMeta
-│   ├── download.ts           Cross-compile: Node + webview prebuild download
-│   ├── wix.ts                .msi builder (WiX v4)
-│   ├── appimage.ts           .AppImage builder (mksquashfs + type-2 runtime)
-│   ├── rpc-server.ts         defineAction / attachRpc
-│   ├── rpc-client.ts         callAction / useAction
-│   ├── components/           Batteries-included UI (Button, Card, Modal, …)
-│   ├── jsx/                  JSX runtime (SSR + hydration)
-│   └── runtime/              window lifecycle, native bridge, routing
-└── examples/
-    └── app-router/           Reference app used for iteration + smoke tests
-```
+This is a monorepo — every published package lives here, in one place, and
+each is released independently via its own tag-triggered GitHub Actions
+workflow:
 
-The `create-murasaki` scaffolder lives in a sibling repo:
-[github.com/murasakijs/create-murasaki](https://github.com/murasakijs/create-murasaki).
+| Path | What it is |
+| --- | --- |
+| `packages/murasaki` | The `murasaki` npm package — CLI (`bin/murasaki.mjs`), framework runtime (`src/`), config loader, and the capability manifest (`capabilities.json`). |
+| `crates/native` | `@murasakijs/native` — the Rust binding (napi-rs) for windows, menus, dialogs, clipboard, notifications, tray, and other native APIs. |
+| `packages/create-murasaki` | The `create-murasaki` scaffolder and its default project template. |
+| `packages/ui` | `@murasakijs/ui` — the optional component library. |
+| `packages/mcp` | `@murasakijs/mcp` — the MCP server that gives AI coding tools grounded Murasaki knowledge. |
+| `apps/docs` | The docs site ([murasaki.ichi10.com](https://murasaki.ichi10.com)), English and Japanese. |
+| `examples/` | Full example apps — [Violet Notes](https://github.com/murasakijs/murasaki/tree/main/examples/violet-notes), [Murasaki Focus](https://github.com/murasakijs/murasaki/tree/main/examples/murasaki-focus), [Local Signal](https://github.com/murasakijs/murasaki/tree/main/examples/local-signal) — used for manual verification and screenshots. |
 
 ---
 
@@ -106,9 +96,9 @@ The `create-murasaki` scaffolder lives in a sibling repo:
 3. **Fork + branch** from `main` using a short descriptive name
    (`fix/close-button-hang`, `feat/data-table`).
 4. **Make the change** with focused commits.
-5. **Run `pnpm --filter murasaki tsc -p tsconfig.build.json`** to
-   confirm the whole build compiles.
-6. **Verify by hand** with `examples/app-router`.
+5. **Run `pnpm --filter murasaki build`** to confirm it compiles, then
+   **`pnpm --filter murasaki test`** to run the test suite.
+6. **Verify by hand** with `examples/violet-notes`.
 7. **Open a PR** referencing the issue.
 
 ---
@@ -121,8 +111,8 @@ Before filing a new issue:
    including closed ones.
 2. Confirm you're running the **latest version** of murasaki
    (`pnpm add murasaki@latest`).
-3. Try to reproduce with `examples/app-router` — a minimal reproducer helps
-   enormously.
+3. Try to reproduce from a fresh `npm create murasaki@latest` scaffold, or a
+   minimal repo you can link to — a small reproducer helps enormously.
 
 Please include:
 
@@ -146,13 +136,37 @@ We prefer to discuss non-trivial APIs before code is written.
 
 ---
 
+## Plugins
+
+Murasaki's supported extension point today is the **build-time plugin SDK**:
+plugins declared in `murasaki.config.ts` that contribute Vite options, bundle
+dependencies/resources, and serial dev/build/bundle hooks — see the
+[Plugins section of the configuration docs](https://murasaki.ichi10.com/docs/building/configuration).
+If your idea fits there, that's the fastest path to shipping it.
+
+A **runtime plugin system** — dynamically loaded plugins running inside a
+packaged app — is under RFC, not implemented yet: `rfcs/0004-runtime-plugins.md`.
+If that's what you need, join the discussion there instead of working around
+the build-time SDK.
+
+Extensions to the **native (Rust) surface** — new `@murasakijs/native` APIs,
+new capabilities, or changes to the native ABI — should be proposed as an
+issue first, before any code. These touch the security/capability model
+directly and need design discussion up front.
+
+---
+
 ## Pull requests
 
 - One PR per logical change.
 - Include tests **or** a manual verification note.
 - Explain the "why" in the PR description — the diff shows the "what".
 - Reference the issue with `Fixes #NNN` or `Closes #NNN`.
-- CI will run TypeScript compilation. Make sure it's green before requesting review.
+- CI runs the workspace build, the murasaki test suite, API-report checks
+  (`api:check`), the docs build, MCP knowledge checks, a fresh-scaffold
+  install/build, and `cargo test` for the native crate. Before requesting
+  review, make sure `pnpm --filter murasaki test` is green — and `cargo test`
+  in `crates/native` too if you touched Rust.
 
 ### Commit messages
 
@@ -193,14 +207,16 @@ surrounding code.
 
 ## Testing manually
 
-We don't have an automated test suite yet. Please run through the
-smoke checklist below before opening a PR that touches runtime code:
+`pnpm --filter murasaki test` covers the framework's unit tests, but PRs that
+touch runtime/CLI behavior should also go through the smoke checklist below
+before opening a PR:
 
-1. `pnpm --filter murasaki tsc -p tsconfig.build.json` — clean compile.
-2. `cd examples/app-router && pnpm dev` — window opens, HMR works.
-3. `pnpm build && node dist/server.cjs` — production bundle boots.
-4. `pnpm bundle` — `.app` (or the OS-native folder) is produced and launches.
-5. `pnpm installer` — installer file is produced.
+1. `pnpm --filter murasaki build` — clean compile — then `pnpm --filter murasaki test` — automated tests pass.
+2. `cd examples/violet-notes && pnpm dev` — window opens, HMR works.
+3. `pnpm bundle` — `.app` (or the OS-native folder) is produced and launches;
+   launching it also verifies the packaged Node prod server boots (the native
+   launcher spawns it — there is no standalone server entry point to run).
+4. `pnpm installer` — installer file is produced.
 
 Cross-compile changes should also be verified with `--target win-x64` (at
 minimum) to catch platform assumptions.
