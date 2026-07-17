@@ -22,6 +22,7 @@ There are lots of ways to contribute — you don't have to write code:
 - [Development workflow](#development-workflow)
 - [Reporting issues](#reporting-issues)
 - [Feature requests](#feature-requests)
+- [Plugins](#plugins)
 - [Pull requests](#pull-requests)
 - [Coding style](#coding-style)
 - [Testing manually](#testing-manually)
@@ -69,30 +70,19 @@ or `.tar.gz`.
 
 ## Repository layout
 
-```
-murasaki/
-├── bin/
-│   └── murasaki.js           CLI entry point (dev/build/bundle/installer)
-├── src/
-│   ├── index.ts              Public API (components, hooks, defineAction, defineConfig)
-│   ├── dev.tsx               Development server (HMR, file watcher)
-│   ├── prod.tsx              Production boot (used inside dist/server.cjs)
-│   ├── build.ts              Build pipeline (esbuild → pack → installer)
-│   ├── config.ts             murasaki.config.ts loader + resolveAppMeta
-│   ├── download.ts           Cross-compile: Node + webview prebuild download
-│   ├── wix.ts                .msi builder (WiX v4)
-│   ├── appimage.ts           .AppImage builder (mksquashfs + type-2 runtime)
-│   ├── rpc-server.ts         defineAction / attachRpc
-│   ├── rpc-client.ts         callAction / useAction
-│   ├── components/           Batteries-included UI (Button, Card, Modal, …)
-│   ├── jsx/                  JSX runtime (SSR + hydration)
-│   └── runtime/              window lifecycle, native bridge, routing
-└── examples/
-    └── app-router/           Reference app used for iteration + smoke tests
-```
+This is a monorepo — every published package lives here, in one place, and
+each is released independently via its own tag-triggered GitHub Actions
+workflow:
 
-The `create-murasaki` scaffolder lives in a sibling repo:
-[github.com/murasakijs/create-murasaki](https://github.com/murasakijs/create-murasaki).
+| Path | What it is |
+| --- | --- |
+| `packages/murasaki` | The `murasaki` npm package — CLI (`bin/murasaki.mjs`), framework runtime (`src/`), config loader, and the capability manifest (`capabilities.json`). |
+| `crates/native` | `@murasakijs/native` — the Rust binding (napi-rs) for windows, menus, dialogs, clipboard, notifications, tray, and other native APIs. |
+| `packages/create-murasaki` | The `create-murasaki` scaffolder and its default project template. |
+| `packages/ui` | `@murasakijs/ui` — the optional component library. |
+| `packages/mcp` | `@murasakijs/mcp` — the MCP server that gives AI coding tools grounded Murasaki knowledge. |
+| `apps/docs` | The docs site ([murasaki.ichi10.com](https://murasaki.ichi10.com)), English and Japanese. |
+| `examples/` | Full example apps — [Violet Notes](https://github.com/murasakijs/murasaki/tree/main/examples/violet-notes), [Murasaki Focus](https://github.com/murasakijs/murasaki/tree/main/examples/murasaki-focus), [Local Signal](https://github.com/murasakijs/murasaki/tree/main/examples/local-signal) — used for manual verification and screenshots. |
 
 ---
 
@@ -143,6 +133,26 @@ Open an issue tagged **Feature request** describing:
 - Prior art from Next.js / Tauri / Electron if it applies.
 
 We prefer to discuss non-trivial APIs before code is written.
+
+---
+
+## Plugins
+
+Murasaki's supported extension point today is the **build-time plugin SDK**:
+plugins declared in `murasaki.config.ts` that contribute Vite options, bundle
+dependencies/resources, and serial dev/build/bundle hooks — see the
+[Plugins section of the configuration docs](https://murasaki.ichi10.com/docs/building/configuration).
+If your idea fits there, that's the fastest path to shipping it.
+
+A **runtime plugin system** — dynamically loaded plugins running inside a
+packaged app — is under RFC, not implemented yet: `rfcs/0004-runtime-plugins.md`.
+If that's what you need, join the discussion there instead of working around
+the build-time SDK.
+
+Extensions to the **native (Rust) surface** — new `@murasakijs/native` APIs,
+new capabilities, or changes to the native ABI — should be proposed as an
+issue first, before any code. These touch the security/capability model
+directly and need design discussion up front.
 
 ---
 
