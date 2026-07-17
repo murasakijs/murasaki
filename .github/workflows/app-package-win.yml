@@ -434,6 +434,7 @@ jobs:
 
       - name: Windows updater E2E (headless --apply-update — apply mechanism, contract §8)
         if: steps.locate-installers.outputs.setupPath != ''
+        timeout-minutes: 10
         shell: pwsh
         run: |
           .github/scripts/win-updater-e2e.ps1 `

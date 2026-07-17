@@ -77,6 +77,12 @@ param(
   # "never".
   [int]$NegativeMarkerTimeoutSeconds = 45,
 
+  # The first launcher only verifies/copies itself outside --target, spawns
+  # that helper, and exits. Waiting longer means the launcher itself is
+  # wedged; the detached helper and eventual app relaunch are observed via
+  # the marker instead.
+  [int]$ApplyLauncherTimeoutSeconds = 30,
+
   # Falls back to the OS temp dir so this script can also be run manually
   # (e.g. reproducing a CI failure locally) without $env:RUNNER_TEMP set.
   [string]$LogPath = (Join-Path ($(if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() })) 'murasaki-updater-e2e.log')
@@ -172,8 +178,10 @@ function Wait-Marker([int]$WaitTimeoutSeconds) {
 
 # Invokes the installed launcher's `--apply-update` mode directly, with the
 # exact argv `maybe_spawn_apply_helper` (launcher.rs) builds in production.
-# Uses `Start-Process -Wait -PassThru` rather than the `&` call operator — a
-# `windows_subsystem="windows"` binary is not reliably waited on by `&`.
+# Uses the Process object's bounded `WaitForExit` rather than
+# `Start-Process -Wait`: PowerShell's `-Wait` follows the child process tree
+# on Windows, so it also waits for the updater's intentional self-copy/re-exec
+# and the relaunched desktop app, which is expected to remain running.
 # $SetupV2/$InstallDir/$ExePath may contain spaces, so each space-containing
 # argument is individually wrapped in embedded double quotes.
 #
@@ -196,8 +204,13 @@ function Invoke-ApplyUpdate([string]$Sha256, [int]$WaitPid, [string]$Label) {
     '--target', "`"$InstallDir`"",
     '--relaunch', "`"$ExePath`""
   )
-  $proc = Start-Process -FilePath $ExePath -ArgumentList $argArray -Wait -PassThru `
+  $proc = Start-Process -FilePath $ExePath -ArgumentList $argArray -PassThru `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+  if (-not $proc.WaitForExit($ApplyLauncherTimeoutSeconds * 1000)) {
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    throw "initial --apply-update launcher did not exit within ${ApplyLauncherTimeoutSeconds}s"
+  }
+  $proc.Refresh()
   [PSCustomObject]@{ Process = $proc; OutLog = $outLog; ErrLog = $errLog }
 }
 
