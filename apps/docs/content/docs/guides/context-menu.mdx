@@ -101,6 +101,13 @@ Murasaki rejects the complete menu payload when a required role capability is
 missing. Client behaviors and your own callbacks need no additional native
 capability.
 
+<Callout type="warn">
+  On Linux, `Copy`/`Cut`/`Paste`/`SelectAll` are delivered by synthesizing X11
+  key events (requires XWayland under Wayland), while `Undo`/`Redo` are
+  silently omitted from the menu — an upstream muda/GTK limitation. Give
+  `Undo`/`Redo` your own `action` function on Linux if you need them.
+</Callout>
+
 ## Reusable actions with `createActions`
 
 Define your app's actions once — typically in `src/lib/action.ts`, backed by a

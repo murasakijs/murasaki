@@ -99,6 +99,13 @@ APIを呼ぶ場合と同じpermissionも必要です。
 必要なrole capabilityが欠ける場合、Murasakiはmenu payload全体を拒否します。client
 behaviorと自作callbackには追加のnative capabilityは不要です。
 
+<Callout type="warn">
+  Linux では `Copy`/`Cut`/`Paste`/`SelectAll` は X11 キーイベントの合成によって実現され
+  ます(Wayland では XWayland が必要)。一方 `Undo`/`Redo` はメニューから静かに省かれま
+  す — muda/GTK 側の既知の制約です。Linux でこれらが必要な場合は、独自の `action` 関数
+  を指定してください。
+</Callout>
+
 ## `createActions` による再利用可能な Actions
 
 アプリの actions を(典型的には `src/lib/action.ts` に、store に裏打ちされた形で)一度

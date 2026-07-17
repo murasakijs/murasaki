@@ -85,6 +85,26 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell",
 ] }
 
+# Linux native parity (RFC 0002 phase L1):
+#  - global-hotkey: same crate as macOS/Windows above, X11-only upstream (see
+#    global_shortcut.rs's Wayland detection — XWayland works, pure Wayland
+#    sessions get a structured `unsupported` error instead of registering
+#    against a nonexistent X server).
+#  - gtk: muda/tao/tray-icon already depend on it (default `gtk` feature) for
+#    their own GTK backends; declared directly here too so this crate's own
+#    code (menu.rs's `attach_menu_bar`, webview.rs's context-menu/app-menu
+#    Linux paths) can name `gtk`/`tao::platform::unix` types without relying
+#    on a transitive re-export.
+#  - secret-service: zbus-based (pure Rust, no libsecret/glib-sys linkage)
+#    Secret Service client for secure_storage.rs's Linux backend. `rt-async-io`
+#    picks zbus's bundled async-io reactor (no external Tokio runtime needed
+#    from this synchronous napi addon); `crypto-rust` avoids an OpenSSL
+#    dependency, matching macOS/Windows' no-OpenSSL native crypto.
+[target.'cfg(target_os = "linux")'.dependencies]
+global-hotkey = "0.8"
+gtk = "0.18"
+secret-service = { version = "5", default-features = false, features = ["rt-async-io-crypto-rust"] }
+
 [build-dependencies]
 napi-build = "2"
 

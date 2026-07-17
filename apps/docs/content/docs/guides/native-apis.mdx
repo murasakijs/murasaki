@@ -110,9 +110,12 @@ path; use `shell.openExternal` to open a URL instead.
 
 Use `secureStorage` when trusted renderer code must persist a refresh token,
 license value, or another short string that should not be written to a plain
-file. macOS uses Keychain and Windows uses Credential Manager. Linux and other
-targets return an explicit `unsupported` error; Murasaki never falls back to a
-plaintext file.
+file. macOS uses Keychain, Windows uses Credential Manager, and Linux uses the
+freedesktop.org Secret Service D-Bus API (gnome-keyring, KWallet, KeePassXC,
+and similar). Linux requires a running Secret Service provider — if none is
+reachable, every call fails with a structured error. Other targets return an
+explicit `unsupported` error. Murasaki never falls back to a plaintext file on
+any platform.
 
 ```ts
 import { secureStorage } from 'murasaki/native'
@@ -204,12 +207,21 @@ export default defineConfig({
 Tray menu items are event-driven: every clickable item needs a unique `id`,
 and privileged actions such as quitting still pass through their own native
 capability. Closing the renderer that created the process-wide icon removes
-it. Linux tray support is not available yet.
+it.
+
+<Callout type="warn">
+  Linux trays use libappindicator and need an AppIndicator host (on GNOME,
+  install the AppIndicator/KStatusNotifierItem Shell extension). Tray menu
+  clicks and dynamic icon/menu replacement work the same as macOS/Windows, but
+  tray icon click/double-click events never fire on Linux — AppIndicator
+  exposes no such signal, only "show the attached menu".
+</Callout>
 
 ## Global shortcuts
 
-Trusted client components can register process-wide shortcuts on macOS and
-Windows. Registration and removal are separate, deny-by-default capabilities:
+Trusted client components can register process-wide shortcuts on macOS,
+Windows, and Linux (X11/XWayland). Registration and removal are separate,
+deny-by-default capabilities:
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -255,21 +267,30 @@ export function CaptureShortcut() {
 
 `register(accelerator, id?)` resolves to `{ id, accelerator }`. The returned
 accelerator is platform-resolved and canonical; `CmdOrCtrl` becomes Command on
-macOS and Control on Windows. If `id` is omitted, that canonical accelerator
-is the id. `unregisterAll()` removes only registrations owned by the calling
-renderer, not another window's registrations.
+macOS and Control on Windows/Linux. If `id` is omitted, that canonical
+accelerator is the id. `unregisterAll()` removes only registrations owned by
+the calling renderer, not another window's registrations.
 
 Accelerators are bounded ASCII strings with one to four modifiers followed by
 one known key. Duplicate modifiers, key-only shortcuts, malformed/unknown
-keys, lifecycle/OS-reserved chords (for example Command+Q or Alt+F4), duplicate
-ids, duplicate accelerators, and chords already owned by another application
-are rejected. At most 64 shortcuts may be live in one process. Shortcut ids
-are 1–128 characters and accept letters, numbers, `.`, `_`, `:`, `-`, and `+`.
+keys, lifecycle/OS-reserved chords (for example Command+Q or Alt+F4 — Linux
+has no OS-level reserved list, since that depends on the desktop environment),
+duplicate ids, duplicate accelerators, and chords already owned by another
+application are rejected. At most 64 shortcuts may be live in one process.
+Shortcut ids are 1–128 characters and accept letters, numbers, `.`, `_`, `:`,
+`-`, and `+`.
 
 Ownership follows the renderer window. Closing/disposal automatically releases
 its registrations; application shutdown releases all registrations. Trigger
 events are live-only and are sent only to the owner, with no replay after a
-reload. Linux is not implemented.
+reload.
+
+<Callout type="warn">
+  Linux global shortcuts require X11 or XWayland (the underlying crate has no
+  native Wayland backend). A pure-Wayland session (`WAYLAND_DISPLAY` set, no
+  `DISPLAY`) rejects `register` with a structured `unsupported` error instead
+  of silently registering nothing.
+</Callout>
 
 <Callout type="info">
   Parser, ownership, capability, macOS build, and Windows x64/arm64 build paths
