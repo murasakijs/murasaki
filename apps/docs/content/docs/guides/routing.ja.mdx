@@ -54,6 +54,27 @@ export default function BlogPost() {
 フォルダ(括弧を使い、ブラケットは使わない)は、URL セグメントを追加せずにルートを整理
 します。
 
+## キャッチオールセグメント
+
+`[...name]` フォルダは残りのセグメントすべてを `string[]` としてキャプチャします。少
+なくとも 1 つのセグメントがマッチする必要があります。`[[...name]]`(二重ブラケット)は
+オプショナルな形式で、親パス自体にもマッチし、その場合パラメータは `undefined` のまま
+になります:
+
+```tsx title="src/app/docs/[[...slug]]/page.tsx"
+import { useParams } from 'murasaki'
+
+export default function DocsPage() {
+  const { slug } = useParams()
+  // "/docs"      -> slug は undefined
+  // "/docs/a/b"  -> slug は ["a", "b"]
+  return <p>{slug ? slug.join('/') : 'index'}</p>
+}
+```
+
+優先順位は Next.js と同じです: 静的 > 動的(`[name]`) > キャッチオール(`[...name]`)
+> オプショナルキャッチオール(`[[...name]]`)。
+
 ## Loading、error、not-found バウンダリ
 
 これらのファイルを `page.tsx` の隣(またはその上位)に置きます:
@@ -78,7 +99,23 @@ import { Link } from 'murasaki'
 ```
 
 `useRouter()` は `push` / `replace` / `back` / `pathname` を命令的に提供し、
-`usePathname()` は現在のパスを読み取ります。
+`usePathname()` は現在のパスを読み取ります。`push`/`replace`/`<Link href>` に付けたクエ
+リ文字列(例: `/search?q=cats`)は自動的に pathname から分離されます — ルートマッチング
+は pathname だけを見るため、クエリだけのナビゲーションは
+[`middleware`](/docs/guides/middleware) を再実行せず、レンダーされるページも変わりませ
+ん。
+
+`useSearchParams()` は現在のクエリ文字列を `URLSearchParams` として読み取り、すべての
+ナビゲーションに反応します:
+
+```tsx
+import { useSearchParams } from 'murasaki'
+
+function SearchResults() {
+  const params = useSearchParams()
+  return <p>Query: {params.get('q')}</p>
+}
+```
 
 <Callout type="info">
   オリジンが異なる URL への通常の `<a href="https://...">` は、アプリのウィンドウ内で

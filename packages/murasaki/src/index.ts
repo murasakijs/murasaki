@@ -37,7 +37,7 @@ export type { ActionState, ActionResult } from './react/actions.js'
 
 export type { RouteHandler } from './vite-plugin/api-routes.js'
 
-export { Link, useRouter, usePathname, useParams } from './react/router.js'
+export { Link, useRouter, usePathname, useParams, useSearchParams } from './react/router.js'
 export type { LinkProps } from './react/router.js'
 
 export { AppRouter } from './react/app-router.js'

@@ -26,6 +26,7 @@ hand, and nothing happens if the file doesn't exist.
 ```ts
 export interface MiddlewareContext {
   pathname: string
+  search: string
 }
 
 export type MiddlewareResult = { redirect: string } | void | undefined
@@ -35,13 +36,21 @@ export type Middleware = (
 ) => MiddlewareResult | Promise<MiddlewareResult>
 ```
 
-`ctx` is deliberately small — just the pathname being navigated to. There's no
-`request`/`response`, no headers, no cookies: this runs entirely client-side,
-inside the same WebView as your routes, not an edge or server runtime. To
-return early without redirecting, return nothing (`undefined`).
+`ctx` is deliberately small — the pathname being navigated to, and its query
+string (`search`, `location.search`-style: `''`, or starting with `?`).
+There's no `request`/`response`, no headers, no cookies: this runs entirely
+client-side, inside the same WebView as your routes, not an edge or server
+runtime. To return early without redirecting, return nothing (`undefined`).
 
 It may be async — `<AppRouter>` awaits it before rendering the matched route,
 rendering nothing in between so the guarded route never flashes on screen.
+
+<Callout type="info">
+  `middleware` re-runs when the pathname changes, not on query-only
+  navigations — a `?tab=...`-style update reuses the last decision instead of
+  gating the page behind another await. Read the query string yourself with
+  [`useSearchParams()`](/docs/guides/routing) inside your routes.
+</Callout>
 
 ## Guarding a route
 
