@@ -1,0 +1,191 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # Mondays at 03:13 UTC — off the top of the hour to avoid the scheduled-job
+    # stampede, and this is also when the deep (300s/target) fuzz job runs.
+    - cron: '13 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: true
+  NODE_VERSION: 22.12.0
+
+jobs:
+  cargo-deny:
+    name: cargo-deny / crates/native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: crates/native/Cargo.toml
+          # `unmaintained` no longer has an in-config lint level in cargo-deny
+          # 0.20 (see crates/native/deny.toml's [advisories] comment) — this
+          # is the supported way to keep it a warning instead of an error.
+          # Vulnerabilities remain denied by default; deny.toml's advisories
+          # `ignore` list documents the two specific advisories accepted as
+          # unreachable in this crate's dependency graph.
+          command-arguments: --warn unmaintained
+
+  npm-audit:
+    name: npm audit / workspace root
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit production dependencies (high+ severity)
+        run: pnpm audit --prod --audit-level high
+
+  codeql:
+    name: CodeQL / javascript-typescript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # github/* is exempt from full-commit-SHA pinning (GitHub maintains it).
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - uses: github/codeql-action/analyze@v3
+
+  fuzz-smoke:
+    name: Fuzz smoke / crates/native (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect crates/native changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.event.pull_request.base.sha }}"
+          if git diff --quiet "${{ github.event.pull_request.base.sha }}" -- crates/native; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+        if: steps.changes.outputs.changed == 'true'
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: steps.changes.outputs.changed == 'true'
+        with:
+          workspaces: crates/native/fuzz
+
+      - name: Install Linux native build dependencies
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      - name: Install cargo-fuzz
+        if: steps.changes.outputs.changed == 'true'
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build fuzz targets
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: crates/native
+        # ASan is disabled: murasaki-native is a `cdylib` linking the full
+        # native GUI stack (tao/wry/muda/...), and cargo-fuzz's default
+        # AddressSanitizer instrumentation fails to link that combination
+        # ("initializer pointer has no target" — verified locally). Coverage
+        # instrumentation (what actually drives libFuzzer) stays on; only
+        # memory-sanitizer instrumentation is skipped. The fuzzed parsers
+        # (capability_policy.rs / updater.rs) are unsafe-free, so this isn't
+        # expected to hide anything the harness would otherwise catch.
+        run: cargo +nightly fuzz build --sanitizer none
+
+      - name: Fuzz fuzz_capability_policy (60s)
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: crates/native
+        run: cargo +nightly fuzz run --sanitizer none fuzz_capability_policy -- -max_total_time=60
+
+      - name: Fuzz fuzz_update_journal (60s)
+        if: steps.changes.outputs.changed == 'true'
+        working-directory: crates/native
+        run: cargo +nightly fuzz run --sanitizer none fuzz_update_journal -- -max_total_time=60
+
+      - uses: actions/upload-artifact@v4
+        if: failure() && steps.changes.outputs.changed == 'true'
+        with:
+          name: fuzz-smoke-artifacts
+          path: crates/native/fuzz/artifacts/**
+          if-no-files-found: ignore
+
+  fuzz-deep:
+    name: Fuzz (deep, 300s/target) / crates/native (weekly)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: crates/native/fuzz
+
+      - name: Install Linux native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build fuzz targets
+        working-directory: crates/native
+        # See fuzz-smoke's "Build fuzz targets" step for why ASan is disabled.
+        run: cargo +nightly fuzz build --sanitizer none
+
+      - name: Fuzz fuzz_capability_policy (300s)
+        working-directory: crates/native
+        run: cargo +nightly fuzz run --sanitizer none fuzz_capability_policy -- -max_total_time=300
+
+      - name: Fuzz fuzz_update_journal (300s)
+        working-directory: crates/native
+        run: cargo +nightly fuzz run --sanitizer none fuzz_update_journal -- -max_total_time=300
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-deep-artifacts
+          path: crates/native/fuzz/artifacts/**
+          if-no-files-found: ignore

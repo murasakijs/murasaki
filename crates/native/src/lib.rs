@@ -48,6 +48,13 @@ pub use webview::Webview;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 pub use window::BrowserWindow;
 
+// Fuzzing-only re-exports (see the `fuzzing` feature in Cargo.toml and
+// crates/native/fuzz). Never enabled in the published crate.
+#[cfg(all(feature = "fuzzing", not(any(target_os = "freebsd", target_os = "android"))))]
+pub use capability_policy::fuzz_parse_capability_policy;
+#[cfg(feature = "fuzzing")]
+pub use updater::fuzz_parse_update_journal;
+
 #[napi]
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
