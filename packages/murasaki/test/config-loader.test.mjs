@@ -94,8 +94,17 @@ test('shared config validation rejects invalid dev and updater values early', as
     ["updater: 'yes'", /updater must be a boolean or an updater configuration object/],
     ['updater: { repo: \'owner/repo\', endpoint: \'https://updates.example/latest.json\' }', /mutually exclusive/],
     ["updater: { endpoint: 'file:///tmp/latest.json' }", /absolute HTTP or HTTPS URL/],
+    ["updater: { endpoint: 'http://updates.example.com/latest.json' }", /must use https/],
     ["updater: { checkOnStart: 'yes' }", /checkOnStart must be a boolean/],
     ["updater: { checkInterval: '0m' }", /checkInterval must look like/],
+    ["updater: { publicKeys: ['not-a-real-key'] }", /publicKeys must be an array of 1 to 4/],
+    ["updater: { publicKeys: [] }", /publicKeys must be an array of 1 to 4/],
+    [
+      "updater: { publicKeys: ['AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=', 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=', 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=', 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=', 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='] }",
+      /publicKeys must be an array of 1 to 4/,
+    ],
+    ["updater: { maxManifestAgeDays: 0 }", /maxManifestAgeDays must be a positive safe integer/],
+    ["updater: { maxManifestAgeDays: 12.5 }", /maxManifestAgeDays must be a positive safe integer/],
     ["build: { envPrefix: [] }", /build\.envPrefix must be a non-empty array/],
     ["build: { envPrefix: [''] }", /build\.envPrefix must be a non-empty array/],
     ["build: { envPrefix: ['PUBLIC_', 'PUBLIC_'] }", /build\.envPrefix must be a non-empty array/],
@@ -107,6 +116,35 @@ test('shared config validation rejects invalid dev and updater values early', as
     }\n`)
     await assert.rejects(() => loadUserConfig(root), message)
   }
+})
+
+test('shared config validation allows a loopback http updater.endpoint for local testing', async (t) => {
+  for (const endpoint of [
+    'http://127.0.0.1:5178/latest.json',
+    'http://localhost:5178/latest.json',
+    'http://[::1]:5178/latest.json',
+  ]) {
+    const root = await configProject(t, `export default {
+      appId: 'dev.test.loopback-endpoint',
+      productName: 'Loopback endpoint',
+      updater: { endpoint: '${endpoint}' },
+    }\n`)
+    const config = await loadUserConfig(root)
+    assert.equal(config.updater.endpoint, endpoint)
+  }
+})
+
+test('shared config validation accepts a valid publicKeys rotation set and maxManifestAgeDays', async (t) => {
+  const key1 = 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='
+  const key2 = 'AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI='
+  const root = await configProject(t, `export default {
+    appId: 'dev.test.publickeys-rotation',
+    productName: 'PublicKeys rotation',
+    updater: { publicKey: '${key1}', publicKeys: ['${key2}'], maxManifestAgeDays: 30 },
+  }\n`)
+  const config = await loadUserConfig(root)
+  assert.deepEqual(config.updater.publicKeys, [key2])
+  assert.equal(config.updater.maxManifestAgeDays, 30)
 })
 
 test('shared config validation rejects artifact path traversal components', async (t) => {
