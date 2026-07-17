@@ -71,6 +71,8 @@ export function applyMetadata(meta: Metadata): void {
   upsertMeta('property', 'og:description', meta.openGraph?.description ?? meta.description)
   upsertMeta('property', 'og:image', meta.openGraph?.images?.[0])
   upsertLink('icon', meta.icons?.icon)
+  upsertLink('shortcut icon', meta.icons?.shortcut)
+  upsertLink('apple-touch-icon', meta.icons?.apple)
 }
 
 /** Find-or-create a `<meta name|property="key">` tag and set its content. */

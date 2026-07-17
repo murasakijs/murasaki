@@ -143,21 +143,20 @@ test('applyMetadata: favicon link is created, then its href is updated in place 
   }
 })
 
-// NOTE: `Metadata.icons` also documents `shortcut`/`apple` fields, but
-// applyMetadata only ever reads `icons.icon` (see upsertLink('icon', …) — the
-// only upsertLink call in metadata.ts). `shortcut`/`apple` are accepted into
-// the type and survive mergeMetadata's icons merge (see the AppRouter
-// integration test below), but are never rendered as a <link> tag. Not
-// necessarily a bug — may be reserved API surface — documented here as
-// observed current behavior.
-test('applyMetadata: icons.shortcut / icons.apple are accepted but not rendered as link tags', async () => {
+test('applyMetadata: icons.shortcut / icons.apple render as their conventional link tags', async () => {
   const dom = installDom({ url: 'http://localhost/' })
   try {
     const { applyMetadata } = await import('../dist/react/metadata.js')
     applyMetadata({ icons: { shortcut: '/shortcut.png', apple: '/apple.png' } })
     assert.equal(document.head.querySelector('link[rel="icon"]'), null)
-    assert.equal(document.head.querySelector('link[rel="shortcut"]'), null)
-    assert.equal(document.head.querySelector('link[rel="apple"]'), null)
+    assert.equal(
+      document.head.querySelector('link[rel="shortcut icon"]')?.getAttribute('href'),
+      '/shortcut.png',
+    )
+    assert.equal(
+      document.head.querySelector('link[rel="apple-touch-icon"]')?.getAttribute('href'),
+      '/apple.png',
+    )
   } finally {
     dom.cleanup()
   }

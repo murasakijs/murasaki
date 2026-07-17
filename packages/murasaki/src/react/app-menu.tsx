@@ -290,10 +290,16 @@ function buildAppMenu(
       }
 
       if (entry.shortcut) {
-        const { accelerator, matches } = parseShortcut(entry.shortcut)
-        wire.accelerator = accelerator
-        const handler = handlers.get(id)
-        if (handler) shortcuts.push({ matches, run: handler })
+        try {
+          const { accelerator, matches } = parseShortcut(entry.shortcut)
+          wire.accelerator = accelerator
+          const handler = handlers.get(id)
+          if (handler) shortcuts.push({ matches, run: handler })
+        } catch (error) {
+          // A malformed spec must not take down the whole menu — the item
+          // stays clickable, only the accelerator is dropped.
+          console.error('[murasaki] app menu:', error)
+        }
       }
 
       out.push(wire)

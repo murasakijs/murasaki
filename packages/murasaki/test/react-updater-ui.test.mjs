@@ -290,11 +290,8 @@ test('useUpdate: dismiss() resets status to idle without touching other fields',
       click(window, container.querySelector('#dismiss'))
     })
     assert.equal(read(container).status, 'idle')
-    // NOTE: dismiss() only overwrites `status` (`{ ...s, status: 'idle' }`) —
-    // the stale `error` string from the last SSE frame survives until the
-    // next SSE frame replaces the whole state wholesale. Documented as
-    // observed behavior, not asserted as ideal.
-    assert.equal(read(container).error, 'boom')
+    // dismiss() clears the stale error along with the status.
+    assert.equal(read(container).error, undefined)
   } finally {
     await cleanup()
   }

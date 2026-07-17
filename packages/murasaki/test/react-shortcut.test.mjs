@@ -151,29 +151,15 @@ test('parseShortcut: "+" as the literal key name maps to the muda "Plus" acceler
   })
 })
 
-test('parseShortcut: an empty spec degrades to an empty accelerator and a key that (almost) never matches', () => {
-  const { accelerator, matches } = parseShortcut('')
-  assert.equal(accelerator, '')
-  assert.equal(matches(keyEvent({ key: '' })), true)
-  assert.equal(matches(keyEvent({ key: 'a' })), false)
+test('parseShortcut: an empty spec throws a TypeError', () => {
+  assert.throws(() => parseShortcut(''), TypeError)
 })
 
-// NOTE: possible bug — `parseShortcut` assumes its spec ends in a real,
-// non-modifier key token. Its "find the key" scan (`while (keyIndex > 0 &&
-// MODIFIER_TOKENS.has(tokens[keyIndex])) keyIndex--`) stops as soon as
-// `keyIndex` reaches 0 *even if that token is itself a modifier name* — so a
-// spec made up entirely of modifier tokens ends up treating the FIRST token
-// as if it were the literal key, rather than erroring or ignoring the spec.
-// The result is a silently-nonsensical accelerator/matcher, not a thrown
-// error — documented here as observed behavior with entirely-modifier input.
-test('parseShortcut: a spec with no real key token treats the first modifier-looking token as the key (documented quirk)', () => {
-  const single = parseShortcut('command')
-  assert.equal(single.accelerator, 'command')
-  assert.equal(single.matches(keyEvent({ key: 'command' })), true)
-
-  const double = parseShortcut('command,shift')
-  // "shift" is correctly recognized as a modifier; "command" — despite being
-  // a modifier keyword — is what's left over and gets treated as the key.
-  assert.equal(double.accelerator, 'Shift+command')
-  assert.equal(double.matches(keyEvent({ shiftKey: true, key: 'command' })), true)
+test('parseShortcut: a spec with no real key token throws a TypeError instead of producing a nonsense accelerator', () => {
+  assert.throws(() => parseShortcut('command'), TypeError)
+  assert.throws(() => parseShortcut('command,shift'), TypeError)
+  assert.throws(() => parseShortcut('ctrl,alt,shift'), TypeError)
+  // A trailing real key keeps working.
+  const ok = parseShortcut('command,shift,r')
+  assert.equal(ok.accelerator, 'CmdOrCtrl+Shift+R')
 })

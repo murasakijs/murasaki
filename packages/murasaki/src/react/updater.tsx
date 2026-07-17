@@ -95,7 +95,7 @@ export function useUpdate(): UpdateState & {
   }, [])
 
   const dismiss = useCallback(
-    () => setState((s) => ({ ...s, status: 'idle' })),
+    () => setState((s) => ({ ...s, status: 'idle', error: undefined })),
     [],
   )
 
