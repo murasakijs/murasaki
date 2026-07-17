@@ -162,7 +162,11 @@ directly and need design discussion up front.
 - Include tests **or** a manual verification note.
 - Explain the "why" in the PR description — the diff shows the "what".
 - Reference the issue with `Fixes #NNN` or `Closes #NNN`.
-- CI will run TypeScript compilation. Make sure it's green before requesting review.
+- CI runs the workspace build, the murasaki test suite, API-report checks
+  (`api:check`), the docs build, MCP knowledge checks, a fresh-scaffold
+  install/build, and `cargo test` for the native crate. Before requesting
+  review, make sure `pnpm --filter murasaki test` is green — and `cargo test`
+  in `crates/native` too if you touched Rust.
 
 ### Commit messages
 
@@ -209,9 +213,10 @@ before opening a PR:
 
 1. `pnpm --filter murasaki build` — clean compile — then `pnpm --filter murasaki test` — automated tests pass.
 2. `cd examples/violet-notes && pnpm dev` — window opens, HMR works.
-3. `pnpm build && node dist/server.cjs` — production bundle boots.
-4. `pnpm bundle` — `.app` (or the OS-native folder) is produced and launches.
-5. `pnpm installer` — installer file is produced.
+3. `pnpm bundle` — `.app` (or the OS-native folder) is produced and launches;
+   launching it also verifies the packaged Node prod server boots (the native
+   launcher spawns it — there is no standalone server entry point to run).
+4. `pnpm installer` — installer file is produced.
 
 Cross-compile changes should also be verified with `--target win-x64` (at
 minimum) to catch platform assumptions.
