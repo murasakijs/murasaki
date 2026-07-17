@@ -328,7 +328,24 @@ export function AppRouter({
         if (cancelled) return
 
         const redirect = result?.redirect
-        if (redirect && redirect !== pathname) {
+        if (redirect) {
+          const redirectPathname = redirect.split('?')[0].split('#')[0] || '/'
+          if (redirectPathname === pathname) {
+            // Same pathname — e.g. a query-normalizing redirect
+            // ("/list" -> "/list?page=1"). Apply it (so the URL/search
+            // updates) but don't treat it as a middleware-triggering
+            // navigation: the effect below is keyed on pathname only, so
+            // re-running middleware here would never happen anyway, and
+            // this avoids leaving `resolving` stuck forever waiting for a
+            // pathname change that isn't coming. Not a loop risk, by
+            // construction, since it's handled without recursing.
+            window.history.replaceState(null, '', redirect)
+            setLocation(currentLocation())
+            hopsRef.current = 0
+            setResolving(false)
+            return
+          }
+
           if (hopsRef.current >= MAX_MIDDLEWARE_HOPS) {
             console.warn(
               `[murasaki] middleware redirected ${MAX_MIDDLEWARE_HOPS}+ times in a row (possible loop) — rendering "${pathname}" as-is.`,

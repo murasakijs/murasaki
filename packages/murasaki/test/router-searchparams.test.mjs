@@ -193,3 +193,30 @@ test('middleware only re-runs on pathname changes, not query-only navigations', 
   await act(async () => push('/dashboard/settings?tab=profile'))
   assert.equal(calls, 2)
 })
+
+test('middleware redirecting to the same pathname with a different query applies it without hanging or looping', async (t) => {
+  window.history.pushState(null, '', '/a')
+
+  let calls = 0
+  const middleware = ({ pathname, search }) => {
+    calls++
+    if (pathname === '/a' && search === '') return { redirect: '/a?x=1' }
+  }
+  const seenSearch = []
+  function PageA() {
+    seenSearch.push(useSearchParams().toString())
+    return null
+  }
+  const routes = [{ urlPath: '/a', isDynamic: false, page: { default: PageA } }]
+
+  const view = await mount(h(AppRouter, { routes, middleware }))
+  t.after(() => view.unmount())
+
+  // The query-normalizing redirect applied, the page rendered with it, and
+  // middleware was not re-invoked (a pathname-unchanged redirect must not
+  // hang forever or loop).
+  assert.equal(window.location.pathname, '/a')
+  assert.equal(window.location.search, '?x=1')
+  assert.deepEqual(seenSearch, ['x=1'])
+  assert.equal(calls, 1)
+})
