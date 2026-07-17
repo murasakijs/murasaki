@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { loadConfigFromFile } from 'vite'
 import { validateConfig, type MurasakiConfig } from '../config.js'
+import { loadProjectEnv } from './load-env.js'
 
 const CONFIG_NAMES = [
   'murasaki.config.ts',
@@ -11,7 +12,13 @@ const CONFIG_NAMES = [
 ] as const
 
 /** Load and runtime-validate a project config regardless of its export style. */
-export async function loadUserConfig(cwd: string): Promise<MurasakiConfig> {
+export async function loadUserConfig(
+  cwd: string,
+  mode: 'development' | 'production' = 'production',
+): Promise<MurasakiConfig> {
+  // Load before evaluating murasaki.config.* so config and plugin hooks can
+  // read private values from process.env, matching Next-style expectations.
+  loadProjectEnv(cwd, mode)
   for (const name of CONFIG_NAMES) {
     const path = resolve(cwd, name)
     if (!existsSync(path)) continue

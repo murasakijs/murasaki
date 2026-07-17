@@ -1,4 +1,5 @@
 import type { Plugin, PluginOption } from 'vite'
+import { dirname } from 'node:path'
 import react from '@vitejs/plugin-react'
 import svgr from 'vite-plugin-svgr'
 import { validateConfig, type MurasakiConfig } from '../config.js'
@@ -12,6 +13,7 @@ import { runtimeSecurityPlugin } from './runtime-security.js'
 import { mainModulesPlugin } from './main-modules.js'
 import { mainEventsPlugin } from './main-events.js'
 import { preparePlugins } from '../plugin-runtime.js'
+import { DEFAULT_RENDERER_ENV_PREFIX, loadProjectEnv } from '../cli/load-env.js'
 
 export interface MurasakiPluginOptions {
   config: MurasakiConfig
@@ -26,6 +28,16 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
   const prepared = preparePlugins(opts.config)
   const config = prepared.config
   return [
+    {
+      name: 'murasaki:environment',
+      enforce: 'pre',
+      config(_inlineConfig, environment) {
+        // Covers direct Vite usage as well as the official CLI. The CLI loads
+        // earlier so murasaki.config.ts can read process.env; this hook makes
+        // Node-side Vite modules consistent when consumers compose the plugin.
+        loadProjectEnv(dirname(opts.srcDir), environment.mode)
+      },
+    },
     react(),
     // Import SVGs as React components via `import Icon from './x.svg?react'`,
     // so an icon inherits `currentColor` (theme-aware) — plain `.svg` imports
@@ -50,7 +62,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
         // config() over inline), pinning every run back to the default and
         // defeating the auto-free-port probe. dev-server.mjs owns the port.
         return {
-          envPrefix: config.build?.envPrefix ?? ['VITE_', 'NEXT_PUBLIC_'],
+          envPrefix: config.build?.envPrefix ?? [...DEFAULT_RENDERER_ENV_PREFIX],
           define: {
             __MURASAKI_APP_ID__: JSON.stringify(config.appId),
             __MURASAKI_PRODUCT_NAME__: JSON.stringify(config.productName),

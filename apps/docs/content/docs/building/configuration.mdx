@@ -396,20 +396,58 @@ still belong in Murasaki's native host and capability model.
 ```ts
 build: {
   before: 'pnpm --filter @acme/database build && pnpm prisma generate',
-  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+  envPrefix: ['MURASAKI_PUBLIC_', 'ACME_PUBLIC_'],
 }
 ```
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `before` | `string?` | Shell command run once before the client and Node builds. A non-zero exit stops packaging. Use it for workspace prerequisites and code generation. |
-| `envPrefix` | `string[]?` | Environment prefixes that Vite may expose to renderer code. Defaults to `VITE_` and `NEXT_PUBLIC_`. |
+| `envPrefix` | `string[]?` | Environment prefixes that may be exposed to renderer code. Defaults to `MURASAKI_PUBLIC_`; set this only to add or replace prefixes. |
 
 Only prefixed variables are client-public, but never put secrets under those
-prefixes: Vite replaces their values into shipped JavaScript. Packaged Node
-Main inherits the environment of the launcher; Murasaki does not copy `.env`
-files into the app. Put end-user runtime settings under `context.paths.data`
-or provide them through your deployment environment.
+prefixes: Vite replaces their values into shipped JavaScript.
+
+### Environment variables and `.env`
+
+The Murasaki CLI automatically loads the following files from the project root.
+Later files have higher priority, while variables already supplied by the terminal
+or CI override every `.env` file.
+
+```txt
+.env
+.env.local
+.env.development          # murasaki dev
+.env.development.local
+.env.production           # build / bundle / installer
+.env.production.local
+```
+
+Prefix renderer values with Murasaki's `MURASAKI_PUBLIC_` namespace and read them
+through `import.meta.env`:
+
+```bash title=".env.local"
+MURASAKI_PUBLIC_API_ORIGIN=https://api.example.com
+ACCOUNT_API_TOKEN=keep-this-private
+```
+
+```tsx title="src/app/page.tsx"
+const apiOrigin = import.meta.env.MURASAKI_PUBLIC_API_ORIGIN
+```
+
+Unprefixed values never enter the renderer bundle. In `murasaki.config.*`, plugin
+hooks, Node Main, Server Actions, and API Routes, read them as ordinary Node
+environment variables:
+
+```ts title="src/main.ts"
+const token = process.env.ACCOUNT_API_TOKEN
+```
+
+`MURASAKI_PUBLIC_` values are embedded into shipped JavaScript at build time, so
+never use that prefix for secrets. Packaged Node Main inherits the launcher's
+environment, but Murasaki does not copy `.env` files into the app. For installed
+app secrets or end-user runtime settings, use the deployment environment, OS
+credential store, `secureStorage`, or `context.paths.data`.
 
 ## `security`
 

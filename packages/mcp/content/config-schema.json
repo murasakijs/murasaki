@@ -347,7 +347,7 @@
           "items": { "type": "string", "minLength": 1 },
           "minItems": 1,
           "uniqueItems": true,
-          "default": ["VITE_", "NEXT_PUBLIC_"]
+          "default": ["MURASAKI_PUBLIC_"]
         }
       }
     },

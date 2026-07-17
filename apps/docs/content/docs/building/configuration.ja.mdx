@@ -385,18 +385,55 @@ Murasaki native hostとcapability modelへ実装します。
 ```ts
 build: {
   before: 'pnpm --filter @acme/database build && pnpm prisma generate',
-  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+  envPrefix: ['MURASAKI_PUBLIC_', 'ACME_PUBLIC_'],
 }
 ```
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
 | `before` | `string?` | client / Node buildの前に一度実行するshell command。非0終了ならpackagingを停止。workspace prerequisiteやcode generation向け。 |
-| `envPrefix` | `string[]?` | Viteがrenderer codeへ公開できるenv prefix。既定は`VITE_`と`NEXT_PUBLIC_`。 |
+| `envPrefix` | `string[]?` | renderer codeへ公開できるenv prefix。既定は`MURASAKI_PUBLIC_`。追加・置換する場合だけ指定します。 |
 
 prefix付き変数はclient公開用ですが、secretを置かないでください。Viteが値を配布JavaScriptへ
-埋め込みます。packaged Node Mainはlauncherの環境を継承し、Murasakiは`.env`をappへ
-コピーしません。end-user runtime設定は`context.paths.data`かdeployment環境を使います。
+埋め込みます。
+
+### 環境変数と`.env`
+
+Murasaki CLIはproject rootから次のファイルを自動で読み込みます。後のファイルほど優先され、
+terminal / CIから渡した既存の環境変数はすべての`.env`より優先されます。
+
+```txt
+.env
+.env.local
+.env.development          # murasaki dev
+.env.development.local
+.env.production           # build / bundle / installer
+.env.production.local
+```
+
+Rendererへ渡す値にはMurasaki固有の`MURASAKI_PUBLIC_`を付け、`import.meta.env`から
+参照します。
+
+```bash title=".env.local"
+MURASAKI_PUBLIC_API_ORIGIN=https://api.example.com
+ACCOUNT_API_TOKEN=keep-this-private
+```
+
+```tsx title="src/app/page.tsx"
+const apiOrigin = import.meta.env.MURASAKI_PUBLIC_API_ORIGIN
+```
+
+prefixなしの値はrenderer bundleへ入りません。`murasaki.config.*`、plugin hook、Node Main、
+Server Actions、API Routesでは通常のNode環境変数として参照できます。
+
+```ts title="src/main.ts"
+const token = process.env.ACCOUNT_API_TOKEN
+```
+
+`MURASAKI_PUBLIC_`値はbuild時に配布JavaScriptへ埋め込まれるため、secretには使用しないで
+ください。packaged Node Mainはlauncherの環境を継承しますが、Murasakiは`.env`をappへ
+コピーしません。installed appのsecret / end-user runtime設定はdeployment環境、OSの
+credential store、`secureStorage`、または`context.paths.data`を使用してください。
 
 ## `security`
 

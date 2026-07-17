@@ -21,7 +21,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  */
 export default async function dev(_argv: string[]) {
   const cwd = process.cwd()
-  const prepared = preparePlugins(await loadUserConfig(cwd))
+  const prepared = preparePlugins(await loadUserConfig(cwd, 'development'))
   const config = prepared.config
   const hookOptions = { projectRoot: cwd, command: 'dev' as const }
   await runPluginHooks(prepared, 'before', hookOptions)

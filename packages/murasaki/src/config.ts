@@ -313,7 +313,7 @@ export interface MurasakiConfig {
   build?: {
     /** Command run before the client and Node bundles (for workspace packages, codegen, etc.). */
     before?: string
-    /** Variables with these prefixes may be embedded in renderer code. Default `VITE_` and `NEXT_PUBLIC_`. */
+    /** Variables with these prefixes may be embedded in renderer code. Default `MURASAKI_PUBLIC_`. */
     envPrefix?: string[]
   }
 
@@ -575,12 +575,32 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   validateBundleConfig((config as { bundle?: unknown }).bundle, 'bundle')
   validatePlugins((config as { plugins?: unknown }).plugins)
   validateWebviewConfig((config as { webview?: unknown }).webview)
+  validateBuildConfig((config as { build?: unknown }).build)
   validateSecurityConfig(candidate.security)
   validateSystemPermissionsConfig(candidate.systemPermissions)
   validateDevPort(candidate.devPort)
   validateUpdaterConfig(candidate.updater)
   validateSignConfig(candidate.sign)
   resolveWindowDeclarations(candidate)
+}
+
+function validateBuildConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('build must be an object')
+  }
+  const build = value as Record<string, unknown>
+  if (build.before !== undefined
+    && (typeof build.before !== 'string' || build.before.trim().length === 0)) {
+    throw new TypeError('build.before must be a non-empty string')
+  }
+  if (build.envPrefix === undefined) return
+  if (!Array.isArray(build.envPrefix)
+    || build.envPrefix.length === 0
+    || build.envPrefix.some((prefix) => typeof prefix !== 'string' || prefix.length === 0)
+    || new Set(build.envPrefix).size !== build.envPrefix.length) {
+    throw new TypeError('build.envPrefix must be a non-empty array of unique non-empty strings')
+  }
 }
 
 const MAX_USER_AGENT_BYTES = 512

@@ -2,5 +2,5 @@ node_modules
 dist
 .DS_Store
 *.log
-.env
-.env.*
+.env*
+!.env.example

@@ -435,6 +435,29 @@ default `5178`), `targets` (build targets array), `protocols`,
 `fileAssociations`, and `updater` — auto-update config consumed by
 `useUpdate()` and `<UpdateButton />` (both from `murasaki`).
 
+### Environment variables
+
+Murasaki automatically loads `.env`, `.env.local`, `.env.development(.local)`
+for `murasaki dev`, and `.env.production(.local)` for build, bundle, and
+installer commands. Existing terminal/CI variables always win.
+
+```env
+MURASAKI_PUBLIC_API_ORIGIN=https://api.example.com
+ACCOUNT_API_TOKEN=keep-this-private
+```
+
+Renderer-public values use Murasaki's own prefix:
+
+```ts
+const origin = import.meta.env.MURASAKI_PUBLIC_API_ORIGIN
+```
+
+Unprefixed values remain Node-only and are available as
+`process.env.ACCOUNT_API_TOKEN` in config, plugin hooks, Node Main, Server
+Actions, and API Routes. `MURASAKI_PUBLIC_` values are compiled into the client
+bundle; never put secrets under that prefix. `.env` files are not copied into
+packaged apps.
+
 ---
 
 ## Server Actions

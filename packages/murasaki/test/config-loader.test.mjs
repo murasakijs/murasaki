@@ -96,6 +96,9 @@ test('shared config validation rejects invalid dev and updater values early', as
     ["updater: { endpoint: 'file:///tmp/latest.json' }", /absolute HTTP or HTTPS URL/],
     ["updater: { checkOnStart: 'yes' }", /checkOnStart must be a boolean/],
     ["updater: { checkInterval: '0m' }", /checkInterval must look like/],
+    ["build: { envPrefix: [] }", /build\.envPrefix must be a non-empty array/],
+    ["build: { envPrefix: [''] }", /build\.envPrefix must be a non-empty array/],
+    ["build: { envPrefix: ['PUBLIC_', 'PUBLIC_'] }", /build\.envPrefix must be a non-empty array/],
   ]) {
     const root = await configProject(t, `export default {
       appId: 'dev.test.invalid-runtime-config',

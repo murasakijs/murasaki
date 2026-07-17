@@ -10,6 +10,7 @@ import { loadUserConfig } from './load-config.js'
 import { banner, dim, error, success, viteLogger } from './brand.js'
 import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
 import type { MurasakiConfig } from '../config.js'
+import { loadProjectEnv } from './load-env.js'
 
 type EmittedFile = { fileName: string; code?: string; source?: string | Uint8Array }
 
@@ -23,6 +24,9 @@ export default async function build(_argv: string[]) {
 
 /** Internal build path reused by `bundle` without running build hooks twice. */
 export async function buildProject(cwd: string, config: MurasakiConfig): Promise<void> {
+  // `buildProject` is also an internal API used outside the top-level build
+  // command, so do not rely solely on loadUserConfig having run first.
+  loadProjectEnv(cwd, 'production')
   const srcDir = resolve(cwd, 'src')
 
   process.stdout.write(`\n${banner({ mode: 'build' })}\n\n`)
