@@ -3,8 +3,14 @@
 //! Validation and namespacing live outside the platform modules so they can
 //! be unit tested without reading or modifying a developer's real credential
 //! store. The platform layer has deliberately no file/plaintext fallback:
-//! macOS uses Keychain Services and Windows uses Credential Manager; every
-//! other target returns an explicit unsupported error.
+//! macOS uses Keychain Services, Windows uses Credential Manager, and Linux
+//! uses the freedesktop.org Secret Service D-Bus API (via the pure-Rust
+//! `secret-service`/`zbus` crates — no libsecret/glib linkage); every other
+//! target returns an explicit unsupported error. Linux additionally requires
+//! a running Secret Service provider (e.g. gnome-keyring, KWallet's
+//! ksecretsservice, or KeePassXC) — if none is reachable, every operation
+//! fails with a structured, actionable error instead of ever falling back to
+//! a plaintext file.
 
 use sha2::{Digest, Sha256};
 
@@ -233,7 +239,118 @@ mod platform {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::StorageEntry;
+    use secret_service::{
+        blocking::{Collection, SecretService},
+        EncryptionType, Error as SsError,
+    };
+    use std::collections::HashMap;
+
+    const ATTR_SERVICE: &str = "service";
+    const ATTR_ACCOUNT: &str = "account";
+    const ITEM_LABEL: &str = "Murasaki secure storage";
+    const CONTENT_TYPE: &str = "text/plain";
+
+    // Search/create by the already-hashed `service`/`account` pair (see
+    // `StorageEntry::new`) rather than a single combined key, so a lookup can
+    // never match an unrelated app/key pair that merely shares one half.
+    // `pub(super)` (rather than private) only so the unit tests below can
+    // exercise it without a real D-Bus connection — see the `tests` module.
+    pub(super) fn attributes(entry: &StorageEntry) -> HashMap<&str, &str> {
+        HashMap::from([
+            (ATTR_SERVICE, entry.service.as_str()),
+            (ATTR_ACCOUNT, entry.account.as_str()),
+        ])
+    }
+
+    fn connect() -> Result<SecretService<'static>, String> {
+        SecretService::connect(EncryptionType::Dh).map_err(describe_error)
+    }
+
+    /// Opens the collection to store/search items in. Uses
+    /// `get_any_collection` (the "default"-aliased collection, then
+    /// "session", then the first one found) rather than
+    /// `get_default_collection` alone — some otherwise-healthy Secret
+    /// Service providers never set up a "default" alias even though a
+    /// perfectly usable collection exists.
+    fn open_collection<'a>(service: &'a SecretService<'a>) -> Result<Collection<'a>, String> {
+        service.get_any_collection().map_err(describe_error)
+    }
+
+    /// Maps every `secret-service` error to an actionable message that never
+    /// includes the caller's `appId`/key/value (the crate's own errors never
+    /// carry them). `Error::Unavailable` in particular means "no D-Bus
+    /// session bus or Secret Service provider was found" — worth naming
+    /// concrete providers for, since Linux secure storage is *supported*
+    /// here, just missing a runtime dependency this host doesn't currently
+    /// satisfy (there is still no plaintext fallback for it). `pub(super)`
+    /// for the same testability reason as `attributes` above.
+    pub(super) fn describe_error(error: SsError) -> String {
+        match error {
+            SsError::Unavailable => {
+                "Linux Secret Service is unavailable: no D-Bus session bus or Secret Service \
+                 provider was found. Install and run a provider implementing the \
+                 org.freedesktop.Secret.Service D-Bus API — for example gnome-keyring-daemon, \
+                 KDE's ksecretsservice/kwalletd, or KeePassXC's Secret Service integration — then \
+                 retry."
+                    .to_string()
+            }
+            SsError::Locked => {
+                "Linux Secret Service collection is locked and the unlock prompt did not complete"
+                    .to_string()
+            }
+            SsError::Prompt => {
+                "Linux Secret Service unlock prompt was dismissed before completing".to_string()
+            }
+            other => format!("Linux Secret Service request failed: {other}"),
+        }
+    }
+
+    pub(super) fn get(entry: &StorageEntry) -> Result<Option<Vec<u8>>, String> {
+        let service = connect()?;
+        let collection = open_collection(&service)?;
+        let items = collection
+            .search_items(attributes(entry))
+            .map_err(describe_error)?;
+        let Some(item) = items.into_iter().next() else {
+            return Ok(None);
+        };
+        if item.is_locked().map_err(describe_error)? {
+            item.unlock().map_err(describe_error)?;
+        }
+        let secret = item.get_secret().map_err(describe_error)?;
+        Ok(Some(secret))
+    }
+
+    pub(super) fn set(entry: &StorageEntry, value: &[u8]) -> Result<(), String> {
+        let service = connect()?;
+        let collection = open_collection(&service)?;
+        // `replace: true` — a second `set` for the same appId/key overwrites
+        // the existing item by matching attributes instead of accumulating
+        // duplicates, mirroring Keychain/Credential Manager's upsert
+        // semantics above.
+        collection
+            .create_item(ITEM_LABEL, attributes(entry), value, true, CONTENT_TYPE)
+            .map_err(describe_error)?;
+        Ok(())
+    }
+
+    pub(super) fn delete(entry: &StorageEntry) -> Result<(), String> {
+        let service = connect()?;
+        let collection = open_collection(&service)?;
+        let items = collection
+            .search_items(attributes(entry))
+            .map_err(describe_error)?;
+        for item in items {
+            item.delete().map_err(describe_error)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod platform {
     use super::StorageEntry;
 
@@ -303,7 +420,7 @@ mod tests {
         assert!(decode_value(vec![b'x'; MAX_VALUE_BYTES + 1]).is_err());
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     #[test]
     fn unsupported_platforms_never_fall_back_to_plaintext() {
         assert!(super::get("com.example.app", "key")
@@ -315,5 +432,84 @@ mod tests {
         assert!(super::delete("com.example.app", "key")
             .unwrap_err()
             .contains("unsupported"));
+    }
+
+    // Linux's platform module talks to a real D-Bus Secret Service, so —
+    // like the macOS/Windows platform modules above — its `get`/`set`/
+    // `delete` are deliberately not exercised here (this would read/write a
+    // developer's real keyring, or hang/fail depending on what happens to be
+    // running on the host/CI). Instead, test its pure, I/O-free helpers
+    // directly: attribute construction and error-message mapping.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_searches_by_hashed_service_and_account_attributes_only() {
+        use super::platform::attributes;
+
+        let entry = StorageEntry::new("com.example.app", "refresh-token").unwrap();
+        let attrs = attributes(&entry);
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs.get("service"), Some(&entry.service.as_str()));
+        assert_eq!(attrs.get("account"), Some(&entry.account.as_str()));
+        // Never the raw inputs — only their SHA-256 namespacing (see
+        // `namespaces_are_deterministic_app_and_key_isolated_and_do_not_expose_inputs`).
+        assert!(!attrs
+            .values()
+            .any(|value| { value.contains("com.example.app") || value.contains("refresh-token") }));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_errors_are_actionable_and_never_fall_back_to_plaintext() {
+        use super::platform::describe_error;
+        use secret_service::Error as SsError;
+
+        let unavailable = describe_error(SsError::Unavailable);
+        assert!(unavailable.contains("Secret Service"));
+        assert!(unavailable.contains("gnome-keyring") || unavailable.contains("KWallet"));
+
+        let locked = describe_error(SsError::Locked);
+        assert!(locked.contains("locked"));
+
+        let prompt = describe_error(SsError::Prompt);
+        assert!(prompt.contains("prompt"));
+
+        // None of these ever mention a plaintext fallback path.
+        for message in [&unavailable, &locked, &prompt] {
+            assert!(!message.to_ascii_lowercase().contains("plaintext"));
+        }
+    }
+
+    // Opt-in only (`#[ignore]`): exercises the real Linux Secret Service
+    // round trip, unlike every test above. Never runs as part of a normal
+    // `cargo test` — only via `cargo test -- --ignored`, and only meaningful
+    // with a reachable Secret Service provider (e.g. `dbus-run-session --
+    // gnome-keyring-daemon --unlock --replace`). Manual verification tool,
+    // not CI-required coverage.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore]
+    fn linux_live_round_trip_get_set_delete() {
+        let app_id = "com.murasaki.l1-manual-smoke-test";
+        let key = "manual-smoke-key";
+
+        assert_eq!(super::get(app_id, key).unwrap(), None);
+
+        super::set(app_id, key, "manual-smoke-value").unwrap();
+        assert_eq!(
+            super::get(app_id, key).unwrap(),
+            Some("manual-smoke-value".to_string())
+        );
+
+        // Overwrite (upsert) semantics.
+        super::set(app_id, key, "replaced-value").unwrap();
+        assert_eq!(
+            super::get(app_id, key).unwrap(),
+            Some("replaced-value".to_string())
+        );
+
+        super::delete(app_id, key).unwrap();
+        assert_eq!(super::get(app_id, key).unwrap(), None);
+        // Deleting an already-absent key is a no-op, not an error.
+        super::delete(app_id, key).unwrap();
     }
 }

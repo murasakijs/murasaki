@@ -21,6 +21,12 @@ async function fixture(t, overrides = {}) {
       logs: join(root, 'logs'),
       temp: join(root, 'temp'),
     },
+    // These tests exercise lifecycle plumbing, not crash capture; installing
+    // real process-level uncaughtException/unhandledRejection listeners here
+    // would leak into every other test in this file/process. crash-reports
+    // behavior itself is covered in isolated subprocesses by
+    // crash-diagnostics.test.mjs.
+    diagnostics: { crashReports: false },
     ...overrides,
   })
 }

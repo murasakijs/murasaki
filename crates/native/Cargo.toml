@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.37.0"
+version = "0.38.0"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
@@ -16,6 +16,12 @@ crate-type = ["cdylib", "rlib"]
 [[bin]]
 name = "murasaki-launcher"
 path = "src/bin/murasaki-launcher.rs"
+
+[features]
+# Exposes the fuzz-only parse entry points in src/capability_policy.rs and
+# src/updater.rs (see crates/native/fuzz). Never enabled for the published
+# crate or the napi build.
+fuzzing = []
 
 [dependencies]
 napi = { version = "3", features = ["napi9"] }
@@ -41,6 +47,10 @@ notify-rust = "4"
 open = "5"
 png = "0.17"
 url = "2"
+# clipboard.readImage/writeImage's PNG<->base64 wire encoding (see clipboard.rs).
+base64 = "0.22"
+# shell.trashItem — moves a file/directory to the OS trash/recycle bin.
+trash = "5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 global-hotkey = "0.8"
@@ -74,6 +84,31 @@ windows = { version = "0.62", features = [
   "Win32_System_Threading",
   "Win32_UI_Shell",
 ] }
+
+# Linux native parity (RFC 0002 phase L1):
+#  - global-hotkey: same crate as macOS/Windows above, X11-only upstream (see
+#    global_shortcut.rs's Wayland detection — XWayland works, pure Wayland
+#    sessions get a structured `unsupported` error instead of registering
+#    against a nonexistent X server).
+#  - gtk: muda/tao/tray-icon already depend on it (default `gtk` feature) for
+#    their own GTK backends; declared directly here too so this crate's own
+#    code (menu.rs's `attach_menu_bar`, webview.rs's context-menu/app-menu
+#    Linux paths) can name `gtk`/`tao::platform::unix` types without relying
+#    on a transitive re-export.
+#  - secret-service: zbus-based (pure Rust, no libsecret/glib-sys linkage)
+#    Secret Service client for secure_storage.rs's Linux backend. `rt-async-io`
+#    picks zbus's bundled async-io reactor (no external Tokio runtime needed
+#    from this synchronous napi addon); `crypto-rust` avoids an OpenSSL
+#    dependency, matching macOS/Windows' no-OpenSSL native crypto.
+#  - libc: `--apply-update`'s `--wait-pid` liveness check (updater.rs) —
+#    `libc::kill(pid, 0)`, same as macOS above — and `launcher.rs`'s
+#    process-group teardown of the bundled Node backend tree (`imp_linux`'s
+#    `terminate_and_wait_child`).
+[target.'cfg(target_os = "linux")'.dependencies]
+global-hotkey = "0.8"
+gtk = "0.18"
+secret-service = { version = "5", default-features = false, features = ["rt-async-io-crypto-rust"] }
+libc = "0.2"
 
 [build-dependencies]
 napi-build = "2"

@@ -8,6 +8,7 @@ export { defineConfig, defineMurasakiPlugin, resolveWindowDeclarations } from '.
 export type {
   BundleConfig,
   BundleResource,
+  DiagnosticsConfig,
   MurasakiConfig,
   MurasakiBuildTarget,
   MurasakiDeepReadonly,
@@ -28,6 +29,7 @@ export type {
   UpdaterConfig,
   WindowsSigningConfig,
   WebviewConfig,
+  WebviewDownloadsConfig,
   WebviewProxyConfig,
   WindowConfig,
 } from './config.js'
@@ -37,7 +39,7 @@ export type { ActionState, ActionResult } from './react/actions.js'
 
 export type { RouteHandler } from './vite-plugin/api-routes.js'
 
-export { Link, useRouter, usePathname, useParams } from './react/router.js'
+export { Link, useRouter, usePathname, useParams, useSearchParams } from './react/router.js'
 export type { LinkProps } from './react/router.js'
 
 export { AppRouter } from './react/app-router.js'
@@ -94,3 +96,11 @@ export type { UpdateState } from './react/updater.js'
 
 export { UpdateButton } from './react/update-button.js'
 export type { UpdateButtonProps } from './react/update-button.js'
+
+export { useWindowDrag } from './react/window.js'
+
+export { subscribeDownloads } from './react/downloads.js'
+export type { DownloadEvent } from './react/downloads.js'
+
+export { subscribeFileDrops, useFileDrop } from './react/file-drop.js'
+export type { FileDropEvent } from './react/file-drop.js'

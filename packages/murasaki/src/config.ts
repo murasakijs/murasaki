@@ -28,6 +28,15 @@ export interface WebviewProxyConfig {
   port: number
 }
 
+/** `webview:download`-granted downloads' confinement directory. */
+export interface WebviewDownloadsConfig {
+  /**
+   * Absolute directory downloads are confined to. Defaults to the OS user
+   * Downloads folder when omitted (resolved natively per-OS).
+   */
+  directory?: string
+}
+
 /** Application-wide native WebView session and network configuration. */
 export interface WebviewConfig {
   /** Complete custom User-Agent header value. */
@@ -36,6 +45,34 @@ export interface WebviewConfig {
   incognito?: boolean
   /** Unauthenticated proxy applied to every application WebView. */
   proxy?: WebviewProxyConfig
+  /** Confines `webview:download`-granted downloads to a directory. */
+  downloads?: WebviewDownloadsConfig
+  /**
+   * Trusted, project-root-relative JavaScript file paths injected into every
+   * page before load (in this declaration order), via
+   * `with_initialization_script_for_main_only`. Not capability-gated —
+   * config is already fully trusted, unlike renderer-triggered commands.
+   * Each file is bounded to 256 KiB and the combined total to 1 MiB,
+   * enforced when the project is loaded (see `resolveInitScripts`).
+   */
+  initScripts?: string[]
+  /**
+   * Enables OS page-zoom hotkeys/gestures. Effective on Windows (WebView2)
+   * only; no-op on macOS/Linux.
+   */
+  hotkeysZoom?: boolean
+}
+
+/** Local crash report capture (Node, native, and prod renderer domains). Murasaki never transmits these. */
+export interface DiagnosticsConfig {
+  /**
+   * Capture uncaught exceptions/rejections (Node Main), native panics and
+   * unexpected exits, and prod renderer errors as local crash report files.
+   * Default `true`.
+   */
+  crashReports?: boolean
+  /** Newest crash reports retained per app. Default 20; out-of-range values are clamped to 1-100. */
+  keepReports?: number
 }
 
 export type MurasakiPluginCommand = 'dev' | 'build' | 'bundle'
@@ -90,8 +127,29 @@ export interface WindowConfig {
   height?: number
   minWidth?: number
   minHeight?: number
+  /**
+   * Maximum inner width/height, in logical pixels. Setting only one axis is
+   * rejected — provide both or neither. Must be greater than or equal to
+   * `minWidth`/`minHeight` when both are configured.
+   */
+  maxWidth?: number
+  maxHeight?: number
   resizable?: boolean
   transparent?: boolean
+  /**
+   * Shows/hides the OS window chrome (titlebar + borders). Default `true`;
+   * `false` produces a frameless window on every platform. Pair with
+   * `useWindowDrag()` for a custom, draggable titlebar region.
+   */
+  decorations?: boolean
+  /**
+   * macOS only. `'hidden'` keeps the traffic-light buttons but hides the
+   * title text and extends the WebView under the titlebar. Accepted (and
+   * ignored) on Windows/Linux.
+   */
+  titleBarStyle?: 'default' | 'hidden'
+  /** Initial borderless-fullscreen state. Exclusive fullscreen is not supported. */
+  fullscreen?: boolean
   /**
    * macOS translucent window vibrancy. The native host automatically makes
    * the tao window and WebView transparent when a material is configured.
@@ -220,7 +278,13 @@ export type UpdaterConfig =
   | {
       /** GitHub "owner/repo". Defaults to `repository` in package.json. */
       repo?: string
-      /** Self-hosted manifest URL (points at latest.json). Mutually exclusive with `repo`. */
+      /**
+       * Self-hosted manifest URL (points at latest.json). Mutually exclusive
+       * with `repo`. Must be `https:` — `http:` is only accepted for
+       * loopback hosts (`127.0.0.1`, `localhost`, `[::1]`), for local
+       * testing. Enforced here and again at fetch time in the runtime
+       * engine.
+       */
       endpoint?: string
       /** Release channel. Default 'stable' (GitHub: ignores prereleases). */
       channel?: string
@@ -230,18 +294,37 @@ export type UpdaterConfig =
       checkInterval?: string | false
       /** Ed25519 public key (base64, raw 32 bytes). Defaults to .murasaki/update-key.pub. */
       publicKey?: string
+      /**
+       * Additional pinned Ed25519 public keys (base64, raw 32 bytes each;
+       * at most 4) for key rotation. Merged with `publicKey` into one
+       * deduplicated pinned set — verification tries every pinned key
+       * until one succeeds. See the auto-update guide's rotation runbook.
+       */
+      publicKeys?: string[]
+      /**
+       * Maximum accepted age, in days, of a manifest's `generatedAt`
+       * timestamp — an anti-freeze/replay guard: a manifest older than this
+       * is rejected outright. A manifest with no `generatedAt` at all is
+       * still accepted (older manifests didn't write one) but logs a
+       * warning. Default 90, minimum 1.
+       */
+      maxManifestAgeDays?: number
     }
 
 /** The fully-resolved shape `resolveUpdater()` produces from a `UpdaterConfig`. */
 export interface ResolvedUpdater {
   /** Absolute URL of latest.json. Derived from repo or endpoint. */
   manifestUrl: string
-  /** base64 raw-32-byte Ed25519 public key. */
+  /** base64 raw-32-byte Ed25519 public key — the primary pinned key (back-compat; also `publicKeys[0]`). */
   publicKey: string
+  /** Every pinned Ed25519 public key (base64 raw 32 bytes), deduplicated — the union of `publicKey` and `publicKeys`. Verification tries each until one succeeds. */
+  publicKeys: string[]
   channel: string
   checkOnStart: boolean
   /** milliseconds, or false */
   checkIntervalMs: number | false
+  /** Maximum accepted age, in days, of a manifest's `generatedAt`. */
+  maxManifestAgeDays: number
 }
 
 /**
@@ -316,6 +399,9 @@ export interface MurasakiConfig {
     /** Variables with these prefixes may be embedded in renderer code. Default `MURASAKI_PUBLIC_`. */
     envPrefix?: string[]
   }
+
+  /** Local crash report capture. See `DiagnosticsConfig`. */
+  diagnostics?: DiagnosticsConfig
 
   /** Renderer security policy applied to framework- and user-owned HTML. */
   security?: {
@@ -452,13 +538,19 @@ export const NATIVE_CAPABILITIES = [
   'dialog:openFile',
   'dialog:openDirectory',
   'dialog:saveFile',
+  'dialog:message',
   'clipboard:readText',
   'clipboard:writeText',
+  'clipboard:readImage',
+  'clipboard:writeImage',
+  'clipboard:writeHtml',
   'menu:application',
   'menu:context',
   'notification:show',
   'shell:openExternal',
   'shell:showItemInFolder',
+  'shell:trashItem',
+  'shell:openPath',
   'secureStorage:get',
   'secureStorage:set',
   'secureStorage:delete',
@@ -488,6 +580,12 @@ export const NATIVE_CAPABILITIES = [
   'tray:setTooltip',
   'tray:setIcon',
   'tray:setMenu',
+  'webview:download',
+  'webview:dragDrop',
+  'webview:zoom',
+  'webview:print',
+  'webview:readCookies',
+  'webview:writeCookies',
 ] as const
 
 export type NativeCapability = (typeof NATIVE_CAPABILITIES)[number]
@@ -576,6 +674,7 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   validatePlugins((config as { plugins?: unknown }).plugins)
   validateWebviewConfig((config as { webview?: unknown }).webview)
   validateBuildConfig((config as { build?: unknown }).build)
+  validateDiagnosticsConfig(candidate.diagnostics)
   validateSecurityConfig(candidate.security)
   validateSystemPermissionsConfig(candidate.systemPermissions)
   validateDevPort(candidate.devPort)
@@ -605,6 +704,11 @@ function validateBuildConfig(value: unknown): void {
 
 const MAX_USER_AGENT_BYTES = 512
 const MAX_PROXY_HOST_BYTES = 253
+/** A sane ceiling on the number of declared init scripts. Per-file (256 KiB)
+ * and combined-total (1 MiB) byte bounds are enforced where file contents are
+ * actually read (see `resolveInitScripts` in `cli/init-scripts.ts`), since
+ * this module stays free of Node builtins and cannot read files itself. */
+const MAX_INIT_SCRIPTS = 64
 
 function validateWebviewConfig(value: unknown): void {
   if (value === undefined) return
@@ -612,7 +716,11 @@ function validateWebviewConfig(value: unknown): void {
     throw new TypeError('webview must be an object')
   }
   const webview = value as Record<string, unknown>
-  rejectUnknownFields(webview, ['userAgent', 'incognito', 'proxy'], 'webview')
+  rejectUnknownFields(
+    webview,
+    ['userAgent', 'incognito', 'proxy', 'downloads', 'initScripts', 'hotkeysZoom'],
+    'webview',
+  )
 
   if (webview.userAgent !== undefined) {
     if (typeof webview.userAgent !== 'string'
@@ -631,26 +739,55 @@ function validateWebviewConfig(value: unknown): void {
   if (webview.incognito !== undefined && typeof webview.incognito !== 'boolean') {
     throw new TypeError('webview.incognito must be a boolean')
   }
-  if (webview.proxy === undefined) return
-  if (!webview.proxy || typeof webview.proxy !== 'object' || Array.isArray(webview.proxy)) {
-    throw new TypeError('webview.proxy must be an object')
+  if (webview.hotkeysZoom !== undefined && typeof webview.hotkeysZoom !== 'boolean') {
+    throw new TypeError('webview.hotkeysZoom must be a boolean')
   }
-  const proxy = webview.proxy as Record<string, unknown>
-  rejectUnknownFields(proxy, ['protocol', 'host', 'port'], 'webview.proxy')
-  if (proxy.protocol !== 'http' && proxy.protocol !== 'socks5') {
-    throw new TypeError('webview.proxy.protocol must be http or socks5')
+  if (webview.initScripts !== undefined) {
+    if (!Array.isArray(webview.initScripts)
+      || webview.initScripts.length > MAX_INIT_SCRIPTS
+      || webview.initScripts.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)) {
+      throw new TypeError(
+        `webview.initScripts must be an array of at most ${MAX_INIT_SCRIPTS} non-empty file paths`,
+      )
+    }
   }
-  if (typeof proxy.host !== 'string' || !validProxyHost(proxy.host)) {
-    throw new TypeError(
-      'webview.proxy.host must be a hostname or IP literal without a scheme, credentials, path, query, or fragment',
-    )
+  if (webview.downloads !== undefined) {
+    if (!webview.downloads || typeof webview.downloads !== 'object' || Array.isArray(webview.downloads)) {
+      throw new TypeError('webview.downloads must be an object')
+    }
+    const downloads = webview.downloads as Record<string, unknown>
+    rejectUnknownFields(downloads, ['directory'], 'webview.downloads')
+    if (downloads.directory !== undefined && !validAbsolutePath(downloads.directory)) {
+      throw new TypeError(
+        'webview.downloads.directory must be a non-empty absolute path without traversal segments',
+      )
+    }
   }
-  if (!Number.isSafeInteger(proxy.port) || (proxy.port as number) < 1 || (proxy.port as number) > 65_535) {
-    throw new TypeError('webview.proxy.port must be an integer between 1 and 65535')
+  if (webview.proxy !== undefined) {
+    if (!webview.proxy || typeof webview.proxy !== 'object' || Array.isArray(webview.proxy)) {
+      throw new TypeError('webview.proxy must be an object')
+    }
+    const proxy = webview.proxy as Record<string, unknown>
+    rejectUnknownFields(proxy, ['protocol', 'host', 'port'], 'webview.proxy')
+    if (proxy.protocol !== 'http' && proxy.protocol !== 'socks5') {
+      throw new TypeError('webview.proxy.protocol must be http or socks5')
+    }
+    if (typeof proxy.host !== 'string' || !validProxyHost(proxy.host)) {
+      throw new TypeError(
+        'webview.proxy.host must be a hostname or IP literal without a scheme, credentials, path, query, or fragment',
+      )
+    }
+    if (!Number.isSafeInteger(proxy.port) || (proxy.port as number) < 1 || (proxy.port as number) > 65_535) {
+      throw new TypeError('webview.proxy.port must be an integer between 1 and 65535')
+    }
   }
 }
 
-/** @internal One normalized app-level value shared by dev and bundle metadata. */
+/** @internal One normalized app-level value shared by dev and bundle metadata.
+ * `initScripts` is deliberately excluded — its file contents are resolved by
+ * the Node-only `resolveInitScripts` (see `cli/init-scripts.ts`), since this
+ * module stays free of Node builtins (see the module doc comment above
+ * `resolveUpdater`'s reference). */
 export function resolveWebviewNetworkConfig(
   config: Pick<MurasakiConfig, 'webview'>,
 ): WebviewConfig | undefined {
@@ -666,7 +803,64 @@ export function resolveWebviewNetworkConfig(
     ...(config.webview.proxy
       ? { proxy: { ...config.webview.proxy } }
       : {}),
+    ...(config.webview.downloads
+      ? { downloads: { ...config.webview.downloads } }
+      : {}),
+    ...(config.webview.hotkeysZoom !== undefined
+      ? { hotkeysZoom: config.webview.hotkeysZoom }
+      : {}),
   }
+}
+
+const DEFAULT_KEEP_CRASH_REPORTS = 20
+const MIN_KEEP_CRASH_REPORTS = 1
+const MAX_KEEP_CRASH_REPORTS = 100
+
+function validateDiagnosticsConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('diagnostics must be an object')
+  }
+  const diagnostics = value as Record<string, unknown>
+  rejectUnknownFields(diagnostics, ['crashReports', 'keepReports'], 'diagnostics')
+  if (diagnostics.crashReports !== undefined && typeof diagnostics.crashReports !== 'boolean') {
+    throw new TypeError('diagnostics.crashReports must be a boolean')
+  }
+  if (diagnostics.keepReports !== undefined && !Number.isSafeInteger(diagnostics.keepReports)) {
+    throw new TypeError('diagnostics.keepReports must be a safe integer')
+  }
+}
+
+/**
+ * Fully-resolved `diagnostics` defaults shared by dev (`main-process.ts`
+ * passes `config.diagnostics` through as-is) and bundle metadata
+ * (`cli/bundle.ts`'s `metaJson` writes this resolved shape so
+ * `prod-server.mjs` and the native launcher never re-derive the defaults).
+ * Unlike most numeric config here, an out-of-range `keepReports` is clamped
+ * rather than rejected, matching `MainRuntimeOptions.diagnostics`'s runtime
+ * behavior.
+ */
+export function resolveDiagnosticsConfig(
+  config: Pick<MurasakiConfig, 'diagnostics'>,
+): { crashReports: boolean; keepReports: number } {
+  validateDiagnosticsConfig(config.diagnostics)
+  const raw = config.diagnostics
+  const keepReports = raw?.keepReports === undefined
+    ? DEFAULT_KEEP_CRASH_REPORTS
+    : Math.min(MAX_KEEP_CRASH_REPORTS, Math.max(MIN_KEEP_CRASH_REPORTS, raw.keepReports))
+  return { crashReports: raw?.crashReports ?? true, keepReports }
+}
+
+/** Absolute, traversal-free path check shared by `webview.downloads.directory`
+ * — same absoluteness/`..`-segment rules as capability path scopes (see
+ * `validateCapabilityPathPattern`), without that function's wildcard support. */
+function validAbsolutePath(value: unknown): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false
+  const absolute = value.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || /^\\\\[^\\]+\\[^\\]+/.test(value)
+  const segments = value.split(/[\\/]+/)
+  return absolute && !segments.includes('..')
 }
 
 function validProxyHost(host: string): boolean {
@@ -901,6 +1095,32 @@ function validateDevPort(value: unknown): void {
   }
 }
 
+/**
+ * Loopback hosts allowed to use `http:` for `updater.endpoint` (local testing
+ * only). `runtime/updater.ts` keeps an independent copy of this same check as
+ * its fetch-time defense-in-depth half — it can't import this one instead:
+ * that module compiles to a single standalone `updater-engine.mjs` with no
+ * non-`node:` imports (see its top doc comment), copied alone into a packaged
+ * app's resources dir.
+ */
+function isLoopbackUpdaterHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+}
+
+const MAX_PINNED_PUBLIC_KEYS = 4
+
+/** `true` iff `value` base64-decodes to exactly 32 bytes — a raw Ed25519 key/seed's length, not a full cryptographic validation (that happens when the runtime actually verifies/signs with it). */
+function isRawEd25519KeyBase64(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return false
+  try {
+    return atob(trimmed).length === 32
+  } catch {
+    return false
+  }
+}
+
 function validateUpdaterConfig(value: unknown): void {
   if (value === undefined || typeof value === 'boolean') return
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -927,6 +1147,26 @@ function validateUpdaterConfig(value: unknown): void {
     if (endpoint.protocol !== 'https:' && endpoint.protocol !== 'http:') {
       throw new TypeError('updater.endpoint must be an absolute HTTP or HTTPS URL')
     }
+    if (endpoint.protocol === 'http:' && !isLoopbackUpdaterHost(endpoint.hostname)) {
+      throw new TypeError(
+        'updater.endpoint must use https: (http: is only allowed for loopback hosts — ' +
+          '127.0.0.1, localhost, [::1] — for local testing)',
+      )
+    }
+  }
+  if (updater.publicKeys !== undefined) {
+    if (!Array.isArray(updater.publicKeys)
+      || updater.publicKeys.length === 0
+      || updater.publicKeys.length > MAX_PINNED_PUBLIC_KEYS
+      || updater.publicKeys.some((key) => typeof key !== 'string' || !isRawEd25519KeyBase64(key))) {
+      throw new TypeError(
+        `updater.publicKeys must be an array of 1 to ${MAX_PINNED_PUBLIC_KEYS} base64-encoded 32-byte Ed25519 public keys`,
+      )
+    }
+  }
+  if (updater.maxManifestAgeDays !== undefined
+    && (!Number.isSafeInteger(updater.maxManifestAgeDays) || (updater.maxManifestAgeDays as number) < 1)) {
+    throw new TypeError('updater.maxManifestAgeDays must be a positive safe integer (days), at least 1')
   }
   if (updater.checkOnStart !== undefined && typeof updater.checkOnStart !== 'boolean') {
     throw new TypeError('updater.checkOnStart must be a boolean')
@@ -1123,9 +1363,16 @@ function resolveWindowDeclaration(
   }
   validateWindowDeclaration(declaration, label)
   const minimumSize = resolveMinimumSize(declaration, label)
+  const maximumSize = resolveMaximumSize(declaration, label)
+  if (declaration.titleBarStyle === 'hidden') {
+    console.warn(
+      `[murasaki] window ${label} titleBarStyle: 'hidden' is macOS only and is ignored on Windows/Linux`,
+    )
+  }
   return {
     ...declaration,
     ...minimumSize,
+    ...maximumSize,
     label,
     primary,
     route: resolveWindowRoute(declaration.route, label),
@@ -1157,6 +1404,8 @@ function validateWindowDeclaration(
     ['visible', declaration.visible],
     ['console', declaration.console],
     ['createOnLaunch', declaration.createOnLaunch],
+    ['decorations', declaration.decorations],
+    ['fullscreen', declaration.fullscreen],
   ] as const) {
     if (value !== undefined && typeof value !== 'boolean') {
       throw new TypeError(`window ${label} ${name} must be a boolean`)
@@ -1166,6 +1415,11 @@ function validateWindowDeclaration(
     && declaration.vibrancy !== null
     && !['hud', 'sidebar', 'popover'].includes(declaration.vibrancy)) {
     throw new TypeError(`window ${label} vibrancy must be hud, sidebar, popover, or null`)
+  }
+  if (declaration.titleBarStyle !== undefined
+    && declaration.titleBarStyle !== 'default'
+    && declaration.titleBarStyle !== 'hidden') {
+    throw new TypeError(`window ${label} titleBarStyle must be default or hidden`)
   }
 }
 
@@ -1287,7 +1541,7 @@ function resolveCapabilityScope(
 
 function capabilityScopeKeys(permission: NativeCapability): Array<keyof NativeCapabilityScope> {
   if (permission === 'shell:openExternal') return ['urls']
-  if (permission === 'shell:showItemInFolder') return ['paths']
+  if (permission === 'shell:showItemInFolder' || permission === 'shell:trashItem' || permission === 'shell:openPath') return ['paths']
   if (permission === 'window:open' || permission === 'window:manage') return ['windows']
   if (permission === 'systemPermission:status' || permission === 'systemPermission:request') return ['permissions']
   return []
@@ -1351,6 +1605,45 @@ function resolveMinimumSize(
   return {
     minWidth: declaration.minWidth ?? 0,
     minHeight: declaration.minHeight ?? 0,
+  }
+}
+
+/** The largest positive 32-bit integer — tao's inner-size fields are `i32`. */
+const MAX_WINDOW_DIMENSION = 2_147_483_647
+
+function resolveMaximumSize(
+  declaration: WindowConfig,
+  label: string,
+): Pick<WindowConfig, 'maxWidth' | 'maxHeight'> {
+  const hasWidth = declaration.maxWidth !== undefined
+  const hasHeight = declaration.maxHeight !== undefined
+  if (!hasWidth && !hasHeight) return {}
+  for (const [name, value] of [
+    ['maxWidth', declaration.maxWidth],
+    ['maxHeight', declaration.maxHeight],
+  ] as const) {
+    if (value !== undefined
+      && (!Number.isSafeInteger(value) || value <= 0 || value > MAX_WINDOW_DIMENSION)) {
+      throw new TypeError(`window ${label} ${name} must be a positive 32-bit integer`)
+    }
+  }
+  if (declaration.maxWidth !== undefined
+    && declaration.minWidth !== undefined
+    && declaration.maxWidth < declaration.minWidth) {
+    throw new TypeError(`window ${label} maxWidth must be greater than or equal to minWidth`)
+  }
+  if (declaration.maxHeight !== undefined
+    && declaration.minHeight !== undefined
+    && declaration.maxHeight < declaration.minHeight) {
+    throw new TypeError(`window ${label} maxHeight must be greater than or equal to minHeight`)
+  }
+  // tao accepts one two-dimensional maximum. An unset axis is filled with the
+  // largest representable size so it stays effectively unconstrained instead
+  // of silently discarding the configured axis — the mirror image of
+  // resolveMinimumSize's zero sentinel above.
+  return {
+    maxWidth: declaration.maxWidth ?? MAX_WINDOW_DIMENSION,
+    maxHeight: declaration.maxHeight ?? MAX_WINDOW_DIMENSION,
   }
 }
 

@@ -20,6 +20,8 @@
  */
 export interface MiddlewareContext {
   pathname: string
+  /** Current query string, `location.search`-style (`''`, or starting with `?`). */
+  search: string
 }
 
 export type MiddlewareResult = { redirect: string } | void | undefined

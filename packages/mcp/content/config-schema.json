@@ -5,7 +5,10 @@
   "description": "Configuration accepted by defineConfig(). Fields marked as planned or no-op remain documented as such.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["appId", "productName"],
+  "required": [
+    "appId",
+    "productName"
+  ],
   "$defs": {
     "nativeCapability": {
       "enum": [
@@ -13,13 +16,19 @@
         "dialog:openFile",
         "dialog:openDirectory",
         "dialog:saveFile",
+        "dialog:message",
         "clipboard:readText",
         "clipboard:writeText",
+        "clipboard:readImage",
+        "clipboard:writeImage",
+        "clipboard:writeHtml",
         "menu:application",
         "menu:context",
         "notification:show",
         "shell:openExternal",
         "shell:showItemInFolder",
+        "shell:trashItem",
+        "shell:openPath",
         "secureStorage:get",
         "secureStorage:set",
         "secureStorage:delete",
@@ -48,49 +57,94 @@
         "tray:remove",
         "tray:setTooltip",
         "tray:setIcon",
-        "tray:setMenu"
+        "tray:setMenu",
+        "webview:download",
+        "webview:dragDrop",
+        "webview:zoom",
+        "webview:print",
+        "webview:readCookies",
+        "webview:writeCookies"
       ]
     },
     "macCapturePermission": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["usageDescription"],
+      "required": [
+        "usageDescription"
+      ],
       "properties": {
-        "usageDescription": { "type": "string", "minLength": 1 },
-        "requestOnLaunch": { "type": "boolean", "default": false }
+        "usageDescription": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requestOnLaunch": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
     "macPromptPermission": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "requestOnLaunch": { "type": "boolean", "default": false }
+        "requestOnLaunch": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
     "windowConfig": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "title": { "type": "string" },
-        "width": { "type": "integer", "minimum": 1 },
-        "height": { "type": "integer", "minimum": 1 },
-        "minWidth": { "type": "integer", "minimum": 1 },
-        "minHeight": { "type": "integer", "minimum": 1 },
-        "resizable": { "type": "boolean" },
-        "transparent": { "type": "boolean" },
+        "title": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minHeight": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resizable": {
+          "type": "boolean"
+        },
+        "transparent": {
+          "type": "boolean"
+        },
         "vibrancy": {
-          "enum": ["hud", "sidebar", "popover", null],
+          "enum": [
+            "hud",
+            "sidebar",
+            "popover",
+            null
+          ],
           "description": "Declared but currently a no-op."
         },
         "route": {
           "type": "string",
           "minLength": 1,
           "pattern": "^/(?!/)",
-          "not": { "pattern": "\\\\" },
+          "not": {
+            "pattern": "\\\\"
+          },
           "default": "/",
           "description": "Same-origin path. Full URLs, protocol-relative URLs, and backslashes are rejected."
         },
-        "visible": { "type": "boolean", "default": false },
+        "visible": {
+          "type": "boolean",
+          "default": false
+        },
         "createOnLaunch": {
           "type": "boolean",
           "default": true,
@@ -98,7 +152,9 @@
         },
         "capabilities": {
           "type": "array",
-          "items": { "$ref": "#/$defs/nativeCapability" },
+          "items": {
+            "$ref": "#/$defs/nativeCapability"
+          },
           "uniqueItems": true,
           "default": [],
           "description": "Per-secondary-window allowlist. It never inherits top-level capabilities."
@@ -107,41 +163,94 @@
     }
   },
   "properties": {
-    "appId": { "type": "string", "minLength": 1 },
-    "productName": { "type": "string", "minLength": 1 },
-    "version": { "type": "string" },
-    "description": { "type": "string" },
-    "copyright": { "type": "string" },
-    "homepage": { "type": "string", "format": "uri" },
-    "authors": { "type": "array", "items": { "type": "string" } },
+    "appId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "productName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "copyright": {
+      "type": "string"
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
+    "authors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "window": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "title": { "type": "string" },
-        "width": { "type": "integer", "minimum": 1 },
-        "height": { "type": "integer", "minimum": 1 },
-        "minWidth": { "type": "integer", "minimum": 1 },
-        "minHeight": { "type": "integer", "minimum": 1 },
-        "resizable": { "type": "boolean" },
-        "transparent": { "type": "boolean" },
+        "title": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minWidth": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minHeight": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resizable": {
+          "type": "boolean"
+        },
+        "transparent": {
+          "type": "boolean"
+        },
         "vibrancy": {
-          "enum": ["hud", "sidebar", "popover", null],
+          "enum": [
+            "hud",
+            "sidebar",
+            "popover",
+            null
+          ],
           "description": "Declared but currently a no-op."
         },
-        "console": { "type": "boolean", "description": "Windows backend console visibility." },
+        "console": {
+          "type": "boolean",
+          "description": "Windows backend console visibility."
+        },
         "route": {
           "type": "string",
           "minLength": 1,
           "pattern": "^/(?!/)",
-          "not": { "pattern": "\\\\" },
+          "not": {
+            "pattern": "\\\\"
+          },
           "default": "/",
           "description": "Same-origin path. Full URLs, protocol-relative URLs, and backslashes are rejected."
         },
-        "visible": { "type": "boolean", "default": true },
+        "visible": {
+          "type": "boolean",
+          "default": true
+        },
         "capabilities": {
           "type": "array",
-          "items": { "$ref": "#/$defs/nativeCapability" },
+          "items": {
+            "$ref": "#/$defs/nativeCapability"
+          },
           "uniqueItems": true,
           "description": "Primary-window allowlist. Falls back to top-level capabilities when omitted."
         }
@@ -153,16 +262,23 @@
       "propertyNames": {
         "pattern": "^(?![Mm][Aa][Ii][Nn]$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
       },
-      "additionalProperties": { "$ref": "#/$defs/windowConfig" }
+      "additionalProperties": {
+        "$ref": "#/$defs/windowConfig"
+      }
     },
     "main": {
       "oneOf": [
-        { "const": false },
+        {
+          "const": false
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "entry": { "type": "string", "default": "src/main.ts" },
+            "entry": {
+              "type": "string",
+              "default": "src/main.ts"
+            },
             "shutdownTimeoutMs": {
               "type": "integer",
               "minimum": 1,
@@ -183,13 +299,19 @@
           "dialog:openFile",
           "dialog:openDirectory",
           "dialog:saveFile",
+          "dialog:message",
           "clipboard:readText",
           "clipboard:writeText",
+          "clipboard:readImage",
+          "clipboard:writeImage",
+          "clipboard:writeHtml",
           "menu:application",
           "menu:context",
           "notification:show",
           "shell:openExternal",
           "shell:showItemInFolder",
+          "shell:trashItem",
+          "shell:openPath",
           "secureStorage:get",
           "secureStorage:set",
           "secureStorage:delete",
@@ -218,7 +340,13 @@
           "tray:remove",
           "tray:setTooltip",
           "tray:setIcon",
-          "tray:setMenu"
+          "tray:setMenu",
+          "webview:download",
+          "webview:dragDrop",
+          "webview:zoom",
+          "webview:print",
+          "webview:readCookies",
+          "webview:writeCookies"
         ]
       },
       "uniqueItems": true
@@ -232,10 +360,18 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "camera": { "$ref": "#/$defs/macCapturePermission" },
-            "microphone": { "$ref": "#/$defs/macCapturePermission" },
-            "screenRecording": { "$ref": "#/$defs/macPromptPermission" },
-            "accessibility": { "$ref": "#/$defs/macPromptPermission" }
+            "camera": {
+              "$ref": "#/$defs/macCapturePermission"
+            },
+            "microphone": {
+              "$ref": "#/$defs/macCapturePermission"
+            },
+            "screenRecording": {
+              "$ref": "#/$defs/macPromptPermission"
+            },
+            "accessibility": {
+              "$ref": "#/$defs/macPromptPermission"
+            }
           }
         }
       }
@@ -247,26 +383,43 @@
       "properties": {
         "external": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "uniqueItems": true
         },
         "noExternal": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "uniqueItems": true
         },
         "resources": {
           "type": "array",
           "items": {
             "oneOf": [
-              { "type": "string", "minLength": 1 },
+              {
+                "type": "string",
+                "minLength": 1
+              },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["from"],
+                "required": [
+                  "from"
+                ],
                 "properties": {
-                  "from": { "type": "string", "minLength": 1 },
-                  "to": { "type": "string", "minLength": 1 }
+                  "from": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "to": {
+                    "type": "string",
+                    "minLength": 1
+                  }
                 }
               }
             ]
@@ -276,7 +429,7 @@
     },
     "webview": {
       "type": "object",
-      "description": "Application-wide native WebView User-Agent, private-session, and unauthenticated proxy settings.",
+      "description": "Application-wide native WebView User-Agent, private-session, proxy, downloads, init-script, and zoom-hotkey settings.",
       "additionalProperties": false,
       "properties": {
         "userAgent": {
@@ -293,17 +446,56 @@
         "proxy": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["protocol", "host", "port"],
+          "required": [
+            "protocol",
+            "host",
+            "port"
+          ],
           "properties": {
-            "protocol": { "enum": ["http", "socks5"] },
+            "protocol": {
+              "enum": [
+                "http",
+                "socks5"
+              ]
+            },
             "host": {
               "type": "string",
               "minLength": 1,
               "maxLength": 253,
               "description": "ASCII hostname, IPv4 address, or bracketed IPv6 literal; URLs and credentials are rejected."
             },
-            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
           }
+        },
+        "downloads": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Confines webview:download-granted downloads to a directory.",
+          "properties": {
+            "directory": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Absolute path without traversal segments. Defaults to the OS user Downloads folder when omitted."
+            }
+          }
+        },
+        "initScripts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "maxItems": 64,
+          "description": "Project-root-relative JavaScript file paths injected before every page load, in declaration order. Trusted/config-owned; not capability-gated. Each file is bounded to 256 KiB and the combined total to 1 MiB."
+        },
+        "hotkeysZoom": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enables OS page-zoom hotkeys/gestures. Effective on Windows (WebView2) only; a no-op on macOS/Linux."
         }
       }
     },
@@ -313,7 +505,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
           "name": {
             "type": "string",
@@ -324,13 +518,19 @@
           "vite": {
             "description": "A Vite PluginOption; executable JavaScript values cannot be represented completely in JSON Schema."
           },
-          "bundle": { "$ref": "#/properties/bundle" },
+          "bundle": {
+            "$ref": "#/properties/bundle"
+          },
           "hooks": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "before": { "description": "A build-time JavaScript function run serially before the CLI command." },
-              "after": { "description": "A build-time JavaScript function run serially after a successful CLI command." }
+              "before": {
+                "description": "A build-time JavaScript function run serially before the CLI command."
+              },
+              "after": {
+                "description": "A build-time JavaScript function run serially after a successful CLI command."
+              }
             }
           }
         }
@@ -341,13 +541,40 @@
       "description": "Build prerequisites and renderer-public environment prefixes.",
       "additionalProperties": false,
       "properties": {
-        "before": { "type": "string", "minLength": 1 },
+        "before": {
+          "type": "string",
+          "minLength": 1
+        },
         "envPrefix": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "minItems": 1,
           "uniqueItems": true,
-          "default": ["MURASAKI_PUBLIC_"]
+          "default": [
+            "MURASAKI_PUBLIC_"
+          ]
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "description": "Crash-report capture settings for the Node Main runtime (see the node-main guide). Reports are written locally; murasaki never transmits them.",
+      "additionalProperties": false,
+      "properties": {
+        "crashReports": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write crash reports for uncaught Node exceptions/rejections, native launcher panics, and production renderer errors."
+        },
+        "keepReports": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20,
+          "description": "How many newest crash reports to retain (out-of-range values are clamped, not rejected)."
         }
       }
     },
@@ -364,55 +591,105 @@
               "minLength": 1,
               "pattern": "^(?=.*\\S)[^\\u0000-\\u001F\\u007F\"<>]+$"
             },
-            { "const": false }
+            {
+              "const": false
+            }
           ]
         }
       }
     },
     "updater": {
       "oneOf": [
-        { "type": "boolean" },
+        {
+          "type": "boolean"
+        },
         {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "repo": { "type": "string", "pattern": "^[^/]+/[^/]+$" },
-            "endpoint": { "type": "string", "format": "uri" },
-            "channel": { "type": "string", "default": "stable" },
-            "checkOnStart": { "type": "boolean", "default": true },
+            "repo": {
+              "type": "string",
+              "pattern": "^[^/]+/[^/]+$"
+            },
+            "endpoint": {
+              "type": "string",
+              "format": "uri"
+            },
+            "channel": {
+              "type": "string",
+              "default": "stable"
+            },
+            "checkOnStart": {
+              "type": "boolean",
+              "default": true
+            },
             "checkInterval": {
-              "oneOf": [{ "type": "string" }, { "const": false }],
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "const": false
+                }
+              ],
               "default": "6h"
             },
-            "publicKey": { "type": "string" }
+            "publicKey": {
+              "type": "string"
+            }
           }
         }
       ]
     },
-    "locales": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
-    "devPort": { "type": "integer", "minimum": 1, "maximum": 65535, "default": 5178 },
+    "locales": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "devPort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 5178
+    },
     "targets": {
       "type": "array",
       "items": {
-        "enum": ["darwin-arm64", "darwin-x64", "win32-x64", "win32-arm64", "linux-x64", "linux-arm64"]
+        "enum": [
+          "darwin-arm64",
+          "darwin-x64",
+          "win32-x64",
+          "win32-arm64",
+          "linux-x64",
+          "linux-arm64"
+        ]
       },
       "uniqueItems": true
     },
-    "icon": { "type": "string" },
+    "icon": {
+      "type": "string"
+    },
     "protocols": {
       "type": "array",
       "description": "URL schemes registered by packaged macOS apps and installed Windows apps.",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["scheme"],
+        "required": [
+          "scheme"
+        ],
         "properties": {
           "scheme": {
             "type": "string",
             "pattern": "^[A-Za-z][A-Za-z0-9+.-]{0,62}$",
             "description": "RFC 3986 scheme. Reserved and duplicate schemes are rejected during configuration resolution."
           },
-          "name": { "type": "string", "minLength": 1 }
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "uniqueItems": true
@@ -423,7 +700,9 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["extensions"],
+        "required": [
+          "extensions"
+        ],
         "properties": {
           "extensions": {
             "type": "array",
@@ -434,9 +713,23 @@
               "pattern": "^\\.?[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
             }
           },
-          "name": { "type": "string", "minLength": 1 },
-          "description": { "type": "string", "minLength": 1 },
-          "role": { "enum": ["viewer", "editor", "shell", "none"], "default": "viewer" },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "enum": [
+              "viewer",
+              "editor",
+              "shell",
+              "none"
+            ],
+            "default": "viewer"
+          },
           "mimeType": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$"
@@ -449,28 +742,59 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "background": { "type": "string" },
+        "background": {
+          "type": "string"
+        },
         "window": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["width", "height"],
+          "required": [
+            "width",
+            "height"
+          ],
           "properties": {
-            "width": { "type": "integer", "minimum": 1 },
-            "height": { "type": "integer", "minimum": 1 }
+            "width": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "type": "integer",
+              "minimum": 1
+            }
           }
         },
-        "iconSize": { "type": "integer", "minimum": 1 },
+        "iconSize": {
+          "type": "integer",
+          "minimum": 1
+        },
         "windows": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "installMode": { "enum": ["perUser", "perMachine"] },
-            "publisher": { "type": "string" },
-            "upgradeCode": { "type": "string" },
-            "icon": { "type": "string" },
-            "banner": { "type": "string" },
-            "sidebar": { "type": "string" },
-            "license": { "type": "string" }
+            "installMode": {
+              "enum": [
+                "perUser",
+                "perMachine"
+              ]
+            },
+            "publisher": {
+              "type": "string"
+            },
+            "upgradeCode": {
+              "type": "string"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "banner": {
+              "type": "string"
+            },
+            "sidebar": {
+              "type": "string"
+            },
+            "license": {
+              "type": "string"
+            }
           }
         }
       }
@@ -479,30 +803,61 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "identity": { "type": "string" },
-        "entitlements": { "type": "string" },
+        "identity": {
+          "type": "string"
+        },
+        "entitlements": {
+          "type": "string"
+        },
         "windows": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "certificateFile": { "type": "string" },
-            "certificateSubjectName": { "type": "string" },
-            "certificateSha1": { "type": "string", "pattern": "^(?:[0-9A-Fa-f]\\s*){40}$" },
-            "certificateStore": { "enum": ["currentUser", "localMachine"] },
-            "timestampUrl": {
-              "oneOf": [
-                { "type": "string", "format": "uri", "pattern": "^https?://" },
-                { "const": false }
+            "certificateFile": {
+              "type": "string"
+            },
+            "certificateSubjectName": {
+              "type": "string"
+            },
+            "certificateSha1": {
+              "type": "string",
+              "pattern": "^(?:[0-9A-Fa-f]\\s*){40}$"
+            },
+            "certificateStore": {
+              "enum": [
+                "currentUser",
+                "localMachine"
               ]
             },
-            "signToolPath": { "type": "string" },
+            "timestampUrl": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "format": "uri",
+                  "pattern": "^https?://"
+                },
+                {
+                  "const": false
+                }
+              ]
+            },
+            "signToolPath": {
+              "type": "string"
+            },
             "artifactSigning": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["dlib", "metadata"],
+              "required": [
+                "dlib",
+                "metadata"
+              ],
               "properties": {
-                "dlib": { "type": "string" },
-                "metadata": { "type": "string" }
+                "dlib": {
+                  "type": "string"
+                },
+                "metadata": {
+                  "type": "string"
+                }
               }
             }
           }

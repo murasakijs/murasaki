@@ -1,0 +1,85 @@
+name: Bug report
+description: Report a reproducible problem with murasaki, @murasakijs/native, create-murasaki, or another package in this repo.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug.
+
+        **Do not report security vulnerabilities here.** Use a private
+        [GitHub Security Advisory](https://github.com/murasakijs/murasaki/security/advisories/new)
+        instead — see [SECURITY.md](https://github.com/murasakijs/murasaki/blob/main/SECURITY.md)
+        for the full reporting flow.
+  - type: input
+    id: murasaki-version
+    attributes:
+      label: murasaki version
+      description: The version in your project's package.json, or the output of `npx murasaki --version`.
+      placeholder: "0.53.0"
+    validations:
+      required: true
+  - type: input
+    id: native-version
+    attributes:
+      label: "@murasakijs/native version"
+      description: From `pnpm ls @murasakijs/native` (or your lockfile). Leave blank if you're not sure — usually matches the murasaki version.
+      placeholder: "0.53.0"
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system + architecture
+      options:
+        - macOS (arm64 / Apple silicon)
+        - macOS (x64 / Intel)
+        - Windows (x64)
+        - Windows (arm64)
+        - Linux (x64)
+        - Linux (arm64)
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: >
+        Minimal steps to reproduce, ideally starting from a fresh
+        `npm create murasaki@latest`. Link a repo or gist if the repro needs
+        more than a few files.
+      placeholder: |
+        1. `npm create murasaki@latest repro`
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the full error message and stack trace where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: version-output
+    attributes:
+      label: "`npx murasaki --version` output"
+      render: shell
+  - type: textarea
+    id: dev-console
+    attributes:
+      label: Relevant `murasaki dev` console output
+      description: Paste the terminal output from around when the problem happens. Redact anything sensitive (tokens, paths with usernames, etc).
+      render: shell
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else — screenshots, `murasaki.config.ts` snippets, workarounds you've tried.

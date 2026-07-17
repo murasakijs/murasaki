@@ -8,7 +8,7 @@ import { PxDmgInstaller } from "./px-dmg";
 const EXT_BY_NAME: Record<string, string> = {
   macOS: ".app / .dmg",
   Windows: ".zip / .exe / .msi",
-  Linux: ".AppImage",
+  Linux: ".AppImage / .deb",
 };
 
 /**

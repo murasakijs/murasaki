@@ -129,7 +129,10 @@ the native accelerator label. Reuse your app's actions with
 - **Windows** — an in-window `HMENU` bar; it inherits the OS's classic styling
   and doesn't follow dark mode. The `close` role hides a secondary so it can be
   reopened; closing the primary `main` window and quitting enter the app lifecycle.
-- **Linux** — no default menu bar yet.
+- **Linux** — an in-window GTK menu bar with the same plain File/Edit/Window
+  shape as Windows (no macOS-style bold app-name submenu); Edit-role items run
+  `document.execCommand` in the focused webview rather than using a native
+  responder chain.
 
 ## Next
 

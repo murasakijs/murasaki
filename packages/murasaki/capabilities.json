@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.53.0",
+  "frameworkVersion": "0.54.0",
   "features": [
     {
       "id": "file-routing",
@@ -12,11 +12,14 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Page, layout, loading, error, not-found, route-group, and single dynamic segments ship today; catch-all page segments are not implemented.",
+        "Page, layout, loading, error, not-found, route-group, single dynamic segments, and catch-all/optional catch-all page segments ([...slug], [[...slug]]) ship today.",
         "The router is client-side and does not provide the full Next.js App Router or React Server Components runtime."
       ],
-      "apiSymbols": ["AppRouter", "Link", "useRouter", "usePathname", "useParams"],
-      "testEvidence": [],
+      "apiSymbols": ["AppRouter", "Link", "useRouter", "usePathname", "useParams", "useSearchParams"],
+      "testEvidence": [
+        "packages/murasaki/test/routing-catchall.test.mjs",
+        "packages/murasaki/test/router-searchparams.test.mjs"
+      ],
       "docsSlug": "/docs/guides/routing"
     },
     {
@@ -69,11 +72,11 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Middleware runs in the renderer before client navigation and only receives pathname.",
+        "Middleware runs in the renderer before client navigation and only receives the pathname and query string being navigated to.",
         "Request headers, response headers, cookies, edge execution, and matcher configuration are not available."
       ],
       "apiSymbols": ["Middleware", "MiddlewareContext", "MiddlewareResult"],
-      "testEvidence": [],
+      "testEvidence": ["packages/murasaki/test/router-searchparams.test.mjs"],
       "docsSlug": "/docs/guides/middleware"
     },
     {
@@ -86,8 +89,8 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Document title, description, favicon, and a small Open Graph subset are applied in the renderer.",
-        "The metadata shape is not Next.js-compatible in full, and document metadata does not update the native window title."
+        "Document title, description, favicon, and a small Open Graph subset are applied in the renderer; the title is additionally mirrored onto the native window title (best-effort, requires the window:setTitle capability).",
+        "The metadata shape is not Next.js-compatible in full."
       ],
       "apiSymbols": ["Metadata", "GenerateMetadata", "applyMetadata"],
       "testEvidence": [],
@@ -134,9 +137,13 @@
       },
       "limitations": [
         "Configured secondary templates can be created, destroyed, and recreated from trusted Node Main, with generation-scoped lifecycle events; renderers remain limited to showing and managing live declared windows and cannot supply runtime URLs or capability policies.",
-        "macOS hud, sidebar, and popover vibrancy materials are applied natively with transparent window/WebView composition; Windows and Linux ignore the macOS-only option."
+        "macOS hud, sidebar, and popover vibrancy materials are applied natively with transparent window/WebView composition; Windows and Linux ignore the macOS-only option.",
+        "No parent/child or modal window relationship — tao has no cross-platform support for it, so every declared window is an independent top-level window.",
+        "Only borderless fullscreen is supported; there is no exclusive/dedicated-video-mode fullscreen.",
+        "titleBarStyle: 'hidden' is macOS only (transparent titlebar + hidden title + full-size content view); Windows and Linux accept and ignore it.",
+        "getMonitors() geometry (position, size) is reported in physical pixels, not logical/CSS pixels."
       ],
-      "apiSymbols": ["App", "WindowConfig", "SecondaryWindowConfig", "MainWindowState", "MainWindowLifecycleEvent", "murasaki/main.windows", "murasaki/native.appWindow", "murasaki/native.windows"],
+      "apiSymbols": ["App", "WindowConfig", "SecondaryWindowConfig", "MainWindowState", "MainWindowLifecycleEvent", "murasaki/main.windows", "murasaki/native.appWindow", "murasaki/native.windows", "useWindowDrag"],
       "testEvidence": [
         "packages/murasaki/test/native-api.test.mjs",
         "packages/murasaki/test/windows.test.mjs",
@@ -151,11 +158,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "supported"
       },
       "limitations": [
-        "Native application menus ship on macOS and Windows; replacement is process-global, restricted to the primary renderer, and requires menu:application plus the capabilities of privileged roles.",
-        "Linux has no default or custom application menu implementation. Missing role capabilities reject the whole replacement and keep the current menu."
+        "Native application menus ship on macOS, Windows, and Linux (GTK, via muda); replacement is process-global, restricted to the primary renderer, and requires menu:application plus the capabilities of privileged roles.",
+        "Linux/Windows menus are a plain File/Edit/Window bar with no macOS-style bold app-name submenu; Edit items dispatch document.execCommand into the focused webview rather than riding a native responder chain. Missing role capabilities reject the whole replacement and keep the current menu."
       ],
       "apiSymbols": ["useAppMenu", "AppMenu", "AppMenuItemSpec"],
       "testEvidence": ["crates/native/src/webview.rs", "crates/native/src/menu.rs"],
@@ -168,11 +175,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "supported"
       },
       "limitations": [
-        "Native whole-window and scoped context menus ship on macOS and Windows behind menu:context; privileged native roles additionally require their matching capability.",
-        "Menu IPC is bounded by payload, item-count, depth, and string limits. Linux has no native context-menu implementation."
+        "Native whole-window and scoped context menus ship on macOS, Windows, and Linux (GTK) behind menu:context; privileged native roles additionally require their matching capability.",
+        "Menu IPC is bounded by payload, item-count, depth, and string limits. On Linux, undo/redo context-menu role items are silently omitted (an upstream muda/GTK limitation), and cut/copy/paste/selectAll are delivered by synthesizing X11 key events (requires libxdo; not available under Wayland without XWayland)."
       ],
       "apiSymbols": [
         "useContextMenu",
@@ -194,7 +201,9 @@
       },
       "limitations": [
         "Dialogs, clipboard, notifications, shell helpers, secure storage, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
-        "Selected target-bearing commands support inline allow/deny scopes; other arguments remain command-level, and the native renderer API is not available directly inside src/main.ts."
+        "Selected target-bearing commands support inline allow/deny scopes; other arguments remain command-level, and the native renderer API is not available directly inside src/main.ts.",
+        "dialog.showMessage shows a native OS message box; clipboard also supports PNG image and HTML read/write, each bounded and independently permissioned; shell.trashItem and shell.openPath are path-scoped like shell.showItemInFolder, and shell.openPath rejects URLs and UNC/device paths.",
+        "notification.show returns a generated id for local bookkeeping only; upstream notify-rust cannot deliver click/action callbacks on macOS or Windows, so the id never correlates with a later event."
       ],
       "apiSymbols": [
         "murasaki/native.dialog",
@@ -208,6 +217,7 @@
       ],
       "testEvidence": [
         "packages/murasaki/test/native-api.test.mjs",
+        "packages/murasaki/test/native-utilities.test.mjs",
         ".github/workflows/native-release.yml"
       ],
       "docsSlug": "/docs/guides/native-apis"
@@ -219,10 +229,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "partial"
       },
       "limitations": [
-        "String values are stored in macOS Keychain or Windows Credential Manager under a SHA-256-derived appId/key namespace; missing keys return null, inputs and IPC are bounded, and there is no plaintext fallback.",
+        "String values are stored in macOS Keychain, Windows Credential Manager, or (Linux) the freedesktop.org Secret Service D-Bus API under a SHA-256-derived appId/key namespace; missing keys return null, inputs and IPC are bounded, and there is no plaintext fallback on any platform.",
+        "Linux requires a running Secret Service provider (e.g. gnome-keyring, KWallet's ksecretsservice, or KeePassXC); if none is reachable every operation fails with a structured error instead of a plaintext fallback.",
         "get, set, and delete have independent deny-by-default per-window capabilities, but grants are command-level rather than per-key; renderer compromise can use every granted secure-storage operation within that app namespace."
       ],
       "apiSymbols": ["murasaki/native.secureStorage"],
@@ -240,17 +251,19 @@
       "status": "partial",
       "platforms": {
         "macos": "supported",
-        "windows": "partial",
-        "linux": "unsupported"
+        "windows": "supported",
+        "linux": "partial"
       },
       "limitations": [
-        "Signed manifests, bounded downloads, SHA-256 payload verification, staged handoff, and relaunch are implemented for packaged apps.",
-        "Linux packaging and updates are unavailable; Windows arm64 update publishing is not supported by the current artifact naming and manifest scan."
+        "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS, Windows (x64 and arm64), and Linux AppImage apps.",
+        "A custom self-hosted endpoint must be https (loopback http is allowed for local testing only); delta/differential updates are not implemented. Linux self-update only works for the AppImage packaging format (the running .AppImage file is journal-swapped in place, relaunched with --appimage-extract-and-run); a .deb install or a manually-extracted AppDir has no file to swap, so check() reports a structured not-available reason (updates are managed by the system package manager) instead of an error."
       ],
       "apiSymbols": ["useUpdate", "UpdateButton", "UpdaterConfig", "UpdateState"],
       "testEvidence": [
         "packages/murasaki/test/updater-hardening.test.mjs",
-        ".github/workflows/app-package-win.yml"
+        "crates/native/src/updater.rs",
+        ".github/workflows/app-package-win.yml",
+        ".github/workflows/app-package-linux.yml"
       ],
       "docsSlug": "/docs/guides/auto-update"
     },
@@ -261,14 +274,20 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today.",
-        "Linux launcher packaging and installers are not implemented. WiX is required for MSI and only runs on Windows."
+        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging, repository metadata, and code signing are not implemented. WiX is required for MSI and only runs on Windows."
       ],
       "apiSymbols": ["murasaki bundle", "murasaki installer"],
-      "testEvidence": [".github/workflows/app-package-win.yml"],
+      "testEvidence": [
+        ".github/workflows/app-package-win.yml",
+        ".github/workflows/app-package-linux.yml",
+        ".github/workflows/ci.yml",
+        "packages/murasaki/test/linux-bundle.test.mjs",
+        "packages/murasaki/test/linux-deb.test.mjs"
+      ],
       "docsSlug": "/docs/building/distribution"
     },
     {
@@ -361,12 +380,14 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "One process-wide macOS status item / Windows system-tray icon ships with tooltip, click events, native nested menus, menu-item events, and dynamic icon/menu replacement; the latest successful create replaces the previous owner.",
+        "Linux trays use libappindicator and need an AppIndicator host (on GNOME, the AppIndicator/KStatusNotifierItem Shell extension); tray-menu clicks and dynamic icon/menu replacement work the same as macOS/Windows, but tray icon click/double-click events never fire — AppIndicator exposes no such signal, only \"show the attached menu\".",
         "macOS and Windows global shortcuts support bounded modifier-plus-known-key accelerators, explicit ids, owner-routed press events, same-process conflict detection, and automatic owner/shutdown cleanup behind separate register/unregister capabilities.",
-        "Shortcut availability still depends on OS-reserved bindings and other applications and requires packaged OS smoke testing. Linux tray and global shortcuts are not implemented."
+        "Linux global shortcuts use the same accelerator/id model over X11 and require X11 or XWayland; a pure-Wayland session (no DISPLAY) returns a structured unsupported error instead of registering. Linux has no OS-reserved-shortcut list (unlike macOS/Windows), since that depends on the desktop environment.",
+        "Shortcut availability still depends on OS-reserved bindings and other applications and requires packaged OS smoke testing."
       ],
       "apiSymbols": [
         "murasaki/native.tray",
@@ -415,11 +436,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "Packaged macOS apps and installed Windows apps register declared URL schemes and file associations, preserve the per-user single-instance lock, and deliver normalized startup, second-instance, and system open requests to src/main.ts.",
-        "Windows portable .zip and bare executable distributions do not register protocols or file associations automatically; registration is supplied by the NSIS and MSI installers, while Linux support remains planned."
+        "Windows portable .zip and bare executable distributions do not register protocols or file associations automatically; registration is supplied by the NSIS and MSI installers. Linux preserves the same per-user single-instance lock and delivers cold-start argv (the %U/%F the .desktop Exec line expands to) and second-instance activation over the existing loopback channel; protocol/file-association MimeType entries are declared in the .desktop file (installed under usr/share/applications by the .deb, refreshed by update-desktop-database) but there is no OS-level registration step to verify for a manually-extracted AppImage/AppDir the way NSIS/MSI perform on Windows."
       ],
       "apiSymbols": [
         "ProtocolConfig",
@@ -434,7 +455,8 @@
         "packages/murasaki/test/associations.test.mjs",
         "packages/murasaki/test/main-runtime.test.mjs",
         "packages/murasaki/test/prod-server-http.test.mjs",
-        "crates/native/src/launcher.rs"
+        "crates/native/src/launcher.rs",
+        ".github/workflows/app-package-linux.yml"
       ],
       "docsSlug": "/docs/guides/deep-links"
     },
@@ -474,17 +496,28 @@
       },
       "limitations": [
         "Node Main provides structured JSONL logging, bounded rotation, secret-looking field redaction, shutdown flushing, and opt-in bounded diagnostic reports with application/runtime metadata and log tails.",
-        "Reports are local files and are never uploaded by Murasaki; crash capture, renderer/native-host log aggregation, symbolication, and a user-facing consent/upload flow remain application responsibilities."
+        "Murasaki also captures versioned local crash reports across three domains: Node uncaughtException/unhandledRejection, native launcher panics and unexpected-exit metadata, and (production builds only) uncaught renderer errors/unhandled rejections, all bounded and redacted the same way as log fields and readable through MainContext.diagnostics.",
+        "Crash reports are local JSON files only and are never transmitted by Murasaki; there is no minidump/native-symbolication support, no automatic upload, and renderer capture is a no-op under murasaki dev (the dev error overlay owns that UX instead). Wiring reports to a crash-reporting service remains an application responsibility."
       ],
       "apiSymbols": [
         "MainContext.log",
         "MainLogger",
         "createMainLogger",
-        "DiagnosticReportOptions"
+        "DiagnosticReportOptions",
+        "MainContext.diagnostics",
+        "CrashDiagnosticsApi",
+        "CrashReport",
+        "CrashReportDomain",
+        "CrashReportSummary",
+        "MurasakiConfig.diagnostics",
+        "DiagnosticsConfig"
       ],
       "testEvidence": [
         "packages/murasaki/test/main-logger.test.mjs",
-        "packages/murasaki/test/main-runtime.test.mjs"
+        "packages/murasaki/test/main-runtime.test.mjs",
+        "packages/murasaki/test/crash-diagnostics.test.mjs",
+        "packages/murasaki/test/config-loader.test.mjs",
+        "crates/native/src/launcher.rs"
       ],
       "docsSlug": "/docs/guides/node-main"
     },
@@ -499,19 +532,32 @@
       },
       "limitations": [
         "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
-        "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported."
+        "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported.",
+        "webview:download confines sanitized, collision-resolved downloads to a configured (or OS default) directory and reports start/completion events; there is no reliable id correlating a completed event with the started event it followed, and macOS never reports a completed download's path (an upstream WebKit limitation).",
+        "webview:dragDrop reports file drag-and-drop events (dragover throttled to 20/sec) without ever blocking the OS default, so file inputs keep working regardless of the grant. webview.initScripts injects trusted, config-owned JavaScript before page load and is not capability-gated.",
+        "webview:zoom bounds page zoom to 0.25-5.0 and is available on macOS 11+/iOS 14+ only; webview.hotkeysZoom (config, not a capability) enables OS zoom hotkeys/gestures on Windows only. webview:print opens the platform print dialog; there is no find-in-page API because Wry exposes none.",
+        "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete; the murasaki runtime's own session-auth cookie is filtered out of reads and rejected from writes/deletes regardless of granted capabilities. deleteCookie matches by name, the URL host as domain, and the default / path only.",
+        "In-page permission requests (getUserMedia, geolocation) are not intercepted: Wry 0.55 has no permission handler, so these fall through to the platform WebView's own default behavior; interception is planned once Wry ships one."
       ],
       "apiSymbols": [
         "MurasakiConfig.webview",
         "WebviewConfig",
-        "WebviewProxyConfig"
+        "WebviewProxyConfig",
+        "WebviewDownloadsConfig",
+        "murasaki/native.webview",
+        "murasaki.subscribeDownloads",
+        "murasaki.subscribeFileDrops",
+        "murasaki.useFileDrop"
       ],
       "testEvidence": [
         "packages/murasaki/test/webview-config.test.mjs",
+        "packages/murasaki/test/webview-native-api.test.mjs",
+        "packages/murasaki/test/webview-events.test.mjs",
         "crates/native/src/webview.rs",
+        "crates/native/src/download.rs",
         "crates/native/src/launcher.rs"
       ],
-      "docsSlug": "/docs/building/configuration"
+      "docsSlug": "/docs/guides/webview"
     },
     {
       "id": "build-time-plugin-sdk",
@@ -542,18 +588,24 @@
     {
       "id": "linux-distribution",
       "category": "distribution",
-      "status": "planned",
+      "status": "partial",
       "platforms": {
         "macos": "unsupported",
         "windows": "unsupported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
-        "Prebuilt Linux native binaries and development support do not constitute an installable Linux application release.",
-        "AppImage, deb, rpm, repository metadata, signing, updates, and launcher packaging are not implemented."
+        "AppDir/AppImage/deb artifact assembly (see the application-packaging capability) and the native launcher runtime both work end to end: window/webview creation, single-instance locking, cold-start deep links (argv from the .desktop Exec line) and second-instance forwarding, graceful shutdown, and native crash reporting all run from the packaged AppImage or .deb, verified under Xvfb + a private D-Bus session in Docker and in app-package-linux.yml.",
+        "AppImage self-update works (journaled single-file swap of the running .AppImage, relaunch via --appimage-extract-and-run, first-launch rollback on a failed health check); a .deb install or a bare/manually-extracted AppDir has no self-update (there is no single file to swap) and reports updates as managed by the system package manager instead. rpm packaging, repository metadata, and code signing are not implemented."
       ],
       "apiSymbols": [],
-      "testEvidence": [],
+      "testEvidence": [
+        "crates/native/src/launcher.rs",
+        "crates/native/src/updater.rs",
+        ".github/workflows/app-package-linux.yml",
+        ".github/scripts/linux-installer-e2e.sh",
+        ".github/scripts/linux-smoke-test.sh"
+      ],
       "docsSlug": "/docs/core-concepts/platform-feature-status"
     }
   ]

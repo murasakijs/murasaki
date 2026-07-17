@@ -8,10 +8,13 @@ no update service to run — the manifest is a JSON file next to your release
 artifacts (GitHub Releases by default, or any static host you control), and
 the whole trust model is a single Ed25519 keypair you generate once.
 
-<Callout type="warn">
-  macOS and Windows only. Linux app packaging doesn't exist in Murasaki yet
-  (see [CLI reference](/docs/building/cli)), so there's nothing to update on
-  Linux either.
+<Callout type="info">
+  macOS, Windows, and Linux **AppImage** builds. A `.deb` install or a bare
+  (manually-extracted) AppDir has no self-contained file to swap — `check()`
+  reports a structured "updates are managed by the system package manager"
+  result instead of checking a manifest, never an error. See
+  [Distribution](/docs/building/distribution#linux-appimage-and-deb) for the
+  Linux packaging story.
 </Callout>
 
 ## Quick start
@@ -122,12 +125,16 @@ alongside a detached signature, `dist/latest.json.sig`:
 {
   "version": "1.2.0",
   "publishedAt": "2026-07-12T09:00:00.000Z",
+  "generatedAt": "2026-07-12T09:00:00.000Z",
   "notes": "markdown release notes",
   "mandatory": false,
+  "rollout": 25,
+  "keyId": "a1b2c3d4e5f60718",
   "assets": {
     "darwin-arm64": { "url": "https://.../App-1.2.0-darwin-arm64.app.zip", "sha256": "<hex>" },
     "darwin-x64":   { "url": "https://.../App-1.2.0-darwin-x64.app.zip",   "sha256": "<hex>" },
-    "win32-x64":    { "url": "https://.../App-1.2.0-setup.exe",           "sha256": "<hex>" }
+    "win32-x64":    { "url": "https://.../App-1.2.0-setup-x64.exe",       "sha256": "<hex>" },
+    "win32-arm64":  { "url": "https://.../App-1.2.0-setup-arm64.exe",     "sha256": "<hex>" }
   }
 }
 ```
@@ -142,26 +149,42 @@ fewer platforms than a manifest might otherwise cover.
 ever parsing them as JSON, never the other way around — there's no JSON
 canonicalization ambiguity to worry about.
 
+`generatedAt`, `rollout`, and `keyId` are all optional, and all covered by
+that same signature since they live in the signed bytes:
+
+- **`generatedAt`** — an anti-freeze/replay guard. See [Manifest
+  freshness](#manifest-freshness) below.
+- **`rollout`** — a 0-100 staged-rollout percentage. See [Staged
+  rollout](#staged-rollout) below.
+- **`keyId`** — a key-rotation hint. See [Key rotation](#key-rotation) below.
+
 ## Publishing releases
 
 ```bash
 murasaki release --keygen [--force]
-murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory] [--rollout <0-100>]
 murasaki release --sign
 ```
 
 - **`--keygen`** — generates the Ed25519 keypair (see [Quick start](#quick-start)).
   Refuses to overwrite an existing key unless you pass `--force` — rotating
   the key invalidates trust for any already-shipped app still holding the old
-  public key.
+  public key, unless you pin both keys first (see [Key
+  rotation](#key-rotation)).
 - **`--manifest`** — scans `dist/` for this version's payloads (the macOS
-  `.app.zip` files `murasaki bundle` produces, the Windows `-setup.exe`
-  `murasaki installer` produces), hashes whichever exist, and writes
-  `dist/latest.json`. A missing target is skipped, not an error — only zero
-  payloads found is fatal.
+  `.app.zip` files `murasaki bundle` produces, the Windows
+  `-setup-<arch>.exe` files `murasaki installer` produces — the legacy
+  un-suffixed `-setup.exe` name is still recognized too, for win32-x64 assets
+  published before arch-suffixed naming), hashes whichever exist, and writes
+  `dist/latest.json` with a `generatedAt` timestamp. A missing target is
+  skipped, not an error — only zero payloads found is fatal.
+  `--rollout <0-100>` writes an optional staged-rollout percentage (see
+  [Staged rollout](#staged-rollout)).
 - **`--sign`** — signs `dist/latest.json` into `dist/latest.json.sig`. Reads
   the private key from `$MURASAKI_UPDATE_KEY`, falling back to
-  `.murasaki/update-key`.
+  `.murasaki/update-key`. When `.murasaki/update-key.pub` is present, also
+  writes a `keyId` hint into the manifest before signing it (see [Key
+  rotation](#key-rotation)).
 
 (`--generate-manifest` still works as a deprecated alias of `--manifest`.)
 
@@ -211,7 +234,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-payload
-          path: dist/*-setup.exe
+          path: dist/*-setup-*.exe
 
   publish:
     needs: [macos, windows]
@@ -240,7 +263,7 @@ jobs:
         with:
           files: |
             dist/bundle/*.app.zip
-            dist/*-setup.exe
+            dist/*-setup-*.exe
             dist/latest.json
             dist/latest.json.sig
 ```
@@ -251,13 +274,13 @@ printed). This is independent of code-signing — see
 want a Developer ID-signed, notarized `.dmg`; nothing stops you from adding
 those steps to the same `macos` job.
 
-<Callout type="warn">
-  This example only publishes `win32-x64` — see [Platform
-  support](#platform-support) below for why `win32-arm64` isn't publishable
-  yet. If you build a `win32-arm64` installer too, keep it in a separate
-  output path: the NSIS filename doesn't encode architecture, so an `x64` and
-  an `arm64` build landing in the same `dist/` would overwrite each other
-  before `--manifest` ever runs.
+<Callout type="info">
+  This example only publishes `win32-x64`, but `win32-arm64` is supported too
+  (see [Platform support](#platform-support) below) — add a second `windows`
+  job (or a matrix leg) that runs `murasaki bundle --target win32-arm64` /
+  `murasaki installer --target win32-arm64` and uploads its
+  `-setup-arm64.exe` alongside the x64 one; the arch-suffixed filenames won't
+  collide in the same `dist/`.
 </Callout>
 
 ## Apply transaction and first-launch rollback
@@ -311,20 +334,104 @@ Keep `.murasaki/update-key` out of version control (`--keygen` gitignores it
 automatically) and treat `MURASAKI_UPDATE_KEY` like any other release-signing
 secret.
 
+A self-hosted `updater.endpoint` must be `https:` — `http:` is only accepted
+for loopback hosts (`127.0.0.1`, `localhost`, `[::1]`), for local testing.
+This is enforced both when your config loads and again at fetch time, so a
+config that somehow bypasses validation still can't be pointed at a plaintext
+endpoint. GitHub-hosted manifests are always fetched over `https:`, so this
+only matters if you set `endpoint` (see [Self-hosting the
+manifest](#self-hosting-the-manifest)).
+
+## Manifest freshness
+
+Every manifest that includes a `generatedAt` timestamp (written automatically
+by `murasaki release --manifest`) is checked for freshness before anything
+else: a manifest older than `updater.maxManifestAgeDays` (default 90, minimum
+1) is rejected outright, as a possibly frozen or replayed manifest — without
+this, an attacker who once captured a validly-signed old manifest could keep
+serving it forever, freezing a fleet on a known-vulnerable version. A
+manifest dated more than 24 hours in the future is also rejected, as a
+clock-skew/tampering signal (that tolerance is fixed, not configurable). A
+manifest with no `generatedAt` at all — published before this field
+existed — is still accepted for backward compatibility, but logs a
+structured warning.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  updater: {
+    maxManifestAgeDays: 30, // reject anything older than 30 days
+  },
+})
+```
+
+## Key rotation
+
+Pin more than one Ed25519 public key with `publicKeys` (up to 4 total,
+counting `publicKey`) so you can rotate keys without breaking already-shipped
+apps: verification tries every pinned key until one succeeds, so an app
+holding either the old or the new key still trusts a manifest signed with
+either one.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  updater: {
+    publicKey: 'OLD_KEY_BASE64...',      // .murasaki/update-key.pub before rotation
+    publicKeys: ['NEW_KEY_BASE64...'],   // the new key, added ahead of rotating
+  },
+})
+```
+
+`murasaki release --sign` also writes a `keyId` — the first 8 bytes (hex) of
+sha256 of the raw public key — into the manifest next to the signature, when
+`.murasaki/update-key.pub` is available. The client uses `keyId` only as a
+hint for which pinned key to try first; it always falls back to trying every
+pinned key, so a missing or stale hint never causes a false rejection.
+
+**Rotation runbook**, across three releases:
+
+1. **Version N** — ship pinning `[old, new]` (both keys), still signing with
+   the old key. Every app that installs or updates to N now trusts both
+   keys.
+2. **Version N+1** — run `murasaki release --keygen --force` (or otherwise
+   swap in the new key), then sign with the new key. Apps on N (or later)
+   already trust it; apps still behind N reject it until they update to N
+   first.
+3. **Version N+2** — drop the old key from `publicKeys`/`publicKey`,
+   pinning only the new one. By now every app that's kept up has moved past
+   the version that only knew the old key.
+
+## Staged rollout
+
+`murasaki release --manifest --rollout <0-100>` writes an optional `rollout`
+percentage into the manifest. Absent (or `100`) means every client sees the
+update immediately, same as today.
+
+Below 100, each installed app computes a stable bucket from a random id
+persisted the first time it checks (`update-client-id`, stored alongside the
+`.murasaki-apply.json` handoff file) — `sha256(id)`'s first byte, mod 100.
+A client whose bucket is `>= rollout` gets `not-available` for that check,
+exactly like "no update for your platform": no error, no retry storm, just
+try again on the next scheduled check, by which point you may have raised
+the percentage. This is a distribution knob, not a security boundary — it
+doesn't change what a client is allowed to install, only when it's offered.
+
 ## Platform support
 
 | Platform | Update payload | Status |
 | --- | --- | --- |
 | macOS (arm64) | `<productName>-darwin-arm64.app.zip` | Supported |
 | macOS (x64) | `<productName>-darwin-x64.app.zip` | Supported |
-| Windows (x64) | `<productName>-<version>-setup.exe` | Supported |
-| Windows (arm64) | — | Not yet — see below |
-| Linux | — | No app packaging in Murasaki yet |
+| Windows (x64) | `<productName>-<version>-setup-x64.exe` | Supported |
+| Windows (arm64) | `<productName>-<version>-setup-arm64.exe` | Supported |
+| Linux AppImage (x64 / arm64) | `<productName>-<version>-linux-{x64,arm64}.AppImage` | Supported |
+| Linux `.deb` / bare AppDir | — | Not applicable — `check()` reports "managed by the system package manager" |
 
-Windows arm64 has no update path today: the NSIS installer's filename doesn't
-encode architecture, so `murasaki release --manifest` can only ever produce a
-`win32-x64` entry. An arm64 Windows app checking for updates just gets
-`not-available` — it degrades gracefully, it doesn't crash or error.
+`murasaki installer` names the NSIS installer with an arch suffix so x64 and
+arm64 builds never collide in the same `dist/`; `murasaki release
+--manifest` still also recognizes the legacy un-suffixed `-setup.exe` name,
+so assets published before this change keep resolving as `win32-x64`.
 
 ## Self-hosting the manifest
 
@@ -341,7 +448,9 @@ export default defineConfig({
 ```
 
 `repo` and `endpoint` are mutually exclusive — `murasaki` throws at build/dev
-time if both are set. Run `murasaki release --manifest --base-url
+time if both are set. `endpoint` must be `https:` (see [Security
+model](#security-model) above for the loopback exception used in local
+testing). Run `murasaki release --manifest --base-url
 https://updates.example.com` and upload `dist/latest.json` +
 `dist/latest.json.sig` + the payloads to wherever that URL resolves.
 

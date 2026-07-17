@@ -1,9 +1,10 @@
 import { resolve, join, dirname, basename } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readdir, stat } from 'node:fs/promises'
+import { mkdtemp, rm, cp, copyFile, mkdir, symlink, writeFile, readFile, readdir, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { gzipSync } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { success, warn, error, dim, unsignedNote } from './brand.js'
 import bundle, { parseTarget, type Arch } from './bundle.js'
@@ -11,6 +12,7 @@ import type { MurasakiConfig } from '../config.js'
 import { resolveAssociations, windowsProgId, type ResolvedAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
 import { signWindowsArtifact } from './windows-signing.js'
+import { writeArArchive, writeUstarTar, type TarEntry } from './deb.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -21,9 +23,8 @@ const DEFAULT_ICON_SIZE = 128
  * Produce a distributable installer for `--target <platform>-<arch>` (reuses
  * `bundle`'s `--target` parsing — see bundle.ts's `parseTarget`), defaulting
  * to the host platform/`config.targets[0]` the same way `bundle` does. Routes
- * to the darwin `.dmg` path (below) or the win32 NSIS/MSI path
- * (`installerWin32`); any other target prints a "not supported yet" notice
- * and returns, same UX as `bundle`'s unsupported-target handling.
+ * to the darwin `.dmg` path (below), the win32 NSIS/MSI path
+ * (`installerWin32`), or the Linux `.deb` path (`installerLinux`).
  */
 export default async function installer(argv: string[]) {
   const cwd = process.cwd()
@@ -38,14 +39,17 @@ export default async function installer(argv: string[]) {
     return
   }
 
-  if (target.platform !== 'darwin') {
-    process.stdout.write(`\n${warn(`installer: ${target.platform} is not supported yet.`)}\n\n`)
+  if (target.platform === 'linux') {
+    if (argv.includes('--notarize')) {
+      throw new Error('murasaki: --notarize is only available for macOS DMG installers.')
+    }
+    await installerLinux(argv, cwd, config, target.arch)
     return
   }
 
   if (process.platform !== 'darwin') {
     process.stdout.write(
-      `\n${warn('installer: a .dmg can only be built while running on macOS (win32 targets can be built from any host with makensis/wix installed).')}\n\n`,
+      `\n${warn('installer: a .dmg can only be built while running on macOS (win32/Linux targets can be built from any host with the right tools installed).')}\n\n`,
     )
     return
   }
@@ -430,7 +434,7 @@ async function installerWin32(
   // asset only warns a single time (rather than once per installer type).
   const branding = resolveWindowsBranding(cwd, config, bundleDir)
 
-  const nsisPath = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding })
+  const nsisPath = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding, arch })
   if (shouldSign && nsisPath) signWindowsArtifact(nsisPath, config, cwd)
   const msiPath = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
   if (shouldSign && msiPath) signWindowsArtifact(msiPath, config, cwd)
@@ -746,9 +750,14 @@ function uninstKillFailedText(productName: string, languageName: string): string
 
 /**
  * Generates the `.nsi` script and runs `makensis` against it to produce
- * `dist/<productName>-<version>-setup.exe`. Returns `null` (without
- * throwing) if `makensis` isn't on PATH or compilation fails, so the caller
- * can fall through to the "no installer produced" notice.
+ * `dist/<productName>-<version>-setup-<arch>.exe` (arch-suffixed so a win32
+ * arm64 build's installer can't collide with — or silently overwrite — an
+ * x64 build's, and so `murasaki release --manifest` can tell the two apart;
+ * see release.ts's manifest scan, which also still recognizes the legacy
+ * un-suffixed `-setup.exe` name for already-published win32-x64 assets).
+ * Returns `null` (without throwing) if `makensis` isn't on PATH or
+ * compilation fails, so the caller can fall through to the "no installer
+ * produced" notice.
  */
 async function buildNsisInstaller(opts: {
   cwd: string
@@ -757,8 +766,9 @@ async function buildNsisInstaller(opts: {
   version: string
   bundleDir: string
   branding: WindowsBranding
+  arch: Arch
 }): Promise<string | null> {
-  const { cwd, config, productName, version, bundleDir, branding } = opts
+  const { cwd, config, productName, version, bundleDir, branding, arch } = opts
 
   const makensis = resolveMakensis()
   if (!makensis) {
@@ -769,7 +779,7 @@ async function buildNsisInstaller(opts: {
     return null
   }
 
-  const setupPath = resolve(cwd, 'dist', `${productName}-${version}-setup.exe`)
+  const setupPath = resolve(cwd, 'dist', `${productName}-${version}-setup-${arch}.exe`)
   await rm(setupPath, { force: true })
 
   const installMode = config.installer?.windows?.installMode ?? 'perUser'
@@ -1737,4 +1747,195 @@ function escapeMsiFormatted(s: string): string {
     if (character === ']') return '[\\]]'
     return character
   }).join('')
+}
+
+// ── Linux: .deb ─────────────────────────────────────────────────────────
+
+/**
+ * Linux counterpart of the darwin `.dmg`/win32 NSIS+MSI paths above:
+ * (re-)bundles via `bundle` (same re-bundle-by-default / `--no-build`
+ * convention), then packs the just-staged `dist/bundle/<productName>.AppDir/`
+ * `usr/` tree into `dist/<debName>_<version>_<debArch>.deb` — a pure-Node
+ * `ar`/ustar-tar writer (see deb.ts), no `dpkg-deb` dependency, so this
+ * cross-builds from macOS/CI the same way `bundle --target linux-*` already
+ * does. The `.AppImage` (produced by `bundle` itself, see bundle.ts's
+ * `bundleLinux`) is left as the standalone/self-updating distribution
+ * channel; this `.deb` is package-manager-owned and never carries update
+ * logic of its own (see release.ts's manifest scan, which only ever looks
+ * for `.AppImage` payloads).
+ */
+async function installerLinux(
+  argv: string[],
+  cwd: string,
+  config: MurasakiConfig,
+  arch: Arch,
+): Promise<void> {
+  const productName = config.productName
+  const version = config.version ?? '0.0.0'
+  const appDir = resolve(cwd, 'dist/bundle', `${productName}.AppDir`)
+
+  if (argv.includes('--sign')) {
+    process.stdout.write(
+      `\n${warn('installer: --sign is not implemented for Linux .deb packages yet — producing an unsigned package.')}\n`,
+    )
+  }
+
+  // Same re-bundle-by-default / --no-build convention as the darwin/win32 paths.
+  const skipBuild = argv.includes('--no-build')
+  if (!skipBuild || !existsSync(appDir)) await bundle(argv)
+
+  await mkdir(resolve(cwd, 'dist'), { recursive: true })
+
+  const debName = sanitizeDebName(productName)
+  const debArch = arch === 'arm64' ? 'arm64' : 'amd64'
+  const debPath = resolve(cwd, 'dist', `${debName}_${version}_${debArch}.deb`)
+  await rm(debPath, { force: true })
+
+  const dataEntries = await collectDebTarEntries(join(appDir, 'usr'), 'usr')
+  const dataTarGz = gzipSync(writeUstarTar(dataEntries))
+
+  const maintainer = sanitizeDebControlValue(
+    config.authors && config.authors.length > 0 ? config.authors.join(', ') : config.appId,
+  )
+  const description = sanitizeDebControlValue(
+    config.description?.trim() || `${productName} desktop application`,
+  )
+  const control = debControlFile({ debName, version, debArch, maintainer, description })
+  const md5sums = debMd5sumsFile(dataEntries)
+
+  const controlEntries: TarEntry[] = [
+    { path: '.', type: 'directory', mode: 0o755 },
+    { path: './control', type: 'file', mode: 0o644, data: Buffer.from(control, 'utf8') },
+    { path: './md5sums', type: 'file', mode: 0o644, data: Buffer.from(md5sums, 'utf8') },
+    { path: './postinst', type: 'file', mode: 0o755, data: Buffer.from(DEB_MAINTAINER_SCRIPT, 'utf8') },
+    { path: './postrm', type: 'file', mode: 0o755, data: Buffer.from(DEB_MAINTAINER_SCRIPT, 'utf8') },
+  ]
+  const controlTarGz = gzipSync(writeUstarTar(controlEntries))
+
+  const deb = writeArArchive([
+    { name: 'debian-binary', data: Buffer.from('2.0\n', 'ascii') },
+    { name: 'control.tar.gz', data: controlTarGz },
+    { name: 'data.tar.gz', data: dataTarGz },
+  ])
+  await writeFile(debPath, deb)
+
+  process.stdout.write(`\n${success(`installer written  ${dim(debPath)}`)}\n\n`)
+}
+
+/**
+ * Debian package names: lowercase letters/digits/`+`/`.`/`-`, starting with
+ * an alphanumeric (Debian Policy §5.6.7) — derived from `productName` with
+ * the same "collapse to a separator, fall back to a generic name" convention
+ * `sanitizeAssemblyName`/`sanitizeLinuxExecName` use in bundle.ts (kept as
+ * its own copy here since dpkg's charset is stricter — no underscore, and
+ * lowercase-only — matching this file's existing precedent of not sharing
+ * per-installer-format sanitizers, e.g. `resolveWindowsPublisher`'s copy).
+ */
+export function sanitizeDebName(productName: string): string {
+  const sanitized = productName.toLowerCase().replace(/[^a-z0-9+.-]+/g, '-').replace(/^[-.+]+/, '')
+  return sanitized.length > 0 ? sanitized : 'murasaki-app'
+}
+
+/** Strips embedded newlines from a control-file field value (Maintainer/Description), which would otherwise corrupt the single-line `Key: value` format. */
+function sanitizeDebControlValue(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim()
+}
+
+/** `control.tar.gz`'s `control` file — Package/Version/Architecture/Maintainer/Description plus the fixed `Section: utils` / `Priority: optional` murasaki always declares. */
+export function debControlFile(opts: {
+  debName: string
+  version: string
+  debArch: string
+  maintainer: string
+  description: string
+}): string {
+  const { debName, version, debArch, maintainer, description } = opts
+  return `Package: ${debName}
+Version: ${version}
+Architecture: ${debArch}
+Maintainer: ${maintainer}
+Description: ${description}
+Section: utils
+Priority: optional
+`
+}
+
+/**
+ * `md5sum`-format checksums of every regular file in `entries` (directories
+ * excluded), path relative to the tar root without the leading `./` — the
+ * format `dpkg` itself expects at `control.tar.gz`'s `md5sums`.
+ */
+export function debMd5sumsFile(entries: TarEntry[]): string {
+  return entries
+    .filter((entry) => entry.type === 'file')
+    .map(
+      (entry) =>
+        `${createHash('md5').update(entry.data ?? Buffer.alloc(0)).digest('hex')}  ${entry.path.replace(/^\.\//, '')}\n`,
+    )
+    .join('')
+}
+
+/** Shared by `postinst`/`postrm`: best-effort desktop-database/icon-cache refresh, guarded so a minimal system without either tool still installs/removes cleanly. */
+const DEB_MAINTAINER_SCRIPT = `#!/bin/sh
+set -e
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q /usr/share/applications || true
+fi
+
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -q -f /usr/share/icons/hicolor || true
+fi
+
+exit 0
+`
+
+/**
+ * Recursively walks `absRoot` (the AppDir's `usr/` directory) into ustar
+ * `TarEntry` objects rooted at `./<labelRoot>` (e.g. `./usr`, `./usr/bin`,
+ * `./usr/bin/<execName>`, …) — the `./`-prefixed path convention real
+ * `dpkg-deb`-built `data.tar.gz` archives use. Regular files keep whatever
+ * executable bit they already have on disk (755 for the launcher binary/
+ * Node runtime, 644 for everything else); directories are always 755.
+ */
+async function collectDebTarEntries(absRoot: string, labelRoot: string): Promise<TarEntry[]> {
+  const entries: TarEntry[] = []
+
+  async function walk(absDir: string, relPath: string): Promise<void> {
+    const dirStat = await stat(absDir)
+    entries.push({
+      path: `./${relPath}`,
+      type: 'directory',
+      mode: 0o755,
+      mtime: Math.floor(dirStat.mtimeMs / 1000),
+    })
+
+    const children = (await readdir(absDir, { withFileTypes: true })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )
+    for (const child of children) {
+      const absChild = join(absDir, child.name)
+      const relChild = `${relPath}/${child.name}`
+      if (child.isDirectory()) {
+        await walk(absChild, relChild)
+      } else if (child.isFile()) {
+        const fileStat = await stat(absChild)
+        const executable = (fileStat.mode & 0o111) !== 0
+        entries.push({
+          path: `./${relChild}`,
+          type: 'file',
+          mode: executable ? 0o755 : 0o644,
+          mtime: Math.floor(fileStat.mtimeMs / 1000),
+          data: await readFile(absChild),
+        })
+      }
+      // Symlinks aren't expected under an AppDir's usr/ tree (the AppImage-
+      // specific .DirIcon symlink lives at the AppDir root, outside usr/) —
+      // skipped rather than erroring, matching this file's existing
+      // best-effort posture for unexpected entry kinds (see collectWxsTree).
+    }
+  }
+
+  await walk(absRoot, labelRoot)
+  return entries
 }

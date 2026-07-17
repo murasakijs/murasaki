@@ -98,7 +98,7 @@ Windows `.ico` (embedded into the `.exe`).
 
 ```bash
 murasaki release --keygen [--force]
-murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory] [--rollout <0-100>]
 murasaki release --sign
 ```
 
@@ -111,10 +111,15 @@ Three independent modes for publishing signed auto-updates — see the
   key once with instructions to store it as a `MURASAKI_UPDATE_KEY` GitHub
   secret. Refuses to overwrite an existing key without `--force`.
 - **`--manifest`** — scans `dist/` for this version's payloads (the macOS
-  `.app.zip`, the Windows `-setup.exe`), hashes whichever exist, and writes
-  `dist/latest.json`. Missing targets are skipped, not errors.
+  `.app.zip`, the Windows `-setup-<arch>.exe` — the legacy un-suffixed
+  `-setup.exe` name is still recognized for win32-x64), hashes whichever
+  exist, and writes `dist/latest.json` with a `generatedAt` timestamp.
+  Missing targets are skipped, not errors. `--rollout <0-100>` writes an
+  optional staged-rollout percentage.
 - **`--sign`** — signs `dist/latest.json` into `dist/latest.json.sig`. Key
-  from `$MURASAKI_UPDATE_KEY`, falling back to `.murasaki/update-key`.
+  from `$MURASAKI_UPDATE_KEY`, falling back to `.murasaki/update-key`. Also
+  writes a `keyId` rotation hint into the manifest when
+  `.murasaki/update-key.pub` is available.
 
 `--generate-manifest` still works as a deprecated alias of `--manifest`.
 

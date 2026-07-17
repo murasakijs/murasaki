@@ -87,6 +87,11 @@ export function parseShortcut(spec: string): {
   let keyIndex = tokens.length - 1
   while (keyIndex > 0 && MODIFIER_TOKENS.has(tokens[keyIndex])) keyIndex--
   const keyToken = tokens[keyIndex] ?? ''
+  if (keyToken === '' || MODIFIER_TOKENS.has(keyToken)) {
+    throw new TypeError(
+      `invalid shortcut spec ${JSON.stringify(spec)}: a shortcut needs one non-modifier key token (e.g. "command,R")`,
+    )
+  }
   const modifierTokens = tokens.filter((_, i) => i !== keyIndex)
 
   const mac = isMac()

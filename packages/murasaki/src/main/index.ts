@@ -1,5 +1,6 @@
 import type { MainLogger } from './logger.js'
 import type { SidecarSupervisor } from './sidecar.js'
+import type { CrashDiagnosticsApi } from './crash-reports.js'
 
 export {
   createMainLogger,
@@ -8,6 +9,13 @@ export {
   type MainLogger,
   type MainLoggerOptions,
 } from './logger.js'
+
+export {
+  type CrashDiagnosticsApi,
+  type CrashReport,
+  type CrashReportDomain,
+  type CrashReportSummary,
+} from './crash-reports.js'
 
 export {
   createSidecarSupervisor,
@@ -38,6 +46,8 @@ export interface MainContext {
   }
   /** Structured rotating log plus an opt-in diagnostic report generator. */
   log: MainLogger
+  /** Local crash report capture (Node, native, and prod renderer domains). Murasaki never transmits these. */
+  diagnostics: CrashDiagnosticsApi
   /** Supervises executable resources without a shell and stops them with the app. */
   sidecars: SidecarSupervisor
   /** Aborted after `beforeQuit`, or when the total quit-hook deadline expires. */

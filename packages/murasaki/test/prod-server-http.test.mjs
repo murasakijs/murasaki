@@ -20,6 +20,7 @@ async function copyMainRuntimeFixture(root) {
     copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(runtimeDir, 'main-runtime.js')),
     copyFile(join(packageDir, 'dist/main/logger.js'), join(mainDir, 'logger.js')),
     copyFile(join(packageDir, 'dist/main/sidecar.js'), join(mainDir, 'sidecar.js')),
+    copyFile(join(packageDir, 'dist/main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
     writeFile(join(runtimeRoot, 'package.json'), '{"private":true,"type":"module"}\n'),
   ])
 }

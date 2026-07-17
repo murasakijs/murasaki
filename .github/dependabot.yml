@@ -1,0 +1,43 @@
+# https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+version: 2
+updates:
+  # pnpm workspace root. Dependabot follows the pnpm workspace graph from a
+  # single root `directory`, so every package under apps/*, packages/*,
+  # examples/*, and crates/native's package.json is covered from here.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    # Major version bumps are intentionally left out of the group above so
+    # each lands as its own individually reviewable pull request.
+
+  - package-ecosystem: "cargo"
+    directory: "/crates/native"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

@@ -51,10 +51,10 @@ await shell.showItemInFolder(files[0])
 | API | 操作 |
 | --- | --- |
 | `app` | `quit`（gracefulなapplication shutdown） |
-| `dialog` | `openFile`, `openDirectory`, `saveFile` |
-| `clipboard` | `readText`, `writeText` |
-| `notification` | `show` |
-| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder` |
+| `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage`(ネイティブOSメッセージボックス) |
+| `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
+| `notification` | `show`(ローカル生成idを返す) |
+| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder`, `trashItem`, `openPath` |
 | `secureStorage` | string値向けのOS-backed `get`, `set`, `delete` |
 | `systemPermission` | macOSのcamera / microphone / screen recording / accessibility向け`status`, `request` |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
@@ -64,6 +64,28 @@ await shell.showItemInFolder(files[0])
 
 `app.quit()` とrootの `quit()` helperはいずれも `app:quit` が必要です。権限のない
 secondary rendererからapplication全体を終了することはできません。
+
+`dialog.showMessage({ title?, message, level?, buttons? })` はネイティブな
+main-thread message boxを表示します(`level`は既定`'info'`、`buttons`は既定`'ok'`)。
+押されたbuttonに解決されます(`'ok' | 'cancel' | 'yes' | 'no'`)。`title`は256
+UTF-8 byte、`message`は4096 UTF-8 byteまでで、どちらも制御文字は拒否されます
+(改行は`message`のみ許可)。`dialog:message`が必要です。
+
+`clipboard.readImage()` は `{ width, height, pngBase64 }` または、clipboardに
+imageがない場合は`null`を返します。`clipboard.writeImage({ pngBase64 })`
+はデコードしてclipboard imageを置き換えます(デコード後のpixelは64 MiB、各辺は
+16,384pxまで)。`clipboard.writeHtml({ html, altText? })` はHTMLと任意の
+plain-text fallbackを書き込みます(`html`は1 MiB、`altText`は64 KiBまで)。
+それぞれ `clipboard:readImage`, `clipboard:writeImage`, `clipboard:writeHtml`
+が必要です。
+
+`shell.trashItem(path)` は既存のfile / directoryをOSのtrash・recycle binへ
+移動します。`shell.openPath(path)` は既存のlocal file / directoryをOSの既定
+handlerで開きます(ダブルクリックと同様)。どちらもabsoluteでtraversalしない、
+実在するpathが必要です。`shell.showItemInFolder`と同様、`shell:trashItem` /
+`shell:openPath` capabilityは許可するpath subtreeへscopeできます。
+`shell.openPath` はURLとしてparseできるものやUNCのnetwork / device pathも
+拒否します。URLを開く場合は`shell.openExternal`を使ってください。
 
 <Callout type="warning">
   **0.50 migration:** 以前の`quit()`はpermissionなしのraw IPCを送っていました。
@@ -85,8 +107,11 @@ secondary rendererからapplication全体を終了することはできません
 
 信頼済みrendererがrefresh token、license値などの短いstringを永続化する必要があり、plain
 fileへ保存したくない場合は`secureStorage`を使います。macOSではKeychain、Windowsでは
-Credential Managerを使用します。Linuxなど未対応platformは明示的な`unsupported` errorを
-返し、Murasakiがplaintext fileへfallbackすることはありません。
+Credential Manager、Linuxではfreedesktop.orgのSecret Service D-Bus API
+(gnome-keyring、KWallet、KeePassXCなど)を使用します。Linuxでは稼働中のSecret Service
+providerが必要で、到達できない場合はすべての呼び出しがstructured errorで失敗します。その他の
+未対応platformは明示的な`unsupported` errorを返します。どのplatformでもMurasakiが
+plaintext fileへfallbackすることはありません。
 
 ```ts
 import { secureStorage } from 'murasaki/native'
@@ -174,12 +199,20 @@ export default defineConfig({
 `template` はmacOS専用です。もう一度 `create` すると既存アイコンを置き換えます。
 tray menuはevent駆動で、click可能な項目には一意な`id`が必要です。quitなどのprivileged
 actionは、それぞれ本来のnative capabilityを通過します。process-wide iconを作成した
-rendererを閉じるとiconも削除されます。Linux trayは未対応です。
+rendererを閉じるとiconも削除されます。
+
+<Callout type="warn">
+  Linuxのtrayはlibappindicatorを使うため、AppIndicatorをホストする環境が必要です
+  (GNOMEではAppIndicator/KStatusNotifierItem Shell拡張機能が必要)。tray menuのclickと
+  動的なicon/menu差し替えはmacOS/Windowsと同様に動作しますが、tray icon自体の
+  click/double-click eventはLinuxでは発火しません — AppIndicatorには「attach済みmenuを
+  表示する」以外のsignalがないためです。
+</Callout>
 
 ## グローバルショートカット
 
-信頼済みclient componentから、macOS / Windowsのprocess-wide shortcutを登録できます。
-登録と解除は別々のdeny-by-default capabilityです。
+信頼済みclient componentから、macOS / Windows / Linux(X11/XWayland)の
+process-wide shortcutを登録できます。登録と解除は別々のdeny-by-default capabilityです。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -224,18 +257,26 @@ export function CaptureShortcut() {
 ```
 
 `register(accelerator, id?)`は`{ id, accelerator }`を返します。返されるacceleratorは
-platform解決済みのcanonical値で、`CmdOrCtrl`はmacOSでCommand、WindowsでControlに
+platform解決済みのcanonical値で、`CmdOrCtrl`はmacOSでCommand、Windows/LinuxでControlに
 なります。`id`省略時はcanonical acceleratorがidです。`unregisterAll()`が解除するのは
 呼び出したrendererの登録だけで、他windowの登録には触れません。
 
 acceleratorは上限付きASCII stringで、1〜4個のmodifierの後に既知のkeyを1個置きます。
 modifier重複、keyだけのshortcut、不正・未知のkey、lifecycle / OS予約chord（Command+Q、
-Alt+F4など）、重複id、重複accelerator、他appが取得済みのchordは拒否されます。同時登録は
+Alt+F4など。LinuxにはOS-levelの予約listがありません — desktop環境ごとに異なるためです）、
+重複id、重複accelerator、他appが取得済みのchordは拒否されます。同時登録は
 processあたり64件までです。idは1〜128文字で、英数字と`.`、`_`、`:`、`-`、`+`を使えます。
 
 所有権はrenderer windowに紐づき、close / disposeでその登録を自動解除し、app shutdownで
 全登録を解除します。trigger eventはlive-onlyかつownerだけに届き、reload後のreplayは
-ありません。Linuxは未実装です。
+ありません。
+
+<Callout type="warn">
+  LinuxのグローバルショートカットはX11またはXWayland必須です(内部で使用するcrateに
+  ネイティブなWayland backendがないため)。純粋なWaylandセッション(`WAYLAND_DISPLAY`が
+  設定され`DISPLAY`が未設定)では、`register`は何も登録せず失敗するのではなく、
+  structuredな`unsupported` errorを返します。
+</Callout>
 
 <Callout type="info">
   parser、所有権、capability、macOS build、Windows x64/arm64 buildは自動検証します。

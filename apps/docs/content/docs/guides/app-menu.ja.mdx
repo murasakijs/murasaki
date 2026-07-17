@@ -125,7 +125,10 @@ interface AppMenuEntry {
 - **Windows** — ウィンドウ内の `HMENU` バー。OS のクラシックなスタイルを引き継ぎ、
   ダークモードには追従しません。`close` roleはsecondaryをhideして再open可能にし、
   primaryの `main` closeと`quit`はapp lifecycleへ進みます。
-- **Linux** — デフォルトのメニューバーはまだありません。
+- **Linux** — ウィンドウ内の GTK メニューバー。Windows と同じ File/Edit/Window の
+  プレーンな構成で、macOS のような太字のアプリ名サブメニューはありません。Edit role の
+  項目はネイティブのレスポンダーチェーンではなく、フォーカス中の webview で
+  `document.execCommand` を実行します。
 
 ## 次へ
 

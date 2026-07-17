@@ -10,21 +10,25 @@
 //! Mirrors `packages/murasaki/assets/prod-launcher.mjs` closely: spawns
 //! `prod-server.mjs` as a child process, reads the assigned port off a
 //! `MURASAKI_PORT=<n>` stdout line, then opens a webview pointed at
-//! `http://127.0.0.1:<port>/`. macOS and Windows share that
+//! `http://127.0.0.1:<port>/`. macOS, Windows, and Linux share that
 //! resources-dir → spawn-node → read-port sequence (the `shared` module
-//! below, identical pure `std::process`/IO on both); everything past that —
-//! building the window/webview and any native chrome (Dock, app menu, About
-//! panel) — is per-OS in `imp_macos`/`imp_win`, since only macOS currently
-//! wires up a native menu bar / About panel. (The right-click context menu is
-//! a separate story — `webview::show_context_menu` — and is implemented on
-//! both macOS and Windows; both `imp_macos`/`imp_win` build their webview via
-//! the same `crate::webview::Webview::new`, so this launcher gets it for
-//! free.) The default-menu locale resolution mirrors
-//! `packages/murasaki/src/menu-i18n.ts` — also macOS-only for now, see
-//! `imp_win`'s doc comment for what's deferred.
+//! below, identical pure `std::process`/IO on all three); everything past
+//! that — building the window/webview and any native chrome (Dock/app menu
+//! on macOS, the File/Edit/Window menu bar on Windows/Linux) — is per-OS in
+//! `imp_macos`/`imp_win`/`imp_linux`. (The right-click context menu is a
+//! separate story — `webview::show_context_menu` — and is implemented on all
+//! three; every per-OS launcher builds its webview via the same
+//! `crate::webview::Webview::new`, so this launcher gets it for free.) The
+//! default-menu locale resolution mirrors `packages/murasaki/src/menu-i18n.ts`
+//! for macOS/Windows; `imp_linux` has its own POSIX env-var fallback chain
+//! instead (see that module's `detect_locale`).
 //!
-//! Linux packaging is Phase 3; `run_launcher` is a no-op stub there (and
-//! everywhere else) so the crate still builds wherever the GUI stack does.
+//! `imp_linux` resolves its own resources directory differently from
+//! `imp_macos`/`imp_win` (see `imp_linux::resolve_resources_dir`'s doc
+//! comment) and only supports self-update for the AppImage packaging format
+//! (see `updater.rs`'s `apply_linux`) — a `.deb` install or bare AppDir has
+//! no running `.AppImage` file to swap, so `runtime/updater.ts`'s `check()`
+//! reports those as managed by the system package manager instead.
 
 /// Cross-platform core shared by `imp_macos` and `imp_win`: reading
 /// `murasaki-meta.json` and spawning `prod-server.mjs`. Pure
@@ -43,16 +47,16 @@ pub(crate) mod shared {
         process::{Child, Command, Stdio},
         sync::{
             atomic::{AtomicBool, Ordering},
-            mpsc, Arc,
+            mpsc, Arc, Mutex, OnceLock,
         },
         thread,
-        time::Duration,
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use fs2::FileExt;
     use serde::{Deserialize, Serialize};
 
-    use crate::types::{MenuLabels, WebviewProxyOptions};
+    use crate::types::{MenuLabels, WebviewDownloadsOptions, WebviewProxyOptions};
     use crate::window::{WindowControlCommand, WindowLifecycleEvent};
 
     const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 10_000;
@@ -77,6 +81,13 @@ pub(crate) mod shared {
         pub(super) product_name: String,
         #[serde(default)]
         pub(super) version: Option<String>,
+        /// murasaki's own version (not `version` above, the app's) — written by
+        /// `cli/bundle.ts`'s `metaJson` via `murasakiVersion()`. Used only for
+        /// crash reports' `frameworkVersion` field.
+        #[serde(default)]
+        pub(super) framework_version: Option<String>,
+        #[serde(default)]
+        pub(super) diagnostics: DiagnosticsMeta,
         #[serde(default)]
         pub(super) description: Option<String>,
         #[serde(default)]
@@ -101,6 +112,16 @@ pub(crate) mod shared {
         pub(super) transparent: Option<bool>,
         #[serde(default)]
         pub(super) vibrancy: Option<String>,
+        #[serde(default)]
+        pub(super) decorations: Option<bool>,
+        #[serde(default)]
+        pub(super) title_bar_style: Option<String>,
+        #[serde(default)]
+        pub(super) max_width: Option<i32>,
+        #[serde(default)]
+        pub(super) max_height: Option<i32>,
+        #[serde(default)]
+        pub(super) fullscreen: Option<bool>,
         #[serde(default)]
         pub(super) icon: Option<String>,
         #[serde(default)]
@@ -138,6 +159,24 @@ pub(crate) mod shared {
         pub(super) incognito: Option<bool>,
         #[serde(default)]
         pub(super) proxy: Option<WebviewProxyOptions>,
+        #[serde(default)]
+        pub(super) downloads: Option<WebviewDownloadsOptions>,
+        #[serde(default)]
+        pub(super) init_scripts: Option<Vec<String>>,
+        #[serde(default)]
+        pub(super) hotkeys_zoom: Option<bool>,
+    }
+
+    /// Fully-resolved by `cli/bundle.ts`'s `resolveDiagnosticsConfig` (defaults
+    /// already applied), but every field still tolerates a missing key so an
+    /// older `murasaki-meta.json` (before this feature shipped) still parses.
+    #[derive(Clone, Default, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub(super) struct DiagnosticsMeta {
+        #[serde(default)]
+        pub(super) crash_reports: Option<bool>,
+        #[serde(default)]
+        pub(super) keep_reports: Option<u32>,
     }
 
     pub(super) fn main_shutdown_transport_timeout(meta: &Meta) -> Result<Duration, String> {
@@ -183,6 +222,16 @@ pub(crate) mod shared {
         #[serde(default)]
         pub(super) vibrancy: Option<String>,
         #[serde(default)]
+        pub(super) decorations: Option<bool>,
+        #[serde(default)]
+        pub(super) title_bar_style: Option<String>,
+        #[serde(default)]
+        pub(super) max_width: Option<i32>,
+        #[serde(default)]
+        pub(super) max_height: Option<i32>,
+        #[serde(default)]
+        pub(super) fullscreen: Option<bool>,
+        #[serde(default)]
         pub(super) capabilities: Option<Vec<String>>,
         #[serde(default)]
         pub(super) capability_policy: Option<String>,
@@ -218,6 +267,11 @@ pub(crate) mod shared {
                 resizable: meta.resizable,
                 transparent: meta.transparent,
                 vibrancy: meta.vibrancy.clone(),
+                decorations: meta.decorations,
+                title_bar_style: meta.title_bar_style.clone(),
+                max_width: meta.max_width,
+                max_height: meta.max_height,
+                fullscreen: meta.fullscreen,
                 capabilities: meta.capabilities.clone(),
                 capability_policy: meta.capability_policy.clone(),
             }]
@@ -459,10 +513,12 @@ pub(crate) mod shared {
         let _ = console;
 
         // Keep the bundled Node runtime and every sidecar it spawns in one
-        // process group. If Node crashes independently, the macOS launcher can
-        // tear down the whole backend tree before closing its WebViews instead
-        // of leaving orphaned sidecars behind.
-        #[cfg(target_os = "macos")]
+        // process group. If Node crashes independently, the macOS/Linux
+        // launcher can tear down the whole backend tree before closing its
+        // WebViews instead of leaving orphaned sidecars behind. Windows has no
+        // process-group equivalent here — see `win_job` for its Job Object
+        // approach instead.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
@@ -1152,12 +1208,13 @@ pub(crate) mod shared {
         }
     }
 
-    /// Stop and reap the complete packaged backend tree on macOS. Other
-    /// platforms still reap the direct child here; Windows additionally
-    /// terminates its Job Object at the call sites so descendants cannot live
-    /// past a clean or failed handoff.
+    /// Stop and reap the complete packaged backend tree on macOS/Linux (both
+    /// POSIX, both given their own process group by `spawn_prod_server`).
+    /// Windows has no process-group equivalent, so it still just reaps the
+    /// direct child here; it additionally terminates its Job Object at the
+    /// call sites so descendants cannot live past a clean or failed handoff.
     pub(super) fn terminate_and_wait_child(child: &mut Child) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let process_group = -(child.id() as i32);
             // SAFETY: `spawn_prod_server` created the child as leader of this
@@ -1165,7 +1222,7 @@ pub(crate) mod shared {
             // cannot be ignored by a stuck sidecar.
             let _ = unsafe { libc::kill(process_group, libc::SIGKILL) };
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -1182,6 +1239,421 @@ pub(crate) mod shared {
 
     pub(super) fn shutdown_allows_update(transport_error: &Option<String>) -> bool {
         transport_error.is_none()
+    }
+
+    // ── Crash diagnostics (native domain) ──────────────────────────────────
+    //
+    // Mirrors `packages/murasaki/src/main/crash-reports.ts`'s report shape and
+    // storage convention exactly (`<appData>/<appId>/crash-reports/<safe-ISO-
+    // timestamp>-native.json`) so `MainContext.diagnostics` reads native
+    // reports the same way it reads Node/renderer ones. This crate has no
+    // date/time or app-dirs dependency, so both the timestamp formatter below
+    // and `app_data_dir` are small hand-rolled equivalents of what Node's
+    // `resolveAppPaths`/`Date.prototype.toISOString` already do — see that
+    // function's doc comment in `runtime/main-runtime.ts`.
+    //
+    // Every function here is best-effort: a crash report must never itself
+    // become a second crash, so all I/O failures are silently ignored.
+
+    const CRASH_REPORT_VERSION: u32 = 1;
+    const MAX_CRASH_MESSAGE_CHARS: usize = 8 * 1024;
+    const MAX_CRASH_VERSION_CHARS: usize = 256;
+    const DEFAULT_KEEP_CRASH_REPORTS: u32 = 20;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NativeCrashReport {
+        report_version: u32,
+        domain: &'static str,
+        timestamp: String,
+        app_version: String,
+        framework_version: String,
+        os: String,
+        arch: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stack: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        extra: Option<serde_json::Value>,
+    }
+
+    /// Truncates by character count (not bytes) — an approximation of the
+    /// TS side's UTF-16-length bound, consistent enough for a best-effort
+    /// diagnostic string that is never round-tripped byte-exactly.
+    fn bounded_chars(value: &str, max_chars: usize) -> String {
+        if value.chars().count() <= max_chars {
+            return value.to_string();
+        }
+        let truncated: String = value.chars().take(max_chars).collect();
+        format!("{truncated}…[truncated]")
+    }
+
+    /// Minimal UTC `YYYY-MM-DDTHH:MM:SS.mmmZ` formatter — see the module doc
+    /// comment above for why this crate hand-rolls it instead of adding a
+    /// date/time dependency for one timestamp.
+    fn iso8601_utc_now() -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let millis = now.as_millis();
+        let secs = (millis / 1000) as i64;
+        let ms = (millis % 1000) as u32;
+        let days = secs.div_euclid(86_400);
+        let secs_of_day = secs.rem_euclid(86_400);
+        let (year, month, day) = civil_from_days(days);
+        let hour = secs_of_day / 3600;
+        let minute = (secs_of_day % 3600) / 60;
+        let second = secs_of_day % 60;
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{ms:03}Z")
+    }
+
+    /// Howard Hinnant's public-domain `civil_from_days`: days since the Unix
+    /// epoch (1970-01-01) -> proleptic-Gregorian (year, month, day).
+    fn civil_from_days(z: i64) -> (i64, u32, u32) {
+        let z = z + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = (z - era * 146_097) as u64; // [0, 146096]
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
+        let y = yoe as i64 + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+        let mp = (5 * doy + 2) / 153; // [0, 11]
+        let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+        let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+        let year = if m <= 2 { y + 1 } else { y };
+        (year, m, d)
+    }
+
+    /// Filename-safe transform matching the TS writer's
+    /// `timestamp.replace(/[:.]/g, '-')` exactly, so filenames sort/compare
+    /// identically regardless of which side wrote them.
+    fn safe_timestamp_component(timestamp: &str) -> String {
+        timestamp.replace([':', '.'], "-")
+    }
+
+    fn build_crash_report(
+        domain: &'static str,
+        message: &str,
+        stack: Option<String>,
+        extra: Option<serde_json::Value>,
+        app_version: &str,
+        framework_version: &str,
+    ) -> NativeCrashReport {
+        NativeCrashReport {
+            report_version: CRASH_REPORT_VERSION,
+            domain,
+            timestamp: iso8601_utc_now(),
+            app_version: bounded_chars(app_version, MAX_CRASH_VERSION_CHARS),
+            framework_version: bounded_chars(framework_version, MAX_CRASH_VERSION_CHARS),
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+            message: bounded_chars(message, MAX_CRASH_MESSAGE_CHARS),
+            stack,
+            extra,
+        }
+    }
+
+    /// Panic message, source location, and thread name captured by the panic
+    /// hook — kept separate from `std::panic::PanicHookInfo` (which has no
+    /// public constructor) so the serialization below stays unit-testable.
+    pub(super) struct NativePanicDetails {
+        pub(super) message: String,
+        pub(super) location: Option<String>,
+        pub(super) thread_name: String,
+    }
+
+    /// Pure — no I/O — so this is the part unit tests exercise directly.
+    pub(super) fn native_panic_report_json(
+        details: &NativePanicDetails,
+        app_version: &str,
+        framework_version: &str,
+    ) -> String {
+        let extra = serde_json::json!({
+            "location": details.location,
+            "threadName": details.thread_name,
+        });
+        let report = build_crash_report(
+            "native",
+            &details.message,
+            None,
+            Some(extra),
+            app_version,
+            framework_version,
+        );
+        serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Pure — no I/O — companion to `native_panic_report_json` for the
+    /// unexpected-Node-exit path (message + `status`'s exit code/signal text).
+    pub(super) fn node_exit_report_json(
+        message: &str,
+        status: &str,
+        app_version: &str,
+        framework_version: &str,
+    ) -> String {
+        let extra = serde_json::json!({ "exitStatus": status });
+        let report = build_crash_report(
+            "native",
+            message,
+            None,
+            Some(extra),
+            app_version,
+            framework_version,
+        );
+        serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Mirrors the TS writer's charset allowlist exactly — the only thing
+    /// standing between a crash-report filename and path traversal, since
+    /// `MainContext.diagnostics.readCrashReport(id)` joins `id` onto the
+    /// directory unchanged.
+    fn is_valid_crash_report_filename(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_alphanumeric()
+            && name.len() <= 200
+            && name.ends_with(".json")
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+    }
+
+    /// Keeps the newest `keep_reports` files (by sorted, timestamp-prefixed
+    /// name) in `dir` and removes the rest. Shared with the TS-side writer's
+    /// rotation, which applies the same policy to the same directory.
+    fn rotate_crash_reports(dir: &Path, keep_reports: u32) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| is_valid_crash_report_filename(name))
+            .collect();
+        names.sort();
+        let keep = keep_reports.max(1) as usize;
+        if names.len() <= keep {
+            return;
+        }
+        for name in &names[..names.len() - keep] {
+            let _ = fs::remove_file(dir.join(name));
+        }
+    }
+
+    /// Writes one native crash report synchronously and atomically (a temp
+    /// file, then a rename), then rotates. Best-effort throughout: any
+    /// failure here is silently ignored rather than risking a crash inside
+    /// crash reporting.
+    fn write_native_crash_report(dir: &Path, report_json: &str, keep_reports: u32) {
+        if fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        let filename = format!(
+            "{}-native.json",
+            safe_timestamp_component(&iso8601_utc_now())
+        );
+        let final_path = dir.join(&filename);
+        let temp_path = dir.join(format!(".{filename}.tmp-{}", std::process::id()));
+        if fs::write(&temp_path, report_json).is_err() {
+            return;
+        }
+        if fs::rename(&temp_path, &final_path).is_err() {
+            let _ = fs::remove_file(&temp_path);
+            return;
+        }
+        rotate_crash_reports(dir, keep_reports);
+    }
+
+    /// App-scoped context the panic hook and unexpected-Node-exit path read
+    /// from — set once `murasaki-meta.json` has been parsed (see
+    /// `set_crash_context`'s call sites in `imp_macos`/`imp_win`). `None`
+    /// until then, so a panic before that point is a best-effort no-op for
+    /// report writing (the default panic hook still runs — see
+    /// `install_panic_hook`).
+    #[derive(Clone)]
+    struct CrashContext {
+        dir: PathBuf,
+        app_version: String,
+        framework_version: String,
+        keep_reports: u32,
+    }
+
+    static CRASH_CONTEXT: OnceLock<Mutex<Option<CrashContext>>> = OnceLock::new();
+
+    /// Called once `resources_dir`/`meta` are known and diagnostics are
+    /// enabled (`meta.diagnostics.crashReports`, default `true`). Skipping
+    /// this call entirely (when disabled) keeps the panic hook and
+    /// unexpected-exit path pure no-ops, mirroring the Node side's "don't even
+    /// install the hooks" opt-out.
+    pub(super) fn set_crash_context(
+        dir: PathBuf,
+        app_version: String,
+        framework_version: String,
+        keep_reports: u32,
+    ) {
+        let cell = CRASH_CONTEXT.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = cell.lock() {
+            *guard = Some(CrashContext {
+                dir,
+                app_version,
+                framework_version,
+                keep_reports,
+            });
+        }
+    }
+
+    fn crash_context() -> Option<CrashContext> {
+        CRASH_CONTEXT.get()?.lock().ok()?.clone()
+    }
+
+    fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
+        if let Some(message) = info.payload().downcast_ref::<&str>() {
+            (*message).to_string()
+        } else if let Some(message) = info.payload().downcast_ref::<String>() {
+            message.clone()
+        } else {
+            "native panic".to_string()
+        }
+    }
+
+    /// Installs the panic hook as early as `run_launcher` can (see that
+    /// function): writes a `native` crash report (best-effort — a no-op until
+    /// `set_crash_context` has run), then always defers to the previously
+    /// installed hook so default panic/abort behavior — printing to stderr and
+    /// unwinding/aborting — is completely unchanged.
+    pub(super) fn install_panic_hook() {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if let Some(context) = crash_context() {
+                let details = NativePanicDetails {
+                    message: panic_message(info),
+                    location: info.location().map(|location| {
+                        format!(
+                            "{}:{}:{}",
+                            location.file(),
+                            location.line(),
+                            location.column()
+                        )
+                    }),
+                    thread_name: thread::current().name().unwrap_or("<unnamed>").to_string(),
+                };
+                let json = native_panic_report_json(
+                    &details,
+                    &context.app_version,
+                    &context.framework_version,
+                );
+                write_native_crash_report(&context.dir, &json, context.keep_reports);
+            }
+            default_hook(info);
+        }));
+    }
+
+    /// Called from every `poll_unexpected_child_exit` branch that observed the
+    /// bundled Node process exit (both before the startup health checkpoint
+    /// and during the running event loop, on both macOS and Windows).
+    /// Best-effort no-op if diagnostics are disabled or context isn't set yet.
+    /// Only exit code/signal metadata is captured — reading and tailing
+    /// Node's own log file would need a second, log-directory-specific
+    /// `app_*_dir` resolution in this crate for comparatively little extra
+    /// value, so it's deliberately left to Node's own crash report (written
+    /// before it exits) plus `MainContext.log`.
+    pub(super) fn report_unexpected_node_exit(message: &str, status: &str) {
+        if let Some(context) = crash_context() {
+            let json = node_exit_report_json(
+                message,
+                status,
+                &context.app_version,
+                &context.framework_version,
+            );
+            write_native_crash_report(&context.dir, &json, context.keep_reports);
+        }
+    }
+
+    /// Mirrors `runtime/main-runtime.ts`'s `resolveAppPaths().data` for this
+    /// process's own crash-report writes — same base directory, so
+    /// `MainContext.diagnostics` reads native reports out of the exact
+    /// directory this launcher wrote them into. Returns `None` when the
+    /// platform's home/profile directory can't be resolved (best-effort; the
+    /// caller simply skips crash context setup in that case).
+    pub(super) fn app_data_dir(app_id: &str) -> Option<PathBuf> {
+        let safe_id = safe_app_id(app_id);
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var_os("HOME")?;
+            Some(
+                PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join(safe_id),
+            )
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var_os("APPDATA")?;
+            Some(PathBuf::from(appdata).join(safe_id))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
+                return Some(PathBuf::from(xdg_data_home).join(safe_id));
+            }
+            let home = std::env::var_os("HOME")?;
+            Some(
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join(safe_id),
+            )
+        }
+    }
+
+    /// Mirrors `resolveAppPaths`'s `appId.replace(/[^A-Za-z0-9._-]/g, '_') ||
+    /// 'murasaki-app'` exactly.
+    fn safe_app_id(app_id: &str) -> String {
+        let mapped: String = app_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if mapped.is_empty() {
+            "murasaki-app".to_string()
+        } else {
+            mapped
+        }
+    }
+
+    /// Resolves `app_data_dir(app_id)/crash-reports` and calls
+    /// `set_crash_context` when `meta.diagnostics.crashReports` allows it
+    /// (default `true`) and the directory could be resolved — a no-op
+    /// otherwise, which keeps the panic hook and unexpected-exit path inert.
+    /// Shared by `imp_macos`/`imp_win`'s `run_inner`, called right after
+    /// `read_meta` succeeds.
+    pub(super) fn init_crash_context(app_id: &str, meta: &Meta) {
+        if !meta.diagnostics.crash_reports.unwrap_or(true) {
+            return;
+        }
+        let Some(dir) = app_data_dir(app_id) else {
+            return;
+        };
+        let keep_reports = meta
+            .diagnostics
+            .keep_reports
+            .unwrap_or(DEFAULT_KEEP_CRASH_REPORTS)
+            .clamp(1, 100);
+        set_crash_context(
+            dir.join("crash-reports"),
+            meta.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
+            meta.framework_version
+                .clone()
+                .unwrap_or_else(|| "0.0.0".to_string()),
+            keep_reports,
+        );
     }
 
     /// Checked on every clean exit path — `{ kind: "appQuit" }` and
@@ -1399,10 +1871,13 @@ pub(crate) mod shared {
         };
 
         use super::{
-            app_instance_key, app_origin_port, discard_apply_handoff,
-            main_shutdown_transport_timeout, open_targets_from_args, poll_unexpected_child_exit,
-            request_main_shutdown, resolve_windows, runtime_token, shutdown_allows_update, Meta,
-            OpenTarget, ShutdownCompletion, ShutdownCoordinator, ShutdownPoll,
+            app_data_dir, app_instance_key, app_origin_port, crash_context, discard_apply_handoff,
+            init_crash_context, is_valid_crash_report_filename, main_shutdown_transport_timeout,
+            native_panic_report_json, node_exit_report_json, open_targets_from_args,
+            poll_unexpected_child_exit, request_main_shutdown, resolve_windows,
+            rotate_crash_reports, runtime_token, shutdown_allows_update, write_native_crash_report,
+            Meta, NativePanicDetails, OpenTarget, ShutdownCompletion, ShutdownCoordinator,
+            ShutdownPoll,
         };
 
         #[test]
@@ -1727,6 +2202,55 @@ pub(crate) mod shared {
         }
 
         #[test]
+        fn window_metadata_parses_frameless_titlebar_max_size_and_fullscreen_fields() {
+            let meta: Meta = serde_json::from_value(serde_json::json!({
+              "productName": "Frameless",
+              "windows": [
+                {
+                  "label": "main",
+                  "primary": true,
+                  "decorations": false,
+                  "titleBarStyle": "hidden",
+                  "maxWidth": 1600,
+                  "maxHeight": 1200,
+                  "fullscreen": true
+                },
+                { "label": "settings" }
+              ]
+            }))
+            .unwrap();
+            let windows = resolve_windows(&meta).unwrap();
+            assert_eq!(windows[0].decorations, Some(false));
+            assert_eq!(windows[0].title_bar_style.as_deref(), Some("hidden"));
+            assert_eq!(windows[0].max_width, Some(1600));
+            assert_eq!(windows[0].max_height, Some(1200));
+            assert_eq!(windows[0].fullscreen, Some(true));
+            // Unset on a declaration that never mentions these keys.
+            assert_eq!(windows[1].decorations, None);
+            assert_eq!(windows[1].title_bar_style, None);
+            assert_eq!(windows[1].max_width, None);
+            assert_eq!(windows[1].fullscreen, None);
+
+            // The legacy single-window fallback (no `windows` array) carries the
+            // same top-level fields through onto the synthesized `main` entry.
+            let legacy: Meta = serde_json::from_value(serde_json::json!({
+              "productName": "Legacy Frameless",
+              "decorations": false,
+              "titleBarStyle": "hidden",
+              "maxWidth": 2000,
+              "maxHeight": 1500,
+              "fullscreen": true
+            }))
+            .unwrap();
+            let legacy_windows = resolve_windows(&legacy).unwrap();
+            assert_eq!(legacy_windows[0].decorations, Some(false));
+            assert_eq!(legacy_windows[0].title_bar_style.as_deref(), Some("hidden"));
+            assert_eq!(legacy_windows[0].max_width, Some(2000));
+            assert_eq!(legacy_windows[0].max_height, Some(1500));
+            assert_eq!(legacy_windows[0].fullscreen, Some(true));
+        }
+
+        #[test]
         fn rejects_unsafe_or_ambiguous_window_metadata() {
             for windows in [
                 serde_json::json!([
@@ -1749,6 +2273,199 @@ pub(crate) mod shared {
                 .unwrap();
                 assert!(resolve_windows(&meta).is_err());
             }
+        }
+
+        // ── Crash diagnostics (native domain) ──────────────────────────────
+
+        #[test]
+        fn native_panic_report_is_versioned_bounded_and_carries_location_and_thread() {
+            let details = NativePanicDetails {
+                message: "x".repeat(9_000),
+                location: Some("src/launcher.rs:42:5".to_string()),
+                thread_name: "main".to_string(),
+            };
+            let json = native_panic_report_json(&details, "1.2.3", "0.37.0");
+            let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(report["reportVersion"], 1);
+            assert_eq!(report["domain"], "native");
+            assert_eq!(report["appVersion"], "1.2.3");
+            assert_eq!(report["frameworkVersion"], "0.37.0");
+            assert!(report["timestamp"].as_str().unwrap().ends_with('Z'));
+            // 8 * 1024 chars + the "…[truncated]" marker, not the raw 9000.
+            assert!(report["message"].as_str().unwrap().len() < 9_000);
+            assert!(report["message"]
+                .as_str()
+                .unwrap()
+                .ends_with("…[truncated]"));
+            assert_eq!(report["extra"]["location"], "src/launcher.rs:42:5");
+            assert_eq!(report["extra"]["threadName"], "main");
+            assert!(report.get("stack").is_none());
+        }
+
+        #[test]
+        fn node_exit_report_carries_exit_status_in_extra() {
+            let json = node_exit_report_json(
+                "bundled Node process exited unexpectedly",
+                "signal: 11 (SIGSEGV)",
+                "1.0.0",
+                "0.37.0",
+            );
+            let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(report["domain"], "native");
+            assert_eq!(
+                report["message"],
+                "bundled Node process exited unexpectedly"
+            );
+            assert_eq!(report["extra"]["exitStatus"], "signal: 11 (SIGSEGV)");
+        }
+
+        #[test]
+        fn crash_report_filenames_reject_traversal_and_unsafe_characters() {
+            assert!(is_valid_crash_report_filename(
+                "2026-07-17T12-34-56-789Z-native.json"
+            ));
+            for unsafe_name in [
+                "..",
+                "../../etc/passwd.json",
+                "a/b.json",
+                "a\\b.json",
+                ".hidden.json",
+                "no-json-extension",
+                "",
+            ] {
+                assert!(
+                    !is_valid_crash_report_filename(unsafe_name),
+                    "expected {unsafe_name:?} to be rejected"
+                );
+            }
+        }
+
+        #[test]
+        fn rotation_keeps_only_the_newest_files_by_sorted_name() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "murasaki-crash-rotate-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+
+            for index in 0..5 {
+                fs::write(
+                    dir.join(format!("2026-01-0{}T00-00-00-000Z-native.json", index + 1)),
+                    "{}",
+                )
+                .unwrap();
+            }
+            // Not a valid crash-report name (no leading alnum after the dot) —
+            // rotation must not touch it.
+            fs::write(dir.join(".stray.json"), "{}").unwrap();
+
+            rotate_crash_reports(&dir, 2);
+
+            let mut remaining: Vec<String> = fs::read_dir(&dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            remaining.sort();
+            assert_eq!(
+                remaining,
+                vec![
+                    ".stray.json".to_string(),
+                    "2026-01-04T00-00-00-000Z-native.json".to_string(),
+                    "2026-01-05T00-00-00-000Z-native.json".to_string(),
+                ]
+            );
+
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn write_native_crash_report_is_atomic_and_rotates() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "murasaki-crash-write-{}-{nonce}",
+                std::process::id()
+            ));
+
+            for _ in 0..3 {
+                write_native_crash_report(&dir, "{\"reportVersion\":1}", 2);
+                // The filename convention (shared with the TS writer — see
+                // `iso8601_utc_now`'s doc comment) is millisecond-resolution.
+                // Real crash reports are single, rare events with no
+                // realistic risk of a same-millisecond collision; this test
+                // is the only place three writes ever happen back-to-back
+                // fast enough to need a nudge apart, so the nudge belongs
+                // here rather than in the production filename scheme.
+                thread::sleep(Duration::from_millis(2));
+            }
+
+            let files: Vec<String> = fs::read_dir(&dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            assert_eq!(
+                files.len(),
+                2,
+                "rotation should cap at keep_reports: {files:?}"
+            );
+            assert!(files.iter().all(|name| name.ends_with("-native.json")));
+            assert!(files
+                .iter()
+                .all(|name| is_valid_crash_report_filename(name)));
+            // No leftover `.tmp-` staging files after a successful write.
+            assert!(!files.iter().any(|name| name.contains(".tmp-")));
+
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn app_data_dir_sanitizes_the_app_id_into_a_portable_path_component() {
+            let dir = app_data_dir("com/example app!*").expect("resolvable on this host");
+            let last = dir.file_name().unwrap().to_str().unwrap();
+            assert_eq!(last, "com_example_app__");
+            assert!(!last.chars().any(|c| "<>:\"/\\|?*".contains(c)));
+        }
+
+        #[test]
+        fn crash_context_is_populated_from_meta_and_respects_the_diagnostics_toggle() {
+            let meta_enabled: Meta = serde_json::from_value(serde_json::json!({
+                "productName": "Diagnostics Test",
+                "version": "1.2.3",
+                "frameworkVersion": "9.9.9",
+            }))
+            .unwrap();
+            init_crash_context("com.example.diagnostics-test", &meta_enabled);
+            let context = crash_context().expect("diagnostics default to enabled");
+            assert!(context.dir.ends_with("crash-reports"));
+            assert_eq!(context.app_version, "1.2.3");
+            assert_eq!(context.framework_version, "9.9.9");
+            assert_eq!(context.keep_reports, 20);
+
+            let meta_clamped: Meta = serde_json::from_value(serde_json::json!({
+                "productName": "Diagnostics Test",
+                "diagnostics": { "keepReports": 5_000 },
+            }))
+            .unwrap();
+            init_crash_context("com.example.diagnostics-test", &meta_clamped);
+            assert_eq!(crash_context().unwrap().keep_reports, 100);
+
+            let sentinel_dir = crash_context().unwrap().dir;
+            let meta_disabled: Meta = serde_json::from_value(serde_json::json!({
+                "productName": "Diagnostics Test",
+                "diagnostics": { "crashReports": false },
+            }))
+            .unwrap();
+            init_crash_context("com.example.diagnostics-test", &meta_disabled);
+            // Disabled is a no-op: it must leave any previous context in place
+            // rather than clear it, matching "never install the hooks" on the
+            // Node side.
+            assert_eq!(crash_context().unwrap().dir, sentinel_dir);
         }
     }
 }
@@ -1779,12 +2496,13 @@ mod imp_macos {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, load_menu_locales,
-        main_shutdown_transport_timeout, maybe_spawn_apply_helper, normalize_locale,
-        open_targets_from_args, open_targets_from_urls, poll_unexpected_child_exit, read_meta,
-        request_main_open, resolve_menu_labels, resolve_windows, runtime_token,
-        shutdown_allows_update, spawn_prod_server, terminate_and_wait_child, InstanceRole,
-        ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
+        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
+        normalize_locale, open_targets_from_args, open_targets_from_urls,
+        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
+        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
+        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
+        ShutdownPoll, WindowControlCoordinator,
     };
 
     pub fn run() {
@@ -1837,6 +2555,7 @@ mod imp_macos {
         let meta = read_meta(&resources_dir)?;
         let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
         let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
+        init_crash_context(app_id, &meta);
         let mut primary_instance = match acquire_instance(app_id)? {
             InstanceRole::Primary(primary) => primary,
             InstanceRole::Secondary(secondary) => {
@@ -1956,6 +2675,11 @@ mod imp_macos {
                         resizable: declaration.resizable,
                         transparent: declaration.transparent,
                         vibrancy: declaration.vibrancy,
+                        decorations: declaration.decorations,
+                        title_bar_style: declaration.title_bar_style,
+                        max_width: declaration.max_width,
+                        max_height: declaration.max_height,
+                        fullscreen: declaration.fullscreen,
                         icon: icon_path
                             .as_ref()
                             .and_then(|path| path.to_str())
@@ -1983,6 +2707,9 @@ mod imp_macos {
                             .and_then(|path| path.to_str())
                             .map(String::from),
                         serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
@@ -2014,6 +2741,10 @@ mod imp_macos {
         // templates are intentionally outside this startup checkpoint. Only
         // now is it safe to delete the previous bundle retained by the helper.
         if let Some(status) = poll_unexpected_child_exit(&mut child)? {
+            report_unexpected_node_exit(
+                "bundled Node process exited before startup health acknowledgement",
+                &status,
+            );
             discard_apply_handoff(&resources_dir);
             terminate_and_wait_child(&mut child);
             return Err(format!(
@@ -2052,6 +2783,10 @@ mod imp_macos {
                 Ok(Some(status)) => {
                     eprintln!(
                         "murasaki-launcher: bundled Node process exited unexpectedly: {status}"
+                    );
+                    report_unexpected_node_exit(
+                        "bundled Node process exited unexpectedly",
+                        &status,
                     );
                     discard_apply_handoff(&resources_dir);
                     let resources = windows.borrow_mut().prepare_close_all();
@@ -2437,13 +3172,13 @@ mod win_job {
 /// attached via `Menu::init_for_hwnd` and localized the same way macOS's app
 /// menu is: `menu-locales.json` + the locale resolver in `shared` (this
 /// launcher can't call into Node's `menu-i18n.ts` either — see `imp_macos`'s
-/// module for that same constraint). See `menu::build_windows_menu_bar` for
+/// module for that same constraint). See `menu::build_menu_bar` for
 /// why its items are custom `MenuItem`s (not muda `PredefinedMenuItem`s like
 /// macOS uses) and `webview::poll_menu_bar_events` for how their clicks are
 /// picked up in the event loop below and dispatched into the webview.
 ///
 /// The "About <app>" panel *is* handled here too, via a Help menu appended
-/// by `menu::build_windows_menu_bar` (muda's `PredefinedMenuItem::about` is
+/// by `menu::build_menu_bar` (muda's `PredefinedMenuItem::about` is
 /// cross-platform, same call macOS's app-name submenu uses) — see that
 /// function's doc comment. `icon_path` isn't threaded through on Windows
 /// (unlike macOS's `about`, below): muda's Windows About dialog is built from
@@ -2452,7 +3187,7 @@ mod win_job {
 ///
 /// Deferred macOS-parity items, left for a later packaging phase:
 ///  - Menu-bar keyboard accelerators (Ctrl+Z etc.) — see
-///    `menu::build_windows_menu_bar`'s doc comment for why they're
+///    `menu::build_menu_bar`'s doc comment for why they're
 ///    intentionally left unset rather than shipped as inert decoration.
 ///
 /// The window's own icon (title bar / Alt-Tab thumbnail) *is* handled here
@@ -2484,7 +3219,7 @@ mod imp_win {
     };
 
     use crate::{
-        menu::{build_windows_menu_bar, AboutInfo, SharedMenu},
+        menu::{build_menu_bar, AboutInfo, SharedMenu},
         types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
         webview::{poll_menu_bar_events, AppMenuContext, ProcessWebContext, SharedWebContext},
         window::{
@@ -2493,12 +3228,13 @@ mod imp_win {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, load_menu_locales,
-        main_shutdown_transport_timeout, maybe_spawn_apply_helper, normalize_locale,
-        open_targets_from_args, open_targets_from_urls, poll_unexpected_child_exit, read_meta,
-        request_main_open, resolve_menu_labels, resolve_windows, runtime_token,
-        shutdown_allows_update, spawn_prod_server, terminate_and_wait_child, InstanceRole,
-        ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
+        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
+        normalize_locale, open_targets_from_args, open_targets_from_urls,
+        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
+        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
+        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
+        ShutdownPoll, WindowControlCoordinator,
     };
     use super::win_job::KillOnCloseJob;
 
@@ -2758,6 +3494,7 @@ mod imp_win {
         let meta = read_meta(&resources_dir)?;
         let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
         let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
+        init_crash_context(app_id, &meta);
         let mut primary_instance = match acquire_instance(app_id)? {
             InstanceRole::Primary(primary) => primary,
             InstanceRole::Secondary(secondary) => {
@@ -2872,7 +3609,7 @@ mod imp_win {
             homepage: meta.homepage.as_deref(),
             authors: meta.authors.as_deref(),
         };
-        let menu_bar = build_windows_menu_bar(Some(&about), Some(&menu_labels))
+        let menu_bar = build_menu_bar(Some(&about), Some(&menu_labels))
             .map_err(|e| format!("build menu bar: {e}"))?;
         // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
         // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
@@ -2906,6 +3643,11 @@ mod imp_win {
                         resizable: declaration.resizable,
                         transparent: declaration.transparent,
                         vibrancy: declaration.vibrancy,
+                        decorations: declaration.decorations,
+                        title_bar_style: declaration.title_bar_style,
+                        max_width: declaration.max_width,
+                        max_height: declaration.max_height,
+                        fullscreen: declaration.fullscreen,
                         icon: None,
                         version: meta.version.clone(),
                         description: meta.description.clone(),
@@ -2930,6 +3672,9 @@ mod imp_win {
                             .as_ref()
                             .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
                         serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
@@ -2949,6 +3694,10 @@ mod imp_win {
         runtime_windows.create_on_launch(&event_loop)?;
 
         if let Some(status) = poll_unexpected_child_exit(&mut child)? {
+            report_unexpected_node_exit(
+                "bundled Node process exited before startup health acknowledgement",
+                &status,
+            );
             discard_apply_handoff(&resources_dir);
             job.terminate();
             return Err(format!(
@@ -2984,6 +3733,10 @@ mod imp_win {
                     let _ = writeln!(
                         std::io::stderr(),
                         "murasaki-launcher: bundled Node process exited unexpectedly: {status}"
+                    );
+                    report_unexpected_node_exit(
+                        "bundled Node process exited unexpectedly",
+                        &status,
                     );
                     discard_apply_handoff(&resources_dir);
                     let resources = windows.borrow_mut().prepare_close_all();
@@ -3270,12 +4023,582 @@ mod imp_win {
     }
 }
 
+#[cfg(target_os = "linux")]
+mod imp_linux {
+    use std::{
+        cell::RefCell,
+        path::{Path, PathBuf},
+        rc::Rc,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use tao::{
+        event::{Event, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+    };
+
+    use crate::{
+        menu::{build_menu_bar, AboutInfo, SharedMenu},
+        types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
+        webview::{poll_menu_bar_events, AppMenuContext, ProcessWebContext, SharedWebContext},
+        window::{
+            execute_window_control, RuntimeWindowManager, SharedWindowRegistry, WindowRegistry,
+        },
+    };
+
+    use super::shared::{
+        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
+        normalize_locale, open_targets_from_args, open_targets_from_urls,
+        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
+        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
+        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
+        ShutdownPoll, WindowControlCoordinator,
+    };
+
+    pub fn run() {
+        if let Err(err) = run_inner() {
+            eprintln!("murasaki-launcher: {err}");
+            std::process::exit(1);
+        }
+    }
+
+    /// Resolves `<AppDir or /usr>/usr/lib/<appId>/resources` from the running
+    /// launcher's own path — the fixed layout `cli/bundle.ts`'s `bundleLinux`
+    /// produces (`usr/bin/<execName>` + `usr/lib/<appId>/resources`, a
+    /// *sibling* of `usr/bin`, unlike macOS's `Contents/MacOS` + `../Resources`
+    /// or Windows's exe + `resources/`). This one relative shape covers both
+    /// ways the layout is ever run: a mounted or `--appimage-extract-and-run`-
+    /// extracted AppDir (`$APPDIR/usr/bin/<execName>`), and a real
+    /// `.deb`-installed system tree (`/usr/bin/<execName>`).
+    ///
+    /// `<appId>` can't be recovered from `execName` alone — `bundleLinux`
+    /// sanitizes each independently (`sanitizeLinuxExecName` vs
+    /// `sanitizeLinuxAppId`) and they may differ — and a real `/usr/lib` hosts
+    /// many unrelated packages' directories, so blindly globbing "the one
+    /// subdirectory under usr/lib" (safe inside an isolated AppDir mount) would
+    /// break the moment this app is `.deb`-installed alongside anything else.
+    /// `bundleLinux` therefore also drops a small sidecar file next to the
+    /// launcher binary recording the exact `appId` folder name
+    /// (`.{execName}.murasaki-appid`, plain text, no parsing needed) — this
+    /// reads that instead of guessing.
+    fn resolve_resources_dir(exe: &Path) -> Result<PathBuf, String> {
+        let bin_dir = exe
+            .parent()
+            .ok_or_else(|| "murasaki-launcher: executable has no parent directory".to_string())?;
+        let exe_name = exe
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "murasaki-launcher: executable path has no file name".to_string())?;
+        let hint_path = bin_dir.join(format!(".{exe_name}.murasaki-appid"));
+        let app_id = std::fs::read_to_string(&hint_path)
+            .map_err(|e| format!("read {}: {e}", hint_path.display()))?;
+        let app_id = app_id.trim();
+        if app_id.is_empty() {
+            return Err(format!("{} is empty", hint_path.display()));
+        }
+        let usr_dir = bin_dir
+            .parent()
+            .ok_or_else(|| "murasaki-launcher: could not resolve the usr/ directory".to_string())?;
+        usr_dir
+            .join("lib")
+            .join(app_id)
+            .join("resources")
+            .canonicalize()
+            .map_err(|e| format!("resolve resources dir: {e}"))
+    }
+
+    fn run_inner() -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+
+        // Self-update only exists for the AppImage packaging format: `$APPIMAGE`
+        // is the absolute path of the running `.AppImage` file, set by the
+        // AppImage runtime (or `--appimage-extract-and-run`) before it execs
+        // AppRun, and inherited unchanged all the way down to this process. A
+        // `.deb`-installed or manually-copied bare AppDir has no such file to
+        // ever swap — see `updater.rs`'s `apply_linux` and `runtime/updater.ts`'s
+        // Linux `check()` short-circuit, which never lets Node stage an update
+        // in that case, so `.murasaki-apply.json` should never exist there
+        // either (the checks below are still real checks, not just assertions,
+        // in case that invariant is ever broken by a bug).
+        let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+        if let Some(appimage) = &appimage {
+            match crate::updater::prepare_startup_update(appimage)? {
+                crate::updater::StartupUpdateAction::None
+                | crate::updater::StartupUpdateAction::ContinueHealthAttempt => {}
+                crate::updater::StartupUpdateAction::ExitForUpdateInProgress => return Ok(()),
+                crate::updater::StartupUpdateAction::RecoveryRequired {
+                    relaunch: _,
+                    failed_pid,
+                } => {
+                    crate::updater::spawn_recovery_helper(appimage, failed_pid)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        let resources_dir = resolve_resources_dir(&exe)?;
+        let meta = read_meta(&resources_dir)?;
+        let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
+        let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
+        init_crash_context(app_id, &meta);
+        let mut primary_instance = match acquire_instance(app_id)? {
+            InstanceRole::Primary(primary) => primary,
+            InstanceRole::Secondary(secondary) => {
+                secondary.activate_primary(&meta)?;
+                return Ok(());
+            }
+        };
+        let runtime_token = runtime_token()?;
+        let origin_port = app_origin_port(app_id);
+
+        // Spawns resources/node prod-server.mjs — same handshake as macOS/
+        // Windows, see `shared::spawn_prod_server`. No guard callback needed
+        // (unlike Windows' Job Object): `spawn_prod_server` already puts this
+        // child in its own process group on Linux, and `terminate_and_wait_child`
+        // SIGKILLs that whole group on any exit path.
+        let (mut child, port) = spawn_prod_server(
+            &resources_dir,
+            "node",
+            meta.console,
+            origin_port,
+            &runtime_token,
+            |_| Ok(()),
+        )?;
+
+        primary_instance.publish(port, &runtime_token)?;
+        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
+        if !startup_targets.is_empty() {
+            request_main_open(
+                port,
+                &runtime_token,
+                "cold-start",
+                "argv",
+                startup_targets,
+                Some(startup_cwd),
+            )?;
+        }
+
+        let event_loop = EventLoop::<()>::new();
+        // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
+        // see `webview::Webview::new`'s `wake` parameter doc comment / the
+        // matching comment in `imp_macos`/`imp_win`.
+        let quit_proxy = event_loop.create_proxy();
+        let shortcut_proxy = quit_proxy.clone();
+        crate::global_shortcut::set_event_waker(Arc::new(move || {
+            let _ = shortcut_proxy.send_event(());
+        }));
+
+        // Native menu bar (File/Edit/Window) — same muda GTK backend/labels as
+        // Windows (see `menu::build_menu_bar`'s doc comment); localized the same
+        // way, just with a POSIX env-var locale chain instead of a Win32 API call
+        // (see `detect_locale` below).
+        let locale_table = load_menu_locales(&resources_dir);
+        let locale = detect_locale();
+        let menu_labels = resolve_menu_labels(
+            &meta.product_name,
+            &locale,
+            meta.locales.as_deref(),
+            &locale_table,
+        );
+        // No `icon_path` — same reasoning as `imp_win`'s `AboutInfo` (see that
+        // module's doc comment): muda's About dialog never reads it on either
+        // platform's non-macOS backend.
+        let about = AboutInfo {
+            name: &meta.product_name,
+            icon_path: None,
+            version: meta.version.as_deref(),
+            description: meta.description.as_deref(),
+            copyright: meta.copyright.as_deref(),
+            homepage: meta.homepage.as_deref(),
+            authors: meta.authors.as_deref(),
+        };
+        let menu_bar = build_menu_bar(Some(&about), Some(&menu_labels))
+            .map_err(|e| format!("build menu bar: {e}"))?;
+        // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
+        // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
+        let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu_bar)));
+        let app_menu_context = AppMenuContext {
+            menu_slot: app_menu_slot.clone(),
+            menu_labels: Some(menu_labels.clone()),
+        };
+
+        let declarations = resolve_windows(&meta)?;
+        let windows: SharedWindowRegistry = Rc::new(RefCell::new(WindowRegistry::default()));
+        let web_context: SharedWebContext = Rc::new(RefCell::new(ProcessWebContext::default()));
+        let runtime_templates = declarations
+            .into_iter()
+            .map(|declaration| {
+                let route = declaration.route().to_string();
+                let template = RuntimeWindowTemplate {
+                    window: WindowOptions {
+                        label: Some(declaration.label),
+                        primary: declaration.primary,
+                        visible: declaration.visible,
+                        title: Some(
+                            declaration
+                                .title
+                                .unwrap_or_else(|| meta.product_name.clone()),
+                        ),
+                        width: declaration.width.or(Some(1000)),
+                        height: declaration.height.or(Some(700)),
+                        min_width: declaration.min_width,
+                        min_height: declaration.min_height,
+                        resizable: declaration.resizable,
+                        transparent: declaration.transparent,
+                        vibrancy: declaration.vibrancy,
+                        decorations: declaration.decorations,
+                        title_bar_style: declaration.title_bar_style,
+                        max_width: declaration.max_width,
+                        max_height: declaration.max_height,
+                        fullscreen: declaration.fullscreen,
+                        icon: None,
+                        version: meta.version.clone(),
+                        description: meta.description.clone(),
+                        copyright: meta.copyright.clone(),
+                        homepage: meta.homepage.clone(),
+                        authors: meta.authors.clone(),
+                        menu_labels: Some(menu_labels.clone()),
+                    },
+                    webview: WebviewOptions {
+                        url: Some(format!("http://127.0.0.1:{port}{route}")),
+                        html: None,
+                        devtools: Some(false),
+                        transparent: declaration.transparent,
+                        app_id: meta.app_id.clone(),
+                        user_agent: meta.webview.user_agent.clone(),
+                        incognito: meta.webview.incognito,
+                        proxy: meta.webview.proxy.clone(),
+                        capabilities: declaration.capabilities,
+                        capability_policy: declaration.capability_policy,
+                        tray_icon: meta
+                            .icon
+                            .as_ref()
+                            .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
+                        serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
+                    },
+                    create_on_launch: declaration.create_on_launch,
+                };
+                (template, app_menu_context.clone())
+            })
+            .collect();
+        let manager_wake = quit_proxy.clone();
+        let mut runtime_windows = RuntimeWindowManager::new(
+            windows.clone(),
+            web_context,
+            Rc::new(move || {
+                let _ = manager_wake.send_event(());
+            }),
+        );
+        runtime_windows.configure(runtime_templates)?;
+        runtime_windows.create_on_launch(&event_loop)?;
+
+        // This is the updater's first-launch health checkpoint (AppImage only —
+        // see the module doc comment above): the packaged Node runtime is
+        // listening, the instance endpoint is published, and every
+        // createOnLaunch native window/webview has been created. Only now is it
+        // safe to delete the previous AppImage retained by the update helper.
+        if let Some(status) = poll_unexpected_child_exit(&mut child)? {
+            report_unexpected_node_exit(
+                "bundled Node process exited before startup health acknowledgement",
+                &status,
+            );
+            discard_apply_handoff(&resources_dir);
+            terminate_and_wait_child(&mut child);
+            return Err(format!(
+                "bundled Node process exited before startup health acknowledgement: {status}"
+            ));
+        }
+        if let Some(appimage) = &appimage {
+            if let Err(error) = crate::updater::acknowledge_update_health(appimage) {
+                terminate_and_wait_child(&mut child);
+                return Err(format!("acknowledge update health: {error}"));
+            }
+        }
+
+        // Same shutdown story as `imp_macos`/`imp_win` (see either module's
+        // `event_loop.run` comment): tao's `EventLoop::run` never returns and
+        // explicitly documents that values not passed into it aren't dropped, so
+        // `runtime_windows` owns the frozen catalog and shared browser context
+        // and moves into the event-loop closure with the registry. `child`,
+        // `resources_dir`, and `appimage` remain alive there too, so every clean
+        // update handoff shares the same process lifetime.
+        let mut completed_initial_event_cycle = false;
+        let mut received_open_event = false;
+        let mut shutdown = ShutdownCoordinator::new();
+        let control_wake = quit_proxy.clone();
+        let window_control = WindowControlCoordinator::start(port, &runtime_token, move || {
+            let _ = control_wake.send_event(());
+        });
+        event_loop.run(move |event, target, control_flow| {
+            *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
+            match poll_unexpected_child_exit(&mut child) {
+                Ok(None) => {}
+                Ok(Some(status)) => {
+                    eprintln!(
+                        "murasaki-launcher: bundled Node process exited unexpectedly: {status}"
+                    );
+                    report_unexpected_node_exit(
+                        "bundled Node process exited unexpectedly",
+                        &status,
+                    );
+                    discard_apply_handoff(&resources_dir);
+                    let resources = windows.borrow_mut().prepare_close_all();
+                    crate::window::drop_all_webviews(resources);
+                    terminate_and_wait_child(&mut child);
+                    std::process::exit(1);
+                }
+                Err(error) => {
+                    eprintln!("murasaki-launcher: {error}");
+                    discard_apply_handoff(&resources_dir);
+                    let resources = windows.borrow_mut().prepare_close_all();
+                    crate::window::drop_all_webviews(resources);
+                    terminate_and_wait_child(&mut child);
+                    std::process::exit(1);
+                }
+            }
+            let shutdown_proceed = match shutdown.poll() {
+                ShutdownPoll::Proceed { transport_error } => Some(transport_error),
+                ShutdownPoll::Cancelled | ShutdownPoll::None => None,
+            };
+            for command in window_control.take_commands() {
+                let result = if matches!(command.method.as_str(), "create" | "destroy") {
+                    runtime_windows.execute(target, &command)
+                } else {
+                    execute_window_control(&windows, &command)
+                };
+                window_control.respond(command.id, result);
+            }
+
+            if primary_instance.take_activation() {
+                if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+                    if let Some(window) = window_slot.borrow().as_ref() {
+                        window.set_visible(true);
+                        window.set_minimized(false);
+                        window.set_focus();
+                    }
+                }
+            }
+
+            if let Event::Opened { urls } = &event {
+                let targets = open_targets_from_urls(&meta, urls);
+                if !targets.is_empty() {
+                    let activation = if !received_open_event && !completed_initial_event_cycle {
+                        "cold-start"
+                    } else {
+                        "os-event"
+                    };
+                    let transport = if targets
+                        .iter()
+                        .any(|target| matches!(target, super::shared::OpenTarget::Url { .. }))
+                    {
+                        "open-url"
+                    } else {
+                        "open-file"
+                    };
+                    let _ = request_main_open(
+                        port,
+                        &runtime_token,
+                        activation,
+                        transport,
+                        targets,
+                        None,
+                    );
+                    received_open_event = true;
+                    if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+                        if let Some(window) = window_slot.borrow().as_ref() {
+                            window.set_visible(true);
+                            window.set_minimized(false);
+                            window.set_focus();
+                        }
+                    }
+                }
+            }
+            if matches!(&event, Event::MainEventsCleared) {
+                completed_initial_event_cycle = true;
+            }
+
+            let mut shutdown_reason = None;
+            if let Some((label, window_slot, webview_slot)) =
+                WindowRegistry::dispatch_target(&windows)
+            {
+                let app_menu_webview = WindowRegistry::primary_dispatch_target(&windows)
+                    .map(|(_, _, webview)| webview)
+                    .unwrap_or_else(|| webview_slot.clone());
+                let outcome = poll_menu_bar_events(
+                    &window_slot,
+                    &webview_slot,
+                    &app_menu_webview,
+                    &app_menu_slot,
+                );
+                if outcome.quit {
+                    shutdown_reason = Some("app-quit");
+                }
+                if outcome.close {
+                    if windows.borrow().is_primary(&label) {
+                        shutdown_reason = Some("window-close");
+                    } else {
+                        crate::window::set_window_visible(&window_slot, false);
+                        windows.borrow_mut().record_lifecycle("hidden", &label);
+                    }
+                }
+            }
+            if let Some((_label, webview_slot, tray_slot)) =
+                WindowRegistry::tray_dispatch_target(&windows)
+            {
+                crate::webview::poll_tray_events(&webview_slot, &tray_slot);
+            }
+            crate::webview::poll_global_shortcut_events(&windows);
+
+            let close_requests = windows.borrow_mut().take_close_requests();
+            for label in close_requests {
+                if windows.borrow().is_primary(&label) {
+                    shutdown_reason = Some("window-close");
+                } else {
+                    let resources = windows.borrow_mut().prepare_close_secondary(&label);
+                    match resources {
+                        Ok(resources) => crate::window::drop_closed_window(resources),
+                        Err(error) => {
+                            eprintln!("murasaki-launcher: failed to close window {label}: {error}");
+                        }
+                    }
+                }
+            }
+
+            // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
+            // doc comment. Same clean-shutdown path as Exit/CloseRequested below:
+            // best-effort kill the spawned `node` child (via its process group),
+            // hand off to the apply-helper if one is pending, then exit.
+            if crate::webview::quit_requested() {
+                shutdown_reason = Some("app-quit");
+            }
+
+            if let Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                window_id,
+                ..
+            } = &event
+            {
+                let identity = WindowRegistry::identity_for_id(&windows, *window_id);
+                if let Some(identity) = identity {
+                    if windows.borrow().is_primary(&identity.label) {
+                        shutdown_reason = Some("window-close");
+                    } else {
+                        let window = windows.borrow().live_window(&identity.label);
+                        match window {
+                            Ok(window) => {
+                                crate::window::set_window_visible(&window, false);
+                                windows
+                                    .borrow_mut()
+                                    .record_lifecycle_for_identity("hidden", &identity);
+                            }
+                            Err(error) => eprintln!(
+                                "murasaki-launcher: failed to hide window {}: {error}",
+                                identity.label
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Event::WindowEvent {
+                event: WindowEvent::Focused(focused),
+                window_id,
+                ..
+            } = &event
+            {
+                if let Some(identity) = WindowRegistry::identity_for_id(&windows, *window_id) {
+                    windows.borrow_mut().record_lifecycle_for_identity(
+                        if *focused { "focused" } else { "blurred" },
+                        &identity,
+                    );
+                }
+            }
+
+            for event in windows.borrow_mut().take_lifecycle_events() {
+                window_control.emit(event);
+            }
+
+            if let Some(reason) = shutdown_reason {
+                let wake = quit_proxy.clone();
+                shutdown.begin(
+                    port,
+                    &runtime_token,
+                    reason,
+                    shutdown_transport_timeout,
+                    move || {
+                        let _ = wake.send_event(());
+                    },
+                );
+            }
+            if let Some(transport_error) = shutdown_proceed {
+                let confirmed_shutdown = shutdown_allows_update(&transport_error);
+                if let Some(error) = transport_error.as_ref() {
+                    eprintln!("murasaki-launcher: graceful shutdown transport failed: {error}");
+                }
+                *control_flow = ControlFlow::Exit;
+                let resources = windows.borrow_mut().prepare_close_all();
+                crate::window::drop_all_webviews(resources);
+                terminate_and_wait_child(&mut child);
+                match (&appimage, confirmed_shutdown) {
+                    (Some(appimage), true) => {
+                        maybe_spawn_apply_helper(&resources_dir, appimage, appimage);
+                    }
+                    // Either shutdown wasn't confirmed, or there is no AppImage
+                    // to swap in the first place (a `.deb` install/bare AppDir —
+                    // see the module doc comment above) — discard defensively in
+                    // both cases rather than assume a handoff can't exist.
+                    _ => discard_apply_handoff(&resources_dir),
+                }
+                std::process::exit(0);
+            }
+        });
+    }
+
+    /// Best-effort system UI language, normalized to a shipped locale key —
+    /// the same POSIX env-var fallback chain `menu-i18n.ts`'s `envLocale()`
+    /// uses off-macOS: `LC_ALL`, then `LC_MESSAGES`, then `LANG` (first one set
+    /// to something other than the untranslated `"C"`/`"POSIX"` locale wins).
+    /// Mirrors `imp_macos::detect_locale`/`imp_win::detect_locale`'s role, just
+    /// with no OS API call needed on Linux.
+    fn detect_locale() -> String {
+        let raw = linux_ui_language().unwrap_or_else(|| "en".to_string());
+        normalize_locale(&raw)
+    }
+
+    fn linux_ui_language() -> Option<String> {
+        for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+            if let Ok(value) = std::env::var(var) {
+                if !value.is_empty() && value != "C" && value != "POSIX" {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }
+}
+
 /// Entry point for `bin/murasaki-launcher.rs`'s `main`. Checked *before*
 /// anything else: `--apply-update` (see `updater.rs`) must be reachable
 /// before any window/webview/event-loop is created, since that mode runs
 /// headless right after the previous app instance has quit to make way for
 /// it.
 pub fn run_launcher() {
+    // Installed before anything else so a panic anywhere below — including
+    // update recovery/apply and association management — at least gets the
+    // chance to write a native crash report (best-effort no-op until
+    // `shared::init_crash_context` has run; see that function). Default
+    // panic/abort behavior is completely unchanged — see
+    // `shared::install_panic_hook`'s doc comment.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    shared::install_panic_hook();
+
     if let Some(code) = crate::updater::maybe_recover_update() {
         std::process::exit(code);
     }
@@ -3296,6 +4619,8 @@ pub fn run_launcher() {
     imp_macos::run();
     #[cfg(target_os = "windows")]
     imp_win::run();
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    eprintln!("murasaki-launcher: unsupported platform (macOS/Windows only)");
+    #[cfg(target_os = "linux")]
+    imp_linux::run();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    eprintln!("murasaki-launcher: unsupported platform (macOS/Windows/Linux only)");
 }

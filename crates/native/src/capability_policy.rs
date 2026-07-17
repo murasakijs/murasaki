@@ -19,13 +19,19 @@ const KNOWN_CAPABILITIES: &[&str] = &[
     "dialog:openFile",
     "dialog:openDirectory",
     "dialog:saveFile",
+    "dialog:message",
     "clipboard:readText",
     "clipboard:writeText",
+    "clipboard:readImage",
+    "clipboard:writeImage",
+    "clipboard:writeHtml",
     "menu:application",
     "menu:context",
     "notification:show",
     "shell:openExternal",
     "shell:showItemInFolder",
+    "shell:trashItem",
+    "shell:openPath",
     "secureStorage:get",
     "secureStorage:set",
     "secureStorage:delete",
@@ -55,6 +61,12 @@ const KNOWN_CAPABILITIES: &[&str] = &[
     "tray:setTooltip",
     "tray:setIcon",
     "tray:setMenu",
+    "webview:download",
+    "webview:dragDrop",
+    "webview:zoom",
+    "webview:print",
+    "webview:readCookies",
+    "webview:writeCookies",
 ];
 
 #[derive(Clone, Debug)]
@@ -441,7 +453,7 @@ fn parse_scope(permission: &str, wire: ScopeWire) -> Result<ScopeMatcher, String
         "shell:openExternal" => {
             parse_entries(wire.urls, "urls", UrlPattern::parse).map(ScopeMatcher::Urls)
         }
-        "shell:showItemInFolder" => {
+        "shell:showItemInFolder" | "shell:trashItem" | "shell:openPath" => {
             parse_entries(wire.paths, "paths", PathPattern::parse).map(ScopeMatcher::Paths)
         }
         "window:open" | "window:manage" => parse_exact_entries(wire.windows, "windows", |value| {
@@ -518,6 +530,17 @@ fn validate_capability_name(permission: &str) -> Result<(), String> {
     }
 }
 
+/// Fuzzing-only entry point exercising the JSON policy parser directly.
+/// Gated behind the `fuzzing` feature so it never ships in the published
+/// crate; `crates/native/fuzz`'s `fuzz_capability_policy` target enables the
+/// feature to fuzz this pure-parse surface without widening the normal
+/// public/crate API.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_parse_capability_policy(raw: &str) {
+    let _ = CapabilityPolicy::parse(Some(raw));
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CapabilityPolicy, CapabilityResource};
@@ -571,6 +594,28 @@ mod tests {
         assert!(!allowed("Users/example/Documents/report.pdf"));
         assert!(allowed(r"c:\users\EXAMPLE\downloads\report.pdf"));
         assert!(!allowed(r"c:\users\example\downloads-old\report.pdf"));
+    }
+
+    #[test]
+    fn trash_item_and_open_path_are_path_scoped_exactly_like_show_item_in_folder() {
+        for permission in ["shell:trashItem", "shell:openPath"] {
+            let policy = CapabilityPolicy::parse(Some(&format!(
+                r#"{{"version":1,"grants":[{{"permission":"{permission}","allow":{{"paths":["/Users/example/Downloads/**"]}}}}]}}"#,
+            )))
+            .unwrap();
+            assert!(policy.allows(
+                permission,
+                CapabilityResource::Path("/Users/example/Downloads/file.txt")
+            ));
+            assert!(!policy.allows(
+                permission,
+                CapabilityResource::Path("/Users/example/Documents/file.txt")
+            ));
+            assert!(!policy.allows(
+                permission,
+                CapabilityResource::Path("/Users/example/Downloads/../Secrets/key")
+            ));
+        }
     }
 
     #[test]

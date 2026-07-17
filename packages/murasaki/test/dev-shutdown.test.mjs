@@ -23,6 +23,7 @@ test('dev native shutdown is authenticated, cancellable, and retryable', async (
       appId: 'dev.test.shutdown',
       productName: 'Shutdown Test',
       main: { shutdownTimeoutMs: 100 },
+      diagnostics: { crashReports: false },
     },
   })
   const afterConfigure = plugin.configureServer({
@@ -102,6 +103,7 @@ test('native shutdown freezes an in-flight HMR transition instead of starting an
       appId: 'dev.test.hmr-shutdown',
       productName: 'HMR Shutdown Test',
       main: { shutdownTimeoutMs: 30 },
+      diagnostics: { crashReports: false },
     },
   })
   const afterConfigure = plugin.configureServer({
@@ -167,6 +169,7 @@ test('a cancelled native shutdown resumes main-module HMR', async (t) => {
       appId: 'dev.test.cancelled-shutdown',
       productName: 'Cancelled Shutdown Test',
       main: { shutdownTimeoutMs: 100 },
+      diagnostics: { crashReports: false },
     },
   })
   const afterConfigure = plugin.configureServer({
@@ -228,6 +231,7 @@ test('a rejected beforeQuit also resumes main-module HMR', async (t) => {
       appId: 'dev.test.rejected-shutdown',
       productName: 'Rejected Shutdown Test',
       main: { shutdownTimeoutMs: 100 },
+      diagnostics: { crashReports: false },
     },
   })
   const afterConfigure = plugin.configureServer({

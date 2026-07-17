@@ -5,9 +5,9 @@
 
 /**
  * Localized labels for the standard menu bar — macOS's App/Edit/Window and
- * Windows's File/Edit/Window — see `../menu-i18n.ts` for the resolver. All
- * fields optional since any left unset fall back to an English default on
- * the native side. Unused on Linux (no default menu bar there yet).
+ * Windows's/Linux's File/Edit/Window — see `../menu-i18n.ts` for the
+ * resolver. All fields optional since any left unset fall back to an
+ * English default on the native side.
  */
 export interface MenuLabels {
   about?: string
@@ -38,10 +38,19 @@ export interface WindowOptions {
   height?: number
   minWidth?: number
   minHeight?: number
+  /** Both axes must be present together; a solitary axis is rejected. */
+  maxWidth?: number
+  maxHeight?: number
   resizable?: boolean
   transparent?: boolean
   /** Initial native visibility. Secondary declarative windows default false. */
   visible?: boolean
+  /** Shows/hides native window chrome on every platform. Default true. */
+  decorations?: boolean
+  /** macOS only. Accepted (and ignored) on Windows/Linux. */
+  titleBarStyle?: 'default' | 'hidden'
+  /** Initial borderless-fullscreen state. */
+  fullscreen?: boolean
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
   /** macOS only. Resolved path to a PNG icon shown in the standard "About
    * <app>" panel. */
@@ -88,6 +97,14 @@ export interface WebviewOptions {
   /** Production only: serves this directory via the native custom protocol
    * (`murasaki://localhost/…`), taking priority over `url`/`html`. */
   serveDir?: string
+  /** Confines `webview:download`-granted downloads to this directory.
+   * Omitted/absent `directory` resolves to the OS user Downloads folder. */
+  downloads?: { directory?: string }
+  /** Trusted JavaScript file contents (already read from disk), applied in
+   * declaration order before every page load. Not capability-gated. */
+  initScripts?: string[]
+  /** Enables OS page-zoom hotkeys/gestures. Effective on Windows only. */
+  hotkeysZoom?: boolean
 }
 
 /** Immutable native window template configured before the application loop starts. */

@@ -24,7 +24,7 @@ test('generated capability knowledge exactly matches the canonical manifest', as
   const feature = canonical.features.find((candidate) => candidate.id === 'single-instance-and-deep-links')
   assert.ok(feature)
   assert.equal(feature.status, 'partial')
-  assert.deepEqual(feature.platforms, { macos: 'supported', windows: 'supported', linux: 'planned' })
+  assert.deepEqual(feature.platforms, { macos: 'supported', windows: 'supported', linux: 'partial' })
   for (const symbol of [
     'ProtocolConfig',
     'FileAssociationConfig',
@@ -108,7 +108,10 @@ test('config schema supports dot paths and rejects unknown paths', async () => {
 })
 
 test('compatibility never upgrades planned features to supported', async () => {
-  const result = await checkCompatibility({ features: ['linux-distribution', 'native-utilities'], platform: 'linux' })
+  // linux-distribution graduated to "partial" this phase (RFC 0002 L2a) —
+  // code-signing is still genuinely "planned" on Linux, so it now carries
+  // this test's "never upgrades planned to supported" scenario instead.
+  const result = await checkCompatibility({ features: ['code-signing', 'native-utilities'], platform: 'linux' })
   assert.equal(result.overall, 'planned')
   assert.equal(result.results[0].verdict, 'planned')
   assert.equal(result.results[1].verdict, 'limited')
@@ -121,9 +124,14 @@ test('compatibility never upgrades planned features to supported', async () => {
   assert.equal(windows.overall, 'limited')
   assert.equal(windows.results[0].platformStatus, 'supported')
 
+  // Linux graduated from "planned" to "partial" this phase too (cold-start
+  // argv + second-instance forwarding now work) — no longer a "planned"
+  // verdict, but still not "supported" (feature.status is "partial", and no
+  // OS-level association registration exists for a manually-extracted
+  // AppDir the way NSIS/MSI provide on Windows).
   const linux = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'linux' })
-  assert.equal(linux.overall, 'planned')
-  assert.equal(linux.results[0].platformStatus, 'planned')
+  assert.equal(linux.overall, 'limited')
+  assert.equal(linux.results[0].platformStatus, 'partial')
 })
 
 test('recipes are sourced from localized documentation with English fallback', async () => {

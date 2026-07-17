@@ -265,6 +265,26 @@ Node の TCP / WebSocket / HTTP listener を作れますが、Murasaki runtime-s
 - `shutdown()` で listener を閉じる
 - Murasaki runtime token を独自 protocol の credential に再利用しない
 
+## In-page permission requests(getUserMedia、geolocation)
+
+Murasaki は現時点で in-page の permission request を intercept しません。renderer の
+JavaScript から `navigator.mediaDevices.getUserMedia()` や `navigator.geolocation`
+などの Web API を呼んでも、Murasaki が仲介する prompt / capability にはならず、platform
+WebView 自体の default 挙動にそのまま委ねられます。Wry 0.55 には permission-request
+handler が無く、該当 API は upstream の未リリース版にしか存在しません。この
+intercept(Murasaki 自身の capability / consent モデルへ経由させること)は、Wry が
+`with_permission_handler` を出荷した時点で対応予定です。
+
+それまでは、platform ごとの host OS WebView の default 挙動に従います(例: macOS では
+WebKit 自身の permission UI、Windows では WebView2 自身の UI)。macOS では
+camera / microphone capture は依然として OS の TCC privacy database に支配されており、
+上述の `systemPermissions.macOS.camera` / `microphone` の usage 文言や起動時 prompt は
+`AVFoundation` 経由の native capture に適用されるものであって、ページ自身の
+`getUserMedia()` 呼び出しには適用されません — こちらは WebKit layer で独立に prompt
+される(または黙って拒否される)だけです。OS の default WebView prompt によって
+camera / microphone / location へ想定外にアクセスできてしまう window に、信頼できない
+remote content を読み込ませないでください。
+
 ## Code signing と update key は別物
 
 Code signing は OS に「誰がこの executable を作ったか」を示します。Ed25519 update

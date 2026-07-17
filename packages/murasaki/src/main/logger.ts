@@ -203,9 +203,15 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
   return value
 }
 
-function boundedString(value: unknown): string {
+/** @internal Reused by crash-reports.ts so every capture path bounds strings the same way. */
+export function boundedString(value: unknown, maxLength: number = MAX_STRING_LENGTH): string {
   const text = typeof value === 'string' ? value : String(value)
-  return text.length <= MAX_STRING_LENGTH ? text : `${text.slice(0, MAX_STRING_LENGTH)}…[truncated]`
+  return text.length <= maxLength ? text : `${text.slice(0, maxLength)}…[truncated]`
+}
+
+/** @internal Reused by crash-reports.ts so crash `extra` fields are redacted the same way as log fields. */
+export function redactFields(fields: MainLogFields): MainLogFields {
+  return sanitize(fields, 0, new WeakSet()) as MainLogFields
 }
 
 function errorMessage(error: unknown): string {
