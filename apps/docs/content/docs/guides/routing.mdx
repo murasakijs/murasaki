@@ -54,6 +54,27 @@ literal segments) wins over a less-specific one — the same precedence Next.js
 uses. A `(group)` folder — parens, no brackets — organizes routes without
 adding a URL segment.
 
+## Catch-all segments
+
+A `[...name]` folder captures every remaining segment as a `string[]`; it
+requires at least one segment to match. `[[...name]]` (double brackets) is the
+optional form — it also matches the parent path itself, with the param left
+`undefined`:
+
+```tsx title="src/app/docs/[[...slug]]/page.tsx"
+import { useParams } from 'murasaki'
+
+export default function DocsPage() {
+  const { slug } = useParams()
+  // "/docs"      -> slug is undefined
+  // "/docs/a/b"  -> slug is ["a", "b"]
+  return <p>{slug ? slug.join('/') : 'index'}</p>
+}
+```
+
+Specificity follows Next.js: static > dynamic (`[name]`) > catch-all
+(`[...name]`) > optional catch-all (`[[...name]]`).
+
 ## Loading, error, and not-found boundaries
 
 Drop these files next to (or above) a `page.tsx`:
@@ -77,7 +98,23 @@ import { Link } from 'murasaki'
 ```
 
 `useRouter()` gives you `push` / `replace` / `back` / `pathname` imperatively,
-and `usePathname()` reads the current path.
+and `usePathname()` reads the current path. A query string on `push`/`replace`/
+`<Link href>` (e.g. `/search?q=cats`) is split from the pathname automatically
+— route matching only ever looks at the pathname, and a query-only navigation
+doesn't re-run [`middleware`](/docs/guides/middleware) or change which page
+renders.
+
+`useSearchParams()` reads the current query string as a `URLSearchParams`,
+reactive to every navigation:
+
+```tsx
+import { useSearchParams } from 'murasaki'
+
+function SearchResults() {
+  const params = useSearchParams()
+  return <p>Query: {params.get('q')}</p>
+}
+```
 
 <Callout type="info">
   A plain `<a href="https://...">` to an off-origin URL opens in the user's

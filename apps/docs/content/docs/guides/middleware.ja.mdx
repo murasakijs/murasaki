@@ -26,6 +26,7 @@ export default middleware
 ```ts
 export interface MiddlewareContext {
   pathname: string
+  search: string
 }
 
 export type MiddlewareResult = { redirect: string } | void | undefined
@@ -35,7 +36,8 @@ export type Middleware = (
 ) => MiddlewareResult | Promise<MiddlewareResult>
 ```
 
-`ctx` は意図的に小さく保たれています — ナビゲーション先の pathname だけです。
+`ctx` は意図的に小さく保たれています — ナビゲーション先の pathname と、そのクエリ文字
+列(`search`、`location.search` 形式: `''`、または `?` で始まる文字列)だけです。
 `request`/`response` もヘッダーも cookie もありません — これは完全にクライアントサイ
 ドで、あなたのルートと同じ WebView の中で実行され、エッジや server ランタイムではあり
 ません。リダイレクトせずに早期リターンするには、何も返さない(`undefined`)だけです。
@@ -43,6 +45,13 @@ export type Middleware = (
 非同期でも構いません — `<AppRouter>` はマッチしたルートをレンダーする前にそれを await
 し、その間は何もレンダーしないため、ガードされたルートが一瞬でも表示されることはありま
 せん。
+
+<Callout type="info">
+  `middleware` は pathname が変わったときに再実行され、クエリだけのナビゲーションでは
+  再実行されません — `?tab=...` のような更新は、再度 await でページをゲートする代わり
+  に前回の判定をそのまま使い回します。クエリ文字列自体を読みたい場合は、ルート側で
+  [`useSearchParams()`](/docs/guides/routing) を使ってください。
+</Callout>
 
 ## ルートをガードする
 
