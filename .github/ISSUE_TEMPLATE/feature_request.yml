@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest an idea, API, or capability for murasaki.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Per-platform feature maturity and known limitations are tracked in
+        [`capabilities.json`](https://github.com/murasakijs/murasaki/blob/main/packages/murasaki/capabilities.json)
+        and the docs'
+        [Platform & Feature Status](https://murasaki.ichi10.com/docs/core-concepts/platform-feature-status)
+        page. Check there first — what you want may already exist as
+        `experimental` or `partial`.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: >
+        What are you trying to do? What's missing or awkward today? Focus on
+        the problem you're solving, not just the API you'd like.
+    validations:
+      required: true
+  - type: textarea
+    id: api-sketch
+    attributes:
+      label: Proposed API sketch
+      description: >
+        A rough shape of the API you'd imagine — types, function signatures,
+        config keys. Doesn't need to be final; we'll iterate on it.
+      render: typescript
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds and prior art
+      description: >
+        Anything you've tried instead, and how Next.js / Tauri / Electron (or
+        another tool) handles this, if it applies.
+  - type: checkboxes
+    id: willing-to-pr
+    attributes:
+      label: Contribution
+      options:
+        - label: I'd be willing to submit a PR for this
+  - type: markdown
+    attributes:
+      value: |
+        We prefer to discuss non-trivial APIs before code is written — see
+        [Feature requests](https://github.com/murasakijs/murasaki/blob/main/CONTRIBUTING.md#feature-requests)
+        in CONTRIBUTING.md.

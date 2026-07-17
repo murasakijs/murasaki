@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/murasakijs/murasaki/security/advisories/new
+    about: >-
+      Please do not file security issues as public GitHub issues — open a
+      private advisory instead. See SECURITY.md for details.
+  - name: Documentation & guides
+    url: https://murasaki.ichi10.com
+    about: >-
+      Check the docs site, including the Platform & Feature Status page,
+      before filing an issue.
