@@ -34,6 +34,7 @@ import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
 import { createUpdateRequestHandler, createUpdaterEngine } from './updater-engine.mjs'
 import { MainRuntime } from './.murasaki-runtime/runtime/main-runtime.js'
+import { writeCrashReportSync } from './.murasaki-runtime/main/crash-reports.js'
 import {
   MAX_WIRE_PAYLOAD_BYTES,
   parseWire,
@@ -58,7 +59,9 @@ const MAIN_EVENTS_PATH = '/__murasaki/main/events'
 const MAIN_WINDOW_COMMANDS_PATH = '/__murasaki/main/windows/commands'
 const MAIN_WINDOW_RESULT_PATH = '/__murasaki/main/windows/result'
 const MAIN_WINDOW_EVENT_PATH = '/__murasaki/main/windows/event'
+const DIAGNOSTICS_RENDERER_ERROR_PATH = '/__murasaki/diagnostics/renderer-error'
 const RUNTIME_COOKIE = 'murasaki_runtime'
+const MAX_RENDERER_ERROR_BYTES = 16 * 1024
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -135,6 +138,11 @@ const updateEngine = createUpdaterEngine({
 })
 const handleUpdateRequest = createUpdateRequestHandler(updateEngine)
 
+// Already fully resolved by cli/bundle.ts's metaJson() (via
+// resolveDiagnosticsConfig) — defaults matter only when this file runs
+// standalone (per the header comment above) without a real meta.json.
+const diagnosticsConfig = meta.diagnostics ?? { crashReports: true, keepReports: 20 }
+
 const mainRuntime = new MainRuntime({
   appId: meta.appId ?? meta.productName ?? 'murasaki-app',
   productName: meta.productName ?? 'Murasaki',
@@ -167,6 +175,7 @@ async function handleRequest(req, res) {
     || pathname === MAIN_WINDOW_COMMANDS_PATH
     || pathname === MAIN_WINDOW_RESULT_PATH
     || pathname === MAIN_WINDOW_EVENT_PATH
+    || pathname === DIAGNOSTICS_RENDERER_ERROR_PATH
   if (isPrivileged && !isAuthorizedRuntimeRequest(req)) {
     res.statusCode = 403
     res.setHeader('content-type', 'application/json')
@@ -213,6 +222,9 @@ async function handleRequest(req, res) {
   }
   if (req.method === 'POST' && pathname === MAIN_WINDOW_EVENT_PATH) {
     return handleMainWindowEvent(req, res)
+  }
+  if (req.method === 'POST' && pathname === DIAGNOSTICS_RENDERER_ERROR_PATH) {
+    return handleRendererDiagnostics(req, res)
   }
   if (pathname.startsWith(UPDATE_PATH_PREFIX)) {
     await handleUpdateRequest(req, res)
@@ -343,6 +355,82 @@ function handleMainEvents(req, res) {
   req.on('close', () => {
     clearInterval(heartbeat)
     bus.listeners.delete(listener)
+  })
+}
+
+/**
+ * Prod-only renderer crash capture (see vite-plugin/shell.ts's
+ * `installRendererCrashReporting`, injected into the client bootstrap and a
+ * no-op in dev). Same auth tier as action/API requests (the app-local
+ * session cookie) — NOT the native-token tier, since a renderer, not the
+ * native host, calls this.
+ */
+async function handleRendererDiagnostics(req, res) {
+  if (!diagnosticsConfig.crashReports) {
+    res.statusCode = 204
+    res.setHeader('cache-control', 'no-store')
+    res.end()
+    return
+  }
+
+  let body
+  try {
+    body = JSON.parse(await readBoundedBody(req, MAX_RENDERER_ERROR_BYTES))
+  } catch {
+    body = null
+  }
+  if (!isValidRendererErrorPayload(body)) {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid renderer error payload' }))
+    return
+  }
+
+  const paths = mainRuntime.context?.paths
+  const crashReportsDir = join(paths ? paths.data : process.cwd(), 'crash-reports')
+  writeCrashReportSync(crashReportsDir, {
+    domain: 'renderer',
+    message: body.message,
+    stack: typeof body.stack === 'string' ? body.stack : undefined,
+    extra: { source: body.source },
+    appVersion: mainRuntime.context?.version ?? meta.version ?? '0.0.0',
+    frameworkVersion: meta.frameworkVersion ?? '0.0.0',
+  }, diagnosticsConfig.keepReports)
+
+  res.statusCode = 204
+  res.setHeader('cache-control', 'no-store')
+  res.end()
+}
+
+function isValidRendererErrorPayload(body) {
+  return !!body && typeof body === 'object'
+    && typeof body.message === 'string' && body.message.length > 0 && body.message.length <= 8192
+    && (body.stack === undefined || (typeof body.stack === 'string' && body.stack.length <= 32768))
+    && (body.source === 'error' || body.source === 'unhandledrejection')
+}
+
+function readBoundedBody(req, maxBytes) {
+  return new Promise((resolveOk, rejectFail) => {
+    const chunks = []
+    let size = 0
+    let settled = false
+    req.on('data', (chunk) => {
+      if (settled) return
+      const bytes = Buffer.from(chunk)
+      size += bytes.byteLength
+      if (size > maxBytes) {
+        settled = true
+        rejectFail(new Error(`payload exceeds ${maxBytes} bytes`))
+        return
+      }
+      chunks.push(bytes)
+    })
+    req.on('end', () => {
+      if (!settled) resolveOk(Buffer.concat(chunks).toString('utf8'))
+    })
+    req.on('error', (error) => {
+      if (!settled) rejectFail(error)
+    })
   })
 }
 
