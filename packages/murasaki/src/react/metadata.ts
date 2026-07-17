@@ -1,3 +1,5 @@
+import { appWindow } from '../native/index.js'
+
 /**
  * Static metadata shape, patterned after Next.js.
  *
@@ -31,7 +33,7 @@ export interface Metadata {
 
 /** Context passed to a route's `generateMetadata()`. */
 export interface GenerateMetadataContext {
-  params: Record<string, string>
+  params: Record<string, string | string[]>
 }
 
 /** Shape of a route module's `generateMetadata` export. */
@@ -61,6 +63,7 @@ export function applyMetadata(meta: Metadata): void {
 
   if (typeof meta.title === 'string' && meta.title.length > 0) {
     document.title = meta.title
+    syncNativeWindowTitle(meta.title)
   }
 
   upsertMeta('name', 'description', meta.description)
@@ -94,4 +97,15 @@ function upsertLink(rel: string, href: string | undefined): void {
   }
   el.setAttribute('href', href)
   el.setAttribute(MANAGED_ATTR, '')
+}
+
+/**
+ * Best-effort mirror of the document title onto the native window title
+ * (`window.setTitle`, `crates/native/src/webview.rs`). Silently no-ops
+ * outside a Murasaki native webview, or when the calling window lacks the
+ * `window:setTitle` capability — neither is worth surfacing to the console,
+ * since most apps are content with the `<title>`-only default.
+ */
+function syncNativeWindowTitle(title: string): void {
+  void appWindow.setTitle(title).catch(() => {})
 }

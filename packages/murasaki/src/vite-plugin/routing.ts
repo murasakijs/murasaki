@@ -134,7 +134,20 @@ function isGroupSegment(seg: string) {
 function isDynamicSegment(seg: string) {
   return seg.startsWith('[') && seg.endsWith(']')
 }
+
+/**
+ * Normalizes a directory segment to the route-pattern token `matchRoute`
+ * (react/app-router.tsx) understands: `[name]` → `:name`, `[...name]` (catch-all)
+ * → `:name*`, `[[...name]]` (optional catch-all) → `:name?*`. Same regexes and
+ * `:name`/`:name*`/`:name?*` convention as the API router
+ * (vite-plugin/api-routes.ts's `toRouteSource`), so both routers agree on what
+ * a directory name means.
+ */
 function normalizeSegment(seg: string) {
+  const optionalCatchAll = /^\[\[\.\.\.([^/\]]+)\]\]$/.exec(seg)
+  if (optionalCatchAll) return `:${optionalCatchAll[1]}?*`
+  const catchAll = /^\[\.\.\.([^/\]]+)\]$/.exec(seg)
+  if (catchAll) return `:${catchAll[1]}*`
   if (isDynamicSegment(seg)) return `:${seg.slice(1, -1)}`
   return seg
 }

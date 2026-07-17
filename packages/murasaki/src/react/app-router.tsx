@@ -30,46 +30,98 @@ export interface RouteEntry {
 
 export interface RouteMatch {
   route: RouteEntry
-  params: Record<string, string>
+  params: Record<string, string | string[]>
 }
 
 function segmentsOf(urlPath: string): string[] {
   return urlPath.split('/').filter(Boolean)
 }
 
+type SegmentKind = 'static' | 'dynamic' | 'catchAll' | 'optionalCatchAll'
+
+/**
+ * Classifies a normalized route segment (`vite-plugin/routing.ts`'s
+ * `normalizeSegment`): `:name` (dynamic), `:name*` (catch-all, from
+ * `[...name]`), `:name?*` (optional catch-all, from `[[...name]]`), or a
+ * plain literal segment. Same convention as the API router's route sources
+ * (`vite-plugin/api-routes.ts`).
+ */
+function segmentKind(seg: string): SegmentKind {
+  if (!seg.startsWith(':')) return 'static'
+  if (seg.endsWith('?*')) return 'optionalCatchAll'
+  if (seg.endsWith('*')) return 'catchAll'
+  return 'dynamic'
+}
+
+/**
+ * Matches `pathSegments` against one route's `routeSegments`. A trailing
+ * catch-all or optional catch-all segment consumes every remaining path
+ * segment as a `string[]` param — an empty match is rejected for a required
+ * catch-all, and left unset (not `[]`) for an optional one, matching
+ * `matchApiRoute`'s (vite-plugin/api-routes.ts) behavior for API routes.
+ *
+ * Static segments score 100, dynamic 10, catch-all 1, optional catch-all 0 —
+ * same specificity order as `matchApiRoute`, so static > dynamic > catch-all
+ * > optional catch-all wins ties between overlapping routes.
+ */
+function matchSegments(
+  routeSegments: string[],
+  pathSegments: string[],
+): { params: Record<string, string | string[]>; score: number } | null {
+  const params: Record<string, string | string[]> = {}
+  let score = 0
+  let i = 0
+  for (let r = 0; r < routeSegments.length; r++) {
+    const seg = routeSegments[r]
+    const kind = segmentKind(seg)
+    const isTrailingCatchAll = r === routeSegments.length - 1
+      && (kind === 'catchAll' || kind === 'optionalCatchAll')
+    if (isTrailingCatchAll) {
+      const name = kind === 'catchAll' ? seg.slice(1, -1) : seg.slice(1, -2)
+      const rest = pathSegments.slice(i)
+      if (rest.length === 0) {
+        if (kind === 'catchAll') return null
+        // Optional catch-all also matches its parent path — leave unset.
+      } else {
+        params[name] = rest.map((s) => decodeURIComponent(s))
+        if (kind === 'catchAll') score += 1
+      }
+      i = pathSegments.length
+      continue
+    }
+
+    if (i >= pathSegments.length) return null
+    const ps = pathSegments[i]
+    if (kind === 'dynamic') {
+      params[seg.slice(1)] = decodeURIComponent(ps)
+      score += 10
+    } else if (seg === ps) {
+      score += 100
+    } else {
+      return null
+    }
+    i++
+  }
+  return i === pathSegments.length ? { params, score } : null
+}
+
 /**
  * Pure route matcher — exported for unit testing.
  *
- * Static segments win over dynamic ones, and matches with more static
- * segments win over matches with fewer (more-specific over less). Only
- * entries with a `page` are matchable.
+ * Static segments win over dynamic ones, dynamic over catch-all, and
+ * catch-all over optional catch-all; among same-kind matches, more static
+ * segments win over fewer (more-specific over less). Only entries with a
+ * `page` are matchable.
  */
 export function matchRoute(routes: RouteEntry[], pathname: string): RouteMatch | null {
   const pathSegments = segmentsOf(pathname)
-  let best: { route: RouteEntry; params: Record<string, string>; score: number } | null = null
+  let best: { route: RouteEntry; params: Record<string, string | string[]>; score: number } | null = null
 
   for (const route of routes) {
     if (!route.page) continue
-    const routeSegments = segmentsOf(route.urlPath)
-    if (routeSegments.length !== pathSegments.length) continue
-
-    const params: Record<string, string> = {}
-    let score = 0
-    let ok = true
-    for (let i = 0; i < routeSegments.length; i++) {
-      const rs = routeSegments[i]
-      const ps = pathSegments[i]
-      if (rs.startsWith(':')) {
-        params[rs.slice(1)] = decodeURIComponent(ps)
-      } else if (rs === ps) {
-        score++
-      } else {
-        ok = false
-        break
-      }
-    }
-    if (!ok) continue
-    if (!best || score > best.score) best = { route, params, score }
+    const result = matchSegments(segmentsOf(route.urlPath), pathSegments)
+    if (!result) continue
+    if (!best || result.score > best.score) best = { route, params: result.params, score: result.score }
   }
 
   return best ? { route: best.route, params: best.params } : null
@@ -87,10 +139,13 @@ function isAncestorOfPath(entryUrlPath: string, pathname: string): boolean {
   if (entryUrlPath === '/') return true
   const es = segmentsOf(entryUrlPath)
   const ps = segmentsOf(pathname)
-  if (es.length > ps.length) return false
   for (let i = 0; i < es.length; i++) {
-    const e = es[i]
-    if (!e.startsWith(':') && e !== ps[i]) return false
+    const kind = segmentKind(es[i])
+    // A trailing catch-all/optional catch-all is an ancestor of everything
+    // under its prefix, regardless of how many segments remain.
+    if (kind === 'catchAll' || kind === 'optionalCatchAll') return true
+    if (i >= ps.length) return false
+    if (kind === 'static' && es[i] !== ps[i]) return false
   }
   return true
 }
@@ -188,6 +243,18 @@ function DefaultNotFound() {
 /** Redirect-loop guard for `middleware` — after this many consecutive redirects, give up. */
 const MAX_MIDDLEWARE_HOPS = 5
 
+interface Location {
+  pathname: string
+  /** `location.search`-style query string (`''`, or starting with `?`). */
+  search: string
+}
+
+/** Reads the current pathname + search off `window.location` (SSR-safe). */
+function currentLocation(): Location {
+  if (typeof window === 'undefined') return { pathname: '/', search: '' }
+  return { pathname: window.location.pathname, search: window.location.search }
+}
+
 /**
  * Client-side file-based routing dispatch.
  *
@@ -213,39 +280,41 @@ export function AppRouter({
   routes: RouteEntry[]
   middleware?: Middleware
 }) {
-  const [pathname, setPathname] = useState(() =>
-    typeof window !== 'undefined' ? window.location.pathname : '/',
-  )
+  const [location, setLocation] = useState(currentLocation)
   const [resolving, setResolving] = useState(() => !!middleware)
   const hopsRef = useRef(0)
 
   useEffect(() => {
-    const onPopState = () => setPathname(window.location.pathname)
+    const onPopState = () => setLocation(currentLocation())
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
 
   const routerValue = useMemo(
     () => ({
-      pathname,
+      pathname: location.pathname,
+      search: location.search,
       push(to: string) {
         window.history.pushState(null, '', to)
-        setPathname(window.location.pathname)
+        setLocation(currentLocation())
       },
       replace(to: string) {
         window.history.replaceState(null, '', to)
-        setPathname(window.location.pathname)
+        setLocation(currentLocation())
       },
       back() {
         window.history.back()
       },
     }),
-    [pathname],
+    [location],
   )
 
   // Runs `middleware` before every navigation, ahead of matching/rendering.
-  // No-op (and no async gate) when there's no `middleware` prop.
+  // No-op (and no async gate) when there's no `middleware` prop. Keyed off
+  // the pathname only (like route matching below) — a query-only change
+  // updates `routerValue`/`useSearchParams()` without re-running middleware.
   useEffect(() => {
+    const { pathname, search } = location
     if (!middleware) {
       setResolving(false)
       return
@@ -254,7 +323,7 @@ export function AppRouter({
     let cancelled = false
     setResolving(true)
 
-    Promise.resolve(middleware({ pathname }))
+    Promise.resolve(middleware({ pathname, search }))
       .then((result) => {
         if (cancelled) return
 
@@ -270,7 +339,7 @@ export function AppRouter({
           }
           hopsRef.current++
           window.history.replaceState(null, '', redirect)
-          setPathname(window.location.pathname)
+          setLocation(currentLocation())
           return
         }
 
@@ -288,9 +357,9 @@ export function AppRouter({
     return () => {
       cancelled = true
     }
-  }, [middleware, pathname])
+  }, [middleware, location.pathname])
 
-  const match = useMemo(() => matchRoute(routes, pathname), [routes, pathname])
+  const match = useMemo(() => matchRoute(routes, location.pathname), [routes, location.pathname])
 
   const layoutChain = useMemo(
     () => (match ? ancestorChain(routes, match.route.urlPath, 'layout') : []),
@@ -325,13 +394,13 @@ export function AppRouter({
   }, [match, staticMetadata, resolving])
 
   let element: ReactNode = null
-  let params: Record<string, string> = {}
+  let params: Record<string, string | string[]> = {}
 
   // While `middleware` is deciding (or mid-redirect), render nothing rather
   // than flashing the requested route.
   if (!resolving) {
     if (!match) {
-      const NotFound = nearestNotFound(routes, pathname)?.default ?? DefaultNotFound
+      const NotFound = nearestNotFound(routes, location.pathname)?.default ?? DefaultNotFound
       element = <NotFound />
     } else {
       const { route, params: matchedParams } = match
