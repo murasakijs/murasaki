@@ -103,9 +103,14 @@ export function createDevWindowTemplates(
       height: declaration.height ?? 800,
       minWidth: declaration.minWidth,
       minHeight: declaration.minHeight,
+      maxWidth: declaration.maxWidth,
+      maxHeight: declaration.maxHeight,
       resizable: declaration.resizable,
       transparent: declaration.transparent,
       visible: declaration.visible,
+      decorations: declaration.decorations,
+      titleBarStyle: declaration.titleBarStyle,
+      fullscreen: declaration.fullscreen,
       // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
       // undefined: napi's Option<String> maps undefined to None but rejects an
       // explicit null with "Failed to convert Null into String".

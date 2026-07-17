@@ -36,6 +36,13 @@ test('renderer native API uses request-correlated bridge calls', async () => {
         'window.isFocused': true,
         'window.isMaximized': false,
         'window.isMinimized': false,
+        'window.isFullscreen': true,
+        'window.getMonitors': {
+          monitors: [{
+            name: 'Built-in Retina Display', isPrimary: true, isCurrent: true,
+            x: 0, y: 0, width: 3024, height: 1964, scaleFactor: 2,
+          }],
+        },
         'systemPermission.status': 'notDetermined',
         'systemPermission.request': 'granted',
         'notification.show': 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
@@ -77,6 +84,17 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   assert.equal(await appWindow.isFocused(), true)
   assert.equal(await appWindow.isMaximized(), false)
   assert.equal(await appWindow.isMinimized(), false)
+  await appWindow.startDragging()
+  await appWindow.setFullscreen(true)
+  assert.equal(await appWindow.isFullscreen(), true)
+  await appWindow.setMaxSize({ width: 1600, height: 1200 })
+  await appWindow.setMaxSize()
+  assert.deepEqual(await appWindow.getMonitors(), {
+    monitors: [{
+      name: 'Built-in Retina Display', isPrimary: true, isCurrent: true,
+      x: 0, y: 0, width: 3024, height: 1964, scaleFactor: 2,
+    }],
+  })
   await appWindow.close()
   await windows.open('settings')
   assert.deepEqual(await windows.list(), [{
@@ -137,6 +155,12 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'window.isFocused',
     'window.isMaximized',
     'window.isMinimized',
+    'window.startDragging',
+    'window.setFullscreen',
+    'window.isFullscreen',
+    'window.setMaxSize',
+    'window.setMaxSize',
+    'window.getMonitors',
     'window.close',
     'window.open',
     'window.list',
@@ -164,6 +188,12 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     accelerator: 'Control+Shift+K',
     id: 'capture',
   })
+  assert.deepEqual(calls.find(({ method }) => method === 'window.setFullscreen').args, {
+    fullscreen: true,
+  })
+  const setMaxSizeCalls = calls.filter(({ method }) => method === 'window.setMaxSize')
+  assert.deepEqual(setMaxSizeCalls[0].args, { width: 1600, height: 1200 })
+  assert.deepEqual(setMaxSizeCalls[1].args, {})
   assert.equal(new Set(calls.map(({ requestId }) => requestId)).size, calls.length)
   assert.equal(calls.every(({ requestId }) => typeof requestId === 'string' && requestId.length > 0), true)
   assert.deepEqual(trayClick, { button: 'left', double: false })
@@ -175,6 +205,28 @@ test('renderer native API uses request-correlated bridge calls', async () => {
 test('renderer native API rejects outside the native webview', async () => {
   delete globalThis.window
   await assert.rejects(() => clipboard.readText(), /only available in the Murasaki renderer/)
+})
+
+test('appWindow.startDragging() silently swallows a native rejection', async (t) => {
+  const fakeWindow = new EventTarget()
+  fakeWindow.setTimeout = setTimeout
+  fakeWindow.clearTimeout = clearTimeout
+  fakeWindow.ipc = {
+    postMessage(raw) {
+      const { requestId } = JSON.parse(raw)
+      queueMicrotask(() => fakeWindow.dispatchEvent(new CustomEvent('murasaki:nativeresponse', {
+        detail: {
+          requestId,
+          // Drag legitimately fails outside an active mouse-down.
+          response: { ok: false, error: { message: 'not in a mouse-down' } },
+        },
+      })))
+    },
+  }
+  globalThis.window = fakeWindow
+  t.after(() => { delete globalThis.window })
+
+  await assert.doesNotReject(() => appWindow.startDragging())
 })
 
 test('renderer native API rejects malformed correlated responses and cleans up', async (t) => {

@@ -17,8 +17,13 @@ export interface SerializedWindowTemplate {
   height?: number
   minWidth?: number
   minHeight?: number
+  maxWidth?: number
+  maxHeight?: number
   resizable?: boolean
   transparent?: boolean
+  decorations?: boolean
+  titleBarStyle?: 'default' | 'hidden'
+  fullscreen?: boolean
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
   capabilities: string[]
   capabilityPolicy: string
@@ -39,8 +44,13 @@ export function serializeWindowTemplates(
     height: declaration.height,
     minWidth: declaration.minWidth,
     minHeight: declaration.minHeight,
+    maxWidth: declaration.maxWidth,
+    maxHeight: declaration.maxHeight,
     resizable: declaration.resizable,
     transparent: declaration.transparent,
+    decorations: declaration.decorations,
+    titleBarStyle: declaration.titleBarStyle,
+    fullscreen: declaration.fullscreen,
     vibrancy: declaration.vibrancy,
     capabilities: capabilityPermissionNames(declaration.capabilities),
     capabilityPolicy: serializeCapabilityPolicy(declaration.capabilities),

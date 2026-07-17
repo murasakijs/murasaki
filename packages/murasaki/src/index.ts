@@ -94,3 +94,5 @@ export type { UpdateState } from './react/updater.js'
 
 export { UpdateButton } from './react/update-button.js'
 export type { UpdateButtonProps } from './react/update-button.js'
+
+export { useWindowDrag } from './react/window.js'

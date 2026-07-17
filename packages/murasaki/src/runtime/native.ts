@@ -38,10 +38,19 @@ export interface WindowOptions {
   height?: number
   minWidth?: number
   minHeight?: number
+  /** Both axes must be present together; a solitary axis is rejected. */
+  maxWidth?: number
+  maxHeight?: number
   resizable?: boolean
   transparent?: boolean
   /** Initial native visibility. Secondary declarative windows default false. */
   visible?: boolean
+  /** Shows/hides native window chrome on every platform. Default true. */
+  decorations?: boolean
+  /** macOS only. Accepted (and ignored) on Windows/Linux. */
+  titleBarStyle?: 'default' | 'hidden'
+  /** Initial borderless-fullscreen state. */
+  fullscreen?: boolean
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
   /** macOS only. Resolved path to a PNG icon shown in the standard "About
    * <app>" panel. */

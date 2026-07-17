@@ -903,6 +903,7 @@ impl RuntimeWindowManager {
         if template.window.transparent.unwrap_or(false) || transparent_webview {
             builder = builder.with_transparent(true);
         }
+        builder = apply_window_builder_options(builder, &template.window);
         #[cfg(target_os = "windows")]
         if let Some(icon) = template.icon.clone() {
             builder = builder.with_window_icon(Some(icon));
@@ -911,7 +912,13 @@ impl RuntimeWindowManager {
             .build(target)
             .map_err(|error| format!("build window {label}: {error}"))?;
         apply_window_vibrancy(&window, template.window.vibrancy.as_deref())?;
-        center_on_primary_monitor(&window);
+        // Centering computes a position from the window's already-fullscreen
+        // outer size; skip it so an initial `fullscreen: true` isn't fought
+        // with a redundant/late `set_outer_position` call right after tao
+        // itself just fullscreened the window via `with_fullscreen` above.
+        if !template.window.fullscreen.unwrap_or(false) {
+            center_on_primary_monitor(&window);
+        }
 
         #[cfg(target_os = "windows")]
         if primary {
@@ -1074,6 +1081,40 @@ pub(crate) fn apply_window_vibrancy(
     Ok(())
 }
 
+/// Applies the `WindowOptions` fields shared verbatim by both call sites that
+/// build a `tao::window::WindowBuilder` directly — `RuntimeWindowManager::create_known`
+/// (declarative windows, dev and packaged) and `Application::create_window`
+/// (the ad-hoc single-window API). Kept here, not inlined at either call
+/// site, so the two never drift on how `decorations`/`titleBarStyle`/max
+/// size/`fullscreen` are interpreted.
+pub(crate) fn apply_window_builder_options(
+    mut builder: WindowBuilder,
+    opts: &WindowOptions,
+) -> WindowBuilder {
+    builder = builder.with_decorations(opts.decorations.unwrap_or(true));
+    #[cfg(target_os = "macos")]
+    if opts.title_bar_style.as_deref() == Some("hidden") {
+        use tao::platform::macos::WindowBuilderExtMacOS;
+        // Traffic lights stay; only the title text and titlebar background go
+        // away, and the WebView is allowed to extend underneath them — the
+        // standard "custom titlebar" recipe on macOS.
+        builder = builder
+            .with_titlebar_transparent(true)
+            .with_title_hidden(true)
+            .with_fullsize_content_view(true);
+    }
+    // `config.ts`'s `resolveWindowDeclarations` always resolves both axes
+    // together (filling an unset one with a very large sentinel), so this
+    // mirrors the min-size gate above rather than accepting one axis alone.
+    if let (Some(width), Some(height)) = (opts.max_width, opts.max_height) {
+        builder = builder.with_max_inner_size(LogicalSize::new(width as f64, height as f64));
+    }
+    if opts.fullscreen.unwrap_or(false) {
+        builder = builder.with_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
+    }
+    builder
+}
+
 /// Centers `window` on its primary monitor. tao's default placement can land
 /// the window off-screen (e.g. negative Y on multi-monitor setups), so
 /// callers that build a `tao::window::Window` directly — `Application::createWindow`
@@ -1091,6 +1132,46 @@ pub(crate) fn center_on_primary_monitor(window: &Window) {
         let y = mon_pos.y + ((screen.height as i32 - win.height as i32) / 2).max(0);
         window.set_outer_position(tao::dpi::PhysicalPosition::new(x, y));
     }
+}
+
+/// One OS display, as returned by `window.getMonitors()` (see
+/// `webview::handle_native_call`). Every geometry field is in physical
+/// pixels, not logical — a caller wanting logical values divides by
+/// `scale_factor` itself.
+#[derive(Clone, Debug, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct MonitorInfo {
+    pub name: Option<String>,
+    pub is_primary: bool,
+    pub is_current: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+}
+
+/// Every OS monitor visible to `window`, in tao's enumeration order.
+pub(crate) fn window_monitors(window: &Window) -> Vec<MonitorInfo> {
+    let primary = window.primary_monitor();
+    let current = window.current_monitor();
+    window
+        .available_monitors()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            MonitorInfo {
+                name: monitor.name(),
+                is_primary: primary.as_ref() == Some(&monitor),
+                is_current: current.as_ref() == Some(&monitor),
+                x: position.x,
+                y: position.y,
+                width: size.width,
+                height: size.height,
+                scale_factor: monitor.scale_factor(),
+            }
+        })
+        .collect()
 }
 
 #[napi]
@@ -1151,7 +1232,8 @@ impl BrowserWindow {
 mod tests {
     use super::{
         execute_window_control, generation_is_current, validate_window_label,
-        vibrancy_requires_transparency, RuntimeWindowManager, WindowControlCommand, WindowRegistry,
+        vibrancy_requires_transparency, MonitorInfo, RuntimeWindowManager, WindowControlCommand,
+        WindowRegistry,
     };
     use crate::{
         types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
@@ -1184,6 +1266,11 @@ mod tests {
                 homepage: None,
                 authors: None,
                 menu_labels: None,
+                decorations: None,
+                title_bar_style: None,
+                max_width: None,
+                max_height: None,
+                fullscreen: None,
             },
             webview: WebviewOptions::default(),
             create_on_launch,
@@ -1261,6 +1348,52 @@ mod tests {
         }
         assert!(validate_window_label(&"a".repeat(64)).is_ok());
         assert!(validate_window_label(&"a".repeat(65)).is_err());
+    }
+
+    /// `window.getMonitors()`'s per-monitor shape — camelCase keys, physical
+    /// pixels. Built by hand rather than through a real `tao::window::Window`:
+    /// enumerating actual OS monitors needs a live event loop, unavailable in
+    /// a headless unit test.
+    #[test]
+    fn monitor_info_serializes_to_the_documented_camel_case_shape() {
+        let monitor = MonitorInfo {
+            name: Some("Built-in Retina Display".to_string()),
+            is_primary: true,
+            is_current: true,
+            x: 0,
+            y: 0,
+            width: 3024,
+            height: 1964,
+            scale_factor: 2.0,
+        };
+        assert_eq!(
+            serde_json::to_value(&monitor).unwrap(),
+            serde_json::json!({
+                "name": "Built-in Retina Display",
+                "isPrimary": true,
+                "isCurrent": true,
+                "x": 0,
+                "y": 0,
+                "width": 3024,
+                "height": 1964,
+                "scaleFactor": 2.0,
+            }),
+        );
+
+        let unnamed = MonitorInfo {
+            name: None,
+            is_primary: false,
+            is_current: false,
+            x: 1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale_factor: 1.0,
+        };
+        assert_eq!(
+            serde_json::to_value(&unnamed).unwrap()["name"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]

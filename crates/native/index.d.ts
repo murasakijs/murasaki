@@ -320,4 +320,30 @@ export interface WindowOptions {
    * absent. Unused on Linux (no default menu bar there yet).
    */
   menuLabels?: MenuLabels
+  /**
+   * Whether the OS window chrome (titlebar + borders) is shown. Defaults
+   * to true; `false` produces a frameless window on every platform.
+   */
+  decorations?: boolean
+  /**
+   * macOS only. `'hidden'` keeps the traffic-light buttons but hides the
+   * title text and extends the WebView under the titlebar (transparent
+   * titlebar + full-size content view). Windows/Linux accept and ignore
+   * this field. Values: 'default' | 'hidden'.
+   */
+  titleBarStyle?: string
+  /**
+   * Maximum inner width/height in logical pixels. Both must be present
+   * together (see `window::RuntimeWindowManager::create_known`); a
+   * solitary axis is rejected before it reaches the native host — see
+   * `resolveWindowDeclarations` in `config.ts`.
+   */
+  maxWidth?: number
+  maxHeight?: number
+  /**
+   * Initial borderless-fullscreen state
+   * (`tao::window::Fullscreen::Borderless(None)`). Exclusive fullscreen is
+   * not supported.
+   */
+  fullscreen?: boolean
 }

@@ -822,6 +822,11 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
         "window.showOther" | "window.hideOther" | "window.focusOther" | "window.closeOther" => {
             Some("window:manage")
         }
+        "window.startDragging"
+        | "window.setFullscreen"
+        | "window.isFullscreen"
+        | "window.setMaxSize"
+        | "window.getMonitors" => Some("window:manage"),
         "globalShortcut.register" => Some("globalShortcut:register"),
         "globalShortcut.unregister" | "globalShortcut.unregisterAll" => {
             Some("globalShortcut:unregister")
@@ -1191,6 +1196,27 @@ fn apply_menu_outcome(
     }
 }
 
+/// `window.setMaxSize`'s `{ width?, height? }` resolves to either "clamp to
+/// this bound" or "clear the bound" (`None`) — never a partial pair. One axis
+/// set and the other omitted/null has no coherent meaning (tao's constraint is
+/// inherently two-dimensional), so it's rejected outright rather than
+/// guessing a default for the unset axis.
+fn resolve_max_size_bound(
+    width: Option<f64>,
+    height: Option<f64>,
+) -> std::result::Result<Option<(f64, f64)>, String> {
+    match (width, height) {
+        (None, None) => Ok(None),
+        (Some(width), Some(height)) => {
+            if !width.is_finite() || !height.is_finite() || width < 1.0 || height < 1.0 {
+                return Err("width and height must be positive finite numbers".to_string());
+            }
+            Ok(Some((width, height)))
+        }
+        _ => Err("setMaxSize requires both width and height, or neither".to_string()),
+    }
+}
+
 /// Execute the stable renderer-facing native API synchronously on the UI
 /// thread, then resolve the caller's Promise inside the webview. Keeping this
 /// in Rust makes dev and packaged apps use the same implementation; it also
@@ -1288,6 +1314,19 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
     #[serde(deny_unknown_fields)]
     struct GlobalShortcutIdArg {
         id: String,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SetFullscreenArg {
+        fullscreen: bool,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct SetMaxSizeArg {
+        #[serde(default)]
+        width: Option<f64>,
+        #[serde(default)]
+        height: Option<f64>,
     }
 
     if !native_method_is_allowed(&payload.method, capabilities) {
@@ -1617,6 +1656,56 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 _ => unreachable!(),
             }
             Ok(serde_json::Value::Null)
+        }
+        "window.startDragging" => {
+            if let Some(window) = window_slot.borrow().as_ref() {
+                // Legitimately fails outside an active mouse-down (for example
+                // a synthetic/programmatic call); the TS wrapper swallows the
+                // rejection rather than surfacing it as an app-facing error.
+                window.drag_window().map_err(|e| e.to_string())?;
+            }
+            Ok(serde_json::Value::Null)
+        }
+        "window.setFullscreen" => {
+            let args: SetFullscreenArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if let Some(window) = window_slot.borrow().as_ref() {
+                window.set_fullscreen(if args.fullscreen {
+                    // Borderless on the window's current monitor. Exclusive
+                    // fullscreen (a dedicated video mode) is out of scope.
+                    Some(tao::window::Fullscreen::Borderless(None))
+                } else {
+                    None
+                });
+            }
+            Ok(serde_json::Value::Null)
+        }
+        "window.isFullscreen" => Ok(window_slot
+            .borrow()
+            .as_ref()
+            .map(|window| serde_json::Value::Bool(window.fullscreen().is_some()))
+            .unwrap_or(serde_json::Value::Bool(false))),
+        "window.setMaxSize" => {
+            let args: SetMaxSizeArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            let bound = resolve_max_size_bound(args.width, args.height)?;
+            if let Some(window) = window_slot.borrow().as_ref() {
+                match bound {
+                    Some((width, height)) => {
+                        window.set_max_inner_size(Some(tao::dpi::LogicalSize::new(width, height)))
+                    }
+                    None => window.set_max_inner_size(None::<tao::dpi::LogicalSize<f64>>),
+                }
+            }
+            Ok(serde_json::Value::Null)
+        }
+        "window.getMonitors" => {
+            let monitors = window_slot
+                .borrow()
+                .as_ref()
+                .map(crate::window::window_monitors)
+                .unwrap_or_default();
+            Ok(serde_json::json!({ "monitors": monitors }))
         }
         "globalShortcut.register" => {
             let args: GlobalShortcutRegisterArg =
@@ -2578,10 +2667,10 @@ mod tests {
     use super::{
         app_menu_is_allowed, context_menu_is_allowed, ipc_body_is_allowed, ipc_origin_is_trusted,
         max_native_call_body_bytes, native_call_body_is_allowed, native_method_is_allowed,
-        navigation_policy, prepare_tray_menu_items, sanitize_profile_name, valid_proxy_host,
-        validate_app_menu_payload, validate_context_menu_payload, validate_webview_network,
-        wry_proxy, AppMenuPayload, ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol,
-        DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
+        navigation_policy, prepare_tray_menu_items, resolve_max_size_bound, sanitize_profile_name,
+        valid_proxy_host, validate_app_menu_payload, validate_context_menu_payload,
+        validate_webview_network, wry_proxy, AppMenuPayload, ContextMenuPayload, NavigationPolicy,
+        ValidatedProxyProtocol, DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
         MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES, MAX_IPC_PREPARSE_BODY_BYTES, TRAY_MENU_ID_PREFIX,
     };
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -2757,6 +2846,11 @@ mod tests {
             "window.hideOther",
             "window.focusOther",
             "window.closeOther",
+            "window.startDragging",
+            "window.setFullscreen",
+            "window.isFullscreen",
+            "window.setMaxSize",
+            "window.getMonitors",
         ] {
             assert!(native_method_is_allowed(
                 method,
@@ -2792,6 +2886,20 @@ mod tests {
             assert!(!native_method_is_allowed(method, &[]));
             assert!(native_method_is_allowed(method, &[permission.to_string()]));
         }
+    }
+
+    #[test]
+    fn set_max_size_requires_both_axes_or_neither() {
+        assert_eq!(resolve_max_size_bound(None, None), Ok(None));
+        assert_eq!(
+            resolve_max_size_bound(Some(800.0), Some(600.0)),
+            Ok(Some((800.0, 600.0)))
+        );
+        assert!(resolve_max_size_bound(Some(800.0), None).is_err());
+        assert!(resolve_max_size_bound(None, Some(600.0)).is_err());
+        assert!(resolve_max_size_bound(Some(0.0), Some(600.0)).is_err());
+        assert!(resolve_max_size_bound(Some(f64::NAN), Some(600.0)).is_err());
+        assert!(resolve_max_size_bound(Some(f64::INFINITY), Some(600.0)).is_err());
     }
 
     #[test]

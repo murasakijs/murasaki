@@ -134,9 +134,13 @@
       },
       "limitations": [
         "Configured secondary templates can be created, destroyed, and recreated from trusted Node Main, with generation-scoped lifecycle events; renderers remain limited to showing and managing live declared windows and cannot supply runtime URLs or capability policies.",
-        "macOS hud, sidebar, and popover vibrancy materials are applied natively with transparent window/WebView composition; Windows and Linux ignore the macOS-only option."
+        "macOS hud, sidebar, and popover vibrancy materials are applied natively with transparent window/WebView composition; Windows and Linux ignore the macOS-only option.",
+        "No parent/child or modal window relationship — tao has no cross-platform support for it, so every declared window is an independent top-level window.",
+        "Only borderless fullscreen is supported; there is no exclusive/dedicated-video-mode fullscreen.",
+        "titleBarStyle: 'hidden' is macOS only (transparent titlebar + hidden title + full-size content view); Windows and Linux accept and ignore it.",
+        "getMonitors() geometry (position, size) is reported in physical pixels, not logical/CSS pixels."
       ],
-      "apiSymbols": ["App", "WindowConfig", "SecondaryWindowConfig", "MainWindowState", "MainWindowLifecycleEvent", "murasaki/main.windows", "murasaki/native.appWindow", "murasaki/native.windows"],
+      "apiSymbols": ["App", "WindowConfig", "SecondaryWindowConfig", "MainWindowState", "MainWindowLifecycleEvent", "murasaki/main.windows", "murasaki/native.appWindow", "murasaki/native.windows", "useWindowDrag"],
       "testEvidence": [
         "packages/murasaki/test/native-api.test.mjs",
         "packages/murasaki/test/windows.test.mjs",

@@ -226,6 +226,158 @@ test('preserves one-axis minimum sizes by leaving the other axis unconstrained',
   }
 })
 
+test('resolves maximum sizes and validates the max >= min rule', () => {
+  const resolved = resolveWindowDeclarations({
+    window: { maxWidth: 1600 },
+    windows: { palette: { maxHeight: 900 } },
+  })
+  assert.deepEqual(
+    { maxWidth: resolved[0].maxWidth, maxHeight: resolved[0].maxHeight },
+    { maxWidth: 1600, maxHeight: 2_147_483_647 },
+  )
+  assert.deepEqual(
+    { maxWidth: resolved[1].maxWidth, maxHeight: resolved[1].maxHeight },
+    { maxWidth: 2_147_483_647, maxHeight: 900 },
+  )
+
+  const config = {
+    appId: 'dev.test.maximum',
+    productName: 'Maximum size',
+    window: { maxWidth: 1600 },
+  }
+  const meta = JSON.parse(metaJson(config, config.productName, null, process.cwd()))
+  assert.deepEqual(
+    { maxWidth: meta.windows[0].maxWidth, maxHeight: meta.windows[0].maxHeight },
+    { maxWidth: 1600, maxHeight: 2_147_483_647 },
+  )
+
+  for (const maxWidth of [-1, 0, 1.5]) {
+    assert.throws(
+      () => resolveWindowDeclarations({ window: { maxWidth } }),
+      /maxWidth.*positive/,
+    )
+  }
+
+  assert.throws(
+    () => resolveWindowDeclarations({ window: { minWidth: 800, maxWidth: 600 } }),
+    /maxWidth.*greater than or equal to minWidth/,
+  )
+  assert.throws(
+    () => resolveWindowDeclarations({ window: { minHeight: 800, maxHeight: 600 } }),
+    /maxHeight.*greater than or equal to minHeight/,
+  )
+  // Equal bounds are allowed.
+  const equalBounds = resolveWindowDeclarations({
+    window: { minWidth: 800, maxWidth: 800, minHeight: 600, maxHeight: 600 },
+  })
+  assert.deepEqual(
+    { maxWidth: equalBounds[0].maxWidth, maxHeight: equalBounds[0].maxHeight },
+    { maxWidth: 800, maxHeight: 600 },
+  )
+})
+
+test('validates decorations/fullscreen/titleBarStyle and warns only for macOS-only titleBarStyle', () => {
+  for (const window of [
+    { decorations: 'no' },
+    { fullscreen: 'yes' },
+    { titleBarStyle: 'floating' },
+  ]) {
+    assert.throws(
+      () => resolveWindowDeclarations({ window }),
+      /decorations|fullscreen|titleBarStyle/,
+    )
+  }
+
+  const resolved = resolveWindowDeclarations({
+    window: { decorations: false, fullscreen: true, titleBarStyle: 'default' },
+  })
+  assert.deepEqual(
+    {
+      decorations: resolved[0].decorations,
+      fullscreen: resolved[0].fullscreen,
+      titleBarStyle: resolved[0].titleBarStyle,
+    },
+    { decorations: false, fullscreen: true, titleBarStyle: 'default' },
+  )
+
+  const originalWarn = console.warn
+  const warnings = []
+  console.warn = (message) => warnings.push(message)
+  try {
+    resolveWindowDeclarations({ window: { titleBarStyle: 'default' } })
+    assert.equal(warnings.length, 0)
+    resolveWindowDeclarations({ window: { titleBarStyle: 'hidden' } })
+  } finally {
+    console.warn = originalWarn
+  }
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /window main titleBarStyle.*macOS only/)
+})
+
+test('passes frameless/titlebar/max-size/fullscreen fields through dev and bundle metadata', async () => {
+  const config = {
+    appId: 'dev.test.frameless',
+    productName: 'Frameless',
+    window: {
+      decorations: false,
+      titleBarStyle: 'hidden',
+      maxWidth: 1600,
+      maxHeight: 1200,
+      fullscreen: true,
+    },
+  }
+  const expected = {
+    decorations: false,
+    titleBarStyle: 'hidden',
+    maxWidth: 1600,
+    maxHeight: 1200,
+    fullscreen: true,
+  }
+
+  const originalWarn = console.warn
+  console.warn = () => {}
+  let devTemplate
+  let meta
+  try {
+    const { createDevWindowTemplates } = await import('../dist/cli/dev.js')
+    ;[devTemplate] = createDevWindowTemplates(config, process.cwd(), 'http://127.0.0.1:5178/')
+    meta = JSON.parse(metaJson(config, config.productName, null, process.cwd()))
+  } finally {
+    console.warn = originalWarn
+  }
+
+  assert.deepEqual(
+    {
+      decorations: devTemplate.window.decorations,
+      titleBarStyle: devTemplate.window.titleBarStyle,
+      maxWidth: devTemplate.window.maxWidth,
+      maxHeight: devTemplate.window.maxHeight,
+      fullscreen: devTemplate.window.fullscreen,
+    },
+    expected,
+  )
+  assert.deepEqual(
+    {
+      decorations: meta.decorations,
+      titleBarStyle: meta.titleBarStyle,
+      maxWidth: meta.maxWidth,
+      maxHeight: meta.maxHeight,
+      fullscreen: meta.fullscreen,
+    },
+    expected,
+  )
+  assert.deepEqual(
+    {
+      decorations: meta.windows[0].decorations,
+      titleBarStyle: meta.windows[0].titleBarStyle,
+      maxWidth: meta.windows[0].maxWidth,
+      maxHeight: meta.windows[0].maxHeight,
+      fullscreen: meta.windows[0].fullscreen,
+    },
+    expected,
+  )
+})
+
 test('rejects invalid raw window fields before they reach the native binding', () => {
   for (const window of [
     { width: 0 },

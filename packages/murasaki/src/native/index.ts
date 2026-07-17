@@ -106,6 +106,19 @@ export interface WindowInfo {
   maximized: boolean
 }
 
+/** One OS display, as returned by `appWindow.getMonitors()`. Geometry is in
+ * physical pixels — divide by `scaleFactor` for logical/CSS pixels. */
+export interface WindowMonitorInfo {
+  name: string | null
+  isPrimary: boolean
+  isCurrent: boolean
+  x: number
+  y: number
+  width: number
+  height: number
+  scaleFactor: number
+}
+
 export const app = {
   /** Request graceful application shutdown through the native host. */
   quit(): Promise<void> {
@@ -324,6 +337,31 @@ export const appWindow = {
   },
   isMinimized(): Promise<boolean> {
     return invokeNative('window.isMinimized')
+  },
+  /**
+   * Starts an OS window drag from a custom (frameless) titlebar region. Call
+   * on primary-button pointerdown — see `useWindowDrag()` for the typical
+   * caller. Resolves silently even when the native drag could not start (for
+   * example outside an active mouse-down); that failure is not surfaced.
+   */
+  startDragging(): Promise<void> {
+    return invokeNative<void>('window.startDragging').catch(() => undefined)
+  },
+  /** Enters/exits borderless fullscreen on the window's current monitor. */
+  setFullscreen(fullscreen: boolean): Promise<void> {
+    return invokeNative('window.setFullscreen', { fullscreen })
+  },
+  isFullscreen(): Promise<boolean> {
+    return invokeNative('window.isFullscreen')
+  },
+  /** Sets the maximum inner size. Both `width`/`height` omitted or `null`
+   * clears the bound; a single axis is rejected — provide both or neither. */
+  setMaxSize(size: { width?: number | null; height?: number | null } = {}): Promise<void> {
+    return invokeNative('window.setMaxSize', size)
+  },
+  /** Every OS display visible to this window, in physical pixels. */
+  getMonitors(): Promise<{ monitors: WindowMonitorInfo[] }> {
+    return invokeNative('window.getMonitors')
   },
 }
 

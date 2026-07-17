@@ -90,8 +90,29 @@ export interface WindowConfig {
   height?: number
   minWidth?: number
   minHeight?: number
+  /**
+   * Maximum inner width/height, in logical pixels. Setting only one axis is
+   * rejected — provide both or neither. Must be greater than or equal to
+   * `minWidth`/`minHeight` when both are configured.
+   */
+  maxWidth?: number
+  maxHeight?: number
   resizable?: boolean
   transparent?: boolean
+  /**
+   * Shows/hides the OS window chrome (titlebar + borders). Default `true`;
+   * `false` produces a frameless window on every platform. Pair with
+   * `useWindowDrag()` for a custom, draggable titlebar region.
+   */
+  decorations?: boolean
+  /**
+   * macOS only. `'hidden'` keeps the traffic-light buttons but hides the
+   * title text and extends the WebView under the titlebar. Accepted (and
+   * ignored) on Windows/Linux.
+   */
+  titleBarStyle?: 'default' | 'hidden'
+  /** Initial borderless-fullscreen state. Exclusive fullscreen is not supported. */
+  fullscreen?: boolean
   /**
    * macOS translucent window vibrancy. The native host automatically makes
    * the tao window and WebView transparent when a material is configured.
@@ -1129,9 +1150,16 @@ function resolveWindowDeclaration(
   }
   validateWindowDeclaration(declaration, label)
   const minimumSize = resolveMinimumSize(declaration, label)
+  const maximumSize = resolveMaximumSize(declaration, label)
+  if (declaration.titleBarStyle === 'hidden') {
+    console.warn(
+      `[murasaki] window ${label} titleBarStyle: 'hidden' is macOS only and is ignored on Windows/Linux`,
+    )
+  }
   return {
     ...declaration,
     ...minimumSize,
+    ...maximumSize,
     label,
     primary,
     route: resolveWindowRoute(declaration.route, label),
@@ -1163,6 +1191,8 @@ function validateWindowDeclaration(
     ['visible', declaration.visible],
     ['console', declaration.console],
     ['createOnLaunch', declaration.createOnLaunch],
+    ['decorations', declaration.decorations],
+    ['fullscreen', declaration.fullscreen],
   ] as const) {
     if (value !== undefined && typeof value !== 'boolean') {
       throw new TypeError(`window ${label} ${name} must be a boolean`)
@@ -1172,6 +1202,11 @@ function validateWindowDeclaration(
     && declaration.vibrancy !== null
     && !['hud', 'sidebar', 'popover'].includes(declaration.vibrancy)) {
     throw new TypeError(`window ${label} vibrancy must be hud, sidebar, popover, or null`)
+  }
+  if (declaration.titleBarStyle !== undefined
+    && declaration.titleBarStyle !== 'default'
+    && declaration.titleBarStyle !== 'hidden') {
+    throw new TypeError(`window ${label} titleBarStyle must be default or hidden`)
   }
 }
 
@@ -1357,6 +1392,45 @@ function resolveMinimumSize(
   return {
     minWidth: declaration.minWidth ?? 0,
     minHeight: declaration.minHeight ?? 0,
+  }
+}
+
+/** The largest positive 32-bit integer — tao's inner-size fields are `i32`. */
+const MAX_WINDOW_DIMENSION = 2_147_483_647
+
+function resolveMaximumSize(
+  declaration: WindowConfig,
+  label: string,
+): Pick<WindowConfig, 'maxWidth' | 'maxHeight'> {
+  const hasWidth = declaration.maxWidth !== undefined
+  const hasHeight = declaration.maxHeight !== undefined
+  if (!hasWidth && !hasHeight) return {}
+  for (const [name, value] of [
+    ['maxWidth', declaration.maxWidth],
+    ['maxHeight', declaration.maxHeight],
+  ] as const) {
+    if (value !== undefined
+      && (!Number.isSafeInteger(value) || value <= 0 || value > MAX_WINDOW_DIMENSION)) {
+      throw new TypeError(`window ${label} ${name} must be a positive 32-bit integer`)
+    }
+  }
+  if (declaration.maxWidth !== undefined
+    && declaration.minWidth !== undefined
+    && declaration.maxWidth < declaration.minWidth) {
+    throw new TypeError(`window ${label} maxWidth must be greater than or equal to minWidth`)
+  }
+  if (declaration.maxHeight !== undefined
+    && declaration.minHeight !== undefined
+    && declaration.maxHeight < declaration.minHeight) {
+    throw new TypeError(`window ${label} maxHeight must be greater than or equal to minHeight`)
+  }
+  // tao accepts one two-dimensional maximum. An unset axis is filled with the
+  // largest representable size so it stays effectively unconstrained instead
+  // of silently discarding the configured axis — the mirror image of
+  // resolveMinimumSize's zero sentinel above.
+  return {
+    maxWidth: declaration.maxWidth ?? MAX_WINDOW_DIMENSION,
+    maxHeight: declaration.maxHeight ?? MAX_WINDOW_DIMENSION,
   }
 }
 

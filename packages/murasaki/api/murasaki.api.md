@@ -9,6 +9,7 @@ import { ButtonProps } from '@murasakijs/ui';
 import type { ComponentType } from 'react';
 import { JSX } from 'react';
 import type { PluginOption } from 'vite';
+import type { PointerEvent as PointerEvent_2 } from 'react';
 import type { ReactElement } from 'react';
 import type { ReactNode } from 'react';
 
@@ -548,6 +549,11 @@ export function useUpdate(): UpdateState & {
     dismiss(): void;
 };
 
+// @public (undocumented)
+export function useWindowDrag(): {
+    onPointerDown: (event: PointerEvent_2) => void;
+};
+
 // @public
 export interface WebviewConfig {
     incognito?: boolean;
@@ -566,8 +572,13 @@ export interface WebviewProxyConfig {
 export interface WindowConfig {
     capabilities?: NativeCapabilityGrant[];
     console?: boolean;
+    decorations?: boolean;
+    fullscreen?: boolean;
     // (undocumented)
     height?: number;
+    // (undocumented)
+    maxHeight?: number;
+    maxWidth?: number;
     // (undocumented)
     minHeight?: number;
     // (undocumented)
@@ -577,6 +588,7 @@ export interface WindowConfig {
     route?: string;
     // (undocumented)
     title?: string;
+    titleBarStyle?: 'default' | 'hidden';
     // (undocumented)
     transparent?: boolean;
     vibrancy?: 'hud' | 'sidebar' | 'popover' | null;

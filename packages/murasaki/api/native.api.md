@@ -25,6 +25,16 @@ export const appWindow: {
     isFocused(): Promise<boolean>;
     isMaximized(): Promise<boolean>;
     isMinimized(): Promise<boolean>;
+    startDragging(): Promise<void>;
+    setFullscreen(fullscreen: boolean): Promise<void>;
+    isFullscreen(): Promise<boolean>;
+    setMaxSize(size?: {
+        width?: number | null;
+        height?: number | null;
+    }): Promise<void>;
+    getMonitors(): Promise<{
+        monitors: WindowMonitorInfo[];
+    }>;
 };
 
 // @public (undocumented)
@@ -223,6 +233,26 @@ export interface WindowInfo {
     primary: boolean;
     // (undocumented)
     visible: boolean;
+}
+
+// @public
+export interface WindowMonitorInfo {
+    // (undocumented)
+    height: number;
+    // (undocumented)
+    isCurrent: boolean;
+    // (undocumented)
+    isPrimary: boolean;
+    // (undocumented)
+    name: string | null;
+    // (undocumented)
+    scaleFactor: number;
+    // (undocumented)
+    width: number;
+    // (undocumented)
+    x: number;
+    // (undocumented)
+    y: number;
 }
 
 // @public
