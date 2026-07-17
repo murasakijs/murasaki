@@ -78,6 +78,7 @@ export default defineConfig({
 | `paths.logs` | log file |
 | `paths.temp` | 一時 staging data |
 | `log` | 構造化rotation logと診断report生成 |
+| `diagnostics` | crash reportのlocal capture — [Crash report](#crash-report)参照 |
 | `sidecars` | app同梱executable resource向け上限付きsupervisor |
 | `signal` | `beforeQuit` 後、`shutdown` 前に abort |
 
@@ -119,6 +120,72 @@ log末尾には上限があり、OSが対応する場合reportはowner-only perm
 token、file content、個人情報をmessageや非構造化stringへ書かないでください。通常の
 上限付きshutdownではMurasakiがloggerをflushします。app独自のcrash/restart境界で全record
 を永続化したい場合は先に`await log.flush()`を呼びます。
+
+## Crash report
+
+上記のopt-in snapshotとは別に、Murasakiは3つのdomainにわたってversioned local
+crash reportを自動captureします。`context.log`と同じ方法でbound・redactされ、
+`<paths.data>/crash-reports`へ書かれます。
+
+| Domain | Captureされるタイミング |
+| --- | --- |
+| `node` | Node Mainでuncaught exceptionまたはunhandled rejectionが発生したとき。reportはprocessがcrashする前に同期的に書かれます — Murasakiがなくても起きるcrashそのものは変わりません。 |
+| `native` | native launcherがpanicした、または同梱Node processが予期せずexit（crash、force-kill）したとき。exit code/signalのmetadata付き。 |
+| `renderer` | **本番build**のrendererでuncaughtなerrorまたはunhandled promise rejectionが発生したとき。`murasaki dev`では no-op です（同じ2つのeventは`DevErrorOverlay`が既にsurfaceしています）。 |
+
+既定で有効です。retentionの調整や無効化は`murasaki.config.ts`で行います。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  diagnostics: {
+    // crashReports: false,
+    keepReports: 20, // app毎に保持する最新report数。範囲外の値は1-100へclampされる
+  },
+})
+```
+
+Captureされたreportは`context.diagnostics`経由で読み戻せます。
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ diagnostics, log }) {
+    const reports = await diagnostics.listCrashReports()
+    log.info('crash reports on disk', { count: reports.length })
+  },
+})
+```
+
+reportは`{ reportVersion, domain, timestamp, appVersion, frameworkVersion, os,
+arch, message, stack?, extra? }`という形です。minidump captureやnative
+symbolicationはありません — `message`/`stack`はfailした processが観測した
+そのままの値です。Murasakiはreportをどこへもuploadしません。crash-reporting
+serviceへ流し込みたい場合はapplication codeの責務です。例えばlaunch時に：
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+import * as Sentry from '@sentry/node'
+
+Sentry.init({ dsn: process.env.SENTRY_DSN })
+
+export default defineMain({
+  async ready({ diagnostics, log }) {
+    for (const { id } of await diagnostics.listCrashReports()) {
+      const report = await diagnostics.readCrashReport(id)
+      if (!report) continue
+      Sentry.captureException(new Error(report.message), {
+        tags: { domain: report.domain, appVersion: report.appVersion },
+        extra: { stack: report.stack, ...report.extra },
+      })
+    }
+    await diagnostics.clearCrashReports()
+    log.info('drained crash reports to Sentry')
+  },
+})
+```
 
 ## 同梱sidecarを監督する
 

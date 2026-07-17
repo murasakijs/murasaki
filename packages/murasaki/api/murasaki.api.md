@@ -196,6 +196,12 @@ export function defineConfig(config: MurasakiConfig): MurasakiConfig;
 export function defineMurasakiPlugin(plugin: MurasakiPlugin): MurasakiPlugin;
 
 // @public
+export interface DiagnosticsConfig {
+    crashReports?: boolean;
+    keepReports?: number;
+}
+
+// @public
 export interface FileAssociationConfig {
     description?: string;
     extensions: string[];
@@ -307,6 +313,7 @@ export interface MurasakiConfig {
     copyright?: string;
     description?: string;
     devPort?: number;
+    diagnostics?: DiagnosticsConfig;
     fileAssociations?: FileAssociationConfig[];
     homepage?: string;
     icon?: string;

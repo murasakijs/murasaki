@@ -10,11 +10,12 @@ import { PNG } from 'pngjs'
 import { NtExecutable, NtExecutableResource, Data, Resource } from 'resedit'
 import { buildProject } from './build.js'
 import buildServer from './build-server.js'
-import { dim, success, warn, unsignedNote } from './brand.js'
+import { dim, success, warn, unsignedNote, murasakiVersion } from './brand.js'
 import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import {
   resolveWebviewNetworkConfig,
   resolveStartupSystemPermissions,
+  resolveDiagnosticsConfig,
   validateMainShutdownTimeoutMs,
   type MurasakiConfig,
   type MurasakiBuildTarget,
@@ -484,10 +485,12 @@ async function zipDarwinApp(
 
 /**
  * Copy the Node Main lifecycle runtime without flattening its compiled module
- * graph. `main-runtime.js` imports `../main/logger.js` and
- * `../main/sidecar.js`; preserving that layout prevents packaged apps from
- * starting with an ERR_MODULE_NOT_FOUND after those production services are
- * enabled. A private package boundary marks the copied `.js` files as ESM.
+ * graph. `main-runtime.js` imports `../main/logger.js`, `../main/sidecar.js`,
+ * and `../main/crash-reports.js`; preserving that layout prevents packaged
+ * apps from starting with an ERR_MODULE_NOT_FOUND after those production
+ * services are enabled. `prod-server.mjs` also imports `crash-reports.js`
+ * directly for its renderer crash-report endpoint. A private package
+ * boundary marks the copied `.js` files as ESM.
  */
 async function copyMainRuntime(resourcesDir: string): Promise<void> {
   const root = join(resourcesDir, '.murasaki-runtime')
@@ -502,6 +505,7 @@ async function copyMainRuntime(resourcesDir: string): Promise<void> {
     ),
     copyFile(resolve(__dirname, '../main/logger.js'), join(mainDir, 'logger.js')),
     copyFile(resolve(__dirname, '../main/sidecar.js'), join(mainDir, 'sidecar.js')),
+    copyFile(resolve(__dirname, '../main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
     writeFile(join(root, 'package.json'), '{"private":true,"type":"module"}\n'),
   ])
 }
@@ -535,6 +539,10 @@ export function metaJson(
       appId: config.appId,
       productName,
       version: config.version ?? '0.0.0',
+      // murasaki's own version, not the app's — read by crash reports (both
+      // Node's and the native launcher's) for `frameworkVersion`.
+      frameworkVersion: murasakiVersion(),
+      diagnostics: resolveDiagnosticsConfig(config),
       description: config.description,
       copyright: config.copyright,
       homepage: config.homepage,

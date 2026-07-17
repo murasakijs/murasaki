@@ -18,9 +18,67 @@ import { routes, middleware } from 'virtual:murasaki/routes'
 
 installClientRpc()
 
+// Prod-only renderer crash capture (assets/prod-server.mjs's
+// /__murasaki/diagnostics/renderer-error). Dev keeps this a no-op — the
+// DevErrorOverlay (src/react/error-overlay.tsx) owns dev UX for the same two
+// listeners instead, gated the same way (process.env.NODE_ENV).
+if (process.env.NODE_ENV === 'production') installRendererCrashReporting()
+
 createRoot(document.getElementById('root')).render(
   h(StrictMode, null, h(ThemeProvider, null, h(AppRouter, { routes, middleware }))),
 )
+
+function installRendererCrashReporting() {
+  const MAX_PAYLOAD_BYTES = 16 * 1024
+  const RATE_LIMIT_PER_MINUTE = 10
+  const RATE_WINDOW_MS = 60_000
+  let windowStart = Date.now()
+  let sentInWindow = 0
+
+  function send(message, stack, source) {
+    const now = Date.now()
+    if (now - windowStart >= RATE_WINDOW_MS) {
+      windowStart = now
+      sentInWindow = 0
+    }
+    if (sentInWindow >= RATE_LIMIT_PER_MINUTE) return
+    sentInWindow++
+
+    let payload = {
+      message: String(message).slice(0, 8_000),
+      stack: typeof stack === 'string' ? stack.slice(0, 16_000) : undefined,
+      source,
+    }
+    let body = JSON.stringify(payload)
+    while (new TextEncoder().encode(body).byteLength > MAX_PAYLOAD_BYTES && payload.stack) {
+      payload = { ...payload, stack: payload.stack.slice(0, Math.floor(payload.stack.length / 2)) }
+      body = JSON.stringify(payload)
+    }
+    fetch('/__murasaki/diagnostics/renderer-error', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+      keepalive: true,
+    }).catch(() => {})
+  }
+
+  window.addEventListener('error', (event) => {
+    const error = event.error
+    send(
+      error instanceof Error ? error.message : event.message,
+      error instanceof Error ? error.stack : undefined,
+      'error',
+    )
+  })
+  window.addEventListener('unhandledrejection', (event) => {
+    const reason = event.reason
+    send(
+      reason instanceof Error ? reason.message : String(reason),
+      reason instanceof Error ? reason.stack : undefined,
+      'unhandledrejection',
+    )
+  })
+}
 `
 
 // The framework-owned app shell ships as a plain asset (assets/app.html) —

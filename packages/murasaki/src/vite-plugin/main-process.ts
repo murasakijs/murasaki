@@ -4,6 +4,7 @@ import type { Plugin } from 'vite'
 import { validateMainShutdownTimeoutMs, type MurasakiConfig } from '../config.js'
 import { MainRuntime } from '../runtime/main-runtime.js'
 import { isAuthorizedNativeRequest, runtimeToken } from './runtime-security.js'
+import { murasakiVersion } from '../cli/brand.js'
 import type { MainWindowLifecycleEvent } from '../main/index.js'
 
 interface Options {
@@ -319,9 +320,11 @@ function createRuntime(config: MurasakiConfig, projectRoot: string): MainRuntime
     appId: config.appId,
     productName: config.productName,
     version: config.version,
+    frameworkVersion: murasakiVersion(),
     projectRoot,
     resourcesPath: projectRoot,
     isPackaged: false,
     shutdownTimeoutMs,
+    diagnostics: config.diagnostics,
   })
 }

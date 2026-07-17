@@ -11,9 +11,15 @@ import type {
 } from '../main/index.js'
 import { createMainLogger } from '../main/logger.js'
 import { createSidecarSupervisor } from '../main/sidecar.js'
+import { createCrashDiagnostics, writeCrashReportSync } from '../main/crash-reports.js'
 
 const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS = 10_000
 const MAX_MAIN_SHUTDOWN_TIMEOUT_MS = 300_000
+
+const DEFAULT_KEEP_CRASH_REPORTS = 20
+const MIN_KEEP_CRASH_REPORTS = 1
+const MAX_KEEP_CRASH_REPORTS = 100
+const CRASH_REPORTS_SUBDIR = 'crash-reports'
 
 function validateRuntimeShutdownTimeoutMs(value: number | undefined): void {
   if (value === undefined) return
@@ -24,16 +30,27 @@ function validateRuntimeShutdownTimeoutMs(value: number | undefined): void {
   }
 }
 
+/** Raw `diagnostics` config, passed through from `murasaki.config.ts` (dev) or resolved bundle metadata (prod). */
+export interface MainRuntimeDiagnosticsOptions {
+  /** Capture uncaught exceptions/rejections as local crash reports. Default true. */
+  crashReports?: boolean
+  /** Newest crash reports retained. Default 20, clamped 1-100. */
+  keepReports?: number
+}
+
 export interface MainRuntimeOptions {
   appId: string
   productName: string
   version?: string
+  /** murasaki's own version, for crash report `frameworkVersion`. Defaults to '0.0.0'. */
+  frameworkVersion?: string
   projectRoot: string
   resourcesPath?: string
   isPackaged: boolean
   shutdownTimeoutMs?: number
   /** Internal/test override; normal apps use platform-standard locations. */
   paths?: MainContext['paths']
+  diagnostics?: MainRuntimeDiagnosticsOptions
 }
 
 export interface ShutdownOptions {
@@ -358,8 +375,19 @@ async function createMainContext(
   signal: AbortSignal,
 ): Promise<MainContext> {
   const paths = options.paths ?? resolveAppPaths(options.appId)
-  await Promise.all(Object.values(paths).map((path) => mkdir(path, { recursive: true })))
   const version = options.version ?? '0.0.0'
+  const frameworkVersion = options.frameworkVersion ?? '0.0.0'
+  const crashReportsDir = join(paths.data, CRASH_REPORTS_SUBDIR)
+  const diagnosticsSettings = resolveDiagnosticsOptions(options.diagnostics)
+  if (diagnosticsSettings.crashReports) {
+    installNodeCrashReportHooks({
+      directory: crashReportsDir,
+      appVersion: version,
+      frameworkVersion,
+      keepReports: diagnosticsSettings.keepReports,
+    })
+  }
+  await Promise.all(Object.values(paths).map((path) => mkdir(path, { recursive: true })))
   const log = createMainLogger({
     directory: paths.logs,
     appId: options.appId,
@@ -385,9 +413,63 @@ async function createMainContext(
     resourcesPath,
     paths,
     log,
+    diagnostics: createCrashDiagnostics(crashReportsDir),
     sidecars,
     signal,
   }
+}
+
+function resolveDiagnosticsOptions(
+  diagnostics: MainRuntimeDiagnosticsOptions | undefined,
+): { crashReports: boolean; keepReports: number } {
+  const keepReports = diagnostics?.keepReports === undefined
+    ? DEFAULT_KEEP_CRASH_REPORTS
+    : Math.min(MAX_KEEP_CRASH_REPORTS, Math.max(MIN_KEEP_CRASH_REPORTS, diagnostics.keepReports))
+  return { crashReports: diagnostics?.crashReports ?? true, keepReports }
+}
+
+interface CrashHookOptions {
+  directory: string
+  appVersion: string
+  frameworkVersion: string
+  keepReports: number
+}
+
+// A dev HMR reload calls createMainContext() repeatedly in the same process
+// (see vite-plugin/main-process.ts). Guard installation with a global symbol
+// (the same pattern as the window-control/event buses above) so a reload
+// never stacks a second uncaughtException/unhandledRejection listener.
+const CRASH_HOOKS_INSTALLED = Symbol.for('murasaki.main.crash-hooks.v1')
+
+function installNodeCrashReportHooks(options: CrashHookOptions): void {
+  const root = globalThis as typeof globalThis & { [key: symbol]: unknown }
+  if (root[CRASH_HOOKS_INSTALLED]) return
+  root[CRASH_HOOKS_INSTALLED] = true
+
+  const handleFatal = (error: unknown): void => {
+    const { message, stack } = error instanceof Error
+      ? { message: error.message, stack: error.stack }
+      : { message: String(error), stack: undefined }
+    // Synchronous and atomic (temp file + rename) so this completes before
+    // the process exits below — never queued behind the logger's async
+    // append. Best-effort: a failed write must not stop the process from
+    // crashing normally.
+    writeCrashReportSync(options.directory, {
+      domain: 'node',
+      message,
+      stack,
+      appVersion: options.appVersion,
+      frameworkVersion: options.frameworkVersion,
+    }, options.keepReports)
+    // Registering these listeners replaces Node's own default fail-fast
+    // behavior (print the exception, exit non-zero). Reproduce it: this hook
+    // only adds a report write in front of the same crash, never swallows it.
+    console.error(error)
+    process.exit(1)
+  }
+
+  process.on('uncaughtException', handleFatal)
+  process.on('unhandledRejection', handleFatal)
 }
 
 export function resolveAppPaths(appId: string): MainContext['paths'] {
