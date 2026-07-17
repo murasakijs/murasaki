@@ -83,6 +83,11 @@ param(
   # the marker instead.
   [int]$ApplyLauncherTimeoutSeconds = 30,
 
+  # After the v2 marker appears, the out-of-target helper still has to finish
+  # its relaunch handoff and release installer files. Observe its terminal log
+  # before the negative case tears the install down.
+  [int]$ApplyHelperTimeoutSeconds = 30,
+
   # Falls back to the OS temp dir so this script can also be run manually
   # (e.g. reproducing a CI failure locally) without $env:RUNNER_TEMP set.
   [string]$LogPath = (Join-Path ($(if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [System.IO.Path]::GetTempPath() })) 'murasaki-updater-e2e.log')
@@ -143,9 +148,13 @@ function Uninstall-InstalledApp {
   $uninstaller = Join-Path $InstallDir 'Uninstall.exe'
   if (Test-Path $uninstaller) {
     Write-Host "Uninstalling existing install at $InstallDir ..."
-    $proc = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
-    if ($proc.ExitCode -ne 0) {
-      Write-Host "::warning::Uninstall.exe exited with code $($proc.ExitCode) — falling back to a manual delete."
+    try {
+      $proc = Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru -Wait
+      if ($proc.ExitCode -ne 0) {
+        Write-Host "::warning::Uninstall.exe exited with code $($proc.ExitCode) — falling back to a manual delete."
+      }
+    } catch {
+      Write-Host "::warning::Could not start Uninstall.exe ($_) — falling back to a manual delete."
     }
   }
 
@@ -226,6 +235,21 @@ function Show-ApplyDiagnostics($Apply) {
   Get-Content -Path $Apply.OutLog -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "  $_" }
 }
 
+function Wait-ApplyHelperCompletion($Apply, [int]$WaitTimeoutSeconds) {
+  $deadline = (Get-Date).AddSeconds($WaitTimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $stderr = Get-Content -Path $Apply.ErrLog -Raw -ErrorAction SilentlyContinue
+    if ($stderr -match 'murasaki-apply: relaunched .*; awaiting startup health acknowledgement') {
+      return
+    }
+    if ($stderr -match 'murasaki-apply: (apply failed|CRITICAL:)') {
+      throw 'the out-of-target apply helper reported a terminal failure'
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  throw "out-of-target apply helper did not complete within ${WaitTimeoutSeconds}s"
+}
+
 # ── main ──────────────────────────────────────────────────────────────────
 
 $transcriptStarted = $false
@@ -269,8 +293,8 @@ try {
   # marker is not expected to exist yet at this point.
 
   $markerAppeared = Wait-Marker -WaitTimeoutSeconds $MarkerTimeoutSeconds
-  Show-ApplyDiagnostics $apply
   if (-not $markerAppeared) {
+    Show-ApplyDiagnostics $apply
     Write-Error (
       "v2 marker never appeared at $MarkerPath within ${MarkerTimeoutSeconds}s. " +
       'This is the decisive assertion this workflow exists to make: the apply ' +
@@ -280,6 +304,10 @@ try {
     exit 1
   }
   Write-Host 'v2 marker present — the update was applied for real.'
+
+  Wait-ApplyHelperCompletion $apply $ApplyHelperTimeoutSeconds
+  Show-ApplyDiagnostics $apply
+  Write-Host 'Out-of-target apply helper completed its relaunch handoff.'
 
   if (-not (Test-Path $ExePath)) {
     Write-Error "$ExePath is gone after a successful apply — the app must remain installed/relaunchable."
