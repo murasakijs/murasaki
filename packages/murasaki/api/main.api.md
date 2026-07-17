@@ -5,6 +5,55 @@
 ```ts
 
 // @public
+export interface CrashDiagnosticsApi {
+    // (undocumented)
+    clearCrashReports(): Promise<void>;
+    // (undocumented)
+    listCrashReports(): Promise<CrashReportSummary[]>;
+    // (undocumented)
+    readCrashReport(id: string): Promise<CrashReport | null>;
+}
+
+// @public
+export interface CrashReport {
+    // (undocumented)
+    appVersion: string;
+    // (undocumented)
+    arch: string;
+    // (undocumented)
+    domain: CrashReportDomain;
+    // (undocumented)
+    extra?: Record<string, unknown>;
+    // (undocumented)
+    frameworkVersion: string;
+    // (undocumented)
+    message: string;
+    // (undocumented)
+    os: string;
+    // (undocumented)
+    reportVersion: 1;
+    // (undocumented)
+    stack?: string;
+    // (undocumented)
+    timestamp: string;
+}
+
+// @public (undocumented)
+export type CrashReportDomain = 'node' | 'native' | 'renderer';
+
+// @public
+export interface CrashReportSummary {
+    // (undocumented)
+    appVersion: string;
+    // (undocumented)
+    domain: CrashReportDomain;
+    // (undocumented)
+    id: string;
+    // (undocumented)
+    timestamp: string;
+}
+
+// @public
 export function createMainLogger(options: MainLoggerOptions): MainLogger;
 
 // @public
@@ -29,6 +78,7 @@ export interface MainContext {
     appId: string;
     // (undocumented)
     arch: string;
+    diagnostics: CrashDiagnosticsApi;
     // (undocumented)
     isPackaged: boolean;
     log: MainLogger;
