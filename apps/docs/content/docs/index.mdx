@@ -22,11 +22,10 @@ window, native menus, and OS integration — **without you writing any Rust**.
 | Installer size  | **~43 MB `.dmg`** / **~120 MB `.app`**†         | ~80–150 MB\*          | ~3–10 MB\*            |
 | Server actions  | `defineAction` / `useAction`                   | manual IPC            | manual IPC / commands |
 
-<sub>
-  \* Commonly-cited ballpark for Electron/Tauri — not a measured benchmark. †
-  Measured on macOS — the `.app` bundles a full Node runtime, which is where
-  most of its size comes from.
-</sub>
+<small className="my-4 block text-xs leading-relaxed text-fd-muted-foreground">
+  \* Commonly-cited ballpark for Electron/Tauri — not a measured benchmark.<br />
+  † Measured on macOS — the `.app` bundles a full Node runtime, which is where most of its size comes from.
+</small>
 
 **Choose Murasaki if** you know React/Next.js and want a small-footprint desktop
 app without learning Rust or hand-wiring IPC.

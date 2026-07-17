@@ -18,11 +18,10 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
 | インストーラーサイズ | **~43 MB `.dmg`** / **~120 MB `.app`**†  | ~80–150 MB\*  | ~3–10 MB\*             |
 | サーバーアクション  | `defineAction` / `useAction`    | manual IPC            | manual IPC / commands  |
 
-<sub>
-  \* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。
-  † macOS で実測。`.app` はフル Node ランタイムを同梱しているため、サイズの大部分はそこか
-  ら来ています。
-</sub>
+<small className="my-4 block text-xs leading-relaxed text-fd-muted-foreground">
+  \* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。<br />
+  † macOS で実測。`.app` はフル Node ランタイムを同梱しているため、サイズの大部分はそこから来ています。
+</small>
 
 **Murasaki を選ぶべきなのは**、React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたい人です。
 
