@@ -11,17 +11,21 @@
 //!
 //! Context menus pop the muda menu synchronously — via a modal call that
 //! pumps its own nested run/message loop (`show_context_menu_for_nsview` on
-//! macOS, `show_context_menu_for_hwnd` on Windows) — and report the clicked
-//! item back to the page via `evaluate_script` (which runs inside the
-//! platform webview — WebKit on macOS, WebView2 on Windows — and isn't
-//! affected by the blocked Node loop).
+//! macOS, `show_context_menu_for_hwnd` on Windows, `show_context_menu_for_gtk_window`
+//! on Linux) — and report the clicked item back to the page via
+//! `evaluate_script` (which runs inside the platform webview — WebKit on
+//! macOS/Linux, WebView2 on Windows — and isn't affected by the blocked Node
+//! loop).
 //!
 //! The app menu (`useAppMenu`) instead **replaces** the standing menu
 //! bar/NSMenu — see `AppMenuContext` and `handle_app_menu_message` — and its
 //! clicks arrive asynchronously (whenever the user picks an item, not
 //! synchronously like a popup), picked up by `poll_app_menu_events` (macOS)
-//! / `poll_menu_bar_events` (Windows), polled once per tao event-loop tick
-//! from `Application::run` and `launcher.rs`'s per-platform launchers.
+//! / `poll_menu_bar_events` (Windows and Linux), polled once per tao
+//! event-loop tick from `Application::run` and `launcher.rs`'s per-platform
+//! launchers (the Linux dev-mode poll lives in `application.rs`; the prod
+//! launcher's Linux support is a later phase — see that module's doc
+//! comment).
 //!
 //! `app.quit` (`quit()`) sets `QUIT_REQUESTED` instead of acting immediately —
 //! the ipc_handler closure has no access to the event loop's `ControlFlow`,
@@ -33,7 +37,7 @@ use napi::{
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use napi_derive::napi;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::collections::VecDeque;
 use std::{
     borrow::Cow,
@@ -447,7 +451,7 @@ static QUIT_REQUESTED: AtomicBool = AtomicBool::new(false);
 // context popup is modal, but an application-menu click may already be
 // queued when that popup opens. Preserve those unrelated ids here instead
 // of letting the popup consume and mis-dispatch them.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 thread_local! {
   static DEFERRED_APP_MENU_EVENTS: RefCell<VecDeque<String>> = const {
     RefCell::new(VecDeque::new())
@@ -2396,7 +2400,7 @@ impl Webview {
     /// directly from the IPC handler — see the module doc comment.
     #[napi(js_name = "showContextMenu")]
     pub fn show_context_menu(&self, menu: MenuOptions, position: Option<Position>) -> Result<()> {
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             let (x, y) = match position {
                 Some(p) => (Some(p.x), Some(p.y)),
@@ -2409,13 +2413,14 @@ impl Webview {
             unix,
             not(target_os = "macos"),
             not(target_os = "android"),
-            not(target_os = "freebsd")
+            not(target_os = "freebsd"),
+            not(target_os = "linux")
         ))]
         {
             let _ = (menu, position);
             return Err(Error::new(
                 Status::GenericFailure,
-                "showContextMenu on Linux is wired up but not yet implemented",
+                "showContextMenu is unsupported on this platform",
             ));
         }
 
@@ -2507,12 +2512,22 @@ fn load_tray_icon(path: &str) -> std::result::Result<TrayIconImage, String> {
 /// Drain tray click events and deliver them to renderer listeners. The tao
 /// loop polls this because tray-icon uses its own channel rather than tao
 /// user events.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+///
+/// Linux note (verified by reading tray-icon 0.24's GTK/libappindicator
+/// backend): the tray-menu-click half of this function (below, via muda's
+/// shared `MenuEvent` channel) works identically to macOS/Windows — but the
+/// `TrayIconEvent::receiver()` loop further down never yields anything on
+/// Linux. tray-icon's GTK implementation never calls `TrayIconEvent::send`
+/// at all (only its macOS/Windows backends do) — `AppIndicator`/
+/// `KStatusNotifierItem` expose no left/right/double-click signal to the
+/// app, only "show the attached menu". So `murasaki:trayclick` never fires
+/// on Linux; `murasaki:traymenuclick` does.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn tray_event_is_current(active_id: Option<&str>, event_id: &str) -> bool {
     active_id.is_some_and(|active_id| active_id == event_id)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub(crate) fn poll_tray_events(webview_slot: &SharedWebview, tray_slot: &SharedProcessTray) {
     use tray_icon::{MouseButton, MouseButtonState};
 
@@ -2575,7 +2590,7 @@ pub(crate) fn poll_tray_events(webview_slot: &SharedWebview, tray_slot: &SharedP
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn dispatch_tray_menu_click(webview_slot: &SharedWebview, id: &str) {
     let script = format!(
         "window.dispatchEvent(new CustomEvent('murasaki:traymenuclick',{{detail:{}}}))",
@@ -2586,7 +2601,7 @@ fn dispatch_tray_menu_click(webview_slot: &SharedWebview, id: &str) {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn collect_menu_item_ids(items: Vec<muda::MenuItemKind>, ids: &mut HashSet<String>) {
     for item in items {
         ids.insert(item.id().as_ref().to_string());
@@ -2596,21 +2611,21 @@ fn collect_menu_item_ids(items: Vec<muda::MenuItemKind>, ids: &mut HashSet<Strin
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn menu_owned_ids(menu: &muda::Menu) -> HashSet<String> {
     let mut ids = HashSet::new();
     collect_menu_item_ids(menu.items(), &mut ids);
     ids
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn defer_menu_event_ids(ids: impl IntoIterator<Item = String>) {
     DEFERRED_APP_MENU_EVENTS.with(|pending| pending.borrow_mut().extend(ids));
 }
 
 /// Move events that predate a context popup out of muda's shared receiver.
 /// The popup can then claim only ids belonging to the `Menu` it just built.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn defer_pending_app_menu_events() {
     let mut pending = Vec::new();
     while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
@@ -2621,7 +2636,7 @@ fn defer_pending_app_menu_events() {
 
 /// Select the first event owned by a modal context menu and preserve every
 /// other id, in order, for the persistent application-menu poller.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn split_first_owned_menu_event(
     queued: impl IntoIterator<Item = String>,
     owned_ids: &HashSet<String>,
@@ -2638,7 +2653,7 @@ fn split_first_owned_menu_event(
     (selected, deferred)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn take_context_menu_event(owned_ids: &HashSet<String>) -> Option<String> {
     let mut queued = Vec::new();
     while let Ok(event) = muda::MenuEvent::receiver().try_recv() {
@@ -2649,7 +2664,7 @@ fn take_context_menu_event(owned_ids: &HashSet<String>) -> Option<String> {
     selected
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn retain_owned_menu_events(
     queued: impl IntoIterator<Item = String>,
     owned_ids: &HashSet<String>,
@@ -2660,7 +2675,7 @@ fn retain_owned_menu_events(
         .collect()
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn take_app_menu_events(menu_slot: &SharedMenu) -> Vec<String> {
     let mut queued =
         DEFERRED_APP_MENU_EVENTS.with(|pending| pending.borrow_mut().drain(..).collect::<Vec<_>>());
@@ -2830,7 +2845,76 @@ fn show_native_context_menu(
         .unwrap_or_default()
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+/// Linux: same shape as the macOS/Windows versions above — build the muda
+/// menu, pop it up synchronously via GTK, then report the clicked item back
+/// into page JS. `x`/`y` behave like the Windows variant (relative to the
+/// window's top-left, per `show_context_menu_for_gtk_window`'s own doc
+/// comment) rather than always falling back to the cursor position like
+/// macOS.
+#[cfg(target_os = "linux")]
+fn show_native_context_menu(
+    window_slot: &SharedWindow,
+    webview_slot: &Rc<RefCell<Option<WebView>>>,
+    items: &[MenuItemOptions],
+    x: Option<f64>,
+    y: Option<f64>,
+) -> MenuPollOutcome {
+    use muda::{
+        dpi::{LogicalPosition, Position},
+        ContextMenu,
+    };
+    use tao::platform::unix::WindowExtUnix;
+
+    let menu = match build_menu(items) {
+        Ok(m) => m,
+        Err(_) => return MenuPollOutcome::default(),
+    };
+    let owned_ids = menu_owned_ids(&menu);
+    defer_pending_app_menu_events();
+
+    let position = match (x, y) {
+        (Some(x), Some(y)) => Some(Position::Logical(LogicalPosition::new(x, y))),
+        _ => None,
+    };
+
+    // Clone the `gtk::ApplicationWindow` (a cheap GObject refcount bump, not
+    // a deep copy) and drop the RefCell borrow *before* calling
+    // `show_context_menu_for_gtk_window` below — like the macOS/Windows
+    // calls above, it's modal (it pumps `gtk::main_iteration()` in a loop
+    // until the popup is dismissed or an item is picked), and re-entrant
+    // access to `window_slot` while our borrow was still live would panic
+    // with `BorrowError` if a window event fires during that nested loop.
+    let gtk_window: gtk::ApplicationWindow = {
+        let guard = window_slot.borrow();
+        match guard.as_ref() {
+            Some(w) => w.gtk_window().clone(),
+            None => return MenuPollOutcome::default(),
+        }
+    };
+    // `show_context_menu_for_gtk_window` takes `&gtk::Window` specifically —
+    // glib-rs wrapper types don't implement `std::ops::Deref` toward their
+    // GObject superclass, so this needs an explicit (statically-checked,
+    // zero-cost) upcast rather than relying on deref coercion.
+    use gtk::glib::Cast;
+    let gtk_window: &gtk::Window = gtk_window.upcast_ref();
+
+    // Unconfirmed on real hardware (flagged for manual verification, same
+    // caveat as the macOS variant above): `MenuEvent::receiver().try_recv()`
+    // immediately after this call returns is assumed to already have the
+    // click queued. This matches muda's GTK implementation as read from
+    // source — `show_context_menu_for_gtk_window` pumps `gtk::main_iteration()`
+    // until the popup's `selection-done` signal fires, and GTK delivers the
+    // clicked item's `activate` signal (which is what triggers muda's
+    // `MenuEvent::send`) before `selection-done` — but GTK's signal ordering
+    // isn't a treated as a hard guarantee here the way Windows' is.
+    let _ = menu.show_context_menu_for_gtk_window(gtk_window, position);
+
+    take_context_menu_event(&owned_ids)
+        .map(|id| handle_native_menu_event(window_slot, webview_slot, &id))
+        .unwrap_or_default()
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn handle_native_menu_event(
     window_slot: &SharedWindow,
     webview_slot: &SharedWebview,
@@ -2879,20 +2963,22 @@ fn dispatch_menu_click(webview_slot: &Rc<RefCell<Option<WebView>>>, id: &str) {
     }
 }
 
-/// Windows only: polls muda's global menu-event channel for clicks on the
-/// **native menu bar** built by `menu::build_windows_menu_bar` and installed
-/// via `Menu::init_for_hwnd` (see `application.rs::create_window` and
-/// `launcher.rs`'s `imp_win`). Unlike the context-menu popup above — modal,
-/// so it reads its one expected event synchronously right after
-/// `show_context_menu_for_hwnd` returns — the menu bar is persistent: clicks
-/// arrive asynchronously, whenever the user picks an item, so this is called
-/// once per tao event-loop tick instead (see both call sites' `event_loop.run`
-/// closures).
+/// Windows/Linux: polls muda's global menu-event channel for clicks on the
+/// **native menu bar** built by `menu::build_menu_bar` and installed via
+/// `menu::attach_menu_bar` (see `application.rs::create_window` and
+/// `launcher.rs`'s `imp_win` — Linux dev-mode wiring lives entirely in
+/// `application.rs`; the prod launcher's Linux support is a later phase).
+/// Unlike the context-menu popup above — modal, so it reads its one expected
+/// event synchronously right after `show_context_menu_for_hwnd`/
+/// `show_context_menu_for_gtk_window` returns — the menu bar is persistent:
+/// clicks arrive asynchronously, whenever the user picks an item, so this is
+/// called once per tao event-loop tick instead (see both call sites'
+/// `event_loop.run` closures).
 ///
 /// Drains every pending event in case more than one queued up between two
-/// ticks. Ids outside `windows_menu_bar_ids`
+/// ticks. Ids outside `menu_bar_ids`
 /// are treated as a `useAppMenu` custom-item click (see
-/// `menu::build_windows_app_menu_from_spec`) and dispatched via
+/// `menu::build_menu_bar_app_menu_from_spec`) and dispatched via
 /// `dispatch_menu_click` to the primary renderer. Context popups share muda's
 /// process-global receiver; `show_native_context_menu` separates their owned
 /// ids and preserves unrelated queued app-menu ids for this poller.
@@ -2904,14 +2990,14 @@ fn dispatch_menu_click(webview_slot: &Rc<RefCell<Option<WebView>>>, id: &str) {
 /// spawned `node` child in the prod launcher vs. run the registered
 /// `onQuit` JS callback in the dev path via `Application`), so it's left for
 /// the caller to act on.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) fn poll_menu_bar_events(
     window_slot: &SharedWindow,
     focused_webview_slot: &SharedWebview,
     app_menu_webview_slot: &SharedWebview,
     app_menu_slot: &SharedMenu,
 ) -> MenuPollOutcome {
-    use crate::menu::windows_menu_bar_ids as ids;
+    use crate::menu::menu_bar_ids as ids;
 
     let mut outcome = MenuPollOutcome::default();
 
@@ -3015,26 +3101,19 @@ fn handle_app_menu_message(
     *ctx.menu_slot.borrow_mut() = Some(menu);
 }
 
-/// Windows counterpart of the macOS `handle_app_menu_message` above — see
-/// that function's doc comment for the drop-before-install ordering
-/// requirement, which is load-bearing here (unlike on macOS).
-#[cfg(target_os = "windows")]
+/// Windows/Linux counterpart of the macOS `handle_app_menu_message` above —
+/// see that function's doc comment for the drop-before-install ordering
+/// requirement, which is load-bearing here (unlike on macOS): dropping the
+/// OLD `Menu` first is what detaches its previously-attached native menu bar
+/// (Win32 `SetMenu(hwnd, null)` / GTK `GtkMenuBar::destroy` respectively —
+/// see `menu::attach_menu_bar`'s doc comment) before the new one attaches.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn handle_app_menu_message(
     window_slot: &SharedWindow,
     ctx: &AppMenuContext,
     menus: &[AppMenuSpec],
 ) {
-    use tao::platform::windows::WindowExtWindows;
-
-    let hwnd: isize = {
-        let guard = window_slot.borrow();
-        match guard.as_ref() {
-            Some(w) => w.hwnd(),
-            None => return,
-        }
-    };
-
-    let menu = match crate::menu::build_windows_app_menu_from_spec(menus, ctx.menu_labels.as_ref())
+    let menu = match crate::menu::build_menu_bar_app_menu_from_spec(menus, ctx.menu_labels.as_ref())
     {
         Ok(m) => m,
         Err(_) => return,
@@ -3043,36 +3122,27 @@ fn handle_app_menu_message(
     // Drop the OLD menu first — see this function's doc comment.
     let previous = ctx.menu_slot.borrow_mut().take();
     drop(previous);
-    // SAFETY: `hwnd` was read from a live tao `Window` just above.
-    if let Err(e) = unsafe { menu.init_for_hwnd(hwnd) } {
-        eprintln!("murasaki: failed to attach app menu: {e}");
+    if let Some(window) = window_slot.borrow().as_ref() {
+        if let Err(e) = crate::menu::attach_menu_bar(&menu, window) {
+            eprintln!("murasaki: failed to attach app menu: {e}");
+        }
     }
     *ctx.menu_slot.borrow_mut() = Some(menu);
 }
 
-/// Linux: not implemented yet — mirrors the (also unimplemented) direct-call
-/// path in `Webview::show_context_menu`.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn handle_app_menu_message(
-    _window_slot: &SharedWindow,
-    _ctx: &AppMenuContext,
-    _menus: &[AppMenuSpec],
-) {
-}
-
 /// Runs `document.execCommand(command)` in the webview for a native menu-bar
-/// Edit item — see `menu::build_windows_menu_bar`'s doc comment for why these
+/// Edit item — see `menu::build_menu_bar`'s doc comment for why these
 /// are custom items dispatched this way instead of muda `PredefinedMenuItem`s.
 ///
 /// Also fires the same `murasaki:menuclick` `CustomEvent` the context-menu
-/// path above dispatches (with `id`, one of `windows_menu_bar_ids`, as
+/// path above dispatches (with `id`, one of `menu_bar_ids`, as
 /// `detail`), so an app can still observe or override these via the same
 /// mechanism `useContextMenu` listens on — but doesn't *depend* on any
 /// listener existing: the framework's own default-menu-action JS layer (from
 /// an earlier custom-title-bar iteration, since reverted — see git history)
 /// no longer ships, so `execCommand` runs unconditionally first, up front in
 /// this same script, rather than only as an app-registered handler's effect.
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn run_menu_bar_edit_command(webview_slot: &SharedWebview, command: &str, id: &str) {
     let js = format!(
     "document.execCommand('{command}');window.dispatchEvent(new CustomEvent('murasaki:menuclick',{{detail:{}}}))",
@@ -3083,9 +3153,10 @@ fn run_menu_bar_edit_command(webview_slot: &SharedWebview, command: &str, id: &s
     }
 }
 
-/// Linux: not wired through the Rust IPC handler yet — mirrors the (also
-/// unimplemented) direct-call path in `Webview::show_context_menu`.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+/// Other Unix (BSDs): not implemented — mirrors the (also unimplemented)
+/// direct-call path in `Webview::show_context_menu`. macOS, Windows, and
+/// Linux all have real implementations above.
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn show_native_context_menu(
     _window_slot: &SharedWindow,
     _webview_slot: &Rc<RefCell<Option<WebView>>>,
@@ -3183,7 +3254,7 @@ mod tests {
         ValidatedProxyProtocol, DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
         MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES, MAX_IPC_PREPARSE_BODY_BYTES, TRAY_MENU_ID_PREFIX,
     };
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     use super::{retain_owned_menu_events, split_first_owned_menu_event, tray_event_is_current};
     use crate::{
         menu::AppMenuSpec,
@@ -3196,7 +3267,7 @@ mod tests {
     };
     use wry::DragDropEvent;
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
     fn context_menu_claims_only_owned_ids_and_preserves_app_menu_order() {
         let owned = ["context-open".to_string()].into_iter().collect();
@@ -3212,7 +3283,7 @@ mod tests {
         assert_eq!(deferred, ["app-save", "app-help"]);
     }
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
     fn application_menu_dispatch_drops_delayed_context_and_stale_menu_events() {
         let owned = ["app-save".to_string(), "app-help".to_string()]
@@ -3232,7 +3303,7 @@ mod tests {
         );
     }
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
     fn stale_tray_icon_events_are_rejected_after_replacement() {
         assert!(tray_event_is_current(Some("new-icon"), "new-icon"));

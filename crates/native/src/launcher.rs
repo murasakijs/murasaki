@@ -2525,13 +2525,13 @@ mod win_job {
 /// attached via `Menu::init_for_hwnd` and localized the same way macOS's app
 /// menu is: `menu-locales.json` + the locale resolver in `shared` (this
 /// launcher can't call into Node's `menu-i18n.ts` either — see `imp_macos`'s
-/// module for that same constraint). See `menu::build_windows_menu_bar` for
+/// module for that same constraint). See `menu::build_menu_bar` for
 /// why its items are custom `MenuItem`s (not muda `PredefinedMenuItem`s like
 /// macOS uses) and `webview::poll_menu_bar_events` for how their clicks are
 /// picked up in the event loop below and dispatched into the webview.
 ///
 /// The "About <app>" panel *is* handled here too, via a Help menu appended
-/// by `menu::build_windows_menu_bar` (muda's `PredefinedMenuItem::about` is
+/// by `menu::build_menu_bar` (muda's `PredefinedMenuItem::about` is
 /// cross-platform, same call macOS's app-name submenu uses) — see that
 /// function's doc comment. `icon_path` isn't threaded through on Windows
 /// (unlike macOS's `about`, below): muda's Windows About dialog is built from
@@ -2540,7 +2540,7 @@ mod win_job {
 ///
 /// Deferred macOS-parity items, left for a later packaging phase:
 ///  - Menu-bar keyboard accelerators (Ctrl+Z etc.) — see
-///    `menu::build_windows_menu_bar`'s doc comment for why they're
+///    `menu::build_menu_bar`'s doc comment for why they're
 ///    intentionally left unset rather than shipped as inert decoration.
 ///
 /// The window's own icon (title bar / Alt-Tab thumbnail) *is* handled here
@@ -2572,7 +2572,7 @@ mod imp_win {
     };
 
     use crate::{
-        menu::{build_windows_menu_bar, AboutInfo, SharedMenu},
+        menu::{build_menu_bar, AboutInfo, SharedMenu},
         types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
         webview::{poll_menu_bar_events, AppMenuContext, ProcessWebContext, SharedWebContext},
         window::{
@@ -2960,7 +2960,7 @@ mod imp_win {
             homepage: meta.homepage.as_deref(),
             authors: meta.authors.as_deref(),
         };
-        let menu_bar = build_windows_menu_bar(Some(&about), Some(&menu_labels))
+        let menu_bar = build_menu_bar(Some(&about), Some(&menu_labels))
             .map_err(|e| format!("build menu bar: {e}"))?;
         // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
         // can replace it — see `AppMenuContext`'s doc comment in webview.rs.

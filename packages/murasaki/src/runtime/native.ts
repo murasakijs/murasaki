@@ -5,9 +5,9 @@
 
 /**
  * Localized labels for the standard menu bar — macOS's App/Edit/Window and
- * Windows's File/Edit/Window — see `../menu-i18n.ts` for the resolver. All
- * fields optional since any left unset fall back to an English default on
- * the native side. Unused on Linux (no default menu bar there yet).
+ * Windows's/Linux's File/Edit/Window — see `../menu-i18n.ts` for the
+ * resolver. All fields optional since any left unset fall back to an
+ * English default on the native side.
  */
 export interface MenuLabels {
   about?: string

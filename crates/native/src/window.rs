@@ -920,12 +920,10 @@ impl RuntimeWindowManager {
             center_on_primary_monitor(&window);
         }
 
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         if primary {
-            use tao::platform::windows::WindowExtWindows;
             if let Some(menu) = template.app_menu.menu_slot.borrow().as_ref() {
-                // SAFETY: this HWND belongs to the live window built above.
-                unsafe { menu.init_for_hwnd(window.hwnd()) }
+                crate::menu::attach_menu_bar(menu, &window)
                     .map_err(|error| format!("attach menu for {label}: {error}"))?;
             }
         }

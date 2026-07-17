@@ -1,14 +1,17 @@
 //! muda-based menu builder — used for the app menu bar, tray menus, the
 //! **context menu popup** (see `webview::show_context_menu`), and (Windows
-//! only) the native menu bar attached via `Menu::init_for_hwnd` (see
-//! `build_windows_menu_bar` below).
+//! and Linux) the native menu bar attached via `Menu::init_for_hwnd` /
+//! `Menu::init_for_gtk_window` (see `build_menu_bar` and `attach_menu_bar`
+//! below).
 
 use std::{cell::RefCell, rc::Rc};
 
-use muda::{
-    accelerator::Accelerator, AboutMetadata, Icon, Menu, MenuItem, PredefinedMenuItem, Submenu,
-};
+use muda::{accelerator::Accelerator, AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use napi::bindgen_prelude::{Error, Result, Status};
+
+// `Icon` only backs `load_icon_rgba`'s macOS About-panel icon decoding below.
+#[cfg(target_os = "macos")]
+use muda::Icon;
 
 use crate::types::MenuItemOptions;
 
@@ -35,7 +38,7 @@ pub(crate) mod native_menu_ids {
 /// popup already uses — its `role` field additionally accepts, here,
 /// `AppMenuItemRole`'s vocabulary (quit/close/minimize/zoom/undo/redo/cut/
 /// copy/paste/selectAll — see `predefined_localized` (macOS) /
-/// `windows_role_item` (Windows)). Not `#[napi(object)]`: only ever
+/// `menu_bar_role_item` (Windows)). Not `#[napi(object)]`: only ever
 /// deserialized out of the IPC payload, never a direct napi function param.
 #[derive(Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -284,7 +287,7 @@ pub(crate) fn build_macos_app_menu_from_spec(
 /// `predefined` below, which the pre-existing context-menu path uses and
 /// always passes `None` — left as-is to avoid changing that feature's
 /// behavior). `"close"` has no dedicated `MenuLabels` field (no
-/// `menu-locales.json` entry — same known gap as `build_windows_menu_bar`'s
+/// `menu-locales.json` entry — same known gap as `build_menu_bar`'s
 /// "File"/"Exit"), so it always falls back to muda's English default.
 #[cfg(target_os = "macos")]
 fn predefined_localized(
@@ -477,12 +480,12 @@ fn load_icon_rgba(path: &str) -> Option<Icon> {
     Icon::from_rgba(rgba, width, height).ok()
 }
 
-/// Windows only: stable item ids for `build_windows_menu_bar`'s custom
+/// Windows and Linux: stable item ids for `build_menu_bar`'s custom
 /// `MenuItem`s, shared with `webview::poll_menu_bar_events` (the event-loop
 /// poll that dispatches clicks on these — see that function) so the builder
 /// and the dispatcher never drift apart.
-#[cfg(target_os = "windows")]
-pub(crate) mod windows_menu_bar_ids {
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) mod menu_bar_ids {
     pub(crate) const EXIT: &str = super::native_menu_ids::QUIT;
     pub(crate) const CLOSE: &str = super::native_menu_ids::CLOSE;
     pub(crate) const UNDO: &str = "murasaki-menu-bar:undo";
@@ -493,29 +496,35 @@ pub(crate) mod windows_menu_bar_ids {
     pub(crate) const SELECT_ALL: &str = "murasaki-menu-bar:selectAll";
     pub(crate) const MINIMIZE: &str = super::native_menu_ids::MINIMIZE;
     /// Added for `useAppMenu`'s `role: "zoom"` item (toggle-maximize) — the
-    /// startup default Windows bar has no Zoom item of its own (only
-    /// Minimize), so this id is only ever produced by `windows_role_item`.
+    /// startup default bar has no Zoom item of its own (only Minimize), so
+    /// this id is only ever produced by `menu_bar_role_item`.
     pub(crate) const ZOOM: &str = super::native_menu_ids::ZOOM;
 }
 
-/// Builds the native Win32 menu bar (File / Edit / Window), attached via
-/// `Menu::init_for_hwnd` (see `application.rs::create_window` and
-/// `launcher.rs`'s `imp_win`). Windows has no "bold app name" menu concept
-/// like macOS's app menu, so this is a plain top-level bar rather than
+/// Builds the native menu bar (File / Edit / Window) shared by Windows
+/// (`Menu::init_for_hwnd`) and Linux (`Menu::init_for_gtk_window`) — see
+/// `attach_menu_bar` below for the two platforms' differing attach calls,
+/// and `application.rs::create_window` / `launcher.rs`'s `imp_win` for the
+/// callers. Neither platform has a "bold app name" menu concept like macOS's
+/// app menu, so this is a plain top-level bar rather than
 /// `build_default_app_menu`'s App/Edit/Window shape — just File/Edit/Window.
 ///
 /// Every item here is a **custom** `MenuItem` with a stable id
-/// (`windows_menu_bar_ids`), not a muda `PredefinedMenuItem` like the macOS
-/// builder uses. On macOS, predefined Edit items (`copy:`/`paste:`/etc.) ride
-/// Cocoa's responder chain into the focused `WKWebView`, which handles them
+/// (`menu_bar_ids`), not a muda `PredefinedMenuItem` like the macOS builder
+/// uses. On macOS, predefined Edit items (`copy:`/`paste:`/etc.) ride Cocoa's
+/// responder chain into the focused `WKWebView`, which handles them
 /// natively — Windows has no equivalent: muda's Windows `PredefinedMenuItem`s
 /// for Undo/Redo/Cut/Copy/Paste/SelectAll target native Win32 edit controls,
 /// which a WebView2 host window never is, so they'd be silent no-ops here.
-/// Instead, clicks are picked up asynchronously via `muda::MenuEvent::receiver()`
-/// (the menu bar is persistent, unlike the modal context-menu popup in
-/// `webview.rs`) and mapped to `document.execCommand(...)` in the webview for
-/// the Edit items, or handled natively (window/process) for Minimize/Exit —
-/// see `webview::poll_menu_bar_events`.
+/// (On Linux, muda's GTK backend does implement Copy/Cut/Paste/SelectAll —
+/// by synthesizing X11 key events via `libxdo` — but not Undo/Redo, which it
+/// silently drops; custom items sidestep that gap uniformly on both
+/// platforms.) Instead, clicks are picked up asynchronously via
+/// `muda::MenuEvent::receiver()` (the menu bar is persistent, unlike the
+/// modal context-menu popup in `webview.rs`) and mapped to
+/// `document.execCommand(...)` in the webview for the Edit items, or handled
+/// natively (window/process) for Minimize/Exit — see
+/// `webview::poll_menu_bar_events`.
 ///
 /// `labels` mirrors macOS's `MenuLabels` (see that struct's doc comment and
 /// `build_default_app_menu`), but `menu-locales.json` has no "File"/"Exit"
@@ -525,17 +534,17 @@ pub(crate) mod windows_menu_bar_ids {
 /// rather than blocking on adding new locale keys.
 ///
 /// No keyboard accelerators are set on these items: muda's own docs note
-/// accelerators are inert on Windows unless the host also runs
+/// Windows accelerators are inert unless the host also runs
 /// `TranslateAcceleratorW` against `Menu::haccel()` in its raw message loop,
 /// which tao doesn't expose a hook for — so they'd show a shortcut hint that
-/// doesn't actually fire. Left off rather than shipping a decorative-only,
-/// possibly-misleading label.
-#[cfg(target_os = "windows")]
-pub(crate) fn build_windows_menu_bar(
+/// doesn't actually fire. Left off on both platforms rather than shipping a
+/// decorative-only, possibly-misleading label.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn build_menu_bar(
     about: Option<&AboutInfo>,
     labels: Option<&crate::types::MenuLabels>,
 ) -> Result<Menu> {
-    use windows_menu_bar_ids as ids;
+    use menu_bar_ids as ids;
 
     let menu = Menu::new();
 
@@ -545,8 +554,8 @@ pub(crate) fn build_windows_menu_bar(
         .append(&MenuItem::with_id(ids::EXIT, exit_label, true, None))
         .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-    let edit_menu = build_windows_edit_submenu(labels)?;
-    let window_menu = build_windows_window_submenu(labels)?;
+    let edit_menu = build_menu_bar_edit_submenu(labels)?;
+    let window_menu = build_menu_bar_window_submenu(labels)?;
 
     menu.append_items(&[&file_menu, &edit_menu, &window_menu])
         .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
@@ -556,7 +565,7 @@ pub(crate) fn build_windows_menu_bar(
     // dev-mode caller in `application.rs`, which has no config→native plumbing
     // for this yet) leaves the bar unchanged.
     if let Some(info) = about {
-        let help_menu = build_windows_help_submenu(info, labels)?;
+        let help_menu = build_menu_bar_help_submenu(info, labels)?;
         menu.append(&help_menu)
             .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
     }
@@ -564,11 +573,11 @@ pub(crate) fn build_windows_menu_bar(
     Ok(menu)
 }
 
-/// The Help submenu (About <app>) — see `build_windows_menu_bar`'s doc
+/// The Help submenu (About <app>) — see `build_menu_bar`'s doc
 /// comment above for why it's conditionally appended there instead of always
 /// being part of this bar.
-#[cfg(target_os = "windows")]
-fn build_windows_help_submenu(
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn build_menu_bar_help_submenu(
     info: &AboutInfo,
     labels: Option<&crate::types::MenuLabels>,
 ) -> Result<Submenu> {
@@ -599,13 +608,13 @@ fn build_windows_help_submenu(
 }
 
 /// The Edit submenu (Undo/Redo/sep/Cut/Copy/Paste/Select All) — factored out
-/// of `build_windows_menu_bar` so `build_windows_app_menu_from_spec`'s
+/// of `build_menu_bar` so `build_menu_bar_app_menu_from_spec`'s
 /// `role: "editMenu"` can reuse it verbatim (same ids, so
 /// `webview::poll_menu_bar_events` handles clicks on it identically whether
 /// it came from the startup bar or an app-declared one).
-#[cfg(target_os = "windows")]
-fn build_windows_edit_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-    use windows_menu_bar_ids as ids;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn build_menu_bar_edit_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
+    use menu_bar_ids as ids;
 
     let edit_menu = Submenu::new(
         labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"),
@@ -658,11 +667,11 @@ fn build_windows_edit_submenu(labels: Option<&crate::types::MenuLabels>) -> Resu
     Ok(edit_menu)
 }
 
-/// The Window submenu (Minimize) — factored out of `build_windows_menu_bar`,
-/// same reasoning as `build_windows_edit_submenu` above.
-#[cfg(target_os = "windows")]
-fn build_windows_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-    use windows_menu_bar_ids as ids;
+/// The Window submenu (Minimize) — factored out of `build_menu_bar`,
+/// same reasoning as `build_menu_bar_edit_submenu` above.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn build_menu_bar_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
+    use menu_bar_ids as ids;
 
     let window_menu = Submenu::new(
         labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"),
@@ -682,12 +691,13 @@ fn build_windows_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Re
     Ok(window_menu)
 }
 
-/// Builds a full menu bar from `useAppMenu`'s serialized spec — the Windows
-/// counterpart of `build_macos_app_menu_from_spec`. No app-name submenu to
-/// prepend here (Windows has no such concept — see `build_windows_menu_bar`'s
-/// doc comment), so this just renders `menus` in order.
-#[cfg(target_os = "windows")]
-pub(crate) fn build_windows_app_menu_from_spec(
+/// Builds a full menu bar from `useAppMenu`'s serialized spec — the
+/// Windows/Linux counterpart of `build_macos_app_menu_from_spec`. No
+/// app-name submenu to prepend here (neither platform has that concept —
+/// see `build_menu_bar`'s doc comment), so this just renders `menus` in
+/// order.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub(crate) fn build_menu_bar_app_menu_from_spec(
     menus: &[crate::menu::AppMenuSpec],
     labels: Option<&crate::types::MenuLabels>,
 ) -> Result<Menu> {
@@ -696,12 +706,12 @@ pub(crate) fn build_windows_app_menu_from_spec(
     for spec in menus {
         match spec.role.as_deref() {
             Some("editMenu") => {
-                let sub = build_windows_edit_submenu(labels)?;
+                let sub = build_menu_bar_edit_submenu(labels)?;
                 menu.append(&sub)
                     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
             }
             Some("windowMenu") => {
-                let sub = build_windows_window_submenu(labels)?;
+                let sub = build_menu_bar_window_submenu(labels)?;
                 menu.append(&sub)
                     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
             }
@@ -709,7 +719,7 @@ pub(crate) fn build_windows_app_menu_from_spec(
                 let label = spec.label.as_deref().unwrap_or("");
                 let sub = Submenu::new(label, true);
                 for item in spec.items.as_deref().unwrap_or(&[]) {
-                    append_app_menu_item_windows(&sub, item, labels)?;
+                    append_menu_bar_app_menu_item(&sub, item, labels)?;
                 }
                 menu.append(&sub)
                     .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
@@ -721,15 +731,15 @@ pub(crate) fn build_windows_app_menu_from_spec(
 }
 
 /// Item-level role → a custom `MenuItem` with a stable id, localized via
-/// `labels`. `"quit"` and `"close"` both map to `windows_menu_bar_ids::EXIT`
+/// `labels`. `"quit"` and `"close"` both map to `menu_bar_ids::EXIT`
 /// (the same id/behavior the startup bar's File > Exit uses) — a deliberate
 /// v1 simplification: murasaki is single-window today, so "close the window"
 /// and "quit the app" are the same outcome. `"close"` has no dedicated
-/// `MenuLabels` field (same known gap noted on `build_windows_menu_bar`), so
+/// `MenuLabels` field (same known gap noted on `build_menu_bar`), so
 /// it falls back to the localized `quit` label, then the English literal.
-#[cfg(target_os = "windows")]
-fn windows_role_item(role: &str, labels: Option<&crate::types::MenuLabels>) -> Option<MenuItem> {
-    use windows_menu_bar_ids as ids;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn menu_bar_role_item(role: &str, labels: Option<&crate::types::MenuLabels>) -> Option<MenuItem> {
+    use menu_bar_ids as ids;
 
     match role {
         "undo" => Some(MenuItem::with_id(
@@ -803,13 +813,13 @@ fn windows_role_item(role: &str, labels: Option<&crate::types::MenuLabels>) -> O
     }
 }
 
-/// Recursive item builder for `build_windows_app_menu_from_spec` — mirrors
+/// Recursive item builder for `build_menu_bar_app_menu_from_spec` — mirrors
 /// `append_submenu_item` below (the context-menu path's equivalent) but
-/// resolves roles via `windows_role_item` instead of `predefined` (Windows
-/// `PredefinedMenuItem`s don't work here — see `build_windows_menu_bar`'s
+/// resolves roles via `menu_bar_role_item` instead of `predefined` (Windows
+/// `PredefinedMenuItem`s don't work here — see `build_menu_bar`'s
 /// doc comment).
-#[cfg(target_os = "windows")]
-fn append_app_menu_item_windows(
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+fn append_menu_bar_app_menu_item(
     sub: &Submenu,
     item: &MenuItemOptions,
     labels: Option<&crate::types::MenuLabels>,
@@ -822,14 +832,14 @@ fn append_app_menu_item_windows(
 
     if let Some(role) = item.role.as_deref() {
         // A `{ separator: true }` spec reaches the wire as `role: "separator"`
-        // (see app-menu.tsx), not `item.separator` — and `windows_role_item`
+        // (see app-menu.tsx), not `item.separator` — and `menu_bar_role_item`
         // returns `MenuItem`, which can't be a separator, so handle it here.
         if role == "separator" {
             sub.append(&PredefinedMenuItem::separator())
                 .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
             return Ok(());
         }
-        if let Some(mi) = windows_role_item(role, labels) {
+        if let Some(mi) = menu_bar_role_item(role, labels) {
             sub.append(&mi)
                 .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
             return Ok(());
@@ -846,7 +856,7 @@ fn append_app_menu_item_windows(
     if let Some(inner_items) = &item.submenu {
         let inner = Submenu::new(label, enabled);
         for c in inner_items {
-            append_app_menu_item_windows(&inner, c, labels)?;
+            append_menu_bar_app_menu_item(&inner, c, labels)?;
         }
         sub.append(&inner)
             .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
@@ -861,6 +871,44 @@ fn append_app_menu_item_windows(
     }
 
     Ok(())
+}
+
+/// Attaches `menu` (built by `build_menu_bar` above) as `window`'s persistent
+/// menu bar — the one platform-specific step both callers
+/// (`application.rs::create_window`/`configure_windows` and
+/// `window::RuntimeWindowManager::create_known`) share, so replacing the
+/// menu bar later (`{ kind: "appMenu" }`, see `webview::handle_app_menu_message`)
+/// only has to get this call right once.
+///
+/// Dropping a previously-attached `Menu` cleanly detaches it first on both
+/// platforms — Windows' `Menu::Drop` calls `SetMenu(hwnd, null)` for every
+/// hwnd it's attached to, and muda's GTK `Menu::Drop` destroys (and thereby
+/// unparents) every cached `GtkMenuBar` — so callers only need to drop the
+/// old `Menu` before calling this again with a new one, never call a
+/// separate detach first.
+#[cfg(target_os = "windows")]
+pub(crate) fn attach_menu_bar(
+    menu: &Menu,
+    window: &tao::window::Window,
+) -> std::result::Result<(), String> {
+    use tao::platform::windows::WindowExtWindows;
+    // SAFETY: `window` is a live tao window for the duration of this call.
+    unsafe { menu.init_for_hwnd(window.hwnd()) }.map_err(|e| e.to_string())
+}
+
+/// Linux counterpart of the Windows `attach_menu_bar` above. Attaches into
+/// the window's default vertical `gtk::Box` (created by tao unless
+/// `WindowBuilderExtUnix::with_default_vbox(false)` was used, which murasaki
+/// never does), so the menu bar sits above wry's WebView rather than
+/// underneath/behind it.
+#[cfg(target_os = "linux")]
+pub(crate) fn attach_menu_bar(
+    menu: &Menu,
+    window: &tao::window::Window,
+) -> std::result::Result<(), String> {
+    use tao::platform::unix::WindowExtUnix;
+    menu.init_for_gtk_window(window.gtk_window(), window.default_vbox())
+        .map_err(|e| e.to_string())
 }
 
 fn append_item(menu: &Menu, item: &MenuItemOptions) -> Result<()> {

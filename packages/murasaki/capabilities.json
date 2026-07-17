@@ -155,11 +155,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "supported"
       },
       "limitations": [
-        "Native application menus ship on macOS and Windows; replacement is process-global, restricted to the primary renderer, and requires menu:application plus the capabilities of privileged roles.",
-        "Linux has no default or custom application menu implementation. Missing role capabilities reject the whole replacement and keep the current menu."
+        "Native application menus ship on macOS, Windows, and Linux (GTK, via muda); replacement is process-global, restricted to the primary renderer, and requires menu:application plus the capabilities of privileged roles.",
+        "Linux/Windows menus are a plain File/Edit/Window bar with no macOS-style bold app-name submenu; Edit items dispatch document.execCommand into the focused webview rather than riding a native responder chain. Missing role capabilities reject the whole replacement and keep the current menu."
       ],
       "apiSymbols": ["useAppMenu", "AppMenu", "AppMenuItemSpec"],
       "testEvidence": ["crates/native/src/webview.rs", "crates/native/src/menu.rs"],
@@ -172,11 +172,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "supported"
       },
       "limitations": [
-        "Native whole-window and scoped context menus ship on macOS and Windows behind menu:context; privileged native roles additionally require their matching capability.",
-        "Menu IPC is bounded by payload, item-count, depth, and string limits. Linux has no native context-menu implementation."
+        "Native whole-window and scoped context menus ship on macOS, Windows, and Linux (GTK) behind menu:context; privileged native roles additionally require their matching capability.",
+        "Menu IPC is bounded by payload, item-count, depth, and string limits. On Linux, undo/redo context-menu role items are silently omitted (an upstream muda/GTK limitation), and cut/copy/paste/selectAll are delivered by synthesizing X11 key events (requires libxdo; not available under Wayland without XWayland)."
       ],
       "apiSymbols": [
         "useContextMenu",
@@ -226,10 +226,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "partial"
       },
       "limitations": [
-        "String values are stored in macOS Keychain or Windows Credential Manager under a SHA-256-derived appId/key namespace; missing keys return null, inputs and IPC are bounded, and there is no plaintext fallback.",
+        "String values are stored in macOS Keychain, Windows Credential Manager, or (Linux) the freedesktop.org Secret Service D-Bus API under a SHA-256-derived appId/key namespace; missing keys return null, inputs and IPC are bounded, and there is no plaintext fallback on any platform.",
+        "Linux requires a running Secret Service provider (e.g. gnome-keyring, KWallet's ksecretsservice, or KeePassXC); if none is reachable every operation fails with a structured error instead of a plaintext fallback.",
         "get, set, and delete have independent deny-by-default per-window capabilities, but grants are command-level rather than per-key; renderer compromise can use every granted secure-storage operation within that app namespace."
       ],
       "apiSymbols": ["murasaki/native.secureStorage"],
@@ -368,12 +369,14 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "One process-wide macOS status item / Windows system-tray icon ships with tooltip, click events, native nested menus, menu-item events, and dynamic icon/menu replacement; the latest successful create replaces the previous owner.",
+        "Linux trays use libappindicator and need an AppIndicator host (on GNOME, the AppIndicator/KStatusNotifierItem Shell extension); tray-menu clicks and dynamic icon/menu replacement work the same as macOS/Windows, but tray icon click/double-click events never fire — AppIndicator exposes no such signal, only \"show the attached menu\".",
         "macOS and Windows global shortcuts support bounded modifier-plus-known-key accelerators, explicit ids, owner-routed press events, same-process conflict detection, and automatic owner/shutdown cleanup behind separate register/unregister capabilities.",
-        "Shortcut availability still depends on OS-reserved bindings and other applications and requires packaged OS smoke testing. Linux tray and global shortcuts are not implemented."
+        "Linux global shortcuts use the same accelerator/id model over X11 and require X11 or XWayland; a pure-Wayland session (no DISPLAY) returns a structured unsupported error instead of registering. Linux has no OS-reserved-shortcut list (unlike macOS/Windows), since that depends on the desktop environment.",
+        "Shortcut availability still depends on OS-reserved bindings and other applications and requires packaged OS smoke testing."
       ],
       "apiSymbols": [
         "murasaki/native.tray",

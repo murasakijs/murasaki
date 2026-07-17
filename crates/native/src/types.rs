@@ -38,9 +38,9 @@ pub struct WindowOptions {
     /// Populates the authors field of the native "About <app>" panel.
     pub authors: Option<Vec<String>>,
     /// Localized labels for the standard menu bar — macOS's App/Edit/Window
-    /// (see `crate::menu::build_default_app_menu`) and Windows's File/Edit/Window
-    /// (see `crate::menu::build_windows_menu_bar`). Falls back to English when
-    /// absent. Unused on Linux (no default menu bar there yet).
+    /// (see `crate::menu::build_default_app_menu`) and Windows's/Linux's
+    /// File/Edit/Window (see `crate::menu::build_menu_bar`). Falls back to
+    /// English when absent.
     pub menu_labels: Option<MenuLabels>,
     /// Whether the OS window chrome (titlebar + borders) is shown. Defaults
     /// to true; `false` produces a frameless window on every platform.

@@ -29,8 +29,8 @@ use crate::launcher::shared::{ShutdownCoordinator, ShutdownPoll, WindowControlCo
 
 #[cfg(target_os = "macos")]
 use crate::menu::build_default_app_menu;
-#[cfg(target_os = "windows")]
-use crate::menu::build_windows_menu_bar;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use crate::menu::build_menu_bar;
 use crate::{
     types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
     webview::{ProcessWebContext, SharedWebContext, Webview},
@@ -62,11 +62,11 @@ pub struct Application {
     /// `create_window()` call that installs it. `None` until the primary window
     /// is created; also doubles as the "already installed" guard.
     app_menu: Rc<RefCell<Option<muda::Menu>>>,
-    /// Windows only: same reasoning as `app_menu` above, just for the native
-    /// Win32 menu bar (`Menu::init_for_hwnd`) instead of `init_for_nsapp`.
-    /// `None` until the primary window is created.
-    #[cfg(target_os = "windows")]
-    windows_menu_bar: Rc<RefCell<Option<muda::Menu>>>,
+    /// Windows/Linux only: same reasoning as `app_menu` above, just for the
+    /// native File/Edit/Window menu bar (`menu::attach_menu_bar`) instead of
+    /// `init_for_nsapp`. `None` until the primary window is created.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    menu_bar: Rc<RefCell<Option<muda::Menu>>>,
     /// Every live/declaratively-created window keyed by its stable label.
     /// Webview IPC and the event loop share this registry so cross-window
     /// commands cannot escape the set of declared windows.
@@ -90,7 +90,7 @@ impl Application {
         let wake: Rc<dyn Fn()> = Rc::new(move || {
             let _ = wake_proxy.send_event(UserEvent::Wake);
         });
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
             let shortcut_proxy = event_loop.create_proxy();
             crate::global_shortcut::set_event_waker(Arc::new(move || {
@@ -117,8 +117,8 @@ impl Application {
             event_loop: Rc::new(RefCell::new(Some(event_loop))),
             on_quit: Rc::new(RefCell::new(None)),
             app_menu: Rc::new(RefCell::new(None)),
-            #[cfg(target_os = "windows")]
-            windows_menu_bar: Rc::new(RefCell::new(None)),
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            menu_bar: Rc::new(RefCell::new(None)),
             windows: Rc::new(RefCell::new(WindowRegistry::default())),
             web_context: Rc::new(RefCell::new(ProcessWebContext::default())),
             runtime_windows: Rc::new(RefCell::new(None)),
@@ -268,27 +268,24 @@ impl Application {
             crate::window::center_on_primary_monitor(&window);
         }
 
-        // Install the native Win32 menu bar (File/Edit/Window) once, on the
-        // primary window — same "install once" semantics as the macOS app menu
-        // above. Attaching requires the window's HWND, so unlike the macOS
-        // block above this has to happen after `build()` rather than before it.
-        #[cfg(target_os = "windows")]
-        if primary && self.windows_menu_bar.borrow().is_none() {
+        // Install the native menu bar (File/Edit/Window) once, on the primary
+        // window — same "install once" semantics as the macOS app menu above.
+        // Attaching requires the window's HWND/GTK handle, so unlike the
+        // macOS block above this has to happen after `build()` rather than
+        // before it. `menu::attach_menu_bar` is the Windows/Linux-specific
+        // half (`init_for_hwnd` / `init_for_gtk_window` respectively).
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if primary && self.menu_bar.borrow().is_none() {
             // Dev mode has no config→native plumbing for About metadata yet — `None`
             // here just means the startup bar has no Help/About submenu, same as
-            // before this feature (see `menu::build_windows_menu_bar`'s doc comment).
-            match build_windows_menu_bar(None, opts.menu_labels.as_ref()) {
-                Ok(menu) => {
-                    use tao::platform::windows::WindowExtWindows;
-                    // SAFETY: `hwnd` was just read from the `window` built above, which
-                    // is still alive on this stack frame.
-                    match unsafe { menu.init_for_hwnd(window.hwnd()) } {
-                        Ok(()) => *self.windows_menu_bar.borrow_mut() = Some(menu),
-                        // Cosmetic: a missing menu bar shouldn't crash the app.
-                        Err(e) => eprintln!("murasaki: failed to attach the Windows menu bar: {e}"),
-                    }
-                }
-                Err(e) => eprintln!("murasaki: failed to build the Windows menu bar: {e}"),
+            // before this feature (see `menu::build_menu_bar`'s doc comment).
+            match build_menu_bar(None, opts.menu_labels.as_ref()) {
+                Ok(menu) => match crate::menu::attach_menu_bar(&menu, &window) {
+                    Ok(()) => *self.menu_bar.borrow_mut() = Some(menu),
+                    // Cosmetic: a missing menu bar shouldn't crash the app.
+                    Err(e) => eprintln!("murasaki: failed to attach the native menu bar: {e}"),
+                },
+                Err(e) => eprintln!("murasaki: failed to build the native menu bar: {e}"),
             }
         }
 
@@ -361,10 +358,10 @@ impl Application {
             *self.app_menu.borrow_mut() = Some(menu);
         }
 
-        #[cfg(target_os = "windows")]
-        if self.windows_menu_bar.borrow().is_none() {
-            let menu = build_windows_menu_bar(None, main.window.menu_labels.as_ref())?;
-            *self.windows_menu_bar.borrow_mut() = Some(menu);
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        if self.menu_bar.borrow().is_none() {
+            let menu = build_menu_bar(None, main.window.menu_labels.as_ref())?;
+            *self.menu_bar.borrow_mut() = Some(menu);
         }
 
         let configured = templates
@@ -390,15 +387,15 @@ impl Application {
     /// install/replace the application menu on demand (see that struct's doc
     /// comment and the `{ kind: "appMenu" }` IPC branch in `webview.rs`).
     /// `menu_slot` is a clone of whichever field above (`app_menu` on macOS,
-    /// `windows_menu_bar` on Windows) already holds the startup default menu
+    /// `menu_bar` on Windows/Linux) already holds the startup default menu
     /// installed just above — so a `useAppMenu` replacement and `Application`'s
     /// own bookkeeping always agree on what's currently installed.
     fn app_menu_context(&self, opts: &WindowOptions) -> crate::webview::AppMenuContext {
         #[cfg(target_os = "macos")]
         let menu_slot = self.app_menu.clone();
-        #[cfg(target_os = "windows")]
-        let menu_slot = self.windows_menu_bar.clone();
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        let menu_slot = self.menu_bar.clone();
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         let menu_slot = Rc::new(RefCell::new(None));
 
         crate::webview::AppMenuContext {
@@ -445,8 +442,8 @@ impl Application {
         let startup_error_loop = startup_error.clone();
         #[cfg(target_os = "macos")]
         let app_menu_slot = self.app_menu.clone();
-        #[cfg(target_os = "windows")]
-        let app_menu_slot = self.windows_menu_bar.clone();
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        let app_menu_slot = self.menu_bar.clone();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         let shutdown_endpoint = self.shutdown_endpoint.clone();
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -511,13 +508,14 @@ impl Application {
                 ShutdownPoll::Cancelled | ShutdownPoll::None => {}
             }
 
-            // Windows: drain native menu clicks every tick (both the startup
-            // default bar and any `useAppMenu` replacement — the menu bar is
-            // persistent, unlike the context-menu popup in webview.rs, which reads
-            // its one expected event synchronously right where it's shown instead)
-            // — see `poll_menu_bar_events`'s doc comment. Exit is handled the same
-            // way as the window's own close button, just below.
-            #[cfg(target_os = "windows")]
+            // Windows/Linux: drain native menu clicks every tick (both the
+            // startup default bar and any `useAppMenu` replacement — the menu
+            // bar is persistent, unlike the context-menu popup in webview.rs,
+            // which reads its one expected event synchronously right where
+            // it's shown instead) — see `poll_menu_bar_events`'s doc comment.
+            // Exit is handled the same way as the window's own close button,
+            // just below.
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             {
                 if let Some((label, window_slot, webview_slot)) =
                     WindowRegistry::dispatch_target(&windows)
@@ -573,13 +571,13 @@ impl Application {
                 }
             }
 
-            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             if let Some((_label, webview_slot, tray_slot)) =
                 WindowRegistry::tray_dispatch_target(&windows)
             {
                 crate::webview::poll_tray_events(&webview_slot, &tray_slot);
             }
-            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
             crate::webview::poll_global_shortcut_events(&windows);
 
             let close_requests = windows.borrow_mut().take_close_requests();
