@@ -543,17 +543,28 @@
       },
       "limitations": [
         "Node Main provides structured JSONL logging, bounded rotation, secret-looking field redaction, shutdown flushing, and opt-in bounded diagnostic reports with application/runtime metadata and log tails.",
-        "Reports are local files and are never uploaded by Murasaki; crash capture, renderer/native-host log aggregation, symbolication, and a user-facing consent/upload flow remain application responsibilities."
+        "Murasaki also captures versioned local crash reports across three domains: Node uncaughtException/unhandledRejection, native launcher panics and unexpected-exit metadata, and (production builds only) uncaught renderer errors/unhandled rejections, all bounded and redacted the same way as log fields and readable through MainContext.diagnostics.",
+        "Crash reports are local JSON files only and are never transmitted by Murasaki; there is no minidump/native-symbolication support, no automatic upload, and renderer capture is a no-op under murasaki dev (the dev error overlay owns that UX instead). Wiring reports to a crash-reporting service remains an application responsibility."
       ],
       "apiSymbols": [
         "MainContext.log",
         "MainLogger",
         "createMainLogger",
-        "DiagnosticReportOptions"
+        "DiagnosticReportOptions",
+        "MainContext.diagnostics",
+        "CrashDiagnosticsApi",
+        "CrashReport",
+        "CrashReportDomain",
+        "CrashReportSummary",
+        "MurasakiConfig.diagnostics",
+        "DiagnosticsConfig"
       ],
       "testEvidence": [
         "packages/murasaki/test/main-logger.test.mjs",
-        "packages/murasaki/test/main-runtime.test.mjs"
+        "packages/murasaki/test/main-runtime.test.mjs",
+        "packages/murasaki/test/crash-diagnostics.test.mjs",
+        "packages/murasaki/test/config-loader.test.mjs",
+        "crates/native/src/launcher.rs"
       ],
       "docsSlug": "/docs/guides/node-main"
     },
