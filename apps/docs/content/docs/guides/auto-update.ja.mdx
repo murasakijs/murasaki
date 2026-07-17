@@ -123,12 +123,16 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
 {
   "version": "1.2.0",
   "publishedAt": "2026-07-12T09:00:00.000Z",
+  "generatedAt": "2026-07-12T09:00:00.000Z",
   "notes": "markdown release notes",
   "mandatory": false,
+  "rollout": 25,
+  "keyId": "a1b2c3d4e5f60718",
   "assets": {
     "darwin-arm64": { "url": "https://.../App-1.2.0-darwin-arm64.app.zip", "sha256": "<hex>" },
     "darwin-x64":   { "url": "https://.../App-1.2.0-darwin-x64.app.zip",   "sha256": "<hex>" },
-    "win32-x64":    { "url": "https://.../App-1.2.0-setup.exe",           "sha256": "<hex>" }
+    "win32-x64":    { "url": "https://.../App-1.2.0-setup-x64.exe",       "sha256": "<hex>" },
+    "win32-arm64":  { "url": "https://.../App-1.2.0-setup-arm64.exe",     "sha256": "<hex>" }
   }
 }
 ```
@@ -143,25 +147,40 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
 列を検証します — 逆ではありません。そのため JSON の正規化に関する曖昧さを心配する必要
 はありません。
 
+`generatedAt`、`rollout`、`keyId` はすべてoptionalで、いずれも署名されたバイト列に
+含まれるため、同じ署名でカバーされます:
+
+- **`generatedAt`** — anti-freeze/replay guardです。下記の
+  [マニフェストの鮮度](#manifest-freshness)を参照してください。
+- **`rollout`** — 0〜100 の staged rollout percentageです。下記の
+  [段階的ロールアウト](#staged-rollout)を参照してください。
+- **`keyId`** — key rotationのヒントです。下記の
+  [鍵のローテーション](#key-rotation)を参照してください。
+
 ## リリースの公開
 
 ```bash
 murasaki release --keygen [--force]
-murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory] [--rollout <0-100>]
 murasaki release --sign
 ```
 
 - **`--keygen`** — Ed25519 の鍵ペアを生成します([クイックスタート](#quick-start)参
   照)。`--force` を指定しない限り既存の鍵を上書きしません — 鍵をローテーションする
-  と、古い公開鍵をまだ持っている既存のアプリからの信頼が失われます。
+  と、古い公開鍵をまだ持っている既存のアプリからの信頼が失われます(先に両方の鍵を
+  pinしておけば失われません — [鍵のローテーション](#key-rotation)参照)。
 - **`--manifest`** — `dist/` 配下からこのバージョンの成果物(`murasaki bundle` が生
   成する macOS の `.app.zip`、`murasaki installer` が生成する Windows の
-  `-setup.exe`)を探してハッシュ化し、`dist/latest.json` を書き出します。見つからない
+  `-setup-<arch>.exe`。arch suffixが付く前に公開された win32-x64 の資産のために、
+  suffixなしの旧 `-setup.exe` という名前も引き続き認識します)を探してハッシュ化し、
+  `generatedAt` タイムスタンプ付きで `dist/latest.json` を書き出します。見つからない
   ターゲットはエラーではなくスキップされます — 何も見つからなかった場合のみエラーで
-  す。
+  す。`--rollout <0-100>` は、optionalなstaged rollout percentageを書き込みます
+  ([段階的ロールアウト](#staged-rollout)参照)。
 - **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成しま
   す。秘密鍵は `$MURASAKI_UPDATE_KEY` から、なければ `.murasaki/update-key` から読み
-  込まれます。
+  込まれます。`.murasaki/update-key.pub` が存在する場合、署名前にマニフェストへ
+  `keyId` ヒントも書き込みます([鍵のローテーション](#key-rotation)参照)。
 
 (`--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作しま
 す。)
@@ -212,7 +231,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-payload
-          path: dist/*-setup.exe
+          path: dist/*-setup-*.exe
 
   publish:
     needs: [macos, windows]
@@ -241,7 +260,7 @@ jobs:
         with:
           files: |
             dist/bundle/*.app.zip
-            dist/*-setup.exe
+            dist/*-setup-*.exe
             dist/latest.json
             dist/latest.json.sig
 ```
@@ -251,12 +270,13 @@ jobs:
 れた `.dmg` も欲しい場合は[配布](/docs/building/distribution#signing--notarization)
 を参照してください。同じ `macos` ジョブにそのステップを追加しても構いません。
 
-<Callout type="warn">
-  この例は `win32-x64` のみを公開します — `win32-arm64` がまだ公開できない理由につい
-  ては、下記の[プラットフォーム対応状況](#platform-support)を参照してください。
-  `win32-arm64` のインストーラーもビルドする場合は、別の出力パスに置いてください:
-  NSIS のファイル名にはアーキテクチャが含まれないため、`x64` と `arm64` のビルドが同
-  じ `dist/` に置かれると、`--manifest` が実行される前に互いを上書きしてしまいます。
+<Callout type="info">
+  この例は `win32-x64` のみを公開しますが、`win32-arm64` も対応しています(下記の
+  [プラットフォーム対応状況](#platform-support)参照)— `windows` ジョブをもう1つ
+  (またはmatrixのlegを1つ)追加し、`murasaki bundle --target win32-arm64` /
+  `murasaki installer --target win32-arm64` を実行して、その `-setup-arm64.exe` を
+  x64 のものと一緒にアップロードしてください。arch suffix付きのファイル名なので、同じ
+  `dist/` に置いても衝突しません。
 </Callout>
 
 ## Apply transactionと初回起動rollback
@@ -305,20 +325,101 @@ update helperが停止した場合や、new launcherの初回起動がcheckpoint
 gitignore します)。`MURASAKI_UPDATE_KEY` は、他のリリース署名用シークレットと同様に
 扱ってください。
 
+セルフホストの `updater.endpoint` は `https:` である必要があります — `http:` は
+loopback host(`127.0.0.1`、`localhost`、`[::1]`)に対してのみ、ローカルテスト用に
+許可されます。これはconfigのロード時と、fetch時の両方で強制されるため、何らかの理由で
+validationを迂回したconfigであっても、平文のendpointを指すことはできません。GitHub
+ホストのマニフェストは常に `https:` で取得されるため、これは `endpoint` を設定した場合
+にのみ関係します([マニフェストのセルフホスティング](#self-hosting-the-manifest)参
+照)。
+
+## マニフェストの鮮度
+
+`generatedAt` タイムスタンプ(`murasaki release --manifest` が自動的に書き込みます)
+を含むマニフェストは、他の何よりも先に鮮度がチェックされます: `updater.maxManifestAgeDays`
+(デフォルト90、最小1)より古いマニフェストは、frozenまたはreplayされた可能性がある
+ものとして拒否されます — これがないと、一度validに署名された古いマニフェストを手に
+入れた攻撃者が、それを永遠に配信し続け、既知の脆弱なバージョンにfleetを固定できてしま
+います。24時間より未来の日付が付いたマニフェストも、clock skew/tamperingの兆候として
+拒否されます(この許容範囲は固定で、設定不可です)。`generatedAt` が全く無いマニフェス
+ト — このフィールドが存在する前に公開されたもの — は後方互換のために引き続き受け入れ
+られますが、構造化された警告をログに出力します。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  updater: {
+    maxManifestAgeDays: 30, // 30日より古いものを拒否
+  },
+})
+```
+
+## 鍵のローテーション
+
+`publicKeys` で複数の Ed25519 公開鍵を pin する(`publicKey` を含め合計最大4つ)こと
+で、既にshipされたアプリを壊さずに鍵をローテーションできます: 検証はpinされたすべての
+鍵を、成功するまで順に試すため、旧鍵と新鍵のどちらを持つアプリでも、どちらの鍵で署名さ
+れたマニフェストも信頼し続けます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  updater: {
+    publicKey: 'OLD_KEY_BASE64...',      // ローテーション前の .murasaki/update-key.pub
+    publicKeys: ['NEW_KEY_BASE64...'],   // ローテーションに先立って追加する新しい鍵
+  },
+})
+```
+
+`murasaki release --sign` は、`.murasaki/update-key.pub` が利用可能な場合、署名の隣
+に `keyId`(生の公開鍵の sha256 の最初の8バイト、hex)もマニフェストへ書き込みます。
+クライアントは `keyId` を、どのpinned keyを最初に試すかのヒントとしてのみ使用します —
+常にpinされたすべての鍵を試すフォールバックを行うため、ヒントが欠けていたり古かったり
+しても、誤って拒否されることはありません。
+
+**ローテーションの手順**(3回のリリースにわたって):
+
+1. **バージョン N** — `[旧鍵, 新鍵]` の両方を pin してshipします。署名はまだ旧鍵で行い
+   ます。N をインストールまたは更新したすべてのアプリは、これで両方の鍵を信頼するよう
+   になります。
+2. **バージョン N+1** — `murasaki release --keygen --force`(または別の方法で新しい鍵
+   に差し替え)を実行し、新しい鍵で署名します。N(またはそれ以降)にいるアプリは既に
+   それを信頼しています。まだ N より前のアプリは、まず N に更新するまでそれを拒否しま
+   す。
+3. **バージョン N+2** — `publicKeys`/`publicKey` から旧鍵を外し、新しい鍵だけを pin し
+   ます。この時点で、追随しているすべてのアプリは、旧鍵しか知らなかったバージョンを
+   とうに過ぎています。
+
+## 段階的ロールアウト
+
+`murasaki release --manifest --rollout <0-100>` は、optionalな `rollout` percentage
+をマニフェストへ書き込みます。未設定(または `100`)の場合、今まで通りすべてのクライ
+アントが即座に更新を確認できます。
+
+100 未満の場合、インストール済みの各アプリは、最初にチェックした時に永続化された
+ランダムな id(`update-client-id`。`.murasaki-apply.json` handoff fileと同じ場所に
+保存されます)から安定したbucketを計算します — `sha256(id)` の最初のバイトを 100 で
+割った余りです。bucket が `>= rollout` のクライアントは、そのチェックで「あなた向けの
+プラットフォーム用の更新はありません」と全く同じ `not-available` を受け取ります: エラー
+にもリトライの嵐にもならず、次回の定期チェックでまた試すだけです — その頃にはpercentage
+を上げているかもしれません。これは distribution の調整用のノブであってセキュリティ境界
+ではありません — クライアントが何をinstallできるかは変えず、いつ提供されるかだけを変え
+ます。
+
 ## プラットフォーム対応状況
 
 | プラットフォーム | 更新ペイロード | 状態 |
 | --- | --- | --- |
 | macOS(arm64） | `<productName>-darwin-arm64.app.zip` | 対応 |
 | macOS(x64） | `<productName>-darwin-x64.app.zip` | 対応 |
-| Windows(x64） | `<productName>-<version>-setup.exe` | 対応 |
-| Windows(arm64） | — | まだ未対応 — 下記参照 |
+| Windows(x64） | `<productName>-<version>-setup-x64.exe` | 対応 |
+| Windows(arm64） | `<productName>-<version>-setup-arm64.exe` | 対応 |
 | Linux | — | Murasaki にはまだアプリパッケージングがありません |
 
-Windows arm64 には、今のところ更新経路がありません: NSIS インストーラーのファイル名に
-はアーキテクチャが含まれないため、`murasaki release --manifest` は常に `win32-x64`
-のエントリしか生成できません。arm64 の Windows アプリが更新を確認すると、単に
-`not-available` になります — クラッシュやエラーにはならず、正常に縮退します。
+`murasaki installer` は NSIS インストーラーの名前に arch suffix を付けるため、x64 と
+arm64 のビルドが同じ `dist/` に置かれても衝突しません。`murasaki release --manifest`
+は、suffixなしの旧 `-setup.exe` という名前も引き続き認識するため、この変更より前に公開
+された資産も `win32-x64` として解決され続けます。
 
 ## マニフェストのセルフホスティング
 
@@ -335,7 +436,9 @@ export default defineConfig({
 ```
 
 `repo` と `endpoint` は互いに排他的です — 両方が設定されていると、`murasaki` は
-ビルド時/開発時にエラーになります。`murasaki release --manifest --base-url
+ビルド時/開発時にエラーになります。`endpoint` は `https:` である必要があります(ローカ
+ルテスト用の loopback 例外については、上記の[セキュリティモデル](#security-model)を参
+照してください)。`murasaki release --manifest --base-url
 https://updates.example.com` を実行し、`dist/latest.json` + `dist/latest.json.sig`
 + 各ペイロードを、その URL が解決する場所にアップロードしてください。
 
