@@ -186,7 +186,7 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
               data-cv-dot
               role="img"
               aria-label="cross"
-              className="hidden text-[0.6em] font-extrabold leading-none text-[#7c3aed] lg:inline-block"
+              className="inline-block text-[0.6em] font-extrabold leading-none text-[#7c3aed]"
             >
               ×
             </span>
