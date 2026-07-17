@@ -243,12 +243,12 @@
       "status": "partial",
       "platforms": {
         "macos": "supported",
-        "windows": "partial",
+        "windows": "supported",
         "linux": "unsupported"
       },
       "limitations": [
-        "Signed manifests, bounded downloads, SHA-256 payload verification, staged handoff, and relaunch are implemented for packaged apps.",
-        "Linux packaging and updates are unavailable; Windows arm64 update publishing is not supported by the current artifact naming and manifest scan."
+        "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS and Windows (x64 and arm64) apps.",
+        "A custom self-hosted endpoint must be https (loopback http is allowed for local testing only); delta/differential updates are not implemented; Linux packaging and updates remain unavailable."
       ],
       "apiSymbols": ["useUpdate", "UpdateButton", "UpdaterConfig", "UpdateState"],
       "testEvidence": [

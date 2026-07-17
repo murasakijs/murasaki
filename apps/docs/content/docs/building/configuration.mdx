@@ -491,18 +491,22 @@ type UpdaterConfig =
   | boolean
   | {
       repo?: string                    // "owner/repo" — defaults to package.json#repository
-      endpoint?: string                // self-hosted manifest URL — mutually exclusive with repo
+      endpoint?: string                // self-hosted manifest URL — mutually exclusive with repo, must be https (loopback http allowed for local testing)
       channel?: string                 // release channel, default 'stable'
       checkOnStart?: boolean           // check once at launch, default true
       checkInterval?: string | false   // e.g. '6h' — re-check on a timer, default '6h'
       publicKey?: string               // base64 Ed25519 public key — defaults to .murasaki/update-key.pub
+      publicKeys?: string[]            // additional pinned keys for rotation (max 4 total with publicKey)
+      maxManifestAgeDays?: number      // reject a manifest older than this many days, default 90
     }
 ```
 
 There is deliberately no `provider` field — GitHub vs. self-hosted is
 inferred from whether `repo` or `endpoint` is set, so it can't drift out of
 sync with the rest of the config. There is also no way to disable signature
-verification.
+verification, and a self-hosted `endpoint` must be `https:` (an `http:`
+endpoint is only accepted for loopback hosts — `127.0.0.1`, `localhost`,
+`[::1]` — for local testing), enforced both here and again at fetch time.
 
 `checkOnStart` and `checkInterval` are driven by the update engine itself, so
 they apply whether or not anything in your UI ever calls `check()`. You can

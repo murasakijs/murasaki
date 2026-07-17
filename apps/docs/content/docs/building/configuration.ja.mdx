@@ -474,17 +474,22 @@ type UpdaterConfig =
   | boolean
   | {
       repo?: string                    // "owner/repo" — デフォルトは package.json#repository
-      endpoint?: string                // セルフホストのマニフェスト URL — repo とは排他
+      endpoint?: string                // セルフホストのマニフェスト URL — repo とは排他、https必須(loopback httpはローカルテスト用に許可)
       channel?: string                 // リリースチャンネル、デフォルト 'stable'
       checkOnStart?: boolean           // 起動時に一度チェック、デフォルト true
       checkInterval?: string | false   // 例 '6h' — タイマーで再チェック、デフォルト '6h'
       publicKey?: string               // base64 の Ed25519 公開鍵 — デフォルトは .murasaki/update-key.pub
+      publicKeys?: string[]            // ローテーション用の追加pinned key(publicKeyと合わせて最大4つ)
+      maxManifestAgeDays?: number      // この日数より古いmanifestを拒否、デフォルト90
     }
 ```
 
 意図的に `provider` フィールドはありません — GitHub かセルフホストかは、`repo` と
 `endpoint` のどちらが設定されているかから推論されるため、設定の他の部分とずれることが
-ありません。また、署名検証を無効化する方法もありません。
+ありません。また、署名検証を無効化する方法もなく、セルフホストの `endpoint` は
+`https:` である必要があります(`http:` は loopback host — `127.0.0.1`、`localhost`、
+`[::1]` — に対してのみ、ローカルテスト用に許可されます)。この制約はここと、fetch時の
+両方で強制されます。
 
 `checkOnStart` と `checkInterval` は更新エンジン自身が処理するため、UI 側で
 `check()` を呼ばなくても機能します。`useUpdate().check()` を手動で呼ぶこともできます —

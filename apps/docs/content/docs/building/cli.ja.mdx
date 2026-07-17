@@ -97,7 +97,7 @@ murasaki icon assets/logo.png
 
 ```bash
 murasaki release --keygen [--force]
-murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory] [--rollout <0-100>]
 murasaki release --sign
 ```
 
@@ -110,10 +110,15 @@ murasaki release --sign
   `MURASAKI_UPDATE_KEY` という GitHub シークレットとして保存する手順を案内します。
   `--force` を指定しない限り、既存の鍵を上書きすることはありません。
 - **`--manifest`** — `dist/` 配下からこのバージョンの成果物(macOS の `.app.zip`、
-  Windows の `-setup.exe`)を探してハッシュ化し、`dist/latest.json` を書き出します。
-  見つからないターゲットはエラーではなくスキップされます。
+  Windows の `-setup-<arch>.exe` — win32-x64 については、suffixなしの旧
+  `-setup.exe` という名前も引き続き認識します)を探してハッシュ化し、`generatedAt`
+  タイムスタンプ付きで `dist/latest.json` を書き出します。見つからないターゲットは
+  エラーではなくスキップされます。`--rollout <0-100>` は、optionalなstaged
+  rollout percentageを書き込みます。
 - **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成します。
   鍵は `$MURASAKI_UPDATE_KEY`、なければ `.murasaki/update-key` から読み込まれます。
+  `.murasaki/update-key.pub` が利用可能な場合、`keyId` rotationヒントもマニフェスト
+  へ書き込みます。
 
 `--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作します。
 

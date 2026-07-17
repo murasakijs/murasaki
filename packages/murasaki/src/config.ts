@@ -220,7 +220,13 @@ export type UpdaterConfig =
   | {
       /** GitHub "owner/repo". Defaults to `repository` in package.json. */
       repo?: string
-      /** Self-hosted manifest URL (points at latest.json). Mutually exclusive with `repo`. */
+      /**
+       * Self-hosted manifest URL (points at latest.json). Mutually exclusive
+       * with `repo`. Must be `https:` — `http:` is only accepted for
+       * loopback hosts (`127.0.0.1`, `localhost`, `[::1]`), for local
+       * testing. Enforced here and again at fetch time in the runtime
+       * engine.
+       */
       endpoint?: string
       /** Release channel. Default 'stable' (GitHub: ignores prereleases). */
       channel?: string
@@ -230,18 +236,37 @@ export type UpdaterConfig =
       checkInterval?: string | false
       /** Ed25519 public key (base64, raw 32 bytes). Defaults to .murasaki/update-key.pub. */
       publicKey?: string
+      /**
+       * Additional pinned Ed25519 public keys (base64, raw 32 bytes each;
+       * at most 4) for key rotation. Merged with `publicKey` into one
+       * deduplicated pinned set — verification tries every pinned key
+       * until one succeeds. See the auto-update guide's rotation runbook.
+       */
+      publicKeys?: string[]
+      /**
+       * Maximum accepted age, in days, of a manifest's `generatedAt`
+       * timestamp — an anti-freeze/replay guard: a manifest older than this
+       * is rejected outright. A manifest with no `generatedAt` at all is
+       * still accepted (older manifests didn't write one) but logs a
+       * warning. Default 90, minimum 1.
+       */
+      maxManifestAgeDays?: number
     }
 
 /** The fully-resolved shape `resolveUpdater()` produces from a `UpdaterConfig`. */
 export interface ResolvedUpdater {
   /** Absolute URL of latest.json. Derived from repo or endpoint. */
   manifestUrl: string
-  /** base64 raw-32-byte Ed25519 public key. */
+  /** base64 raw-32-byte Ed25519 public key — the primary pinned key (back-compat; also `publicKeys[0]`). */
   publicKey: string
+  /** Every pinned Ed25519 public key (base64 raw 32 bytes), deduplicated — the union of `publicKey` and `publicKeys`. Verification tries each until one succeeds. */
+  publicKeys: string[]
   channel: string
   checkOnStart: boolean
   /** milliseconds, or false */
   checkIntervalMs: number | false
+  /** Maximum accepted age, in days, of a manifest's `generatedAt`. */
+  maxManifestAgeDays: number
 }
 
 /**
@@ -901,6 +926,32 @@ function validateDevPort(value: unknown): void {
   }
 }
 
+/**
+ * Loopback hosts allowed to use `http:` for `updater.endpoint` (local testing
+ * only). `runtime/updater.ts` keeps an independent copy of this same check as
+ * its fetch-time defense-in-depth half — it can't import this one instead:
+ * that module compiles to a single standalone `updater-engine.mjs` with no
+ * non-`node:` imports (see its top doc comment), copied alone into a packaged
+ * app's resources dir.
+ */
+function isLoopbackUpdaterHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+}
+
+const MAX_PINNED_PUBLIC_KEYS = 4
+
+/** `true` iff `value` base64-decodes to exactly 32 bytes — a raw Ed25519 key/seed's length, not a full cryptographic validation (that happens when the runtime actually verifies/signs with it). */
+function isRawEd25519KeyBase64(value: string): boolean {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return false
+  try {
+    return atob(trimmed).length === 32
+  } catch {
+    return false
+  }
+}
+
 function validateUpdaterConfig(value: unknown): void {
   if (value === undefined || typeof value === 'boolean') return
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -927,6 +978,26 @@ function validateUpdaterConfig(value: unknown): void {
     if (endpoint.protocol !== 'https:' && endpoint.protocol !== 'http:') {
       throw new TypeError('updater.endpoint must be an absolute HTTP or HTTPS URL')
     }
+    if (endpoint.protocol === 'http:' && !isLoopbackUpdaterHost(endpoint.hostname)) {
+      throw new TypeError(
+        'updater.endpoint must use https: (http: is only allowed for loopback hosts — ' +
+          '127.0.0.1, localhost, [::1] — for local testing)',
+      )
+    }
+  }
+  if (updater.publicKeys !== undefined) {
+    if (!Array.isArray(updater.publicKeys)
+      || updater.publicKeys.length === 0
+      || updater.publicKeys.length > MAX_PINNED_PUBLIC_KEYS
+      || updater.publicKeys.some((key) => typeof key !== 'string' || !isRawEd25519KeyBase64(key))) {
+      throw new TypeError(
+        `updater.publicKeys must be an array of 1 to ${MAX_PINNED_PUBLIC_KEYS} base64-encoded 32-byte Ed25519 public keys`,
+      )
+    }
+  }
+  if (updater.maxManifestAgeDays !== undefined
+    && (!Number.isSafeInteger(updater.maxManifestAgeDays) || (updater.maxManifestAgeDays as number) < 1)) {
+    throw new TypeError('updater.maxManifestAgeDays must be a positive safe integer (days), at least 1')
   }
   if (updater.checkOnStart !== undefined && typeof updater.checkOnStart !== 'boolean') {
     throw new TypeError('updater.checkOnStart must be a boolean')

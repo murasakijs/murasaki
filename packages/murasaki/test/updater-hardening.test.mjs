@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { createServer } from 'node:http'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -18,14 +18,44 @@ function signedManifest(privateKey, manifest) {
   return { bytes, signature: sign(null, bytes, privateKey).toString('base64') }
 }
 
-function updaterConfig(manifestUrl, publicKey) {
+function updaterConfig(manifestUrl, publicKey, overrides = {}) {
   return {
     manifestUrl,
     publicKey,
+    publicKeys: [publicKey],
+    maxManifestAgeDays: 90,
     channel: 'stable',
     checkOnStart: false,
     checkIntervalMs: false,
+    ...overrides,
   }
+}
+
+/** Mirrors the client's `keyId` calculation (`runtime/updater.ts`'s `computeKeyId`) for building test fixtures. */
+function keyIdFor(publicKeyB64) {
+  return createHash('sha256').update(Buffer.from(publicKeyB64, 'base64')).digest('hex').slice(0, 16)
+}
+
+/**
+ * Serves a signed `manifestObj` over a throwaway loopback HTTP server and
+ * runs `check()` against it. `configOverrides` merge into the resolved
+ * updater config (e.g. `publicKeys`); `engineOverrides` merge into the
+ * top-level engine options (e.g. `resourcesDir`/`stagingDir`).
+ */
+async function checkManifest(t, privateKey, manifestObj, publicKey, { configOverrides = {}, engineOverrides = {} } = {}) {
+  const { bytes, signature } = signedManifest(privateKey, manifestObj)
+  const origin = await listen(t, (req, res) => {
+    if (req.url === '/latest.json') return res.end(bytes)
+    if (req.url === '/latest.json.sig') return res.end(signature)
+    res.writeHead(404).end()
+  })
+  const engine = createUpdaterEngine({
+    resolvedUpdater: updaterConfig(`${origin}/latest.json`, publicKey, configOverrides),
+    currentVersion: '1.0.0',
+    mode: 'prod',
+    ...engineOverrides,
+  })
+  return engine.check()
 }
 
 async function listen(t, handler) {
@@ -267,4 +297,201 @@ test('aborts stalled metadata and payload fetches at their configured deadlines'
   await payloadEngine.download()
   assert.match(payloadEngine.getState().error ?? '', /update payload request timed out after 25ms/)
   assert.deepEqual(await readdir(stagingDir), [])
+})
+
+test('TLS: rejects a non-loopback http manifestUrl but allows loopback http', async (t) => {
+  const { privateKey, publicKey } = signingKey()
+
+  const insecureEngine = createUpdaterEngine({
+    resolvedUpdater: updaterConfig('http://updates.example.com/latest.json', publicKey),
+    currentVersion: '1.0.0',
+    mode: 'prod',
+  })
+  const insecureState = await insecureEngine.check()
+  assert.equal(insecureState.status, 'error')
+  assert.match(insecureState.error, /manifestUrl must use https/)
+
+  // Loopback http (127.0.0.1) is exercised by every other test in this file
+  // via `listen()`. Confirm `localhost` is accepted too.
+  const { bytes, signature } = signedManifest(privateKey, { version: '0.1.0', assets: {} })
+  const origin = await listen(t, (req, res) => {
+    if (req.url === '/latest.json') return res.end(bytes)
+    if (req.url === '/latest.json.sig') return res.end(signature)
+    res.writeHead(404).end()
+  })
+  const loopbackUrl = origin.replace('127.0.0.1', 'localhost')
+  const loopbackEngine = createUpdaterEngine({
+    resolvedUpdater: updaterConfig(`${loopbackUrl}/latest.json`, publicKey),
+    currentVersion: '1.0.0',
+    mode: 'prod',
+  })
+  const loopbackState = await loopbackEngine.check()
+  assert.equal(loopbackState.status, 'not-available') // 0.1.0 <= currentVersion 1.0.0 — not a TLS error
+})
+
+test('manifest freshness rejects a stale manifest and one too far in the future, warns when generatedAt is absent', async (t) => {
+  const { privateKey, publicKey } = signingKey()
+  const asset = {
+    [`${process.platform}-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+  }
+
+  const stale = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString()
+  const staleState = await checkManifest(t, privateKey, { version: '2.0.0', generatedAt: stale, assets: asset }, publicKey)
+  assert.equal(staleState.status, 'error')
+  assert.match(staleState.error, /freshness limit/)
+
+  const tooFarFuture = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()
+  const futureState = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', generatedAt: tooFarFuture, assets: asset },
+    publicKey,
+  )
+  assert.equal(futureState.status, 'error')
+  assert.match(futureState.error, /clock skew or tampering/)
+
+  // within the 24h clock-skew tolerance -> accepted
+  const withinSkew = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  const skewState = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', generatedAt: withinSkew, assets: asset },
+    publicKey,
+  )
+  assert.equal(skewState.status, 'available')
+
+  // absent generatedAt -> still accepted (back-compat), but logs a structured warning
+  const originalWarn = console.warn
+  const warnLines = []
+  console.warn = (line) => warnLines.push(line)
+  let absentState
+  try {
+    absentState = await checkManifest(t, privateKey, { version: '2.0.0', assets: asset }, publicKey)
+  } finally {
+    console.warn = originalWarn
+  }
+  assert.equal(absentState.status, 'available')
+  assert.ok(warnLines.some((line) => line.includes('updater.manifest.generated_at_missing')))
+})
+
+test('multi-key verification tries every pinned key; a keyId hint is only ever an optimization', async (t) => {
+  const keyA = signingKey()
+  const keyB = signingKey()
+  const keyC = signingKey() // never pinned
+  const asset = {
+    [`${process.platform}-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+  }
+  const pinned = { publicKeys: [keyA.publicKey, keyB.publicKey] }
+  const generatedAt = new Date().toISOString()
+
+  // Signed with the second pinned key, no hint at all -> falls back and succeeds.
+  let state = await checkManifest(
+    t,
+    keyB.privateKey,
+    { version: '2.0.0', generatedAt, assets: asset },
+    keyA.publicKey,
+    { configOverrides: pinned },
+  )
+  assert.equal(state.status, 'available')
+
+  // Signed with the second pinned key, correct hint for it -> succeeds.
+  state = await checkManifest(
+    t,
+    keyB.privateKey,
+    { version: '2.0.0', generatedAt, keyId: keyIdFor(keyB.publicKey), assets: asset },
+    keyA.publicKey,
+    { configOverrides: pinned },
+  )
+  assert.equal(state.status, 'available')
+
+  // Signed with the second pinned key, but the hint points at an unpinned
+  // key -- must still fall back through every pinned key and succeed.
+  state = await checkManifest(
+    t,
+    keyB.privateKey,
+    { version: '2.0.0', generatedAt, keyId: keyIdFor(keyC.publicKey), assets: asset },
+    keyA.publicKey,
+    { configOverrides: pinned },
+  )
+  assert.equal(state.status, 'available')
+
+  // Signed with a key that isn't pinned at all -> rejected.
+  state = await checkManifest(
+    t,
+    keyC.privateKey,
+    { version: '2.0.0', generatedAt, assets: asset },
+    keyA.publicKey,
+    { configOverrides: pinned },
+  )
+  assert.equal(state.status, 'error')
+  assert.match(state.error, /signature verification failed/)
+})
+
+test('staged rollout buckets deterministically from a persisted client id and gates without erroring', async (t) => {
+  const { privateKey, publicKey } = signingKey()
+  const { stagingDir, resourcesDir } = await temporaryDirectories(t)
+  const clientId = '11111111-1111-4111-8111-111111111111'
+  await writeFile(join(resourcesDir, 'update-client-id'), clientId)
+  const bucket = createHash('sha256').update(clientId).digest()[0] % 100
+
+  const asset = {
+    [`${process.platform}-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+  }
+  const generatedAt = new Date().toISOString()
+  const engineOverrides = { resourcesDir, stagingDir }
+
+  // rollout strictly above this client's bucket -> available
+  const includedState = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', generatedAt, rollout: Math.min(100, bucket + 1), assets: asset },
+    publicKey,
+    { engineOverrides },
+  )
+  assert.equal(includedState.status, 'available')
+
+  // rollout at or below the bucket -> not-available, never an error
+  const excludedState = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', generatedAt, rollout: bucket, assets: asset },
+    publicKey,
+    { engineOverrides },
+  )
+  assert.equal(excludedState.status, 'not-available')
+  assert.equal(excludedState.error, undefined)
+
+  // the persisted client id is reused across checks, not regenerated
+  assert.equal((await readFile(join(resourcesDir, 'update-client-id'), 'utf8')).trim(), clientId)
+
+  // absent rollout (100%) -> always available regardless of bucket
+  const noRolloutState = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.1', generatedAt, assets: asset },
+    publicKey,
+    { engineOverrides },
+  )
+  assert.equal(noRolloutState.status, 'available')
+})
+
+test('win32-arm64 resolves as a platform key like any other platform-arch combination', async (t) => {
+  const { privateKey, publicKey } = signingKey()
+  const asset = {
+    'win32-arm64': { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+  }
+  const generatedAt = new Date().toISOString()
+
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform')
+  const originalArch = Object.getOwnPropertyDescriptor(process, 'arch')
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+  Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true })
+  t.after(() => {
+    Object.defineProperty(process, 'platform', originalPlatform)
+    Object.defineProperty(process, 'arch', originalArch)
+  })
+
+  const state = await checkManifest(t, privateKey, { version: '2.0.0', generatedAt, assets: asset }, publicKey)
+  assert.equal(state.status, 'available')
+  assert.equal(state.latest, '2.0.0')
 })

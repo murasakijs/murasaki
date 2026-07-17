@@ -430,7 +430,7 @@ async function installerWin32(
   // asset only warns a single time (rather than once per installer type).
   const branding = resolveWindowsBranding(cwd, config, bundleDir)
 
-  const nsisPath = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding })
+  const nsisPath = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding, arch })
   if (shouldSign && nsisPath) signWindowsArtifact(nsisPath, config, cwd)
   const msiPath = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
   if (shouldSign && msiPath) signWindowsArtifact(msiPath, config, cwd)
@@ -746,9 +746,14 @@ function uninstKillFailedText(productName: string, languageName: string): string
 
 /**
  * Generates the `.nsi` script and runs `makensis` against it to produce
- * `dist/<productName>-<version>-setup.exe`. Returns `null` (without
- * throwing) if `makensis` isn't on PATH or compilation fails, so the caller
- * can fall through to the "no installer produced" notice.
+ * `dist/<productName>-<version>-setup-<arch>.exe` (arch-suffixed so a win32
+ * arm64 build's installer can't collide with — or silently overwrite — an
+ * x64 build's, and so `murasaki release --manifest` can tell the two apart;
+ * see release.ts's manifest scan, which also still recognizes the legacy
+ * un-suffixed `-setup.exe` name for already-published win32-x64 assets).
+ * Returns `null` (without throwing) if `makensis` isn't on PATH or
+ * compilation fails, so the caller can fall through to the "no installer
+ * produced" notice.
  */
 async function buildNsisInstaller(opts: {
   cwd: string
@@ -757,8 +762,9 @@ async function buildNsisInstaller(opts: {
   version: string
   bundleDir: string
   branding: WindowsBranding
+  arch: Arch
 }): Promise<string | null> {
-  const { cwd, config, productName, version, bundleDir, branding } = opts
+  const { cwd, config, productName, version, bundleDir, branding, arch } = opts
 
   const makensis = resolveMakensis()
   if (!makensis) {
@@ -769,7 +775,7 @@ async function buildNsisInstaller(opts: {
     return null
   }
 
-  const setupPath = resolve(cwd, 'dist', `${productName}-${version}-setup.exe`)
+  const setupPath = resolve(cwd, 'dist', `${productName}-${version}-setup-${arch}.exe`)
   await rm(setupPath, { force: true })
 
   const installMode = config.installer?.windows?.installMode ?? 'perUser'
