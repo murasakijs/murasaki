@@ -46,6 +46,15 @@ export interface UpdateState {
   /** 0..1, only meaningful while `status === 'downloading'`. */
   progress?: number
   error?: string
+  /**
+   * Set alongside `status: 'not-available'` when the reason isn't "already
+   * on the latest version" but a structural one the UI may want to word
+   * differently — currently only `'system-package-manager'` (Linux, non-
+   * AppImage packaging — see `runCheck()`'s Linux short-circuit below). This
+   * is deliberately NOT `status: 'error'`: nothing is wrong, self-update
+   * just isn't this package's story to tell.
+   */
+  reason?: 'system-package-manager'
 }
 
 export interface UpdaterEngineOptions {
@@ -166,6 +175,28 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
 
   async function runCheck(): Promise<UpdateState> {
     setState({ status: 'checking', current: opts.currentVersion })
+
+    // Self-update only exists for the AppImage packaging format (see
+    // launcher.rs's `apply_linux` — the running `.AppImage` file gets
+    // journal-swapped in place). A PACKAGED `.deb` install or bare AppDir
+    // launch has no such file: `$APPIMAGE` is only ever set by the AppImage
+    // runtime (or `--appimage-extract-and-run`) before exec'ing this
+    // process, so its absence there means there is nothing this engine
+    // could ever apply an update to, regardless of whether `updater` is even
+    // configured. `mode === 'prod'` scopes this to real packaged launches —
+    // `murasaki dev` never runs inside an AppImage either, but a Linux
+    // developer must still be able to exercise the manifest/available-update
+    // flow locally. Reported as `not-available` (never `error`): nothing is
+    // wrong, updates are just the system package manager's job here — and
+    // checked before the `resolvedUpdater` guard below so it takes priority
+    // for every packaged Linux non-AppImage launch.
+    if (opts.mode === 'prod' && process.platform === 'linux' && !process.env.APPIMAGE) {
+      return setState({
+        status: 'not-available',
+        current: opts.currentVersion,
+        reason: 'system-package-manager',
+      })
+    }
 
     if (!opts.resolvedUpdater) {
       return setState({

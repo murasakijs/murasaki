@@ -8,10 +8,13 @@ no update service to run — the manifest is a JSON file next to your release
 artifacts (GitHub Releases by default, or any static host you control), and
 the whole trust model is a single Ed25519 keypair you generate once.
 
-<Callout type="warn">
-  macOS and Windows only. Linux app packaging doesn't exist in Murasaki yet
-  (see [CLI reference](/docs/building/cli)), so there's nothing to update on
-  Linux either.
+<Callout type="info">
+  macOS, Windows, and Linux **AppImage** builds. A `.deb` install or a bare
+  (manually-extracted) AppDir has no self-contained file to swap — `check()`
+  reports a structured "updates are managed by the system package manager"
+  result instead of checking a manifest, never an error. See
+  [Distribution](/docs/building/distribution#linux-appimage-and-deb) for the
+  Linux packaging story.
 </Callout>
 
 ## Quick start
@@ -422,7 +425,8 @@ doesn't change what a client is allowed to install, only when it's offered.
 | macOS (x64) | `<productName>-darwin-x64.app.zip` | Supported |
 | Windows (x64) | `<productName>-<version>-setup-x64.exe` | Supported |
 | Windows (arm64) | `<productName>-<version>-setup-arm64.exe` | Supported |
-| Linux | — | No app packaging in Murasaki yet |
+| Linux AppImage (x64 / arm64) | `<productName>-<version>-linux-{x64,arm64}.AppImage` | Supported |
+| Linux `.deb` / bare AppDir | — | Not applicable — `check()` reports "managed by the system package manager" |
 
 `murasaki installer` names the NSIS installer with an arch suffix so x64 and
 arm64 builds never collide in the same `dist/`; `murasaki release

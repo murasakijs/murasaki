@@ -3,9 +3,9 @@ title: Deep Link と File Association
 description: URL scheme と document type を登録し、すべての open request を Node Main で処理します。
 ---
 
-Murasaki は packaged macOS / Windows app の custom URL scheme と document
-extension を登録できます。cold launch と起動済み app への request は、どちらも同じ
-Node Main の `openRequested()` hook に届きます。
+Murasaki は packaged macOS / Windows / Linux app の custom URL scheme と
+document extension を登録できます。cold launch と起動済み app への request は、
+どちらも同じ Node Main の `openRequested()` hook に届きます。
 
 ## Handler を設定する
 
@@ -109,7 +109,7 @@ interface OpenRequestEvent {
 | Windows NSIS `.exe` | installer が `installer.windows.installMode` に従い per-user / per-machine の protocol / file association を登録します。起動された URL / file は argv から正規化されます。 |
 | Windows MSI | MSI が per-machine の protocol / file association を登録します。起動された URL / file は argv から正規化されます。 |
 | Windows portable archive | registry entry を作りません。`protocols` / `fileAssociations` を設定しても OS handler にはなりません。 |
-| Linux | protocol / MIME registration は未実装です。Linux の Deep Link / file association 対応を告知しないでください。 |
+| Linux AppDir / `.AppImage` / `.deb` | `murasaki bundle` が `x-scheme-handler/<scheme>` と `application/x-<extension>` の `MimeType=` エントリを `.desktop` ファイルに書き込みます。`.deb` は `usr/share/applications/` にインストールし、インストール/削除時に desktop database を更新します(`update-desktop-database`)。手動展開した AppDir/`.AppImage` には同等の OS レベル登録手順はありませんが、直接起動した場合でも cold-start 時の argv(`.desktop` の `Exec=` 行が展開する `%U`/`%F`)と 2 回目起動時の activation は動作します。 |
 | `murasaki dev` | system handler metadata を install しません。OS integration は install/package 済み artifact でテストしてください。 |
 
 Windows の登録は app を利用可能な handler に追加しますが、user の現在の default app を

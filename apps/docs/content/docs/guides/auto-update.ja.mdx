@@ -9,10 +9,13 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
 ホスティング)であり、信頼モデル全体は一度だけ生成する Ed25519 の鍵ペア1つに集約され
 ます。
 
-<Callout type="warn">
-  macOS と Windows のみです。Murasaki には Linux 向けのアプリパッケージングがまだ存在
-  しないため([CLI リファレンス](/docs/building/cli)を参照)、Linux では更新するもの
-  自体がありません。
+<Callout type="info">
+  macOS、Windows、そして Linux の **AppImage** ビルドに対応しています。`.deb`
+  でインストールした場合や手動展開した bare AppDir には swap できる
+  self-contained なファイルが無いため、`check()` は manifest を確認する代わりに
+  「update はシステムのパッケージマネージャが管理しています」という構造化された
+  結果を返します — エラーにはなりません。Linux パッケージングの詳細は
+  [配布](/ja/docs/building/distribution#linux-appimage-and-deb) を参照してください。
 </Callout>
 
 ## クイックスタート
@@ -414,7 +417,8 @@ export default defineConfig({
 | macOS(x64） | `<productName>-darwin-x64.app.zip` | 対応 |
 | Windows(x64） | `<productName>-<version>-setup-x64.exe` | 対応 |
 | Windows(arm64） | `<productName>-<version>-setup-arm64.exe` | 対応 |
-| Linux | — | Murasaki にはまだアプリパッケージングがありません |
+| Linux AppImage(x64 / arm64） | `<productName>-<version>-linux-{x64,arm64}.AppImage` | 対応 |
+| Linux `.deb` / bare AppDir | — | 対象外 — `check()` は「system package manager が管理」と返します |
 
 `murasaki installer` は NSIS インストーラーの名前に arch suffix を付けるため、x64 と
 arm64 のビルドが同じ `dist/` に置かれても衝突しません。`murasaki release --manifest`

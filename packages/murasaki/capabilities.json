@@ -252,16 +252,18 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "partial"
       },
       "limitations": [
-        "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS and Windows (x64 and arm64) apps.",
-        "A custom self-hosted endpoint must be https (loopback http is allowed for local testing only); delta/differential updates are not implemented; Linux packaging and updates remain unavailable."
+        "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS, Windows (x64 and arm64), and Linux AppImage apps.",
+        "A custom self-hosted endpoint must be https (loopback http is allowed for local testing only); delta/differential updates are not implemented. Linux self-update only works for the AppImage packaging format (the running .AppImage file is journal-swapped in place, relaunched with --appimage-extract-and-run); a .deb install or a manually-extracted AppDir has no file to swap, so check() reports a structured not-available reason (updates are managed by the system package manager) instead of an error."
       ],
       "apiSymbols": ["useUpdate", "UpdateButton", "UpdaterConfig", "UpdateState"],
       "testEvidence": [
         "packages/murasaki/test/updater-hardening.test.mjs",
-        ".github/workflows/app-package-win.yml"
+        "crates/native/src/updater.rs",
+        ".github/workflows/app-package-win.yml",
+        ".github/workflows/app-package-linux.yml"
       ],
       "docsSlug": "/docs/guides/auto-update"
     },
@@ -272,14 +274,20 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today.",
-        "Linux launcher packaging and installers are not implemented. WiX is required for MSI and only runs on Windows."
+        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging, repository metadata, and code signing are not implemented. WiX is required for MSI and only runs on Windows."
       ],
       "apiSymbols": ["murasaki bundle", "murasaki installer"],
-      "testEvidence": [".github/workflows/app-package-win.yml"],
+      "testEvidence": [
+        ".github/workflows/app-package-win.yml",
+        ".github/workflows/app-package-linux.yml",
+        ".github/workflows/ci.yml",
+        "packages/murasaki/test/linux-bundle.test.mjs",
+        "packages/murasaki/test/linux-deb.test.mjs"
+      ],
       "docsSlug": "/docs/building/distribution"
     },
     {
@@ -428,11 +436,11 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "Packaged macOS apps and installed Windows apps register declared URL schemes and file associations, preserve the per-user single-instance lock, and deliver normalized startup, second-instance, and system open requests to src/main.ts.",
-        "Windows portable .zip and bare executable distributions do not register protocols or file associations automatically; registration is supplied by the NSIS and MSI installers, while Linux support remains planned."
+        "Windows portable .zip and bare executable distributions do not register protocols or file associations automatically; registration is supplied by the NSIS and MSI installers. Linux preserves the same per-user single-instance lock and delivers cold-start argv (the %U/%F the .desktop Exec line expands to) and second-instance activation over the existing loopback channel; protocol/file-association MimeType entries are declared in the .desktop file (installed under usr/share/applications by the .deb, refreshed by update-desktop-database) but there is no OS-level registration step to verify for a manually-extracted AppImage/AppDir the way NSIS/MSI perform on Windows."
       ],
       "apiSymbols": [
         "ProtocolConfig",
@@ -447,7 +455,8 @@
         "packages/murasaki/test/associations.test.mjs",
         "packages/murasaki/test/main-runtime.test.mjs",
         "packages/murasaki/test/prod-server-http.test.mjs",
-        "crates/native/src/launcher.rs"
+        "crates/native/src/launcher.rs",
+        ".github/workflows/app-package-linux.yml"
       ],
       "docsSlug": "/docs/guides/deep-links"
     },
@@ -579,18 +588,24 @@
     {
       "id": "linux-distribution",
       "category": "distribution",
-      "status": "planned",
+      "status": "partial",
       "platforms": {
         "macos": "unsupported",
         "windows": "unsupported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
-        "Prebuilt Linux native binaries and development support do not constitute an installable Linux application release.",
-        "AppImage, deb, rpm, repository metadata, signing, updates, and launcher packaging are not implemented."
+        "AppDir/AppImage/deb artifact assembly (see the application-packaging capability) and the native launcher runtime both work end to end: window/webview creation, single-instance locking, cold-start deep links (argv from the .desktop Exec line) and second-instance forwarding, graceful shutdown, and native crash reporting all run from the packaged AppImage or .deb, verified under Xvfb + a private D-Bus session in Docker and in app-package-linux.yml.",
+        "AppImage self-update works (journaled single-file swap of the running .AppImage, relaunch via --appimage-extract-and-run, first-launch rollback on a failed health check); a .deb install or a bare/manually-extracted AppDir has no self-update (there is no single file to swap) and reports updates as managed by the system package manager instead. rpm packaging, repository metadata, and code signing are not implemented."
       ],
       "apiSymbols": [],
-      "testEvidence": [],
+      "testEvidence": [
+        "crates/native/src/launcher.rs",
+        "crates/native/src/updater.rs",
+        ".github/workflows/app-package-linux.yml",
+        ".github/scripts/linux-installer-e2e.sh",
+        ".github/scripts/linux-smoke-test.sh"
+      ],
       "docsSlug": "/docs/core-concepts/platform-feature-status"
     }
   ]

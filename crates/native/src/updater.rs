@@ -19,11 +19,11 @@
 //!            --relaunch  <abs path of the executable to launch when done>
 //! ```
 //!
-//! Platform coverage matches the rest of the packaging story: macOS +
-//! Windows only. Linux packaging doesn't exist in this repo (see
-//! `bundle.ts` / `installer.ts`), so `--apply-update` there — and on any
-//! other target — just logs an error and exits non-zero rather than
-//! pretending to apply anything.
+//! Platform coverage matches the rest of the packaging story: macOS,
+//! Windows, and Linux (AppImage packaging only — see `apply_linux`'s doc
+//! comment for why a `.deb` install or bare AppDir never reaches this code
+//! at all). On any other target, `--apply-update` just logs an error and
+//! exits non-zero rather than pretending to apply anything.
 
 use std::{
     fs,
@@ -33,7 +33,7 @@ use std::{
     time::Duration,
 };
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use std::time::Instant;
 
 /// Every diagnostic line this module prints is prefixed this way. This mode
@@ -191,7 +191,7 @@ fn run_recovery(raw_args: &[String]) -> i32 {
         }
     };
 
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         if !wait_for_pid_exit(args.wait_pid, Duration::from_secs(30)) {
             log!(
@@ -201,10 +201,10 @@ fn run_recovery(raw_args: &[String]) -> i32 {
             return 1;
         }
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = &args;
-        log!("update recovery is only supported on macOS and Windows");
+        log!("update recovery is only supported on macOS, Windows, and Linux (AppImage)");
         return 1;
     }
 
@@ -810,12 +810,12 @@ pub(crate) fn prepare_startup_update(target: &Path) -> Result<StartupUpdateActio
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn wait_for_attempt_exit(pid: u32) -> bool {
     wait_for_pid_exit(pid, Duration::from_secs(2))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn wait_for_attempt_exit(pid: u32) -> bool {
     !pid_alive_for_journal(pid)
 }
@@ -844,20 +844,20 @@ pub(crate) fn acknowledge_update_health(target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn pid_alive_for_journal(pid: u32) -> bool {
     pid_alive(pid)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn pid_alive_for_journal(_pid: u32) -> bool {
     false
 }
 
-/// Shared prelude for both real platforms: re-verify the hash, then wait for
+/// Shared prelude for every real platform: re-verify the hash, then wait for
 /// the quitting launcher to actually exit — both *before* anything about the
 /// install is touched. Contract §8.1/§8.2.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn verify_and_wait(args: &ApplyArgs) -> Result<(), String> {
     log!("verifying payload sha256: {}", args.payload.display());
     verify_sha256(&args.payload, &args.sha256)?;
@@ -884,11 +884,16 @@ fn apply(args: &ApplyArgs, raw_args: &[String]) -> Result<Outcome, String> {
     apply_windows(args, raw_args)
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(target_os = "linux")]
+fn apply(args: &ApplyArgs, _raw_args: &[String]) -> Result<Outcome, String> {
+    verify_and_wait(args)?;
+    apply_linux(args).map(Outcome::Applied)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn apply(_args: &ApplyArgs, _raw_args: &[String]) -> Result<Outcome, String> {
     Err(
-        "apply-update is only supported on macOS and Windows — this platform \
-     (Linux packaging does not exist in murasaki yet) is not supported"
+        "apply-update is only supported on macOS, Windows, and Linux (AppImage packaging)"
             .to_string(),
     )
 }
@@ -898,7 +903,7 @@ fn apply(_args: &ApplyArgs, _raw_args: &[String]) -> Result<Outcome, String> {
 /// overwrite the user's install, so it re-checks independently rather than
 /// trusting the caller. Streams the file in chunks rather than reading it
 /// whole, since payloads (a `.app.zip` or NSIS installer) can be sizeable.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn verify_sha256(payload: &Path, expected_hex: &str) -> Result<(), String> {
     use sha2::{Digest, Sha256};
 
@@ -931,7 +936,7 @@ fn verify_sha256(payload: &Path, expected_hex: &str) -> Result<(), String> {
 }
 
 /// Polls `pid_alive` until it reports the pid gone, or `timeout` elapses.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
     let start = Instant::now();
     loop {
@@ -949,8 +954,8 @@ fn wait_for_pid_exit(pid: u32, timeout: Duration) -> bool {
 /// whether `pid` exists and is signalable, which is exactly a liveness
 /// check. `ESRCH` ("no such process") means it's gone; any other outcome
 /// (success, or an error like `EPERM` — exists but we lack permission to
-/// signal it) means it's still alive.
-#[cfg(target_os = "macos")]
+/// signal it) means it's still alive. Identical on Linux — both are POSIX.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn pid_alive(pid: u32) -> bool {
     let Ok(pid) = libc::pid_t::try_from(pid) else {
         return false;
@@ -1067,6 +1072,89 @@ fn apply_macos(args: &ApplyArgs) -> Result<InstallTransaction, String> {
         args.target.display()
     );
     transaction.install_from(&extracted_app)?;
+    transaction.mark_awaiting_health()?;
+    log!(
+        "install succeeded; retaining backup until startup health acknowledgement: {}",
+        transaction.backup.display(),
+    );
+
+    Ok(transaction)
+}
+
+/// Removes the staged single-file copy when it goes out of scope, on every
+/// path out of `apply_linux` — including the early `return Err(...)`s.
+/// Companion of `StagingDir` above, just for a single file instead of a
+/// directory (there is no archive to extract on Linux — see `apply_linux`'s
+/// doc comment).
+#[cfg(target_os = "linux")]
+struct StagingFile(PathBuf);
+
+#[cfg(target_os = "linux")]
+impl Drop for StagingFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Linux apply (AppImage only — `run_launcher()`'s `imp_linux` never invokes
+/// `--apply-update` at all unless `$APPIMAGE` was set, so reaching this
+/// function already implies the packaging format supports it). Contract
+/// §8.3/§8.4 analog:
+///
+/// Unlike macOS (`ditto -x` extracts an archive) or Windows (an NSIS
+/// installer to run), the downloaded payload already IS the complete,
+/// ready-to-run replacement `.AppImage` — `murasaki release --manifest`
+/// publishes the built `.AppImage` itself as the `linux-<arch>` asset (see
+/// release.ts), so there is nothing to extract, only a file to swap in.
+/// Staged into `target`'s own directory first (same reasoning as
+/// `apply_macos`'s `StagingDir`: `fs::rename` is same-volume-only, and
+/// `runtime/updater.ts`'s download staging directory is typically a
+/// different filesystem than wherever the user keeps their AppImage), then
+/// swapped in via the shared `InstallTransaction` — the same journal/
+/// same-volume-backup/health-ack guarantees as macOS/Windows, just for one
+/// file instead of a directory tree. `target` and `relaunch` are always the
+/// same path here (the running `.AppImage` file itself is directly
+/// executable), mirroring macOS's `.app` bundle swap.
+#[cfg(target_os = "linux")]
+fn apply_linux(args: &ApplyArgs) -> Result<InstallTransaction, String> {
+    let staging_root = args
+        .target
+        .parent()
+        .ok_or_else(|| "--target has no parent directory".to_string())?;
+    let staged_path = staging_root.join(format!(".murasaki-apply-{}.AppImage", std::process::id()));
+    // Best-effort: clear a stale file from a previous aborted attempt with the
+    // same pid (unlikely, but pids do get reused), like apply_macos's tmpdir.
+    let _ = fs::remove_file(&staged_path);
+    log!(
+        "staging new AppImage: {} -> {}",
+        args.payload.display(),
+        staged_path.display()
+    );
+    fs::copy(&args.payload, &staged_path).map_err(|e| {
+        format!(
+            "stage new AppImage {} -> {}: {e}",
+            args.payload.display(),
+            staged_path.display()
+        )
+    })?;
+    let staged = StagingFile(staged_path);
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&staged.0, fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("chmod staged AppImage {}: {e}", staged.0.display()))?;
+    }
+
+    let mut transaction = InstallTransaction::begin(&args.target, &args.relaunch)?;
+    log!(
+        "backed up current AppImage to {}",
+        transaction.backup.display()
+    );
+    log!(
+        "installing new AppImage: {} -> {}",
+        staged.0.display(),
+        args.target.display()
+    );
+    transaction.install_from(&staged.0)?;
     transaction.mark_awaiting_health()?;
     log!(
         "install succeeded; retaining backup until startup health acknowledgement: {}",
@@ -1210,12 +1298,38 @@ fn relaunch(target: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Relaunches the freshly-installed `.AppImage`. Always passes
+/// `--appimage-extract-and-run` rather than plain-exec'ing it: a bare exec
+/// would go through the AppImage runtime's normal FUSE mount, which isn't
+/// guaranteed to be available (this update-apply helper itself may be
+/// running in exactly such an environment — verified in this feature's
+/// Docker test, see `.github/scripts/linux-appimage-e2e.sh`, and it's a
+/// known real-world AppImage pain point too, see the distribution guide's
+/// FUSE note). `--appimage-extract-and-run` is intercepted by the AppImage
+/// runtime itself before it ever reaches this app's own argv (it extracts to
+/// a temp dir and execs AppRun there instead of mounting), so this works
+/// identically whether or not FUSE is present — at the cost of a slower
+/// relaunch than a FUSE mount would give, which only matters for the brief
+/// moment right after an update, not everyday launches.
+#[cfg(target_os = "linux")]
+fn relaunch(target: &Path) -> Result<(), String> {
+    log!(
+        "relaunching: {} --appimage-extract-and-run",
+        target.display()
+    );
+    Command::new(target)
+        .arg("--appimage-extract-and-run")
+        .spawn()
+        .map_err(|e| format!("spawn {}: {e}", target.display()))?;
+    Ok(())
+}
+
 /// Unreachable in practice — `apply()` on this platform always returns
 /// `Err` before `run()` would ever call this — kept only so `run()` doesn't
 /// need its own per-platform `#[cfg]` around the relaunch step.
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn relaunch(_target: &Path) -> Result<(), String> {
-    Err("relaunch is only supported on macOS and Windows".to_string())
+    Err("relaunch is only supported on macOS, Windows, and Linux (AppImage)".to_string())
 }
 
 /// Fuzzing-only entry point exercising the update journal's JSON parsing and

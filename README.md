@@ -23,8 +23,9 @@ built on **React 19 + Vite**, rendered through the **OS WebView already
 installed on your machine** — no bundled Chromium. The native window, menus,
 and OS integrations are powered by a self-authored Rust binding,
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
-you write TypeScript; you never write Rust. Production targets **macOS and
-Windows**; Linux currently has a development runtime but no packaging claim.
+you write TypeScript; you never write Rust. Production targets **macOS,
+Windows, and Linux** (AppDir/`.AppImage`/`.deb`, with self-update for the
+AppImage).
 
 ```bash
 npm create murasaki@latest my-app
@@ -292,13 +293,21 @@ murasaki help        Show this help
 | **macOS** (arm64, x64)     |  ✅   | `.app`             | `.dmg` — must be built on macOS   |     ✅      |
 | **Windows** (x64)          |  ✅   | folder / `.zip`    | NSIS `.exe`¹, `.msi`²             |     ✅      |
 | **Windows** (arm64)        |  ✅   | folder / `.zip`    | NSIS `.exe`¹                      |     ❌³     |
-| **Linux** (x64, arm64)     |  ✅   | —                  | —                                 |     ❌      |
+| **Linux** (x64, arm64)     |  ✅   | AppDir + `.AppImage`⁴ | `.deb`⁴                        |    ✅⁵      |
 
 <sub>¹ needs `makensis` on the build machine — it cross-compiles from macOS/Linux.
 ² needs WiX v4, and must be built on Windows.
 ³ the Windows installer's filename doesn't encode the architecture yet, so the
 update manifest can't tell an arm64 build from an x64 one — tracked as a
-follow-up.</sub>
+follow-up.
+⁴ `bundle`/`installer` need `mksquashfs` (`squashfs-tools`) to build the
+`.AppImage` and cross-compile from any host; the native launcher runs the
+produced AppDir/`.AppImage`/`.deb` (window, webview, single-instance, deep
+links, crash reporting).
+⁵ AppImage only — self-update journal-swaps the running `.AppImage` file in
+place and relaunches with `--appimage-extract-and-run` (no FUSE required). A
+`.deb` install has no self-contained file to swap; `check()` reports it as
+managed by the system package manager instead.</sub>
 
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) ships
 prebuilt binaries for all six targets, so none of this asks you to install a
@@ -306,8 +315,9 @@ Rust toolchain.
 
 **Known limitations, stated plainly:**
 
-- **Linux app packaging isn't implemented.** `murasaki dev` works on Linux, but
-  there's no `bundle` or `installer` for it yet.
+- **Linux has no code signing, `.rpm`, or repository metadata.**
+  AppDir/`.AppImage`/`.deb` all ship unsigned, and there's no Fedora/RHEL
+  package or apt/dnf repository index yet.
 - **Windows Authenticode needs your own certificate or signing provider.**
   `--sign` wires SignTool across the app executable, portable ZIP payload,
   NSIS setup, and MSI, but Murasaki cannot establish publisher reputation for
@@ -582,10 +592,15 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
 - ✅ **Windows packaging** — portable `.zip`, NSIS `.exe`, and `.msi`, all
   cross-compiled from macOS/Linux.
 - ✅ **Auto-update** — signed manifests, SHA-256-verified downloads, and
-  in-place replacement + relaunch on macOS and Windows x64.
+  in-place replacement + relaunch on macOS, Windows x64, and Linux AppImage.
 - ✅ **Code signing** — macOS Developer ID + notarization and Windows
   Authenticode (PFX/store certificates or Microsoft Artifact Signing).
-- 🚧 **Next** — Linux packaging, Windows arm64 auto-update, and v1.0 stabilization.
+- ✅ **Linux distribution** — AppDir + `.AppImage` and `.deb`, cross-compiled
+  from macOS/Windows/Linux (`mksquashfs` required for the `.AppImage`). The
+  native launcher runs the produced bundle end-to-end (window, webview,
+  single-instance, deep links, crash reporting) and self-updates via the
+  AppImage; no code signing, `.rpm`, or repository metadata yet.
+- 🚧 **Next** — Windows arm64 auto-update and v1.0 stabilization.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something

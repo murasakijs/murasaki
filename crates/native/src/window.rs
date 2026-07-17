@@ -911,6 +911,33 @@ impl RuntimeWindowManager {
         let window = builder
             .build(target)
             .map_err(|error| format!("build window {label}: {error}"))?;
+        // GTK-specific: unlike Win32's HWND or Cocoa's NSWindow, a GtkWindow's
+        // native handle (the underlying GdkWindow/X11 XID `raw-window-handle`
+        // exposes) doesn't exist until the widget is *realized* — which
+        // normally only happens as part of showing it. This window is built
+        // hidden above (`.with_visible(false)`) and only actually shown later,
+        // once `initially_visible`, by `open_window()` below — so nothing
+        // flashes an unstyled blank window before the webview has content —
+        // but `Webview::new_unregistered` just below needs a real handle right
+        // now, before that. `realize()` creates that handle without mapping
+        // (showing) the window, so the "hidden until ready" behavior these
+        // dormant/lazy windows rely on is unaffected. Discovered running the
+        // production launcher (`imp_linux`) end-to-end under Xvfb — see
+        // RFC 0002 phase L2a's Docker verification notes.
+        #[cfg(target_os = "linux")]
+        {
+            use gtk::prelude::WidgetExt;
+            use tao::platform::unix::WindowExtUnix;
+            window.gtk_window().realize();
+            // `realize()` only requests realization; the underlying GdkWindow/
+            // X11 XID isn't actually allocated until GTK's main loop processes
+            // that request. Pump the queue synchronously so it's ready by the
+            // time `Webview::new_unregistered` grabs the native handle just
+            // below, instead of racing the tao event loop's own next tick.
+            while gtk::events_pending() {
+                gtk::main_iteration();
+            }
+        }
         apply_window_vibrancy(&window, template.window.vibrancy.as_deref())?;
         // Centering computes a position from the window's already-fullscreen
         // outer size; skip it so an initial `fullscreen: true` isn't fought
@@ -1229,10 +1256,15 @@ impl BrowserWindow {
 #[cfg(test)]
 mod tests {
     use super::{
-        execute_window_control, generation_is_current, validate_window_label,
-        vibrancy_requires_transparency, MonitorInfo, RuntimeWindowManager, WindowControlCommand,
-        WindowRegistry,
+        execute_window_control, generation_is_current, validate_window_label, MonitorInfo,
+        RuntimeWindowManager, WindowControlCommand, WindowRegistry,
     };
+    // Only exercised by `configured_vibrancy_requires_a_transparent_webview`
+    // below, which is itself macOS-only (vibrancy is a macOS-only concept —
+    // see `vibrancy_requires_transparency`'s doc comment) — an unconditional
+    // import here is unused on every other target.
+    #[cfg(target_os = "macos")]
+    use super::vibrancy_requires_transparency;
     use crate::{
         types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
         webview::{AppMenuContext, ProcessWebContext},

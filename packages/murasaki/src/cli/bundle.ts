@@ -1,6 +1,6 @@
 import { resolve, dirname, join, relative, sep } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile, symlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -12,6 +12,7 @@ import { buildProject } from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote, murasakiVersion } from './brand.js'
 import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
+import { buildAppImage } from './appimage.js'
 import {
   resolveWebviewNetworkConfig,
   resolveStartupSystemPermissions,
@@ -102,8 +103,17 @@ export default async function bundle(argv: string[]) {
     return
   }
 
-  if (target.platform !== 'darwin') {
-    process.stdout.write(`\n${warn(`bundle: ${target.platform} is not supported yet.`)}\n\n`)
+  // The Linux AppDir/AppImage path below has no macOS-only dependency either
+  // (same posture as win32's folder above), so it also cross-bundles from
+  // any host — the only extra tool it needs is `mksquashfs` (see
+  // appimage.ts), required only for the final AppImage-packing step.
+  if (target.platform === 'linux') {
+    if (shouldSign) {
+      process.stdout.write(
+        `\n${warn('bundle: --sign is not implemented for Linux yet — producing an unsigned AppDir/AppImage.')}\n\n`,
+      )
+    }
+    await bundleLinux(cwd, config, target.arch)
     await runPluginHooks(prepared, 'after', hookOptions)
     return
   }
@@ -403,6 +413,286 @@ async function bundleWin32(
   const zipPath = await zipWin32Bundle(resolve(cwd, 'dist/bundle'), productName, arch)
   process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
   if (!shouldSign) process.stdout.write(unsignedNote(zipPath))
+}
+
+/**
+ * Stage a Linux AppDir at `dist/bundle/<productName>.AppDir/` — the AppImage
+ * project's standard on-disk layout (freedesktop.org's App Directory
+ * convention), which doubles as the "raw folder" deliverable (mirroring the
+ * win32 folder's role above) and as the input `buildAppImage` squashfs-
+ * compresses into the packaged `.AppImage` below. `usr/lib/<appId>/
+ * resources/` mirrors the EXACT same shape as the macOS bundle's
+ * `Contents/Resources` (see the darwin path above) so `murasaki-launcher`'s
+ * resource-loading code stays platform-agnostic; only the surrounding
+ * AppDir/`.desktop`/icon-theme scaffolding here is Linux-specific.
+ *
+ * Has no macOS-only dependency (same posture as `bundleWin32`), so this can
+ * run on any host, including this one for cross-bundling off a Mac — the
+ * only external tool `bundle` needs for Linux is `mksquashfs`, and only for
+ * the final AppImage-packing step (see appimage.ts).
+ */
+async function bundleLinux(cwd: string, config: MurasakiConfig, arch: Arch): Promise<void> {
+  const productName = config.productName
+  const appId = sanitizeLinuxAppId(config.appId)
+  const execName = sanitizeLinuxExecName(productName)
+  const appDir = resolve(cwd, 'dist/bundle', `${productName}.AppDir`)
+  await rm(appDir, { recursive: true, force: true })
+
+  const binDir = join(appDir, 'usr/bin')
+  const resourcesDir = join(appDir, 'usr/lib', appId, 'resources')
+  const applicationsDir = join(appDir, 'usr/share/applications')
+  await mkdir(binDir, { recursive: true })
+  await mkdir(resourcesDir, { recursive: true })
+  await mkdir(applicationsDir, { recursive: true })
+
+  // usr/lib/<appId>/resources/node_modules/@murasakijs/native — resolved
+  // once, used both to locate the compiled launcher binary below and to
+  // vendor the native binding itself, same as the macOS/win32 paths.
+  const nativeDir = resolveNativeModuleDir(cwd)
+
+  // usr/bin/<execName> — the compiled `murasaki-launcher` Rust binary for
+  // linux-<arch> (crates/native/src/bin/murasaki-launcher.rs).
+  const launcherBinary = await resolveLauncherBinary(nativeDir, 'linux', arch)
+  const launcherDest = join(binDir, execName)
+  await copyFile(launcherBinary, launcherDest)
+  await chmod(launcherDest, 0o755)
+
+  // usr/bin/.<execName>.murasaki-appid — a plain-text sidecar recording this
+  // app's sanitized appId, read by the launcher binary (launcher.rs's
+  // `imp_linux::resolve_resources_dir`) to find `usr/lib/<appId>/resources`
+  // relative to its own path. The launcher can't re-derive `appId` from
+  // `execName` (sanitized independently, see `sanitizeLinuxExecName` vs
+  // `sanitizeLinuxAppId` above, and they may differ), and can't safely assume
+  // it's the only entry under `usr/lib` either — that holds inside an
+  // isolated AppDir mount, but a real `.deb`-installed `/usr/lib` hosts many
+  // unrelated packages' directories. Shipped as an ordinary file under
+  // `usr/bin/`, so both the AppImage (squashfs) and the `.deb` (which tars up
+  // this exact `usr/` tree, see installer.ts) carry it for free.
+  await writeFile(join(binDir, `.${execName}.murasaki-appid`), appId)
+
+  // resources/node — a downloaded, target-specific Node runtime (official
+  // nodejs.org linux build, checksum-verified and cached under
+  // ~/.murasaki/node/, see node-runtime.ts), fetched even when bundling from
+  // a non-Linux host.
+  const nodeSrc = await ensureNodeBinary('linux', arch, process.versions.node)
+  const nodeDest = join(resourcesDir, 'node')
+  await copyFile(nodeSrc, nodeDest)
+  await chmod(nodeDest, 0o755)
+
+  // resources/prod-server.mjs — spawned by the launcher binary.
+  const prodServerSrc = resolve(__dirname, '../../assets/prod-server.mjs')
+  await copyFile(prodServerSrc, join(resourcesDir, 'prod-server.mjs'))
+
+  // resources/updater-engine.mjs — see the macOS path above for why this is
+  // copied verbatim rather than mirrored by hand.
+  const updaterEngineSrc = resolve(__dirname, '../runtime/updater.js')
+  await copyFile(updaterEngineSrc, join(resourcesDir, 'updater-engine.mjs'))
+
+  // resources/wire.mjs — shared dev/prod Server Action wire codec.
+  const wireCodecSrc = resolve(__dirname, '../runtime/wire.js')
+  await copyFile(wireCodecSrc, join(resourcesDir, 'wire.mjs'))
+
+  // resources/.murasaki-runtime — lifecycle runner and private dependencies.
+  await copyMainRuntime(resourcesDir)
+
+  // resources/menu-locales.json — read by the launcher binary at runtime to
+  // localize the default app menu for the end user's locale.
+  const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
+  await copyFile(menuLocalesSrc, join(resourcesDir, 'menu-locales.json'))
+
+  // resources/icon.png + the AppImage root icon/`.desktop` icon reference +
+  // the freedesktop hicolor icon theme fan-out.
+  const iconResource = config.icon
+    ? await buildLinuxIcons(cwd, config.icon, resourcesDir, appDir, appId)
+    : null
+
+  // resources/murasaki-meta.json — same shape the macOS/win32 paths write.
+  await writeFile(
+    join(resourcesDir, 'murasaki-meta.json'),
+    metaJson(config, productName, iconResource, cwd),
+  )
+
+  // resources/client — the Vite build output.
+  await cp(resolve(cwd, 'dist/client'), join(resourcesDir, 'client'), { recursive: true })
+
+  // resources/server — the 'use server' action registry bundle.
+  await cp(resolve(cwd, 'dist/server'), join(resourcesDir, 'server'), { recursive: true })
+
+  // Keep the Linux runtime layout equivalent to macOS/win32: external Node
+  // packages and developer resources live beside server/ under resources/.
+  await stageServerDependencies(cwd, resolve(cwd, 'dist/server'), resourcesDir, config, {
+    platform: 'linux',
+    arch,
+  })
+  await stageBundleResources(cwd, resourcesDir, config)
+
+  // resources/node_modules/@murasakijs/native — external native binding,
+  // copied as-is since its .node binary is arch-specific.
+  const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
+  await mkdir(dirname(nativeDest), { recursive: true })
+  await copyNativeModule(nativeDir, nativeDest, { platform: 'linux', arch })
+
+  // AppRun — the entry point the AppImage runtime execs at launch.
+  await writeFile(join(appDir, 'AppRun'), linuxAppRunScript(execName))
+  await chmod(join(appDir, 'AppRun'), 0o755)
+
+  // <appId>.desktop — the AppImage spec requires a root copy; also installed
+  // under usr/share/applications/ (the .deb ships that same tree — see
+  // installer.ts's `installerLinux` — and a manually-extracted AppDir wants
+  // it discoverable there too).
+  const desktopEntry = linuxDesktopEntry(config, execName, appId)
+  await writeFile(join(appDir, `${appId}.desktop`), desktopEntry)
+  await writeFile(join(applicationsDir, `${appId}.desktop`), desktopEntry)
+
+  // <appId>.png + .DirIcon — the AppImage spec's root icon convention.
+  if (iconResource) {
+    await symlink(`${appId}.png`, join(appDir, '.DirIcon'))
+  }
+
+  process.stdout.write(`\n${success(`bundle written  ${dim(appDir)}`)}\n\n`)
+
+  // dist/bundle/<productName>-<version>-linux-<arch>.AppImage — the
+  // packaged, double-clickable/executable deliverable (see appimage.ts); the
+  // raw AppDir above is kept as its own artifact too, mirroring bundleWin32's
+  // portable folder.
+  const version = config.version ?? '0.0.0'
+  const appImagePath = resolve(cwd, 'dist/bundle', `${productName}-${version}-linux-${arch}.AppImage`)
+  await buildAppImage(appDir, appImagePath, arch)
+  process.stdout.write(`\n${success(`AppImage written  ${dim(appImagePath)}`)}\n\n`)
+}
+
+/**
+ * `<productName>` → a filesystem/shell-safe Linux executable name for
+ * `usr/bin/<execName>` and the `.desktop` file's `Exec=`/`StartupWMClass=`
+ * values — unlike macOS/Windows (where the launcher is invoked via a path
+ * the OS bundle format itself resolves), an unquoted space in a `.desktop`
+ * `Exec=` value is ambiguous per the freedesktop desktop-entry spec. Runs of
+ * characters outside `[A-Za-z0-9._-]` collapse to a single `-`; falls back
+ * to a generic name if that leaves nothing usable (e.g. an all-emoji
+ * productName) — same convention as `sanitizeAssemblyName` below.
+ */
+export function sanitizeLinuxExecName(productName: string): string {
+  const sanitized = productName.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return sanitized.length > 0 ? sanitized : 'murasaki-app'
+}
+
+/**
+ * `config.appId` → a filesystem-safe id for the filenames the fixed Linux
+ * layout derives from it (`<appId>.desktop`, `<appId>.png`, `usr/lib/<appId>/
+ * resources/`) — `appId` isn't validated for path-safety by config.ts (only
+ * `productName`/`version` are, see `validateArtifactComponent`), so this
+ * mirrors the same local sanitization `macTypeIdentifier` above already
+ * applies for the same reason.
+ */
+export function sanitizeLinuxAppId(appId: string): string {
+  const sanitized = appId.replace(/[^A-Za-z0-9.-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '')
+  return sanitized.length > 0 ? sanitized : 'murasaki.app'
+}
+
+/**
+ * `<AppDir>/AppRun` — the entry point every AppImage type-2 runtime execs at
+ * launch. Resolves the launcher binary via `$APPDIR`, the environment
+ * variable the runtime sets to the mounted AppDir root before running this
+ * script — NOT `dirname "$0"`, which would break once squashfs-mounted at a
+ * runtime-chosen mountpoint (this is the AppImage spec's own recommended
+ * idiom).
+ */
+export function linuxAppRunScript(execName: string): string {
+  return `#!/bin/sh\nexec "$APPDIR/usr/bin/${execName}" "$@"\n`
+}
+
+/** Strips embedded newlines from a `.desktop` field value — the format has no XML/shell-style escaping and expects each key on one line. */
+function desktopEscape(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ')
+}
+
+/**
+ * The AppImage-required root `.desktop` file (also installed under
+ * `usr/share/applications/` for the `.deb` — see installerLinux). `Comment`
+ * falls back to the same `"<productName> desktop application"` text
+ * associations.ts's file-association descriptions default to.
+ * `Exec=<execName> %U` — the `%U` field code lets the desktop environment
+ * pass an activation URL/file argument, matching `config.protocols`/
+ * `fileAssociations`. `StartupWMClass=<execName>` lets the window manager
+ * associate the running window with this launcher entry (taskbar
+ * grouping/pinning). `MimeType` is only emitted when protocols/file
+ * associations are declared: `x-scheme-handler/<scheme>` per protocol, and
+ * per file association the declared `mimeType` when present, else
+ * `application/x-<extension>` per extension — mirroring
+ * the macOS/Windows association registration in `infoPlist`/
+ * `nsisAssociationRegistry`/`wixAssociationComponents`, but the `.desktop`
+ * file is the whole of Linux's declaration surface here (there's no OS-level
+ * MIME database to register a custom type into at bundle time).
+ */
+export function linuxDesktopEntry(
+  config: MurasakiConfig,
+  execName: string,
+  appId: string,
+): string {
+  const associations = resolveAssociations(config)
+  const comment = config.description?.trim() || `${config.productName} desktop application`
+  const lines = [
+    '[Desktop Entry]',
+    `Name=${desktopEscape(config.productName)}`,
+    `Comment=${desktopEscape(comment)}`,
+    `Exec=${execName} %U`,
+    `Icon=${appId}`,
+    'Type=Application',
+    'Categories=Utility;',
+    `StartupWMClass=${execName}`,
+  ]
+  const mimeTypes = [
+    ...associations.protocols.map((protocol) => `x-scheme-handler/${protocol.scheme}`),
+    ...associations.files.flatMap((file) =>
+      file.mimeType ? [file.mimeType] : file.extensions.map((extension) => `application/x-${extension}`),
+    ),
+  ]
+  if (mimeTypes.length > 0) {
+    lines.push(`MimeType=${mimeTypes.map((type) => `${type};`).join('')}`)
+  }
+  return `${lines.join('\n')}\n`
+}
+
+/** The freedesktop hicolor icon theme sizes `buildLinuxIcons` fans a configured icon out to. */
+const LINUX_ICON_SIZES = [16, 32, 64, 128, 256, 512]
+
+/**
+ * `config.icon` (a PNG) → `<resourcesDir>/icon.png` (runtime-readable copy,
+ * parity with the macOS/win32 bundles' `icon.png`), the AppImage-required
+ * root `<appDir>/<appId>.png` (256x256), and the freedesktop hicolor icon
+ * theme fan-out under `<appDir>/usr/share/icons/hicolor/<size>x<size>/apps/
+ * <appId>.png` — so desktop environments show a crisp icon at whatever size
+ * they render it (menu, taskbar, alt-tab, …) instead of upscaling a single
+ * resolution. Pure JS (pngjs decode + `resizePng`, the same bilinear resize
+ * `buildWin32Icon` uses for its `.ico` fan-out below), so this runs
+ * unmodified on any host, no ImageMagick/GIMP needed. Same return contract
+ * as `buildIcon`/`buildWin32Icon`: the meta.json-relative icon path
+ * ("icon.png"), or `null` if `iconPath` doesn't resolve to a file.
+ */
+async function buildLinuxIcons(
+  cwd: string,
+  iconPath: string,
+  resourcesDir: string,
+  appDir: string,
+  appId: string,
+): Promise<string | null> {
+  const src = resolve(cwd, iconPath)
+  if (!existsSync(src)) {
+    process.stdout.write(`\n${warn(`icon: ${iconPath} not found, skipping`)}\n\n`)
+    return null
+  }
+  await copyFile(src, join(resourcesDir, 'icon.png'))
+
+  const source = PNG.sync.read(await readFile(src))
+  await writeFile(join(appDir, `${appId}.png`), resizePng(source, 256))
+
+  for (const size of LINUX_ICON_SIZES) {
+    const dir = join(appDir, 'usr/share/icons/hicolor', `${size}x${size}`, 'apps')
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, `${appId}.png`), resizePng(source, size))
+  }
+
+  return 'icon.png'
 }
 
 /**

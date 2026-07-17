@@ -126,10 +126,15 @@ async function ensureGitignored(cwd: string, entry: string): Promise<void> {
 /**
  * Scans `dist/` for this version's payloads (contract §5:
  * `dist/bundle/<productName>-darwin-<arch>.app.zip`,
- * `dist/<productName>-<version>-setup-<arch>.exe`), hashes whichever exist,
- * and writes `dist/latest.json`. Missing targets are skipped, not errors —
- * an app may only ship for some platforms; only zero payloads found is
- * fatal.
+ * `dist/<productName>-<version>-setup-<arch>.exe`,
+ * `dist/bundle/<productName>-<version>-linux-<arch>.AppImage`), hashes
+ * whichever exist, and writes `dist/latest.json`. Missing targets are
+ * skipped, not errors — an app may only ship for some platforms; only zero
+ * payloads found is fatal. The Linux `.deb` (installer.ts's `installerLinux`)
+ * is deliberately never scanned here — it's package-manager-owned (apt/dpkg
+ * upgrades own its lifecycle), unlike the self-contained `.AppImage`, which
+ * is murasaki's own update-manifest payload for Linux the same way the
+ * darwin `.app.zip`/win32 `-setup-<arch>.exe` are.
  */
 async function manifest(argv: string[], cwd: string): Promise<void> {
   const baseUrl = flag(argv, '--base-url')
@@ -161,6 +166,14 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
       ],
     },
     { key: 'win32-arm64', files: [resolve(cwd, 'dist', `${productName}-${version}-setup-arm64.exe`)] },
+    {
+      key: 'linux-x64',
+      files: [resolve(cwd, 'dist/bundle', `${productName}-${version}-linux-x64.AppImage`)],
+    },
+    {
+      key: 'linux-arm64',
+      files: [resolve(cwd, 'dist/bundle', `${productName}-${version}-linux-arm64.AppImage`)],
+    },
   ]
 
   const assets: Record<string, { url: string; sha256: string }> = {}

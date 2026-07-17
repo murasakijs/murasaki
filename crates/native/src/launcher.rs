@@ -10,21 +10,25 @@
 //! Mirrors `packages/murasaki/assets/prod-launcher.mjs` closely: spawns
 //! `prod-server.mjs` as a child process, reads the assigned port off a
 //! `MURASAKI_PORT=<n>` stdout line, then opens a webview pointed at
-//! `http://127.0.0.1:<port>/`. macOS and Windows share that
+//! `http://127.0.0.1:<port>/`. macOS, Windows, and Linux share that
 //! resources-dir → spawn-node → read-port sequence (the `shared` module
-//! below, identical pure `std::process`/IO on both); everything past that —
-//! building the window/webview and any native chrome (Dock, app menu, About
-//! panel) — is per-OS in `imp_macos`/`imp_win`, since only macOS currently
-//! wires up a native menu bar / About panel. (The right-click context menu is
-//! a separate story — `webview::show_context_menu` — and is implemented on
-//! both macOS and Windows; both `imp_macos`/`imp_win` build their webview via
-//! the same `crate::webview::Webview::new`, so this launcher gets it for
-//! free.) The default-menu locale resolution mirrors
-//! `packages/murasaki/src/menu-i18n.ts` — also macOS-only for now, see
-//! `imp_win`'s doc comment for what's deferred.
+//! below, identical pure `std::process`/IO on all three); everything past
+//! that — building the window/webview and any native chrome (Dock/app menu
+//! on macOS, the File/Edit/Window menu bar on Windows/Linux) — is per-OS in
+//! `imp_macos`/`imp_win`/`imp_linux`. (The right-click context menu is a
+//! separate story — `webview::show_context_menu` — and is implemented on all
+//! three; every per-OS launcher builds its webview via the same
+//! `crate::webview::Webview::new`, so this launcher gets it for free.) The
+//! default-menu locale resolution mirrors `packages/murasaki/src/menu-i18n.ts`
+//! for macOS/Windows; `imp_linux` has its own POSIX env-var fallback chain
+//! instead (see that module's `detect_locale`).
 //!
-//! Linux packaging is Phase 3; `run_launcher` is a no-op stub there (and
-//! everywhere else) so the crate still builds wherever the GUI stack does.
+//! `imp_linux` resolves its own resources directory differently from
+//! `imp_macos`/`imp_win` (see `imp_linux::resolve_resources_dir`'s doc
+//! comment) and only supports self-update for the AppImage packaging format
+//! (see `updater.rs`'s `apply_linux`) — a `.deb` install or bare AppDir has
+//! no running `.AppImage` file to swap, so `runtime/updater.ts`'s `check()`
+//! reports those as managed by the system package manager instead.
 
 /// Cross-platform core shared by `imp_macos` and `imp_win`: reading
 /// `murasaki-meta.json` and spawning `prod-server.mjs`. Pure
@@ -509,10 +513,12 @@ pub(crate) mod shared {
         let _ = console;
 
         // Keep the bundled Node runtime and every sidecar it spawns in one
-        // process group. If Node crashes independently, the macOS launcher can
-        // tear down the whole backend tree before closing its WebViews instead
-        // of leaving orphaned sidecars behind.
-        #[cfg(target_os = "macos")]
+        // process group. If Node crashes independently, the macOS/Linux
+        // launcher can tear down the whole backend tree before closing its
+        // WebViews instead of leaving orphaned sidecars behind. Windows has no
+        // process-group equivalent here — see `win_job` for its Job Object
+        // approach instead.
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             use std::os::unix::process::CommandExt;
             cmd.process_group(0);
@@ -1202,12 +1208,13 @@ pub(crate) mod shared {
         }
     }
 
-    /// Stop and reap the complete packaged backend tree on macOS. Other
-    /// platforms still reap the direct child here; Windows additionally
-    /// terminates its Job Object at the call sites so descendants cannot live
-    /// past a clean or failed handoff.
+    /// Stop and reap the complete packaged backend tree on macOS/Linux (both
+    /// POSIX, both given their own process group by `spawn_prod_server`).
+    /// Windows has no process-group equivalent, so it still just reaps the
+    /// direct child here; it additionally terminates its Job Object at the
+    /// call sites so descendants cannot live past a clean or failed handoff.
     pub(super) fn terminate_and_wait_child(child: &mut Child) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let process_group = -(child.id() as i32);
             // SAFETY: `spawn_prod_server` created the child as leader of this
@@ -1215,7 +1222,7 @@ pub(crate) mod shared {
             // cannot be ignored by a stuck sidecar.
             let _ = unsafe { libc::kill(process_group, libc::SIGKILL) };
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -2388,6 +2395,14 @@ pub(crate) mod shared {
 
             for _ in 0..3 {
                 write_native_crash_report(&dir, "{\"reportVersion\":1}", 2);
+                // The filename convention (shared with the TS writer — see
+                // `iso8601_utc_now`'s doc comment) is millisecond-resolution.
+                // Real crash reports are single, rare events with no
+                // realistic risk of a same-millisecond collision; this test
+                // is the only place three writes ever happen back-to-back
+                // fast enough to need a nudge apart, so the nudge belongs
+                // here rather than in the production filename scheme.
+                thread::sleep(Duration::from_millis(2));
             }
 
             let files: Vec<String> = fs::read_dir(&dir)
@@ -4008,6 +4023,567 @@ mod imp_win {
     }
 }
 
+#[cfg(target_os = "linux")]
+mod imp_linux {
+    use std::{
+        cell::RefCell,
+        path::{Path, PathBuf},
+        rc::Rc,
+        sync::Arc,
+        time::{Duration, Instant},
+    };
+
+    use tao::{
+        event::{Event, WindowEvent},
+        event_loop::{ControlFlow, EventLoop},
+    };
+
+    use crate::{
+        menu::{build_menu_bar, AboutInfo, SharedMenu},
+        types::{RuntimeWindowTemplate, WebviewOptions, WindowOptions},
+        webview::{poll_menu_bar_events, AppMenuContext, ProcessWebContext, SharedWebContext},
+        window::{
+            execute_window_control, RuntimeWindowManager, SharedWindowRegistry, WindowRegistry,
+        },
+    };
+
+    use super::shared::{
+        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
+        normalize_locale, open_targets_from_args, open_targets_from_urls,
+        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
+        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
+        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
+        ShutdownPoll, WindowControlCoordinator,
+    };
+
+    pub fn run() {
+        if let Err(err) = run_inner() {
+            eprintln!("murasaki-launcher: {err}");
+            std::process::exit(1);
+        }
+    }
+
+    /// Resolves `<AppDir or /usr>/usr/lib/<appId>/resources` from the running
+    /// launcher's own path — the fixed layout `cli/bundle.ts`'s `bundleLinux`
+    /// produces (`usr/bin/<execName>` + `usr/lib/<appId>/resources`, a
+    /// *sibling* of `usr/bin`, unlike macOS's `Contents/MacOS` + `../Resources`
+    /// or Windows's exe + `resources/`). This one relative shape covers both
+    /// ways the layout is ever run: a mounted or `--appimage-extract-and-run`-
+    /// extracted AppDir (`$APPDIR/usr/bin/<execName>`), and a real
+    /// `.deb`-installed system tree (`/usr/bin/<execName>`).
+    ///
+    /// `<appId>` can't be recovered from `execName` alone — `bundleLinux`
+    /// sanitizes each independently (`sanitizeLinuxExecName` vs
+    /// `sanitizeLinuxAppId`) and they may differ — and a real `/usr/lib` hosts
+    /// many unrelated packages' directories, so blindly globbing "the one
+    /// subdirectory under usr/lib" (safe inside an isolated AppDir mount) would
+    /// break the moment this app is `.deb`-installed alongside anything else.
+    /// `bundleLinux` therefore also drops a small sidecar file next to the
+    /// launcher binary recording the exact `appId` folder name
+    /// (`.{execName}.murasaki-appid`, plain text, no parsing needed) — this
+    /// reads that instead of guessing.
+    fn resolve_resources_dir(exe: &Path) -> Result<PathBuf, String> {
+        let bin_dir = exe
+            .parent()
+            .ok_or_else(|| "murasaki-launcher: executable has no parent directory".to_string())?;
+        let exe_name = exe
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "murasaki-launcher: executable path has no file name".to_string())?;
+        let hint_path = bin_dir.join(format!(".{exe_name}.murasaki-appid"));
+        let app_id = std::fs::read_to_string(&hint_path)
+            .map_err(|e| format!("read {}: {e}", hint_path.display()))?;
+        let app_id = app_id.trim();
+        if app_id.is_empty() {
+            return Err(format!("{} is empty", hint_path.display()));
+        }
+        let usr_dir = bin_dir
+            .parent()
+            .ok_or_else(|| "murasaki-launcher: could not resolve the usr/ directory".to_string())?;
+        usr_dir
+            .join("lib")
+            .join(app_id)
+            .join("resources")
+            .canonicalize()
+            .map_err(|e| format!("resolve resources dir: {e}"))
+    }
+
+    fn run_inner() -> Result<(), String> {
+        let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+
+        // Self-update only exists for the AppImage packaging format: `$APPIMAGE`
+        // is the absolute path of the running `.AppImage` file, set by the
+        // AppImage runtime (or `--appimage-extract-and-run`) before it execs
+        // AppRun, and inherited unchanged all the way down to this process. A
+        // `.deb`-installed or manually-copied bare AppDir has no such file to
+        // ever swap — see `updater.rs`'s `apply_linux` and `runtime/updater.ts`'s
+        // Linux `check()` short-circuit, which never lets Node stage an update
+        // in that case, so `.murasaki-apply.json` should never exist there
+        // either (the checks below are still real checks, not just assertions,
+        // in case that invariant is ever broken by a bug).
+        let appimage = std::env::var_os("APPIMAGE").map(PathBuf::from);
+        if let Some(appimage) = &appimage {
+            match crate::updater::prepare_startup_update(appimage)? {
+                crate::updater::StartupUpdateAction::None
+                | crate::updater::StartupUpdateAction::ContinueHealthAttempt => {}
+                crate::updater::StartupUpdateAction::ExitForUpdateInProgress => return Ok(()),
+                crate::updater::StartupUpdateAction::RecoveryRequired {
+                    relaunch: _,
+                    failed_pid,
+                } => {
+                    crate::updater::spawn_recovery_helper(appimage, failed_pid)?;
+                    return Ok(());
+                }
+            }
+        }
+
+        let resources_dir = resolve_resources_dir(&exe)?;
+        let meta = read_meta(&resources_dir)?;
+        let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
+        let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
+        init_crash_context(app_id, &meta);
+        let mut primary_instance = match acquire_instance(app_id)? {
+            InstanceRole::Primary(primary) => primary,
+            InstanceRole::Secondary(secondary) => {
+                secondary.activate_primary(&meta)?;
+                return Ok(());
+            }
+        };
+        let runtime_token = runtime_token()?;
+        let origin_port = app_origin_port(app_id);
+
+        // Spawns resources/node prod-server.mjs — same handshake as macOS/
+        // Windows, see `shared::spawn_prod_server`. No guard callback needed
+        // (unlike Windows' Job Object): `spawn_prod_server` already puts this
+        // child in its own process group on Linux, and `terminate_and_wait_child`
+        // SIGKILLs that whole group on any exit path.
+        let (mut child, port) = spawn_prod_server(
+            &resources_dir,
+            "node",
+            meta.console,
+            origin_port,
+            &runtime_token,
+            |_| Ok(()),
+        )?;
+
+        primary_instance.publish(port, &runtime_token)?;
+        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
+        if !startup_targets.is_empty() {
+            request_main_open(
+                port,
+                &runtime_token,
+                "cold-start",
+                "argv",
+                startup_targets,
+                Some(startup_cwd),
+            )?;
+        }
+
+        let event_loop = EventLoop::<()>::new();
+        // Lets the IPC handler (`appQuit`, from `quit()`) wake this event loop —
+        // see `webview::Webview::new`'s `wake` parameter doc comment / the
+        // matching comment in `imp_macos`/`imp_win`.
+        let quit_proxy = event_loop.create_proxy();
+        let shortcut_proxy = quit_proxy.clone();
+        crate::global_shortcut::set_event_waker(Arc::new(move || {
+            let _ = shortcut_proxy.send_event(());
+        }));
+
+        // Native menu bar (File/Edit/Window) — same muda GTK backend/labels as
+        // Windows (see `menu::build_menu_bar`'s doc comment); localized the same
+        // way, just with a POSIX env-var locale chain instead of a Win32 API call
+        // (see `detect_locale` below).
+        let locale_table = load_menu_locales(&resources_dir);
+        let locale = detect_locale();
+        let menu_labels = resolve_menu_labels(
+            &meta.product_name,
+            &locale,
+            meta.locales.as_deref(),
+            &locale_table,
+        );
+        // No `icon_path` — same reasoning as `imp_win`'s `AboutInfo` (see that
+        // module's doc comment): muda's About dialog never reads it on either
+        // platform's non-macOS backend.
+        let about = AboutInfo {
+            name: &meta.product_name,
+            icon_path: None,
+            version: meta.version.as_deref(),
+            description: meta.description.as_deref(),
+            copyright: meta.copyright.as_deref(),
+            homepage: meta.homepage.as_deref(),
+            authors: meta.authors.as_deref(),
+        };
+        let menu_bar = build_menu_bar(Some(&about), Some(&menu_labels))
+            .map_err(|e| format!("build menu bar: {e}"))?;
+        // Retained so a later `{ kind: "appMenu" }` IPC message (`useAppMenu`)
+        // can replace it — see `AppMenuContext`'s doc comment in webview.rs.
+        let app_menu_slot: SharedMenu = Rc::new(RefCell::new(Some(menu_bar)));
+        let app_menu_context = AppMenuContext {
+            menu_slot: app_menu_slot.clone(),
+            menu_labels: Some(menu_labels.clone()),
+        };
+
+        let declarations = resolve_windows(&meta)?;
+        let windows: SharedWindowRegistry = Rc::new(RefCell::new(WindowRegistry::default()));
+        let web_context: SharedWebContext = Rc::new(RefCell::new(ProcessWebContext::default()));
+        let runtime_templates = declarations
+            .into_iter()
+            .map(|declaration| {
+                let route = declaration.route().to_string();
+                let template = RuntimeWindowTemplate {
+                    window: WindowOptions {
+                        label: Some(declaration.label),
+                        primary: declaration.primary,
+                        visible: declaration.visible,
+                        title: Some(
+                            declaration
+                                .title
+                                .unwrap_or_else(|| meta.product_name.clone()),
+                        ),
+                        width: declaration.width.or(Some(1000)),
+                        height: declaration.height.or(Some(700)),
+                        min_width: declaration.min_width,
+                        min_height: declaration.min_height,
+                        resizable: declaration.resizable,
+                        transparent: declaration.transparent,
+                        vibrancy: declaration.vibrancy,
+                        decorations: declaration.decorations,
+                        title_bar_style: declaration.title_bar_style,
+                        max_width: declaration.max_width,
+                        max_height: declaration.max_height,
+                        fullscreen: declaration.fullscreen,
+                        icon: None,
+                        version: meta.version.clone(),
+                        description: meta.description.clone(),
+                        copyright: meta.copyright.clone(),
+                        homepage: meta.homepage.clone(),
+                        authors: meta.authors.clone(),
+                        menu_labels: Some(menu_labels.clone()),
+                    },
+                    webview: WebviewOptions {
+                        url: Some(format!("http://127.0.0.1:{port}{route}")),
+                        html: None,
+                        devtools: Some(false),
+                        transparent: declaration.transparent,
+                        app_id: meta.app_id.clone(),
+                        user_agent: meta.webview.user_agent.clone(),
+                        incognito: meta.webview.incognito,
+                        proxy: meta.webview.proxy.clone(),
+                        capabilities: declaration.capabilities,
+                        capability_policy: declaration.capability_policy,
+                        tray_icon: meta
+                            .icon
+                            .as_ref()
+                            .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
+                        serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
+                    },
+                    create_on_launch: declaration.create_on_launch,
+                };
+                (template, app_menu_context.clone())
+            })
+            .collect();
+        let manager_wake = quit_proxy.clone();
+        let mut runtime_windows = RuntimeWindowManager::new(
+            windows.clone(),
+            web_context,
+            Rc::new(move || {
+                let _ = manager_wake.send_event(());
+            }),
+        );
+        runtime_windows.configure(runtime_templates)?;
+        runtime_windows.create_on_launch(&event_loop)?;
+
+        // This is the updater's first-launch health checkpoint (AppImage only —
+        // see the module doc comment above): the packaged Node runtime is
+        // listening, the instance endpoint is published, and every
+        // createOnLaunch native window/webview has been created. Only now is it
+        // safe to delete the previous AppImage retained by the update helper.
+        if let Some(status) = poll_unexpected_child_exit(&mut child)? {
+            report_unexpected_node_exit(
+                "bundled Node process exited before startup health acknowledgement",
+                &status,
+            );
+            discard_apply_handoff(&resources_dir);
+            terminate_and_wait_child(&mut child);
+            return Err(format!(
+                "bundled Node process exited before startup health acknowledgement: {status}"
+            ));
+        }
+        if let Some(appimage) = &appimage {
+            if let Err(error) = crate::updater::acknowledge_update_health(appimage) {
+                terminate_and_wait_child(&mut child);
+                return Err(format!("acknowledge update health: {error}"));
+            }
+        }
+
+        // Same shutdown story as `imp_macos`/`imp_win` (see either module's
+        // `event_loop.run` comment): tao's `EventLoop::run` never returns and
+        // explicitly documents that values not passed into it aren't dropped, so
+        // `runtime_windows` owns the frozen catalog and shared browser context
+        // and moves into the event-loop closure with the registry. `child`,
+        // `resources_dir`, and `appimage` remain alive there too, so every clean
+        // update handoff shares the same process lifetime.
+        let mut completed_initial_event_cycle = false;
+        let mut received_open_event = false;
+        let mut shutdown = ShutdownCoordinator::new();
+        let control_wake = quit_proxy.clone();
+        let window_control = WindowControlCoordinator::start(port, &runtime_token, move || {
+            let _ = control_wake.send_event(());
+        });
+        event_loop.run(move |event, target, control_flow| {
+            *control_flow = ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(250));
+            match poll_unexpected_child_exit(&mut child) {
+                Ok(None) => {}
+                Ok(Some(status)) => {
+                    eprintln!(
+                        "murasaki-launcher: bundled Node process exited unexpectedly: {status}"
+                    );
+                    report_unexpected_node_exit(
+                        "bundled Node process exited unexpectedly",
+                        &status,
+                    );
+                    discard_apply_handoff(&resources_dir);
+                    let resources = windows.borrow_mut().prepare_close_all();
+                    crate::window::drop_all_webviews(resources);
+                    terminate_and_wait_child(&mut child);
+                    std::process::exit(1);
+                }
+                Err(error) => {
+                    eprintln!("murasaki-launcher: {error}");
+                    discard_apply_handoff(&resources_dir);
+                    let resources = windows.borrow_mut().prepare_close_all();
+                    crate::window::drop_all_webviews(resources);
+                    terminate_and_wait_child(&mut child);
+                    std::process::exit(1);
+                }
+            }
+            let shutdown_proceed = match shutdown.poll() {
+                ShutdownPoll::Proceed { transport_error } => Some(transport_error),
+                ShutdownPoll::Cancelled | ShutdownPoll::None => None,
+            };
+            for command in window_control.take_commands() {
+                let result = if matches!(command.method.as_str(), "create" | "destroy") {
+                    runtime_windows.execute(target, &command)
+                } else {
+                    execute_window_control(&windows, &command)
+                };
+                window_control.respond(command.id, result);
+            }
+
+            if primary_instance.take_activation() {
+                if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+                    if let Some(window) = window_slot.borrow().as_ref() {
+                        window.set_visible(true);
+                        window.set_minimized(false);
+                        window.set_focus();
+                    }
+                }
+            }
+
+            if let Event::Opened { urls } = &event {
+                let targets = open_targets_from_urls(&meta, urls);
+                if !targets.is_empty() {
+                    let activation = if !received_open_event && !completed_initial_event_cycle {
+                        "cold-start"
+                    } else {
+                        "os-event"
+                    };
+                    let transport = if targets
+                        .iter()
+                        .any(|target| matches!(target, super::shared::OpenTarget::Url { .. }))
+                    {
+                        "open-url"
+                    } else {
+                        "open-file"
+                    };
+                    let _ = request_main_open(
+                        port,
+                        &runtime_token,
+                        activation,
+                        transport,
+                        targets,
+                        None,
+                    );
+                    received_open_event = true;
+                    if let Some(window_slot) = WindowRegistry::primary_window(&windows) {
+                        if let Some(window) = window_slot.borrow().as_ref() {
+                            window.set_visible(true);
+                            window.set_minimized(false);
+                            window.set_focus();
+                        }
+                    }
+                }
+            }
+            if matches!(&event, Event::MainEventsCleared) {
+                completed_initial_event_cycle = true;
+            }
+
+            let mut shutdown_reason = None;
+            if let Some((label, window_slot, webview_slot)) =
+                WindowRegistry::dispatch_target(&windows)
+            {
+                let app_menu_webview = WindowRegistry::primary_dispatch_target(&windows)
+                    .map(|(_, _, webview)| webview)
+                    .unwrap_or_else(|| webview_slot.clone());
+                let outcome = poll_menu_bar_events(
+                    &window_slot,
+                    &webview_slot,
+                    &app_menu_webview,
+                    &app_menu_slot,
+                );
+                if outcome.quit {
+                    shutdown_reason = Some("app-quit");
+                }
+                if outcome.close {
+                    if windows.borrow().is_primary(&label) {
+                        shutdown_reason = Some("window-close");
+                    } else {
+                        crate::window::set_window_visible(&window_slot, false);
+                        windows.borrow_mut().record_lifecycle("hidden", &label);
+                    }
+                }
+            }
+            if let Some((_label, webview_slot, tray_slot)) =
+                WindowRegistry::tray_dispatch_target(&windows)
+            {
+                crate::webview::poll_tray_events(&webview_slot, &tray_slot);
+            }
+            crate::webview::poll_global_shortcut_events(&windows);
+
+            let close_requests = windows.borrow_mut().take_close_requests();
+            for label in close_requests {
+                if windows.borrow().is_primary(&label) {
+                    shutdown_reason = Some("window-close");
+                } else {
+                    let resources = windows.borrow_mut().prepare_close_secondary(&label);
+                    match resources {
+                        Ok(resources) => crate::window::drop_closed_window(resources),
+                        Err(error) => {
+                            eprintln!("murasaki-launcher: failed to close window {label}: {error}");
+                        }
+                    }
+                }
+            }
+
+            // `quit()` (`{ kind: "appQuit" }`) — see `webview::quit_requested`'s
+            // doc comment. Same clean-shutdown path as Exit/CloseRequested below:
+            // best-effort kill the spawned `node` child (via its process group),
+            // hand off to the apply-helper if one is pending, then exit.
+            if crate::webview::quit_requested() {
+                shutdown_reason = Some("app-quit");
+            }
+
+            if let Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                window_id,
+                ..
+            } = &event
+            {
+                let identity = WindowRegistry::identity_for_id(&windows, *window_id);
+                if let Some(identity) = identity {
+                    if windows.borrow().is_primary(&identity.label) {
+                        shutdown_reason = Some("window-close");
+                    } else {
+                        let window = windows.borrow().live_window(&identity.label);
+                        match window {
+                            Ok(window) => {
+                                crate::window::set_window_visible(&window, false);
+                                windows
+                                    .borrow_mut()
+                                    .record_lifecycle_for_identity("hidden", &identity);
+                            }
+                            Err(error) => eprintln!(
+                                "murasaki-launcher: failed to hide window {}: {error}",
+                                identity.label
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Event::WindowEvent {
+                event: WindowEvent::Focused(focused),
+                window_id,
+                ..
+            } = &event
+            {
+                if let Some(identity) = WindowRegistry::identity_for_id(&windows, *window_id) {
+                    windows.borrow_mut().record_lifecycle_for_identity(
+                        if *focused { "focused" } else { "blurred" },
+                        &identity,
+                    );
+                }
+            }
+
+            for event in windows.borrow_mut().take_lifecycle_events() {
+                window_control.emit(event);
+            }
+
+            if let Some(reason) = shutdown_reason {
+                let wake = quit_proxy.clone();
+                shutdown.begin(
+                    port,
+                    &runtime_token,
+                    reason,
+                    shutdown_transport_timeout,
+                    move || {
+                        let _ = wake.send_event(());
+                    },
+                );
+            }
+            if let Some(transport_error) = shutdown_proceed {
+                let confirmed_shutdown = shutdown_allows_update(&transport_error);
+                if let Some(error) = transport_error.as_ref() {
+                    eprintln!("murasaki-launcher: graceful shutdown transport failed: {error}");
+                }
+                *control_flow = ControlFlow::Exit;
+                let resources = windows.borrow_mut().prepare_close_all();
+                crate::window::drop_all_webviews(resources);
+                terminate_and_wait_child(&mut child);
+                match (&appimage, confirmed_shutdown) {
+                    (Some(appimage), true) => {
+                        maybe_spawn_apply_helper(&resources_dir, appimage, appimage);
+                    }
+                    // Either shutdown wasn't confirmed, or there is no AppImage
+                    // to swap in the first place (a `.deb` install/bare AppDir —
+                    // see the module doc comment above) — discard defensively in
+                    // both cases rather than assume a handoff can't exist.
+                    _ => discard_apply_handoff(&resources_dir),
+                }
+                std::process::exit(0);
+            }
+        });
+    }
+
+    /// Best-effort system UI language, normalized to a shipped locale key —
+    /// the same POSIX env-var fallback chain `menu-i18n.ts`'s `envLocale()`
+    /// uses off-macOS: `LC_ALL`, then `LC_MESSAGES`, then `LANG` (first one set
+    /// to something other than the untranslated `"C"`/`"POSIX"` locale wins).
+    /// Mirrors `imp_macos::detect_locale`/`imp_win::detect_locale`'s role, just
+    /// with no OS API call needed on Linux.
+    fn detect_locale() -> String {
+        let raw = linux_ui_language().unwrap_or_else(|| "en".to_string());
+        normalize_locale(&raw)
+    }
+
+    fn linux_ui_language() -> Option<String> {
+        for var in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+            if let Ok(value) = std::env::var(var) {
+                if !value.is_empty() && value != "C" && value != "POSIX" {
+                    return Some(value);
+                }
+            }
+        }
+        None
+    }
+}
+
 /// Entry point for `bin/murasaki-launcher.rs`'s `main`. Checked *before*
 /// anything else: `--apply-update` (see `updater.rs`) must be reachable
 /// before any window/webview/event-loop is created, since that mode runs
@@ -4043,6 +4619,8 @@ pub fn run_launcher() {
     imp_macos::run();
     #[cfg(target_os = "windows")]
     imp_win::run();
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    eprintln!("murasaki-launcher: unsupported platform (macOS/Windows only)");
+    #[cfg(target_os = "linux")]
+    imp_linux::run();
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    eprintln!("murasaki-launcher: unsupported platform (macOS/Windows/Linux only)");
 }
