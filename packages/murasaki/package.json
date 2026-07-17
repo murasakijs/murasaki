@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.52.0",
+  "version": "0.53.0",
   "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
   "keywords": [
     "desktop",
@@ -56,31 +56,34 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch",
     "test": "pnpm build && node --test test/*.test.mjs",
+    "api:report": "pnpm build && api-extractor run --local --config api-extractor.json && api-extractor run --local --config api-extractor.main.json && api-extractor run --local --config api-extractor.main-client.json && api-extractor run --local --config api-extractor.native.json && api-extractor run --local --config api-extractor.vite-plugin.json",
+    "api:check": "pnpm build && api-extractor run --config api-extractor.json && api-extractor run --config api-extractor.main.json && api-extractor run --config api-extractor.main-client.json && api-extractor run --config api-extractor.native.json && api-extractor run --config api-extractor.vite-plugin.json",
     "prepack": "node scripts/package-readme.mjs sync",
     "postpack": "node scripts/package-readme.mjs clean"
   },
   "dependencies": {
     "@murasakijs/native": "workspace:^",
     "@murasakijs/ui": "workspace:^",
-    "vite": "^7.3.6",
     "@vitejs/plugin-react": "^5.0.4",
     "picocolors": "^1.1.0",
-    "vite-plugin-svgr": "^5.2.0",
     "png-to-ico": "^3.0.2",
     "pngjs": "^7.0.0",
-    "resedit": "^3.0.2"
+    "resedit": "^3.0.2",
+    "vite": "^7.3.6",
+    "vite-plugin-svgr": "^5.2.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
+    "@microsoft/api-extractor": "7.58.11",
     "@types/node": "^22",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@types/pngjs": "^6.0.5",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
   }
 }

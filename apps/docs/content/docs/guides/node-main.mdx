@@ -78,11 +78,97 @@ Set `main: false` to disable discovery even when `src/main.ts` exists.
 | `paths.cache` | Re-creatable cache data |
 | `paths.logs` | Log files |
 | `paths.temp` | Temporary staging data |
+| `log` | Structured rotating application logger and diagnostic report generator |
+| `sidecars` | Bounded supervisor for executable resources bundled with the app |
 | `signal` | Aborts after `beforeQuit` and before `shutdown` |
 
 Quit reasons are `window-close`, `app-quit`, `signal`, `restart`, `dev-reload`,
 and `startup-failure`. See the [process model](/docs/core-concepts/process-model)
 for ordering and cancellation behavior.
+
+## Logs and diagnostic reports
+
+Use `context.log` instead of building an app-specific file logger. Records are
+written as JSON Lines to `paths.logs/murasaki-main.jsonl`, rotated at 5 MiB,
+and retain five rotated files by default.
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ log }) {
+    log.info('database opened', { engine: 'sqlite', schemaVersion: 4 })
+  },
+  async shutdown({ log }) {
+    log.info('database closed')
+  },
+})
+```
+
+Create a bounded, user-shareable diagnostic snapshot only after the user opts
+in. It contains application/runtime metadata, bounded log tails, and optional
+app-owned state:
+
+```ts
+const reportPath = await context.log.createDiagnosticReport({
+  extra: { database: { integrity: 'ok' }, queueDepth: 0 },
+})
+```
+
+Fields whose names look like credentials—such as `authorization`, `cookie`,
+`password`, `secret`, `token`, `apiKey`, or `privateKey`—are redacted. Values,
+nesting, arrays, and included log tails are bounded, and the report is created
+with owner-only permissions where the OS supports them. Redaction is a safety
+net, not permission to log secrets: do not put access tokens, file contents,
+or personal data in log messages or unstructured strings. Murasaki flushes the
+logger during a normal bounded shutdown; call `await log.flush()` before an
+app-owned crash/restart boundary when every queued record must be durable.
+
+## Supervise a bundled sidecar
+
+Put helper executables in `bundle.resources`, then start them through
+`context.sidecars`. Murasaki resolves the real executable below
+`resourcesPath`, never invokes a shell, bounds arguments/environment/restarts,
+and stops every live helper during shutdown.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  bundle: { resources: ['sidecars/search-indexer'] },
+})
+```
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ sidecars, signal, log }) {
+    const indexer = await sidecars.spawn({
+      name: 'search-indexer',
+      resource: 'sidecars/search-indexer',
+      args: ['--stdio'],
+      cwd: 'data',
+      restart: { maxRestarts: 3, delayMs: 1_000 },
+    })
+    indexer.onEvent((event) => {
+      if (event.type === 'stderr') log.warn('indexer stderr', { output: event.data })
+    })
+    signal.addEventListener('abort', () => void indexer.stop(), { once: true })
+  },
+})
+```
+
+`resource` must be a relative path whose resolved target stays below the
+packaged resource root; symlink escapes and traversal are rejected. On POSIX
+the resource must be executable. Use a platform-specific filename such as
+`search-indexer.exe` in a target-specific build when necessary. Working
+directories are restricted to `resources`, `data`, `cache`, or `temp`.
+Sidecars inherit Node Main's environment plus the explicit `env` entries, so
+do not start an untrusted executable or forward renderer-controlled arguments
+without validation. Windows descendants remain covered by the launcher's Job
+Object; normal stop sends termination first and escalates after a bounded
+deadline.
 
 ### `secondInstance(context, event)`
 
@@ -113,6 +199,64 @@ activation behavior in `secondInstance()` and semantic URL/file handling in
 
 See [Deep links and file associations](/docs/guides/deep-links) for the event
 shape, configuration, packaging behavior, and security requirements.
+
+## Control declared windows from Node Main
+
+`windows` controls only the labels declared in `murasaki.config.*`. The calls
+travel over a native-host-only loopback channel authenticated with the
+per-launch runtime token; they do not grant a renderer any additional native
+capability.
+
+```ts title="src/main.ts"
+import { defineMain, windows } from 'murasaki/main'
+
+const unsubscribe = windows.subscribe((event) => {
+  console.log(event.type, event.label, event.generation, event.state)
+})
+
+export default defineMain({
+  async secondInstance() {
+    await windows.show('main')
+    await windows.focus('main')
+  },
+  async openRequested() {
+    const report = await windows.get('report')
+      ?? await windows.create('report')
+    console.log('report generation', report.generation)
+  },
+  async shutdown() {
+    unsubscribe()
+  },
+})
+```
+
+The manager provides `list()`, `get(label)`, `create(label)`, `show(label)`,
+`hide(label)`, `focus(label)`, and `destroy(label)`. `create()` accepts only a
+configured, currently dormant secondary label; it never accepts a URL or a
+runtime capability list. `destroy()` releases a live secondary so the same
+declaration can be created again. The primary cannot be created or destroyed
+through this API.
+
+`subscribe()` receives `created`, `shown`, `hidden`, `focused`, `blurred`, and
+`closed` events. State snapshots and events include a monotonic `generation`
+for the native instance of that label. Use both label and generation when
+correlating long-running work across destroy/recreate. A snapshot also contains
+the primary, visibility, focus, minimized, and maximized state.
+
+<Callout type="warn">
+  Subscribe inside `ready()`, but do not await a window command there in this
+  first release. Native windows are attached after `ready()` completes, so
+  commands inside that hook reject instead of deadlocking startup. Issue them
+  from later lifecycle callbacks, background work, or a `'use main'` function.
+</Callout>
+
+Windows remain declarative: this API cannot create an undeclared label or
+override its route, network settings, or capability policy. Set a secondary's
+`createOnLaunch: false` when it should start dormant. Use `hide()` for a live
+window that will be shown again and `destroy()` to release its native resources.
+Closing the primary remains part of the normal application quit lifecycle.
+Lifecycle events currently cover create, visibility, focus, and close—not
+move, resize, minimize, or maximize notifications.
 
 ## Call Node from the renderer with `'use main'`
 
@@ -232,8 +376,10 @@ the internal RPC endpoints.
 
 ## Current limits
 
-Node Main does not provide an imperative native-window creation API; declared
-windows are managed from trusted renderers through `murasaki/native`. Tray
+Node Main can create and destroy only secondary window templates declared in
+`murasaki.config.*`; it cannot construct an ad-hoc URL, capability policy, or
+undeclared native window at runtime. Declared windows are managed through the
+Node Main `windows` manager or from trusted renderers through `murasaki/native`. Tray
 menus are available through that renderer API, while Node Main itself still
 has no direct tray-menu or global-shortcut API. Packaged macOS/Windows single-instance delivery is available
 through `secondInstance()`; configured URL schemes and file associations are

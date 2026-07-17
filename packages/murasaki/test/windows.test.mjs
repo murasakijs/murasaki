@@ -15,8 +15,16 @@ test('resolves a backwards-compatible primary window', () => {
     primary: true,
     route: '/',
     visible: true,
+    createOnLaunch: true,
     capabilities: ['clipboard:readText'],
   }])
+})
+
+test('always creates the primary window on launch', () => {
+  const windows = resolveWindowDeclarations({
+    window: { createOnLaunch: false },
+  })
+  assert.equal(windows[0].createOnLaunch, true)
 })
 
 test('grants the built-in updater graceful quit only to the primary window', () => {
@@ -51,6 +59,7 @@ test('resolves primary overrides and deny-all hidden secondary windows', () => {
       label: 'main',
       primary: true,
       visible: true,
+      createOnLaunch: true,
     },
     {
       route: '/settings',
@@ -58,6 +67,7 @@ test('resolves primary overrides and deny-all hidden secondary windows', () => {
       label: 'settings',
       primary: false,
       visible: false,
+      createOnLaunch: true,
       capabilities: [],
     },
     {
@@ -66,6 +76,7 @@ test('resolves primary overrides and deny-all hidden secondary windows', () => {
       capabilities: ['window:manage'],
       label: 'palette',
       primary: false,
+      createOnLaunch: true,
     },
   ])
 })
@@ -82,6 +93,23 @@ test('validates and de-duplicates every configured capability list', () => {
   assert.deepEqual(resolved[0].capabilities, ['clipboard:readText'])
   assert.deepEqual(resolved[1].capabilities, ['window:getLabel'])
 
+  const secure = resolveWindowDeclarations({
+    capabilities: ['secureStorage:get', 'secureStorage:set', 'secureStorage:delete'],
+  })
+  assert.deepEqual(secure[0].capabilities, [
+    'secureStorage:get',
+    'secureStorage:set',
+    'secureStorage:delete',
+  ])
+
+  const shortcuts = resolveWindowDeclarations({
+    capabilities: ['globalShortcut:register', 'globalShortcut:unregister'],
+  })
+  assert.deepEqual(shortcuts[0].capabilities, [
+    'globalShortcut:register',
+    'globalShortcut:unregister',
+  ])
+
   for (const config of [
     { capabilities: null },
     { capabilities: 'clipboard:readText' },
@@ -93,6 +121,66 @@ test('validates and de-duplicates every configured capability list', () => {
     assert.throws(
       () => resolveWindowDeclarations(config),
       /capabilities.*array|unknown native capability/,
+    )
+  }
+})
+
+test('validates structured native capability scopes and preserves them in metadata', () => {
+  const capabilities = [
+    {
+      permission: 'shell:openExternal',
+      allow: { urls: ['https://docs.example.com/**'] },
+      deny: { urls: ['https://docs.example.com/private/**'] },
+    },
+    {
+      permission: 'shell:showItemInFolder',
+      allow: { paths: ['/tmp/murasaki/**'] },
+    },
+    {
+      permission: 'window:manage',
+      allow: { windows: ['settings'] },
+    },
+    {
+      permission: 'systemPermission:request',
+      allow: { permissions: ['camera'] },
+    },
+  ]
+  const resolved = resolveWindowDeclarations({ capabilities })
+  assert.deepEqual(resolved[0].capabilities, capabilities)
+
+  const config = {
+    appId: 'dev.test.scopes',
+    productName: 'Scoped Test',
+    capabilities,
+  }
+  const meta = JSON.parse(metaJson(config, config.productName, null, process.cwd()))
+  assert.deepEqual(meta.capabilities, capabilities.map((grant) => grant.permission))
+  assert.deepEqual(
+    JSON.parse(meta.windows[0].capabilityPolicy),
+    { version: 1, grants: capabilities },
+  )
+})
+
+test('rejects ambiguous or unsafe structured capability scopes', () => {
+  for (const capabilities of [
+    [{ permission: 'clipboard:readText', allow: { urls: ['https://example.com/**'] } }],
+    [{ permission: 'shell:openExternal' }],
+    [{ permission: 'shell:openExternal', allow: {} }],
+    [{ permission: 'shell:openExternal', allow: { urls: ['https://example.com/*'] } }],
+    [{ permission: 'shell:openExternal', allow: { urls: ['https://example.com/foo*/**'] } }],
+    [{ permission: 'shell:openExternal', allow: { urls: ['https://example.com/path?next=/**'] } }],
+    [{ permission: 'shell:openExternal', allow: { urls: ['https://user@example.com/**'] } }],
+    [{ permission: 'shell:showItemInFolder', allow: { paths: ['relative/**'] } }],
+    [{ permission: 'shell:showItemInFolder', allow: { paths: ['/tmp/../secret/**'] } }],
+    [{ permission: 'shell:showItemInFolder', allow: { paths: ['/tmp/*/secret/**'] } }],
+    [{ permission: 'window:manage', allow: { windows: ['bad label'] } }],
+    [{ permission: 'systemPermission:request', allow: { permissions: ['contacts'] } }],
+    [{ permission: 'secureStorage:get', allow: { paths: ['/tmp/**'] } }],
+    ['window:manage', { permission: 'window:manage', allow: { windows: ['settings'] } }],
+  ]) {
+    assert.throws(
+      () => resolveWindowDeclarations({ capabilities }),
+      /not valid|must define|must not be empty|trailing \/\*\*|cannot contain a query|credential-free|absolute path|invalid window label|unknown system permission|more than one grant/,
     )
   }
 })
@@ -145,6 +233,55 @@ test('rejects invalid raw window fields before they reach the native binding', (
       /window main (?:width|height|title|resizable|transparent|visible|console|vibrancy)/,
     )
   }
+
+  for (const createOnLaunch of [null, 'false', 0]) {
+    assert.throws(
+      () => resolveWindowDeclarations({ windows: { settings: { createOnLaunch } } }),
+      /window settings createOnLaunch must be a boolean/,
+    )
+  }
+})
+
+test('keeps dormant declarations in dev and bundle metadata', async () => {
+  const config = {
+    appId: 'dev.test.dynamic-windows',
+    productName: 'Dynamic Windows',
+    window: { route: '/main' },
+    windows: {
+      settings: { route: '/settings', createOnLaunch: false },
+      preview: { route: '/preview' },
+    },
+  }
+  const resolved = resolveWindowDeclarations(config)
+  assert.deepEqual(
+    resolved.map(({ label, createOnLaunch }) => ({ label, createOnLaunch })),
+    [
+      { label: 'main', createOnLaunch: true },
+      { label: 'settings', createOnLaunch: false },
+      { label: 'preview', createOnLaunch: true },
+    ],
+  )
+
+  const { createDevWindowTemplates } = await import('../dist/cli/dev.js')
+  const devTemplates = createDevWindowTemplates(config, process.cwd(), 'http://127.0.0.1:5178/')
+  assert.deepEqual(
+    devTemplates.map(({ window, createOnLaunch }) => ({ label: window.label, createOnLaunch })),
+    [
+      { label: 'main', createOnLaunch: true },
+      { label: 'settings', createOnLaunch: false },
+      { label: 'preview', createOnLaunch: true },
+    ],
+  )
+
+  const meta = JSON.parse(metaJson(config, config.productName, null, process.cwd()))
+  assert.deepEqual(
+    meta.windows.map(({ label, createOnLaunch }) => ({ label, createOnLaunch })),
+    [
+      { label: 'main', createOnLaunch: true },
+      { label: 'settings', createOnLaunch: false },
+      { label: 'preview', createOnLaunch: true },
+    ],
+  )
 })
 
 test('rejects reserved or unsafe labels and non-local routes', () => {
@@ -211,22 +348,30 @@ test('bundle metadata contains resolved windows and keeps primary flat fields', 
   const meta = JSON.parse(metaJson(config, config.productName, null, process.cwd()))
   assert.equal(meta.width, 1024)
   assert.deepEqual(meta.capabilities, ['clipboard:readText'])
+  assert.deepEqual(
+    JSON.parse(meta.capabilityPolicy),
+    { version: 1, grants: ['clipboard:readText'] },
+  )
   assert.deepEqual(meta.windows, [
     {
       label: 'main',
       primary: true,
       route: '/home',
       visible: true,
+      createOnLaunch: true,
       width: 1024,
       capabilities: ['clipboard:readText'],
+      capabilityPolicy: JSON.stringify({ version: 1, grants: ['clipboard:readText'] }),
     },
     {
       label: 'settings',
       primary: false,
       route: '/settings',
       visible: false,
+      createOnLaunch: true,
       height: 640,
       capabilities: [],
+      capabilityPolicy: JSON.stringify({ version: 1, grants: [] }),
     },
   ])
 })

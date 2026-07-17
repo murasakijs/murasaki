@@ -214,20 +214,22 @@ test('a concurrent forced shutdown overrides a pending cancellable beforeQuit', 
   assert.equal(runtime.state, 'stopped')
 })
 
-test('a failing quit hook does not leave the runtime stuck in stopping', async (t) => {
+test('a failing beforeQuit cancels shutdown and leaves the runtime retryable', async (t) => {
   const runtime = await fixture(t)
-  await runtime.start(async () => ({
+  const context = await runtime.start(async () => ({
     default: { beforeQuit() { throw new Error('quit hook failed') } },
   }))
-  await assert.rejects(
-    runtime.shutdown({ reason: 'window-close' }),
-    /quit hook failed/,
-  )
-  assert.equal(runtime.state, 'stopped')
+  assert.deepEqual(await runtime.shutdown({ reason: 'window-close' }), {
+    cancelled: true,
+    timedOut: false,
+  })
+  assert.equal(runtime.state, 'running')
+  assert.equal(context.signal.aborted, false)
   assert.deepEqual(await runtime.shutdown({ reason: 'signal', force: true }), {
     cancelled: false,
     timedOut: false,
   })
+  assert.equal(runtime.state, 'stopped')
 })
 
 test('rejects invalid main modules and exposes a failed state', async (t) => {

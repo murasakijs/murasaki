@@ -42,8 +42,8 @@ export type GenerateMetadata = (
 const MANAGED_ATTR = 'data-murasaki-meta'
 
 /**
- * Applies resolved route metadata to the document — `<title>`, `<meta
- * name="description">`, Open Graph tags, and favicon — Next.js-style.
+ * Applies resolved route metadata to the document: the title, description
+ * meta element, Open Graph tags, and favicon, in a Next.js-style shape.
  *
  * Safe to call on every navigation: tags murasaki previously added are
  * removed first, so re-applying (or applying metadata for the next route)

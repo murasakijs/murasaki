@@ -54,8 +54,9 @@ export function post(msg: unknown) {
  *
  * This is the only way to quit a murasaki app programmatically; there is no
  * other API for it. `useUpdate()`'s `install()` calls this after the backend
- * has staged an update and spawned the detached apply-helper, per the
- * install → quit → apply handshake (updater contract §7) — but it's a
+ * has staged a verified launcher handoff. The native host spawns the detached
+ * apply-helper only after graceful shutdown succeeds, per the install → quit →
+ * apply handshake (updater contract §7) — but it's a
  * general-purpose primitive, not an updater internal.
  */
 export function quit(): Promise<void> {

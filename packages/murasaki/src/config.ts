@@ -1,3 +1,89 @@
+import type { PluginOption } from 'vite'
+
+export type MurasakiBuildTarget =
+  | 'darwin-arm64'
+  | 'darwin-x64'
+  | 'win32-x64'
+  | 'win32-arm64'
+  | 'linux-x64'
+  | 'linux-arm64'
+
+export type BundleResource = string | { from: string; to?: string }
+
+export interface BundleConfig {
+  /** Packages staged in the packaged app instead of compiled into server code. */
+  external?: string[]
+  /** JavaScript packages forced into the compiled server bundle. */
+  noExternal?: string[]
+  /** Non-code files/directories copied into packaged resources. */
+  resources?: BundleResource[]
+}
+
+export interface WebviewProxyConfig {
+  /** `http` uses HTTP CONNECT; `socks5` uses SOCKSv5. */
+  protocol: 'http' | 'socks5'
+  /** Hostname or IP literal only. URLs, credentials, and paths are rejected. */
+  host: string
+  /** TCP port from 1 through 65535. */
+  port: number
+}
+
+/** Application-wide native WebView session and network configuration. */
+export interface WebviewConfig {
+  /** Complete custom User-Agent header value. */
+  userAgent?: string
+  /** Use a non-persistent private session instead of the app profile. */
+  incognito?: boolean
+  /** Unauthenticated proxy applied to every application WebView. */
+  proxy?: WebviewProxyConfig
+}
+
+export type MurasakiPluginCommand = 'dev' | 'build' | 'bundle'
+
+export type MurasakiDeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends readonly (infer Item)[]
+    ? readonly MurasakiDeepReadonly<Item>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: MurasakiDeepReadonly<T[Key]> }
+      : T
+
+/** Immutable build configuration exposed to a trusted build-time plugin hook. */
+export type MurasakiPluginHookConfig = MurasakiDeepReadonly<Omit<MurasakiConfig, 'plugins'>>
+
+export interface MurasakiPluginHookContext {
+  readonly projectRoot: string
+  readonly config: MurasakiPluginHookConfig
+  readonly command: MurasakiPluginCommand
+  readonly target?: MurasakiBuildTarget
+}
+
+export interface MurasakiPluginHooks {
+  before?: (context: MurasakiPluginHookContext) => void | Promise<void>
+  after?: (context: MurasakiPluginHookContext) => void | Promise<void>
+}
+
+/**
+ * A trusted, build-time Murasaki extension. This is not a native Rust ABI or
+ * a runtime plugin system: installing a plugin grants it the same privileges
+ * as code in murasaki.config.ts.
+ */
+export interface MurasakiPlugin {
+  /** Stable identifier used in diagnostics and duplicate detection. */
+  name: string
+  /** Vite plugins appended in declaration order after Murasaki's core plugins. */
+  vite?: PluginOption
+  /** Deterministic additions to the application's packaging configuration. */
+  bundle?: BundleConfig
+  /** Serial CLI lifecycle hooks. A rejection stops the command. */
+  hooks?: MurasakiPluginHooks
+}
+
+/** Type-safe identity helper for authoring a trusted build-time plugin. */
+export function defineMurasakiPlugin(plugin: MurasakiPlugin): MurasakiPlugin {
+  return plugin
+}
+
 export interface WindowConfig {
   title?: string
   width?: number
@@ -7,8 +93,8 @@ export interface WindowConfig {
   resizable?: boolean
   transparent?: boolean
   /**
-   * macOS translucent window vibrancy. NOTE: declared but not yet applied by
-   * the native binding — setting it is a no-op today (support is planned).
+   * macOS translucent window vibrancy. The native host automatically makes
+   * the tao window and WebView transparent when a material is configured.
    */
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
   /**
@@ -25,11 +111,14 @@ export interface WindowConfig {
    * Native renderer command allowlist. The primary window falls back to the
    * top-level list; a secondary window with no list remains deny-all.
    */
-  capabilities?: NativeCapability[]
+  capabilities?: NativeCapabilityGrant[]
 }
 
 /** A declaratively-created non-primary application window. */
-export type SecondaryWindowConfig = Omit<WindowConfig, 'console'>
+export type SecondaryWindowConfig = Omit<WindowConfig, 'console'> & {
+  /** Create this window during application launch. Defaults to true. */
+  createOnLaunch?: boolean
+}
 
 /** Fully-resolved window declaration written to bundle metadata. */
 export interface ResolvedWindowConfig extends WindowConfig {
@@ -37,7 +126,8 @@ export interface ResolvedWindowConfig extends WindowConfig {
   primary: boolean
   route: string
   visible: boolean
-  capabilities: NativeCapability[]
+  createOnLaunch: boolean
+  capabilities: NativeCapabilityGrant[]
 }
 
 /** A custom URL scheme registered by packaged macOS/Windows applications. */
@@ -193,7 +283,7 @@ export interface MurasakiConfig {
    * Native commands exposed to trusted renderer code through `murasaki/native`.
    * Default is deny-all; grant only the capabilities the app uses.
    */
-  capabilities?: NativeCapability[]
+  capabilities?: NativeCapabilityGrant[]
 
   /**
    * Host operating-system permissions. On macOS, camera/microphone usage
@@ -211,28 +301,13 @@ export interface MurasakiConfig {
   }
 
   /** Production packaging for Node-side code and non-code assets. */
-  bundle?: {
-    /**
-     * Additional npm packages to keep external from the server/main bundle
-     * and copy into the packaged app. Static bare imports are detected and
-     * staged automatically; list packages here when they are loaded through
-     * a computed import/require or by a plugin at runtime.
-     */
-    external?: string[]
-    /**
-     * Bare npm packages that should be compiled into dist/server instead of
-     * staged in node_modules. Framework packages are bundled by default. Do
-     * not use this for native add-ons or packages with runtime data files.
-     */
-    noExternal?: string[]
-    /**
-     * Files/directories copied into the packaged resources directory. The
-     * string form copies to its basename; the object form chooses a relative
-     * destination. Useful for Prisma schemas, migrations, models, and other
-     * data that JavaScript bundlers cannot discover.
-     */
-    resources?: Array<string | { from: string; to?: string }>
-  }
+  bundle?: BundleConfig
+
+  /** Trusted build-time extensions. Plugin objects are never written to app metadata. */
+  plugins?: MurasakiPlugin[]
+
+  /** Application-wide native WebView session and network settings. */
+  webview?: WebviewConfig
 
   /** Client/server build orchestration and public client environment prefixes. */
   build?: {
@@ -276,14 +351,7 @@ export interface MurasakiConfig {
   devPort?: number
 
   /** Build targets. Defaults to the host platform. */
-  targets?: Array<
-    | 'darwin-arm64'
-    | 'darwin-x64'
-    | 'win32-x64'
-    | 'win32-arm64'
-    | 'linux-x64'
-    | 'linux-arm64'
-  >
+  targets?: MurasakiBuildTarget[]
 
   /** Icon source (PNG). `murasaki icon` fans this out to .icns/.ico/set. */
   icon?: string
@@ -304,7 +372,7 @@ export interface MurasakiConfig {
   installer?: {
     /** Path (relative to project root) to a custom DMG background PNG. Overrides murasaki's default. */
     background?: string
-    /** DMG window content size in points. Default { width: 640, height: 420 } (matches the default background). */
+    /** DMG window content size in points. Defaults to `width: 640, height: 420` to match the default background. */
     window?: { width: number; height: number }
     /** Icon size in the DMG window. Default 128. */
     iconSize?: number
@@ -391,6 +459,9 @@ export const NATIVE_CAPABILITIES = [
   'notification:show',
   'shell:openExternal',
   'shell:showItemInFolder',
+  'secureStorage:get',
+  'secureStorage:set',
+  'secureStorage:delete',
   'systemPermission:status',
   'systemPermission:request',
   'window:setTitle',
@@ -410,6 +481,8 @@ export const NATIVE_CAPABILITIES = [
   'window:open',
   'window:list',
   'window:manage',
+  'globalShortcut:register',
+  'globalShortcut:unregister',
   'tray:create',
   'tray:remove',
   'tray:setTooltip',
@@ -418,6 +491,34 @@ export const NATIVE_CAPABILITIES = [
 ] as const
 
 export type NativeCapability = (typeof NATIVE_CAPABILITIES)[number]
+
+/**
+ * Optional value-level constraints for a renderer-native permission.
+ *
+ * String grants remain backwards compatible and unrestricted. Use the object
+ * form when a command accepts an external target so a compromised renderer
+ * cannot turn one permission into arbitrary URL/path/window access.
+ */
+export interface NativeCapabilityScope {
+  /** Exact URLs, or an absolute URL ending in `/**` for a path subtree. */
+  urls?: string[]
+  /** Exact absolute paths, or an absolute directory ending in `/**`. */
+  paths?: string[]
+  /** Declarative native window labels. */
+  windows?: string[]
+  /** Host permissions that may be queried/requested. */
+  permissions?: SystemPermissionName[]
+}
+
+export interface ScopedNativeCapability {
+  permission: NativeCapability
+  /** Values this permission may operate on. Omitted means unrestricted. */
+  allow?: NativeCapabilityScope
+  /** Values denied before the allow list is considered. */
+  deny?: NativeCapabilityScope
+}
+
+export type NativeCapabilityGrant = NativeCapability | ScopedNativeCapability
 
 const NATIVE_CAPABILITY_SET: ReadonlySet<string> = new Set(NATIVE_CAPABILITIES)
 
@@ -471,12 +572,214 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
     validateArtifactComponent(candidate.version, 'version')
   }
   validateMainConfig((config as { main?: unknown }).main)
+  validateBundleConfig((config as { bundle?: unknown }).bundle, 'bundle')
+  validatePlugins((config as { plugins?: unknown }).plugins)
+  validateWebviewConfig((config as { webview?: unknown }).webview)
   validateSecurityConfig(candidate.security)
   validateSystemPermissionsConfig(candidate.systemPermissions)
   validateDevPort(candidate.devPort)
   validateUpdaterConfig(candidate.updater)
   validateSignConfig(candidate.sign)
   resolveWindowDeclarations(candidate)
+}
+
+const MAX_USER_AGENT_BYTES = 512
+const MAX_PROXY_HOST_BYTES = 253
+
+function validateWebviewConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('webview must be an object')
+  }
+  const webview = value as Record<string, unknown>
+  rejectUnknownFields(webview, ['userAgent', 'incognito', 'proxy'], 'webview')
+
+  if (webview.userAgent !== undefined) {
+    if (typeof webview.userAgent !== 'string'
+      || webview.userAgent.length === 0
+      || webview.userAgent !== webview.userAgent.trim()
+      || new TextEncoder().encode(webview.userAgent).byteLength > MAX_USER_AGENT_BYTES
+      || [...webview.userAgent].some((character) => {
+        const codePoint = character.codePointAt(0) ?? 0
+        return codePoint < 0x20 || codePoint === 0x7f
+      })) {
+      throw new TypeError(
+        `webview.userAgent must be a trimmed, non-empty header value no greater than ${MAX_USER_AGENT_BYTES} UTF-8 bytes without control characters`,
+      )
+    }
+  }
+  if (webview.incognito !== undefined && typeof webview.incognito !== 'boolean') {
+    throw new TypeError('webview.incognito must be a boolean')
+  }
+  if (webview.proxy === undefined) return
+  if (!webview.proxy || typeof webview.proxy !== 'object' || Array.isArray(webview.proxy)) {
+    throw new TypeError('webview.proxy must be an object')
+  }
+  const proxy = webview.proxy as Record<string, unknown>
+  rejectUnknownFields(proxy, ['protocol', 'host', 'port'], 'webview.proxy')
+  if (proxy.protocol !== 'http' && proxy.protocol !== 'socks5') {
+    throw new TypeError('webview.proxy.protocol must be http or socks5')
+  }
+  if (typeof proxy.host !== 'string' || !validProxyHost(proxy.host)) {
+    throw new TypeError(
+      'webview.proxy.host must be a hostname or IP literal without a scheme, credentials, path, query, or fragment',
+    )
+  }
+  if (!Number.isSafeInteger(proxy.port) || (proxy.port as number) < 1 || (proxy.port as number) > 65_535) {
+    throw new TypeError('webview.proxy.port must be an integer between 1 and 65535')
+  }
+}
+
+/** @internal One normalized app-level value shared by dev and bundle metadata. */
+export function resolveWebviewNetworkConfig(
+  config: Pick<MurasakiConfig, 'webview'>,
+): WebviewConfig | undefined {
+  validateWebviewConfig(config.webview)
+  if (!config.webview) return undefined
+  return {
+    ...(config.webview.userAgent !== undefined
+      ? { userAgent: config.webview.userAgent }
+      : {}),
+    ...(config.webview.incognito !== undefined
+      ? { incognito: config.webview.incognito }
+      : {}),
+    ...(config.webview.proxy
+      ? { proxy: { ...config.webview.proxy } }
+      : {}),
+  }
+}
+
+function validProxyHost(host: string): boolean {
+  if (host.length === 0
+    || host !== host.trim()
+    || new TextEncoder().encode(host).byteLength > MAX_PROXY_HOST_BYTES
+    || !/^[\x21-\x7e]+$/.test(host)
+    || /[/\\@?#]/.test(host)) {
+    return false
+  }
+  const bracketedIpv6 = host.startsWith('[') && host.endsWith(']')
+  if (host.includes(':') && !bracketedIpv6) return false
+  if (!bracketedIpv6 && !host.split('.').every((label) =>
+    label.length >= 1
+    && label.length <= 63
+    && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label))) {
+    return false
+  }
+  try {
+    const parsed = new URL(`http://${host}/`)
+    return parsed.username === ''
+      && parsed.password === ''
+      && parsed.port === ''
+      && parsed.pathname === '/'
+      && parsed.hostname.toLowerCase() === host.toLowerCase()
+  } catch {
+    return false
+  }
+}
+
+function rejectUnknownFields(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  path: string,
+): void {
+  for (const field of Object.keys(value)) {
+    if (!allowed.includes(field)) throw new TypeError(`${path} contains unknown field ${field}`)
+  }
+}
+
+const PLUGIN_NAME_RE = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/
+
+function validatePlugins(value: unknown): void {
+  if (value === undefined) return
+  if (!Array.isArray(value)) throw new TypeError('plugins must be an array')
+  const names = new Set<string>()
+  for (let index = 0; index < value.length; index++) {
+    const plugin = value[index]
+    const path = `plugins[${index}]`
+    if (!plugin || typeof plugin !== 'object' || Array.isArray(plugin)) {
+      throw new TypeError(`${path} must be a Murasaki plugin object`)
+    }
+    const candidate = plugin as Record<string, unknown>
+    if (typeof candidate.name !== 'string'
+      || candidate.name.length > 128
+      || !PLUGIN_NAME_RE.test(candidate.name)) {
+      throw new TypeError(
+        `${path}.name must be a stable lowercase identifier (letters, digits, dot, dash, underscore)`,
+      )
+    }
+    if (names.has(candidate.name)) {
+      throw new TypeError(`plugins contains duplicate plugin name ${JSON.stringify(candidate.name)}`)
+    }
+    names.add(candidate.name)
+    validateVitePluginOption(candidate.vite, `${path}.vite`)
+    validateBundleConfig(candidate.bundle, `${path}.bundle`)
+    if (candidate.hooks !== undefined) {
+      if (!candidate.hooks || typeof candidate.hooks !== 'object' || Array.isArray(candidate.hooks)) {
+        throw new TypeError(`${path}.hooks must be an object`)
+      }
+      const hooks = candidate.hooks as Record<string, unknown>
+      for (const phase of ['before', 'after'] as const) {
+        if (hooks[phase] !== undefined && typeof hooks[phase] !== 'function') {
+          throw new TypeError(`${path}.hooks.${phase} must be a function`)
+        }
+      }
+    }
+  }
+}
+
+function validateVitePluginOption(value: unknown, path: string): void {
+  if (value === undefined || value === null || value === false) return
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => validateVitePluginOption(entry, `${path}[${index}]`))
+    return
+  }
+  if (!value || typeof value !== 'object') {
+    throw new TypeError(`${path} must be a Vite PluginOption`)
+  }
+  const candidate = value as { name?: unknown; then?: unknown }
+  if (typeof candidate.then === 'function') return
+  if (typeof candidate.name !== 'string' || candidate.name.trim().length === 0) {
+    throw new TypeError(`${path} Vite plugin must have a non-empty name`)
+  }
+}
+
+function validateBundleConfig(value: unknown, path: string): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${path} must be an object`)
+  }
+  const bundle = value as Record<string, unknown>
+  for (const field of ['external', 'noExternal'] as const) {
+    const entries = bundle[field]
+    if (entries === undefined) continue
+    if (!Array.isArray(entries)
+      || entries.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)) {
+      throw new TypeError(`${path}.${field} must be an array of non-empty strings`)
+    }
+  }
+  const resources = bundle.resources
+  if (resources === undefined) return
+  if (!Array.isArray(resources)) {
+    throw new TypeError(`${path}.resources must be an array`)
+  }
+  resources.forEach((resource, index) => {
+    const resourcePath = `${path}.resources[${index}]`
+    if (typeof resource === 'string') {
+      if (resource.trim().length === 0) throw new TypeError(`${resourcePath} must not be empty`)
+      return
+    }
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+      throw new TypeError(`${resourcePath} must be a path or { from, to? } object`)
+    }
+    const item = resource as Record<string, unknown>
+    if (typeof item.from !== 'string' || item.from.trim().length === 0) {
+      throw new TypeError(`${resourcePath}.from must be a non-empty string`)
+    }
+    if (item.to !== undefined
+      && (typeof item.to !== 'string' || item.to.trim().length === 0)) {
+      throw new TypeError(`${resourcePath}.to must be a non-empty string`)
+    }
+  })
 }
 
 function validateSystemPermissionsConfig(value: unknown): void {
@@ -789,9 +1092,9 @@ export function resolveWindowDeclarations(
 
 function resolveWindowDeclaration(
   label: string,
-  declaration: WindowConfig,
+  declaration: WindowConfig & { createOnLaunch?: boolean },
   primary: boolean,
-  capabilities: NativeCapability[],
+  capabilities: NativeCapabilityGrant[],
 ): ResolvedWindowConfig {
   if (!WINDOW_LABEL_RE.test(label)) {
     throw new TypeError(
@@ -807,11 +1110,15 @@ function resolveWindowDeclaration(
     primary,
     route: resolveWindowRoute(declaration.route, label),
     visible: declaration.visible ?? primary,
+    createOnLaunch: primary ? true : (declaration.createOnLaunch ?? true),
     capabilities: [...capabilities],
   }
 }
 
-function validateWindowDeclaration(declaration: WindowConfig, label: string): void {
+function validateWindowDeclaration(
+  declaration: WindowConfig & { createOnLaunch?: boolean },
+  label: string,
+): void {
   for (const [name, value] of [
     ['width', declaration.width],
     ['height', declaration.height],
@@ -829,6 +1136,7 @@ function validateWindowDeclaration(declaration: WindowConfig, label: string): vo
     ['transparent', declaration.transparent],
     ['visible', declaration.visible],
     ['console', declaration.console],
+    ['createOnLaunch', declaration.createOnLaunch],
   ] as const) {
     if (value !== undefined && typeof value !== 'boolean') {
       throw new TypeError(`window ${label} ${name} must be a boolean`)
@@ -841,26 +1149,165 @@ function validateWindowDeclaration(declaration: WindowConfig, label: string): vo
   }
 }
 
-function resolveCapabilities(value: unknown, path: string): NativeCapability[] {
+function resolveCapabilities(value: unknown, path: string): NativeCapabilityGrant[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) {
     throw new TypeError(`${path} must be an array of known native capabilities`)
   }
-  const unique: NativeCapability[] = []
+  const unique: NativeCapabilityGrant[] = []
   const seen = new Set<NativeCapability>()
-  for (const capability of value) {
-    if (typeof capability !== 'string' || !NATIVE_CAPABILITY_SET.has(capability)) {
-      throw new TypeError(`${path} contains unknown native capability ${JSON.stringify(capability)}`)
+  for (const entry of value) {
+    if (typeof entry === 'string') {
+      if (!NATIVE_CAPABILITY_SET.has(entry)) {
+        throw new TypeError(`${path} contains unknown native capability ${JSON.stringify(entry)}`)
+      }
+      const known = entry as NativeCapability
+      // Preserve the legacy behavior for repeated string permissions.
+      if (!seen.has(known)) {
+        seen.add(known)
+        unique.push(known)
+      }
+      continue
     }
-    const known = capability as NativeCapability
-    // Preserve first occurrence/order for backwards compatibility while
-    // ensuring metadata never contains duplicate grants.
-    if (!seen.has(known)) {
-      seen.add(known)
-      unique.push(known)
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new TypeError(`${path} entries must be a permission string or scoped permission object`)
     }
+    const grant = entry as Record<string, unknown>
+    if (typeof grant.permission !== 'string' || !NATIVE_CAPABILITY_SET.has(grant.permission)) {
+      throw new TypeError(`${path} contains unknown native capability ${JSON.stringify(grant.permission)}`)
+    }
+    const known = grant.permission as NativeCapability
+    if (seen.has(known)) {
+      throw new TypeError(`${path} contains more than one grant for ${known}`)
+    }
+    for (const key of Object.keys(grant)) {
+      if (!['permission', 'allow', 'deny'].includes(key)) {
+        throw new TypeError(`${path} scoped capability ${known} contains unknown field ${key}`)
+      }
+    }
+    const allow = resolveCapabilityScope(grant.allow, known, `${path}.${known}.allow`)
+    const deny = resolveCapabilityScope(grant.deny, known, `${path}.${known}.deny`)
+    if (allow === undefined && deny === undefined) {
+      throw new TypeError(`${path} scoped capability ${known} must define allow or deny`)
+    }
+    seen.add(known)
+    unique.push({
+      permission: known,
+      ...(allow ? { allow } : {}),
+      ...(deny ? { deny } : {}),
+    })
   }
   return unique
+}
+
+function capabilityName(grant: NativeCapabilityGrant): NativeCapability {
+  return typeof grant === 'string' ? grant : grant.permission
+}
+
+/** @internal Legacy permission-name projection consumed by native menus. */
+export function capabilityPermissionNames(
+  grants: readonly NativeCapabilityGrant[],
+): NativeCapability[] {
+  return grants.map(capabilityName)
+}
+
+/** @internal Versioned value-scope policy passed unchanged to the native host. */
+export function serializeCapabilityPolicy(
+  grants: readonly NativeCapabilityGrant[],
+): string {
+  return JSON.stringify({ version: 1, grants })
+}
+
+function resolveCapabilityScope(
+  value: unknown,
+  permission: NativeCapability,
+  path: string,
+): NativeCapabilityScope | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${path} must be an object`)
+  }
+  const scope = value as Record<string, unknown>
+  const allowedKeys = capabilityScopeKeys(permission)
+  const resolved: NativeCapabilityScope = {}
+  for (const key of Object.keys(scope)) {
+    if (!allowedKeys.includes(key as keyof NativeCapabilityScope)) {
+      throw new TypeError(`${path}.${key} is not valid for ${permission}`)
+    }
+    const entries = scope[key]
+    if (!Array.isArray(entries) || entries.length === 0) {
+      throw new TypeError(`${path}.${key} must be a non-empty array`)
+    }
+    const unique = [...new Set(entries)]
+    if (unique.length !== entries.length || unique.some((item) => typeof item !== 'string')) {
+      throw new TypeError(`${path}.${key} must contain unique strings`)
+    }
+    if (key === 'urls') {
+      unique.forEach((item) => validateCapabilityUrlPattern(item as string, `${path}.urls`))
+      resolved.urls = unique as string[]
+    } else if (key === 'paths') {
+      unique.forEach((item) => validateCapabilityPathPattern(item as string, `${path}.paths`))
+      resolved.paths = unique as string[]
+    } else if (key === 'windows') {
+      unique.forEach((item) => {
+        if (!WINDOW_LABEL_RE.test(item as string)) throw new TypeError(`${path}.windows contains invalid window label ${JSON.stringify(item)}`)
+      })
+      resolved.windows = unique as string[]
+    } else if (key === 'permissions') {
+      const known = new Set<SystemPermissionName>(['camera', 'microphone', 'screenRecording', 'accessibility'])
+      unique.forEach((item) => {
+        if (!known.has(item as SystemPermissionName)) throw new TypeError(`${path}.permissions contains unknown system permission ${JSON.stringify(item)}`)
+      })
+      resolved.permissions = unique as SystemPermissionName[]
+    }
+  }
+  if (Object.keys(resolved).length === 0) throw new TypeError(`${path} must not be empty`)
+  return resolved
+}
+
+function capabilityScopeKeys(permission: NativeCapability): Array<keyof NativeCapabilityScope> {
+  if (permission === 'shell:openExternal') return ['urls']
+  if (permission === 'shell:showItemInFolder') return ['paths']
+  if (permission === 'window:open' || permission === 'window:manage') return ['windows']
+  if (permission === 'systemPermission:status' || permission === 'systemPermission:request') return ['permissions']
+  return []
+}
+
+function validateCapabilityUrlPattern(pattern: string, path: string): void {
+  const wildcard = pattern.endsWith('/**')
+  const candidate = wildcard ? pattern.slice(0, -2) : pattern
+  if (candidate.includes('*')) {
+    throw new TypeError(`${path} only supports a trailing /** wildcard`)
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(candidate)
+  } catch {
+    throw new TypeError(`${path} contains invalid absolute URL pattern ${JSON.stringify(pattern)}`)
+  }
+  if (!['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new TypeError(`${path} supports only credential-free http, https, mailto, and tel URLs`)
+  }
+  if (wildcard && !['http:', 'https:'].includes(parsed.protocol)) {
+    throw new TypeError(`${path} wildcards are supported only for http and https URLs`)
+  }
+  if (wildcard && (parsed.search || parsed.hash)) {
+    throw new TypeError(`${path} URL wildcards cannot contain a query or fragment`)
+  }
+}
+
+function validateCapabilityPathPattern(pattern: string, path: string): void {
+  const wildcard = pattern.endsWith('/**') || pattern.endsWith('\\**')
+  const candidate = wildcard
+    ? pattern.slice(0, -3)
+    : pattern
+  const absolute = candidate.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(candidate)
+    || /^\\\\[^\\]+\\[^\\]+/.test(candidate)
+  const segments = candidate.split(/[\\/]+/)
+  if (!absolute || segments.includes('..') || candidate.includes('*')) {
+    throw new TypeError(`${path} contains invalid absolute path pattern ${JSON.stringify(pattern)}`)
+  }
 }
 
 function resolveMinimumSize(

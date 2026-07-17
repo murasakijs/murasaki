@@ -74,6 +74,13 @@ export interface TrayClickEvent {
   double: boolean
 }
 
+/** Resolved process-wide shortcut identity returned by registration/events. */
+export interface GlobalShortcutRegistration {
+  id: string
+  /** Platform-resolved canonical accelerator (for example `Control+Shift+KeyK`). */
+  accelerator: string
+}
+
 /** Serializable state returned for each declared native window. */
 export interface WindowInfo {
   label: string
@@ -206,6 +213,22 @@ export const shell = {
   },
 }
 
+/** OS credential storage, namespaced by `config.appId`. */
+export const secureStorage = {
+  /** Read a UTF-8 string, or null when the key does not exist. */
+  get(key: string): Promise<string | null> {
+    return invokeNative('secureStorage.get', { key })
+  },
+  /** Create or replace a UTF-8 string value. */
+  set(key: string, value: string): Promise<void> {
+    return invokeNative('secureStorage.set', { key, value })
+  },
+  /** Delete a value. Deleting an absent key succeeds. */
+  delete(key: string): Promise<void> {
+    return invokeNative('secureStorage.delete', { key })
+  },
+}
+
 /** Host OS consent, separate from Murasaki renderer capabilities. */
 export const systemPermission = {
   status(permission: SystemPermissionName): Promise<SystemPermissionStatus> {
@@ -280,6 +303,31 @@ export const windows = {
   },
   close(label: string): Promise<void> {
     return invokeNative('window.closeOther', { label })
+  },
+}
+
+/** Process-wide keyboard shortcuts owned by the renderer that registers them. */
+export const globalShortcut = {
+  /** Register a modifier + known-key chord. The optional id must be process-unique. */
+  register(accelerator: string, id?: string): Promise<GlobalShortcutRegistration> {
+    return invokeNative('globalShortcut.register', { accelerator, ...(id === undefined ? {} : { id }) })
+  },
+  /** Unregister one shortcut owned by this renderer. */
+  unregister(id: string): Promise<void> {
+    return invokeNative('globalShortcut.unregister', { id })
+  },
+  /** Unregister every shortcut owned by this renderer. */
+  unregisterAll(): Promise<void> {
+    return invokeNative('globalShortcut.unregisterAll')
+  },
+  /** Subscribe to presses for shortcuts owned by this renderer. */
+  onTriggered(listener: (event: GlobalShortcutRegistration) => void): () => void {
+    if (typeof window === 'undefined') return () => {}
+    const handler = (event: Event) => {
+      listener((event as CustomEvent<GlobalShortcutRegistration>).detail)
+    }
+    window.addEventListener('murasaki:globalshortcut', handler)
+    return () => window.removeEventListener('murasaki:globalshortcut', handler)
   },
 }
 

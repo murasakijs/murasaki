@@ -11,8 +11,9 @@ system.
 
 <Callout type="warn">
   Native renderer commands are deny-by-default and granted with the typed
-  `capabilities` list. Every declared window has its own allowlist, but
-  argument-level and path/URL scopes are not available. Treat every
+  `capabilities` list. Every declared window has its own allowlist. URL, path,
+  target-window, and OS-permission scopes are available for the commands that
+  accept those resources. Treat every
   renderer-to-Node function as privileged application code and keep its
   surface small.
 </Callout>
@@ -33,6 +34,33 @@ loopback `localhost`, `127.0.0.1`, or `[::1]` hosts and rejects cross-site Fetch
 Metadata. Static document responses install the session cookie; it is not
 readable from JavaScript.
 
+## WebView network and private sessions
+
+`webview.userAgent`, `webview.incognito`, and `webview.proxy` are app-wide
+native browser settings, not renderer permissions. They do not expand the
+native command allowlist or relax Murasaki's same-origin navigation/IPC
+checks.
+
+- A private/incognito session prevents the WebView from using the app's
+  persistent browser profile. It does not hide the user's IP address, erase
+  files written by Node Main, or provide anonymity from the app's server.
+- Normal windows share one application WebContext, including cookies and Web
+  Storage after destroy/recreate. Wry ignores the shared context when
+  incognito mode is enabled, so multiple incognito windows are not guaranteed
+  to share one private session; behavior is platform-dependent.
+- A custom User-Agent is sent to origins the application requests and can add
+  fingerprinting information. Replacing the platform User-Agent may also
+  break server compatibility or authentication flows.
+- An HTTP CONNECT or SOCKSv5 proxy can observe destination and traffic
+  metadata; unencrypted HTTP traffic is visible to it. Trust the proxy
+  operator and keep TLS validation enabled in the operating-system WebView.
+- Proxy credentials are not accepted. Do not encode secrets in `host` or add
+  them to bundle metadata; Murasaki rejects URLs, credentials, and unknown
+  proxy fields before startup and validates the endpoint again in Rust.
+
+See [Configuration](/docs/building/configuration#webview) for size limits and
+the macOS/WebView2 version requirements.
+
 ## Grant native commands explicitly
 
 ```ts title="murasaki.config.ts"
@@ -41,7 +69,21 @@ export default defineConfig({
   productName: 'Notes',
   window: {
     route: '/',
-    capabilities: ['app:quit', 'dialog:openFile', 'shell:openExternal', 'window:open'],
+    capabilities: [
+      'app:quit',
+      'dialog:openFile',
+      'secureStorage:get',
+      'secureStorage:set',
+      'secureStorage:delete',
+      'globalShortcut:register',
+      'globalShortcut:unregister',
+      {
+        permission: 'shell:openExternal',
+        allow: { urls: ['https://docs.example.com/**'] },
+        deny: { urls: ['https://docs.example.com/internal/**'] },
+      },
+      { permission: 'window:open', allow: { windows: ['settings'] } },
+    ],
   },
   windows: {
     preview: { route: '/preview', capabilities: ['clipboard:writeText'] },
@@ -54,12 +96,56 @@ Omitting capabilities grants nothing, except that the primary window falls
 back to the legacy top-level list when `window.capabilities` is absent.
 Secondary windows never inherit that list. Unknown strings grant nothing, and
 the bridge accepts calls only from the exact trusted application origin. The
-allowlist is command-level: it cannot constrain a dialog to one directory or
-an external URL to one host. `window:manage` can target any declared window,
-so keep it on a trusted renderer and enforce narrower intent in app code.
+structured policy supports these resource fields:
+
+| Permission | Scope field |
+| --- | --- |
+| `shell:openExternal` | `urls` with exact URLs or an HTTP(S) trailing `/**` subtree |
+| `shell:showItemInFolder` | absolute, non-traversing `paths`, exact or with trailing `/**` |
+| `window:open`, `window:manage` | exact declared `windows` labels |
+| `systemPermission:status`, `systemPermission:request` | exact `permissions` names |
+
+An explicit `deny` wins over `allow`. A structured grant with only `deny`
+allows other values, while a legacy string grant remains unrestricted for its
+command. Other commands, including dialogs, remain command-level. Keep broad
+grants on trusted renderers and enforce narrower application intent in Node.
 Application-wide programmatic shutdown is separately gated by `app:quit`.
 
-## Keep secrets in Node
+Runtime window creation is available only to trusted Node Main and only for
+labels declared in configuration. The private native transport carries a
+method and label, not a URL or capability list; the Rust host uses the immutable
+route and policy from the configured template. Renderer `windows.open()` stays
+show-only and cannot instantiate a dormant or destroyed window.
+
+Global shortcuts are also command-scoped rather than accelerator-scoped.
+`globalShortcut:register` lets that renderer request any accelerator accepted
+by the bounded native parser, while `globalShortcut:unregister` can remove only
+registrations owned by the calling renderer. Murasaki rejects duplicate and
+reserved chords and releases registrations on owner close, but it cannot
+reserve a chord already held by another application. Keep registration in a
+trusted renderer, use stable ids, and treat availability errors as expected.
+
+## Store renderer-needed secrets in the OS credential store
+
+`murasaki/native` exposes `secureStorage.get/set/delete` for short string
+values that trusted renderer code must use. The native host writes only to
+macOS Keychain or Windows Credential Manager. It derives the service/account
+identifier from `appId` and key, enforces non-empty/NUL-free UTF-8 limits, and
+has no plaintext fallback. Missing values return `null`; deletion is
+idempotent. Linux returns `unsupported`.
+
+Grant `secureStorage:get`, `secureStorage:set`, and `secureStorage:delete`
+separately. These capabilities are not key-scoped. A renderer with read access
+can query every key in its app namespace, so do not grant it to a window that
+loads untrusted code. OS credential storage protects data at rest, not against
+XSS executing with the renderer's granted capability.
+
+Keys are limited to 256 UTF-8 bytes and values to 2,048 UTF-8 bytes; both must
+be non-empty and contain no NUL. The overall native IPC body is capped at 256
+KiB. Keep `appId` stable or the new namespace will no longer find existing
+entries.
+
+## Keep server-only secrets in Node
 
 Anything imported by renderer code can become public client JavaScript. Keep
 API tokens, private keys, database credentials, and license validation in
@@ -210,11 +296,16 @@ the OS artifact, plus Murasaki's manifest signature and payload hash.
 
 ## Known security gaps
 
-- Native capabilities are command-level and per-window, but there are no
-  path/URL/argument scopes or separate policy files.
+- Native capabilities are per-window, and selected target-bearing commands
+  support inline allow/deny scopes. Dialog defaults, clipboard content, tray
+  menu contents, secure-storage keys, and other command arguments are not
+  scopeable yet; policies are config-owned rather than separately signed
+  policy files.
 - Declared windows share one application origin and authenticated local Node
   session. Native allowlists do not isolate Server Actions, `'use main'`, API
   routes, or updater endpoints; authorize those operations in application code.
+- Incognito prevents persistent profile use but does not guarantee that
+  multiple incognito windows share the same in-memory session.
 - Linux package signing is not implemented. Windows Authenticode requires a
   developer-supplied certificate/Artifact Signing provider and Windows SDK SignTool.
 - Linux protocol/file-association registration is not implemented. Windows

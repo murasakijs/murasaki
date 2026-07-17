@@ -33,7 +33,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
 import { createUpdateRequestHandler, createUpdaterEngine } from './updater-engine.mjs'
-import { MainRuntime } from './main-runtime.mjs'
+import { MainRuntime } from './.murasaki-runtime/runtime/main-runtime.js'
 import {
   MAX_WIRE_PAYLOAD_BYTES,
   parseWire,
@@ -55,6 +55,9 @@ const MAIN_SHUTDOWN_PATH = '/__murasaki/main/shutdown'
 const MAIN_SECOND_INSTANCE_PATH = '/__murasaki/main/second-instance'
 const MAIN_OPEN_REQUEST_PATH = '/__murasaki/main/open-request'
 const MAIN_EVENTS_PATH = '/__murasaki/main/events'
+const MAIN_WINDOW_COMMANDS_PATH = '/__murasaki/main/windows/commands'
+const MAIN_WINDOW_RESULT_PATH = '/__murasaki/main/windows/result'
+const MAIN_WINDOW_EVENT_PATH = '/__murasaki/main/windows/event'
 const RUNTIME_COOKIE = 'murasaki_runtime'
 
 const MIME_TYPES = {
@@ -161,6 +164,9 @@ async function handleRequest(req, res) {
     || pathname === MAIN_SECOND_INSTANCE_PATH
     || pathname === MAIN_OPEN_REQUEST_PATH
     || pathname === MAIN_EVENTS_PATH
+    || pathname === MAIN_WINDOW_COMMANDS_PATH
+    || pathname === MAIN_WINDOW_RESULT_PATH
+    || pathname === MAIN_WINDOW_EVENT_PATH
   if (isPrivileged && !isAuthorizedRuntimeRequest(req)) {
     res.statusCode = 403
     res.setHeader('content-type', 'application/json')
@@ -171,6 +177,9 @@ async function handleRequest(req, res) {
   const isNativeOnly = pathname === MAIN_SHUTDOWN_PATH
     || pathname === MAIN_SECOND_INSTANCE_PATH
     || pathname === MAIN_OPEN_REQUEST_PATH
+    || pathname === MAIN_WINDOW_COMMANDS_PATH
+    || pathname === MAIN_WINDOW_RESULT_PATH
+    || pathname === MAIN_WINDOW_EVENT_PATH
   if (isNativeOnly && !isAuthorizedNativeRequest(req)) {
     res.statusCode = 403
     res.setHeader('content-type', 'application/json')
@@ -196,6 +205,15 @@ async function handleRequest(req, res) {
   if (req.method === 'GET' && pathname === MAIN_EVENTS_PATH) {
     return handleMainEvents(req, res)
   }
+  if (req.method === 'GET' && pathname === MAIN_WINDOW_COMMANDS_PATH) {
+    return handleMainWindowCommands(res)
+  }
+  if (req.method === 'POST' && pathname === MAIN_WINDOW_RESULT_PATH) {
+    return handleMainWindowResult(req, res)
+  }
+  if (req.method === 'POST' && pathname === MAIN_WINDOW_EVENT_PATH) {
+    return handleMainWindowEvent(req, res)
+  }
   if (pathname.startsWith(UPDATE_PATH_PREFIX)) {
     await handleUpdateRequest(req, res)
     return
@@ -204,6 +222,90 @@ async function handleRequest(req, res) {
     return handleApiRoute(req, res, pathname)
   }
   return serveStatic(req, res)
+}
+
+function mainWindowControlBus() {
+  return globalThis[Symbol.for('murasaki.main.window-control.v1')]
+}
+
+function handleMainWindowCommands(res) {
+  const bus = mainWindowControlBus()
+  const commands = []
+  while (commands.length < 32 && bus?.commands?.length > 0) {
+    const command = bus.commands.shift()
+    if (command && bus.pending?.has(command.id)) commands.push(command)
+  }
+  res.statusCode = 200
+  res.setHeader('content-type', 'application/json')
+  res.setHeader('cache-control', 'no-store')
+  res.end(JSON.stringify(commands))
+}
+
+async function handleMainWindowResult(req, res) {
+  let body
+  try {
+    body = JSON.parse(await readBody(req))
+  } catch {
+    body = null
+  }
+  if (!body || typeof body.id !== 'string' || body.id.length > 64 || typeof body.ok !== 'boolean'
+    || (!body.ok && (typeof body.error !== 'string' || body.error.length > 4096))) {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid native window result' }))
+    return
+  }
+  const bus = mainWindowControlBus()
+  const pending = bus?.pending?.get(body.id)
+  if (pending) {
+    bus.pending.delete(body.id)
+    clearTimeout(pending.timer)
+    if (body.ok) pending.resolve(body.value)
+    else pending.reject(new Error(body.error))
+  }
+  res.statusCode = 204
+  res.setHeader('cache-control', 'no-store')
+  res.end()
+}
+
+async function handleMainWindowEvent(req, res) {
+  let event
+  try {
+    event = JSON.parse(await readBody(req))
+  } catch {
+    event = null
+  }
+  const types = new Set(['created', 'shown', 'hidden', 'focused', 'blurred', 'closed'])
+  const stateValid = event?.type === 'closed'
+    ? event?.state === null
+    : (event?.state && typeof event.state === 'object'
+    && event.state.label === event.label
+    && event.state.generation === event.generation
+    && typeof event.state.primary === 'boolean'
+    && ['visible', 'focused', 'minimized', 'maximized']
+      .every((field) => typeof event.state[field] === 'boolean'))
+  if (!event || !types.has(event.type)
+    || typeof event.label !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(event.label)
+    || !Number.isSafeInteger(event.generation) || event.generation < 1
+    || typeof event.primary !== 'boolean' || !stateValid) {
+    res.statusCode = 400
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ error: 'invalid native window lifecycle event' }))
+    return
+  }
+  const bus = mainWindowControlBus()
+  if (bus?.listeners) {
+    for (const listener of bus.listeners) {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('murasaki: window lifecycle listener failed:', error)
+      }
+    }
+  }
+  res.statusCode = 204
+  res.setHeader('cache-control', 'no-store')
+  res.end()
 }
 
 function handleMainEvents(req, res) {

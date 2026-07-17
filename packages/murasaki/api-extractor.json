@@ -1,0 +1,27 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
+  "newlineKind": "lf",
+  "mainEntryPointFilePath": "<projectFolder>/dist/index.d.ts",
+  "bundledPackages": [],
+  "apiReport": {
+    "enabled": true,
+    "reportFileName": "murasaki.api.md",
+    "reportFolder": "<projectFolder>/api",
+    "reportTempFolder": "<projectFolder>/temp/api"
+  },
+  "docModel": { "enabled": false },
+  "dtsRollup": { "enabled": false },
+  "tsdocMetadata": { "enabled": false },
+  "compiler": {
+    "tsconfigFilePath": "<projectFolder>/tsconfig.build.json",
+    "skipLibCheck": true
+  },
+  "messages": {
+    "extractorMessageReporting": {
+      "ae-missing-release-tag": { "logLevel": "none" }
+    },
+    "tsdocMessageReporting": {
+      "default": { "logLevel": "warning" }
+    }
+  }
+}

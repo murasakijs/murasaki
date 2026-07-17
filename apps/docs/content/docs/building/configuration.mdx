@@ -39,10 +39,12 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `authors` | `string[]?` | Author names shown in the About panel (Windows/Linux only). |
 | `window` | `WindowConfig?` | Window shape — see [below](#window). |
 | `windows` | `Record<string, SecondaryWindowConfig>?` | Secondary windows keyed by stable label — see [below](#windows). |
-| `capabilities` | `NativeCapability[]?` | Primary-window native renderer commands. Used only when `window.capabilities` is omitted. Default is deny-all. |
+| `webview` | `WebviewConfig?` | Application-wide User-Agent, private session, and unauthenticated proxy settings — see [below](#webview). |
+| `capabilities` | `NativeCapabilityGrant[]?` | Primary-window native renderer grants. Used only when `window.capabilities` is omitted. Default is deny-all. |
 | `systemPermissions` | `SystemPermissionsConfig?` | Host-OS consent declarations and packaged macOS launch prompts — see [below](#systempermissions). |
 | `main` | `false \| object?` | Long-lived Node Main entry and shutdown bound — see [below](#main). |
 | `bundle` | `object?` | Node dependency and non-code resource packaging — see [below](#bundle). |
+| `plugins` | `MurasakiPlugin[]?` | Trusted build-time extensions for Vite, CLI hooks, dependencies, and resources — see [below](#plugins). |
 | `build` | `object?` | Pre-build command and public client env prefixes — see [below](#build). |
 | `security` | `object?` | Renderer Content Security Policy — see [below](#security). |
 | `updater` | `UpdaterConfig?` | Auto-update source — see [below](#updater). |
@@ -68,11 +70,13 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `console` | `boolean?` | Windows only: show the backend Node console window. Defaults to `false`. |
 | `route` | `string?` | Same-origin path loaded in this window. Defaults to `/`; full/protocol-relative URLs are rejected. |
 | `visible` | `boolean?` | Initial visibility. Defaults to `true` for `main`, `false` for secondary windows. |
-| `capabilities` | `NativeCapability[]?` | Per-window native command allowlist. Secondary windows default to deny-all. |
+| `capabilities` | `NativeCapabilityGrant[]?` | Per-window native grants. Secondary windows default to deny-all. |
 
-<Callout type="warn">
-  `vibrancy` is declared but not yet applied by the native binding — setting
-  it is currently a no-op (support is planned).
+<Callout type="info">
+  On macOS, `vibrancy` installs the matching semantic `NSVisualEffectView`
+  material and automatically makes both the native window and WebView
+  transparent. Keep the renderer background transparent where the material
+  should remain visible. Other platforms ignore this macOS-only option.
 </Callout>
 
 ## `windows`
@@ -92,16 +96,73 @@ windows: {
     route: '/settings',
     width: 720,
     height: 560,
+    createOnLaunch: false,
     capabilities: [],
   },
 },
 ```
 
-Labels are 1–64 safe characters and `main` is reserved. Secondary windows are
-created hidden and inherit no top-level permissions. A secondary `console`
-field is rejected because that option controls the Windows backend console for
-the whole application. See [Windows & permissions](/docs/guides/windows) for
-lifecycle and renderer APIs.
+Labels are 1–64 safe characters and `main` is reserved. Secondary windows use
+`createOnLaunch: true` by default and are created hidden. Set it to `false` to
+keep a declaration dormant until Node Main calls `windows.create(label)`. The
+primary is always created on launch. Secondary windows inherit no top-level
+permissions. A secondary `console` field is rejected because that option
+controls the Windows backend console for the whole application. See
+[Windows & permissions](/docs/guides/windows) for lifecycle and renderer APIs.
+
+| Secondary-only field | Type | Description |
+| --- | --- | --- |
+| `createOnLaunch` | `boolean?` | Create the declared secondary during startup. Defaults to `true`; `false` keeps it as a trusted Node Main template. |
+
+## `webview`
+
+These settings apply to every native WebView in development and packaged
+macOS/Windows applications. Window-specific overrides are not supported.
+
+```ts title="murasaki.config.ts"
+webview: {
+  userAgent: 'AcmeDesktop/1.4 Murasaki',
+  incognito: true,
+  proxy: {
+    protocol: 'socks5',
+    host: '127.0.0.1',
+    port: 1080,
+  },
+},
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `userAgent` | `string?` | Complete custom User-Agent value. Must be trimmed, contain no control characters, and be at most 512 UTF-8 bytes. |
+| `incognito` | `boolean?` | Use Wry's non-persistent/private data store instead of the app's persistent profile. Default `false`. |
+| `proxy.protocol` | `'http' \| 'socks5'` | `http` is an HTTP CONNECT proxy; `socks5` is SOCKSv5. |
+| `proxy.host` | `string` | ASCII DNS hostname, IPv4 address, or bracketed IPv6 literal, at most 253 bytes. It is not a URL. |
+| `proxy.port` | `number` | Integer from 1 through 65535. |
+
+Proxy URLs and authentication fields are deliberately unsupported: schemes,
+paths, `user@host`, usernames, passwords, and unknown proxy fields fail config
+validation. If a proxy requires credentials, configure it outside Murasaki or
+use a local unauthenticated forwarding proxy. Configuration is passed to Wry's
+native WebKit/WebView2 builder and is also validated by the Rust host.
+
+Platform constraints:
+
+- macOS proxy support uses Wry's `mac-proxy` feature and requires macOS 14 or
+  newer. A configured proxy fails WebView startup explicitly on older macOS.
+  Private sessions use WebKit's non-persistent data store.
+- Windows proxy support uses WebView2 browser arguments. Custom User-Agent
+  requires WebView2 86.0.616.0 or newer; private mode requires
+  101.0.1210.39 or newer. WebView2 ignores those settings on older runtimes.
+- Linux packaging remains unavailable. Development builds pass these options
+  to Wry/WebKitGTK, but Linux is not a supported distribution target yet.
+
+Incognito controls local WebView persistence only. It does not anonymize
+network traffic, hide the client from a proxy/server, or make app-level Node
+data private. Normal windows share one application WebContext and therefore
+share cookies/storage. Wry ignores that shared context when `incognito` is
+enabled, so session sharing between multiple incognito windows is
+platform-dependent and not guaranteed. See
+[Security](/docs/building/security#webview-network-and-private-sessions).
 
 ## `capabilities`
 
@@ -127,6 +188,22 @@ cannot use the native bridge. Window management adds `window:getLabel`,
 `window:open`, `window:list`, and `window:manage`. Programmatic application
 shutdown requires `app:quit`; enabling the built-in updater grants it to the
 primary window for the verified restart handshake.
+
+Use a structured `NativeCapabilityGrant` when a target-bearing command must be
+limited. `deny` takes precedence over `allow`; a trailing `/**` is the only
+wildcard form:
+
+```ts
+capabilities: [
+  { permission: 'shell:openExternal', allow: { urls: ['https://example.com/help/**'] } },
+  { permission: 'shell:showItemInFolder', allow: { paths: ['/Users/me/Documents/**'] } },
+  { permission: 'window:manage', allow: { windows: ['settings', 'preview'] } },
+  { permission: 'systemPermission:request', allow: { permissions: ['camera'] } },
+]
+```
+
+String grants remain unrestricted for compatibility. URL/path scopes are
+validated while loading config and enforced again by the Rust host.
 
 ## `systemPermissions`
 
@@ -263,6 +340,56 @@ bundle: {
 
 Do not place secrets in `resources`; everything in an app bundle is readable by
 the user. Test native addons on every target architecture.
+
+## `plugins`
+
+Use `defineMurasakiPlugin` to declare trusted build-time extensions. Plugins
+run with the same Node.js privileges as `murasaki.config.ts`; install only code
+you trust.
+
+```ts title="murasaki.config.ts"
+import { defineConfig, defineMurasakiPlugin } from 'murasaki'
+import inspect from 'vite-plugin-inspect'
+
+const assetsPlugin = defineMurasakiPlugin({
+  name: 'acme.assets',
+  vite: inspect(),
+  bundle: {
+    external: ['native-addon'],
+    resources: [{ from: 'models', to: 'models' }],
+  },
+  hooks: {
+    async before({ command, target, projectRoot, config }) {
+      // Generate/check files before dev, build, or bundle.
+    },
+    async after(context) {
+      // Runs serially after a successful command.
+    },
+  },
+})
+
+export default defineConfig({
+  appId: 'app.murasaki.example',
+  productName: 'Murasaki App',
+  plugins: [assetsPlugin],
+})
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string` | Required stable lowercase identifier. Duplicate names fail configuration validation. |
+| `vite` | `PluginOption?` | Vite contribution appended after Murasaki core plugins. Nested arrays and async Vite options follow Vite semantics. |
+| `bundle` | `BundleConfig?` | Adds `external`, `noExternal`, and `resources` in plugin declaration order. Exact duplicates are removed; `noExternal` wins when the same package is also external. |
+| `hooks.before` / `hooks.after` | `(context) => void \| Promise<void>` | Serial CLI hooks. A throw/rejection stops the command and reports the plugin name. `after` runs only after success. |
+
+Hook context contains a deeply frozen configuration snapshot (without the
+plugin objects), absolute `projectRoot`, `command` (`dev`, `build`, or
+`bundle`), and the concrete `target` for bundle commands. Plugin objects and
+functions are never serialized into `murasaki-meta.json`.
+
+This SDK extends the **build pipeline only**. It is not a native Rust ABI, a
+dynamic library loader, or a renderer/runtime plugin sandbox. Native features
+still belong in Murasaki's native host and capability model.
 
 ## `build`
 

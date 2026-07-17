@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.52.0",
+  "frameworkVersion": "0.53.0",
   "features": [
     {
       "id": "file-routing",
@@ -124,8 +124,8 @@
         "linux": "development-only"
       },
       "limitations": [
-        "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, and typed live events to renderers in development and packaged apps.",
-        "Window management is renderer-facing rather than exposed from src/main.ts; crash-restart policy and process supervision APIs are not implemented. On macOS, external Dock Quit and OS logout cannot guarantee cancellable beforeQuit through tao, although host resources and the Node child are cleaned up best-effort."
+        "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, typed live events to renderers, and declared-window management in development and packaged apps.",
+        "Configured secondary windows can be created and destroyed at runtime, and packaged hosts detect an unexpected bundled Node exit, discard unconfirmed update handoffs, tear down the backend process tree, and exit non-zero instead of leaving dead WebViews. Replayable lifecycle events, a public crash-restart policy, and health-check APIs are not implemented. On macOS, external Dock Quit and OS logout cannot guarantee cancellable beforeQuit through tao."
       ],
       "apiSymbols": [
         "murasaki/main",
@@ -138,7 +138,9 @@
       "testEvidence": [
         "packages/murasaki/test/main-runtime.test.mjs",
         "packages/murasaki/test/main-events.test.mjs",
-        "packages/murasaki/test/prod-server-http.test.mjs"
+        "packages/murasaki/test/main-windows.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs",
+        "crates/native/src/launcher.rs"
       ],
       "docsSlug": "/docs/guides/node-main"
     },
@@ -152,13 +154,16 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Primary and secondary windows can be declared, identified, shown, hidden, focused, listed, opened, and explicitly closed; runtime creation and per-window lifecycle subscriptions are not available.",
-        "Window vibrancy remains a declared no-op."
+        "Configured secondary templates can be created, destroyed, and recreated from trusted Node Main, with generation-scoped lifecycle events; renderers remain limited to showing and managing live declared windows and cannot supply runtime URLs or capability policies.",
+        "macOS hud, sidebar, and popover vibrancy materials are applied natively with transparent window/WebView composition; Windows and Linux ignore the macOS-only option."
       ],
       "apiSymbols": [
         "App",
         "WindowConfig",
         "SecondaryWindowConfig",
+        "MainWindowState",
+        "MainWindowLifecycleEvent",
+        "murasaki/main.windows",
         "murasaki/native.appWindow",
         "murasaki/native.windows"
       ],
@@ -228,14 +233,15 @@
         "linux": "partial"
       },
       "limitations": [
-        "Dialogs, clipboard, notifications, shell helpers, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
-        "Capabilities are command-level rather than argument/path-scoped, and the native renderer API is not available directly inside src/main.ts."
+        "Dialogs, clipboard, notifications, shell helpers, secure storage, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
+        "Selected target-bearing commands support inline allow/deny scopes; other arguments remain command-level, and the native renderer API is not available directly inside src/main.ts."
       ],
       "apiSymbols": [
         "murasaki/native.dialog",
         "murasaki/native.clipboard",
         "murasaki/native.notification",
         "murasaki/native.shell",
+        "murasaki/native.secureStorage",
         "murasaki/native.appWindow",
         "murasaki/native.app",
         "murasaki/native.windows"
@@ -243,6 +249,30 @@
       "testEvidence": [
         "packages/murasaki/test/native-api.test.mjs",
         ".github/workflows/native-release.yml"
+      ],
+      "docsSlug": "/docs/guides/native-apis"
+    },
+    {
+      "id": "secure-storage",
+      "category": "security",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "unsupported"
+      },
+      "limitations": [
+        "String values are stored in macOS Keychain or Windows Credential Manager under a SHA-256-derived appId/key namespace; missing keys return null, inputs and IPC are bounded, and there is no plaintext fallback.",
+        "get, set, and delete have independent deny-by-default per-window capabilities, but grants are command-level rather than per-key; renderer compromise can use every granted secure-storage operation within that app namespace."
+      ],
+      "apiSymbols": [
+        "murasaki/native.secureStorage"
+      ],
+      "testEvidence": [
+        "crates/native/src/secure_storage.rs",
+        "crates/native/src/webview.rs",
+        "packages/murasaki/test/native-api.test.mjs",
+        "packages/murasaki/test/windows.test.mjs"
       ],
       "docsSlug": "/docs/guides/native-apis"
     },
@@ -329,7 +359,7 @@
       },
       "limitations": [
         "Development privileged endpoints require an HttpOnly same-site runtime session and validate loopback Host, Origin, and Fetch Metadata.",
-        "Renderer native commands have a deny-by-default per-window allowlist, but argument/path/URL-scoped and multi-origin policies are not implemented."
+        "Renderer native commands have a deny-by-default per-window allowlist and selected value-scoped allow/deny rules, but multi-origin policy and scopes for every command argument are not implemented."
       ],
       "apiSymbols": [],
       "testEvidence": [],
@@ -368,8 +398,8 @@
         "linux": "unsupported"
       },
       "limitations": [
-        "Windows must be declared in configuration and are created eagerly; arbitrary runtime creation and recreation after explicit destruction are not implemented.",
-        "Secondary OS/self close hides for later reopening, while an explicit parent close destroys the window until restart; the application menu remains process-global and primary-owned."
+        "Windows must be declared in configuration. Secondary templates may opt out of launch-time creation and trusted Node Main can create, destroy, and recreate them; arbitrary runtime URLs, native policies, and undeclared labels are rejected.",
+        "Secondary OS/self close hides for later reopening, while Node Main destroy releases native resources and increments the generation when recreated; the application menu remains process-global and primary-owned."
       ],
       "apiSymbols": [
         "MurasakiConfig.windows",
@@ -398,17 +428,22 @@
       },
       "limitations": [
         "One process-wide macOS status item / Windows system-tray icon ships with tooltip, click events, native nested menus, menu-item events, and dynamic icon/menu replacement; the latest successful create replaces the previous owner.",
-        "Closing or disposing the owning renderer removes the icon. Menu roles are intentionally event-driven instead of privileged implicit actions; global shortcuts and Linux tray support are not implemented yet."
+        "macOS and Windows global shortcuts support bounded modifier-plus-known-key accelerators, explicit ids, owner-routed press events, same-process conflict detection, and automatic owner/shutdown cleanup behind separate register/unregister capabilities.",
+        "Shortcut availability still depends on OS-reserved bindings and other applications and requires packaged OS smoke testing. Linux tray and global shortcuts are not implemented."
       ],
       "apiSymbols": [
         "murasaki/native.tray",
         "TrayOptions",
         "TrayMenuItem",
-        "TrayClickEvent"
+        "TrayClickEvent",
+        "murasaki/native.globalShortcut",
+        "GlobalShortcutRegistration"
       ],
       "testEvidence": [
         "packages/murasaki/test/native-api.test.mjs",
-        "crates/native/src/webview.rs"
+        "crates/native/src/global_shortcut.rs",
+        "crates/native/src/webview.rs",
+        ".github/workflows/ci.yml"
       ],
       "docsSlug": "/docs/guides/native-apis"
     },
@@ -477,7 +512,7 @@
       },
       "limitations": [
         "Renderer native commands are deny-by-default and granted through a runtime-validated per-window capability allowlist; sender origin and command names are validated in Rust.",
-        "Argument/path scopes and explicit deny overrides are not implemented; secondary windows intentionally inherit no top-level grants, and privileged menu roles require their corresponding command capability."
+        "URL, path, target-window, and OS-permission scopes support explicit allow/deny rules; other arguments remain command-level, secondary windows intentionally inherit no top-level grants, and privileged menu roles require their corresponding capability."
       ],
       "apiSymbols": [
         "MurasakiConfig.capabilities",
@@ -490,6 +525,82 @@
         "packages/murasaki/test/windows.test.mjs"
       ],
       "docsSlug": "/docs/building/security"
+    },
+    {
+      "id": "diagnostics-and-logging",
+      "category": "operations",
+      "status": "partial",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Node Main provides structured JSONL logging, bounded rotation, secret-looking field redaction, shutdown flushing, and opt-in bounded diagnostic reports with application/runtime metadata and log tails.",
+        "Reports are local files and are never uploaded by Murasaki; crash capture, renderer/native-host log aggregation, symbolication, and a user-facing consent/upload flow remain application responsibilities."
+      ],
+      "apiSymbols": [
+        "MainContext.log",
+        "MainLogger",
+        "createMainLogger",
+        "DiagnosticReportOptions"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/main-logger.test.mjs",
+        "packages/murasaki/test/main-runtime.test.mjs"
+      ],
+      "docsSlug": "/docs/guides/node-main"
+    },
+    {
+      "id": "webview-session-network",
+      "category": "native-integration",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
+        "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported."
+      ],
+      "apiSymbols": [
+        "MurasakiConfig.webview",
+        "WebviewConfig",
+        "WebviewProxyConfig"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/webview-config.test.mjs",
+        "crates/native/src/webview.rs",
+        "crates/native/src/launcher.rs"
+      ],
+      "docsSlug": "/docs/building/configuration"
+    },
+    {
+      "id": "build-time-plugin-sdk",
+      "category": "tooling",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "development-only"
+      },
+      "limitations": [
+        "Trusted build-time plugins can contribute Vite PluginOptions, deterministic bundle dependencies/resources, and serial dev/build/bundle lifecycle hooks with runtime-validated stable names.",
+        "This is not a native Rust ABI, dynamic library loader, renderer/runtime plugin sandbox, or a permission boundary; plugin code has the same Node.js authority as murasaki.config.ts."
+      ],
+      "apiSymbols": [
+        "defineMurasakiPlugin",
+        "MurasakiPlugin",
+        "MurasakiPluginHookContext",
+        "MurasakiConfig.plugins"
+      ],
+      "testEvidence": [
+        "packages/murasaki/test/plugin-sdk.test.mjs",
+        "packages/murasaki/src/plugin-runtime.ts",
+        "packages/murasaki/src/vite-plugin/index.ts"
+      ],
+      "docsSlug": "/docs/building/configuration"
     },
     {
       "id": "linux-distribution",

@@ -83,10 +83,10 @@ export function useUpdate(): UpdateState & {
   const install = useCallback(() => {
     fetch(INSTALL_URL, { method: 'POST' })
       .then((res) => {
-        // The backend has spawned the detached apply-helper and deliberately
-        // does NOT quit the app itself (contract §7 step 3) — that's on the
-        // client. On failure the engine has already pushed an 'error' state
-        // over SSE, so there's nothing further to do here.
+        // The backend has written a verified handoff but deliberately does NOT
+        // quit the app itself. The native launcher spawns the detached helper
+        // only after authenticated graceful shutdown succeeds; transport
+        // failure discards the handoff instead of applying it.
         if (res.ok) return quit()
       })
       .catch((err) => {

@@ -10,6 +10,20 @@ import { parseWire, stringifyWire, WIRE_CONTENT_TYPE } from '../dist/runtime/wir
 
 const packageDir = resolve(import.meta.dirname, '..')
 
+async function copyMainRuntimeFixture(root) {
+  const runtimeRoot = join(root, '.murasaki-runtime')
+  const runtimeDir = join(runtimeRoot, 'runtime')
+  const mainDir = join(runtimeRoot, 'main')
+  await mkdir(runtimeDir, { recursive: true })
+  await mkdir(mainDir, { recursive: true })
+  await Promise.all([
+    copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(runtimeDir, 'main-runtime.js')),
+    copyFile(join(packageDir, 'dist/main/logger.js'), join(mainDir, 'logger.js')),
+    copyFile(join(packageDir, 'dist/main/sidecar.js'), join(mainDir, 'sidecar.js')),
+    writeFile(join(runtimeRoot, 'package.json'), '{"private":true,"type":"module"}\n'),
+  ])
+}
+
 test('production API server streams requests/responses and preserves HTTP semantics', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-prod-http-'))
   const clientDir = join(root, 'client')
@@ -27,6 +41,28 @@ export const registry = {
     },
     async lastSecondInstance() { return globalThis.__secondInstance },
     async lastOpenRequest() { return globalThis.__openRequest },
+    requestWindow(method, label) {
+      const key = Symbol.for('murasaki.main.window-control.v1')
+      const bus = globalThis[key] ??= {
+        version: 1, nextId: 1, phase: 'running', commands: [],
+        pending: new Map(), listeners: new Set(),
+      }
+      const id = 'fixture-' + bus.nextId++
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('fixture window timeout')), 2000)
+        bus.pending.set(id, { resolve, reject, timer })
+        bus.commands.push({ id, method, ...(label === undefined ? {} : { label }) })
+      })
+    },
+    subscribeWindows() {
+      const key = Symbol.for('murasaki.main.window-control.v1')
+      const bus = globalThis[key] ??= {
+        version: 1, nextId: 1, phase: 'running', commands: [],
+        pending: new Map(), listeners: new Set(),
+      }
+      bus.listeners.add((event) => { globalThis.__lastWindowEvent = event })
+    },
+    lastWindowEvent() { return globalThis.__lastWindowEvent },
     async publish(channel, value) {
       const key = Symbol.for('murasaki.main.events.v1')
       const bus = globalThis[key] ??= { listeners: new Set() }
@@ -86,7 +122,7 @@ export const routes = [{
   await copyFile(join(packageDir, 'assets/prod-server.mjs'), join(root, 'prod-server.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/updater.js'), join(root, 'updater-engine.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/wire.js'), join(root, 'wire.mjs'))
-  await copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(root, 'main-runtime.mjs'))
+  await copyMainRuntimeFixture(root)
 
   const child = spawn(
     process.execPath,
@@ -234,6 +270,109 @@ export const routes = [{
     body: JSON.stringify(openRequest),
   })
   assert.equal(rendererForgedOpen.status, 403)
+
+  const requestWindow = fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/call/${encodeURIComponent('src/services/main.ts')}/requestWindow`,
+    {
+      method: 'POST',
+      headers: { ...runtimeHeaders, 'content-type': WIRE_CONTENT_TYPE },
+      body: await stringifyWire({ args: ['get', 'settings'] }),
+    },
+  )
+  await new Promise((resolveOk) => setTimeout(resolveOk, 20))
+  const rendererForgedWindowPoll = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/commands`,
+    { headers: runtimeHeaders },
+  )
+  assert.equal(rendererForgedWindowPoll.status, 403)
+  const windowCommands = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/commands`,
+    { headers: nativeHeaders },
+  )
+  const [windowCommand] = await windowCommands.json()
+  assert.deepEqual(
+    { method: windowCommand.method, label: windowCommand.label },
+    { method: 'get', label: 'settings' },
+  )
+  const nativeWindowState = {
+    label: 'settings', generation: 4, primary: false, visible: false, focused: false,
+    minimized: false, maximized: false,
+  }
+  const windowResult = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/result`,
+    {
+      method: 'POST',
+      headers: { ...nativeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ id: windowCommand.id, ok: true, value: nativeWindowState }),
+    },
+  )
+  assert.equal(windowResult.status, 204)
+  assert.deepEqual(parseWire(await (await requestWindow).text()).value, nativeWindowState)
+
+  const subscribeWindows = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/call/${encodeURIComponent('src/services/main.ts')}/subscribeWindows`,
+    {
+      method: 'POST',
+      headers: { ...runtimeHeaders, 'content-type': WIRE_CONTENT_TYPE },
+      body: await stringifyWire({ args: [] }),
+    },
+  )
+  assert.equal(subscribeWindows.status, 200)
+  const windowEvent = {
+    type: 'created', label: 'settings', generation: 4, primary: false, state: nativeWindowState,
+  }
+  const publishedWindowEvent = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/event`,
+    {
+      method: 'POST',
+      headers: { ...nativeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify(windowEvent),
+    },
+  )
+  assert.equal(publishedWindowEvent.status, 204)
+  const invalidWindowEvent = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/event`,
+    {
+      method: 'POST',
+      headers: { ...nativeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...windowEvent, generation: 5 }),
+    },
+  )
+  assert.equal(invalidWindowEvent.status, 400)
+  for (const invalidEvent of [
+    { ...windowEvent, state: null },
+    { ...windowEvent, type: 'closed' },
+  ]) {
+    const response = await fetch(
+      `http://127.0.0.1:${port}/__murasaki/main/windows/event`,
+      {
+        method: 'POST',
+        headers: { ...nativeHeaders, 'content-type': 'application/json' },
+        body: JSON.stringify(invalidEvent),
+      },
+    )
+    assert.equal(response.status, 400)
+  }
+  const lastWindowEvent = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/call/${encodeURIComponent('src/services/main.ts')}/lastWindowEvent`,
+    {
+      method: 'POST',
+      headers: { ...runtimeHeaders, 'content-type': WIRE_CONTENT_TYPE },
+      body: await stringifyWire({ args: [] }),
+    },
+  )
+  assert.deepEqual(parseWire(await lastWindowEvent.text()).value, windowEvent)
+  const closedWindowEvent = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/event`,
+    {
+      method: 'POST',
+      headers: { ...nativeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'closed', label: 'settings', generation: 4, primary: false, state: null,
+      }),
+    },
+  )
+  assert.equal(closedWindowEvent.status, 204)
 
   const eventResponse = await fetch(
     `http://127.0.0.1:${port}/__murasaki/main/events?channel=relay.status`,

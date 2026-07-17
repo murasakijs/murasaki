@@ -39,10 +39,12 @@ export default defineConfig({
 | `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
 | `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したlabelをkeyにしたsecondary window — [下記](#windows)を参照。 |
-| `capabilities` | `NativeCapability[]?` | primary window向けnative command。`window.capabilities`省略時だけ利用。既定deny-all。 |
+| `webview` | `WebviewConfig?` | app-wide User-Agent、private session、unauthenticated proxy設定 — [下記](#webview)を参照。 |
+| `capabilities` | `NativeCapabilityGrant[]?` | primary window向けnative grant。`window.capabilities`省略時だけ利用。既定deny-all。 |
 | `systemPermissions` | `SystemPermissionsConfig?` | host OS同意とpackaged macOSの起動時prompt — [下記](#systempermissions)を参照。 |
 | `main` | `false \| object?` | 長寿命 Node Main entry と shutdown 上限 — [下記](#main)を参照。 |
 | `bundle` | `object?` | Node dependency と non-code resource packaging — [下記](#bundle)を参照。 |
+| `plugins` | `MurasakiPlugin[]?` | Vite、CLI hook、dependency、resourceを拡張するtrusted build-time extension — [下記](#plugins)を参照。 |
 | `build` | `object?` | pre-build command とclient公開env prefix — [下記](#build)を参照。 |
 | `security` | `object?` | rendererのContent Security Policy — [下記](#security)を参照。 |
 | `updater` | `UpdaterConfig?` | 自動更新のソース — [下記](#updater)を参照。 |
@@ -68,11 +70,12 @@ export default defineConfig({
 | `console` | `boolean?` | Windows のみ: backend Node console window を表示。既定 `false`。 |
 | `route` | `string?` | windowに読み込むsame-origin path。既定`/`。完全URL / protocol-relative URLは拒否。 |
 | `visible` | `boolean?` | 初期表示。`main`は既定`true`、secondaryは既定`false`。 |
-| `capabilities` | `NativeCapability[]?` | window別native command allowlist。secondaryは既定deny-all。 |
+| `capabilities` | `NativeCapabilityGrant[]?` | window別native grant。secondaryは既定deny-all。 |
 
-<Callout type="warn">
-  `vibrancy` は宣言できますが、ネイティブバインディングにはまだ適用されていません —
-  設定しても現時点では no-op です(サポート予定)。
+<Callout type="info">
+  macOSでは`vibrancy`に対応するsemantic `NSVisualEffectView` materialを適用し、
+  native windowとWebViewを自動的に透明化します。materialを見せる領域ではrendererの
+  backgroundも透明にしてください。他platformではこのmacOS専用optionを無視します。
 </Callout>
 
 ## `windows`
@@ -91,15 +94,70 @@ windows: {
     route: '/settings',
     width: 720,
     height: 560,
+    createOnLaunch: false,
     capabilities: [],
   },
 },
 ```
 
-labelは安全な1〜64文字で、`main`は予約済みです。secondaryは非表示で作成され、
+labelは安全な1〜64文字で、`main`は予約済みです。secondaryの`createOnLaunch`は既定
+`true`で、非表示で作成されます。`false`にするとNode Mainが`windows.create(label)`を
+呼ぶまで宣言をdormantにできます。primaryは常に起動時に作成されます。secondaryは
 top-level permissionを継承しません。`console` はWindows backend console全体を制御する
 ため、secondaryに書くと拒否されます。lifecycle / renderer APIは
 [ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
+
+| secondary専用field | 型 | 説明 |
+| --- | --- | --- |
+| `createOnLaunch` | `boolean?` | 起動時に宣言secondaryを作成する。既定`true`。`false`では信頼されたNode Main templateとして保持する。 |
+
+## `webview`
+
+developmentとpackaged macOS / Windows appの全native WebViewへ適用します。
+window単位のoverrideはありません。
+
+```ts title="murasaki.config.ts"
+webview: {
+  userAgent: 'AcmeDesktop/1.4 Murasaki',
+  incognito: true,
+  proxy: {
+    protocol: 'socks5',
+    host: '127.0.0.1',
+    port: 1080,
+  },
+},
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `userAgent` | `string?` | 完全なcustom User-Agent。trim済み・control characterなし・最大512 UTF-8 bytes。 |
+| `incognito` | `boolean?` | appのpersistent profileではなくWryのnon-persistent/private data storeを使用。既定`false`。 |
+| `proxy.protocol` | `'http' \| 'socks5'` | `http`はHTTP CONNECT、`socks5`はSOCKSv5。 |
+| `proxy.host` | `string` | 最大253 bytesのASCII DNS hostname、IPv4、またはbracket付きIPv6 literal。URLではない。 |
+| `proxy.port` | `number` | 1〜65535のinteger。 |
+
+proxy URLとauthentication fieldは意図的に非対応です。scheme、path、`user@host`、
+username、password、未知のproxy fieldはconfig validationで拒否します。認証が必要なら
+Murasaki外で設定するか、local unauthenticated forwarding proxyを使用してください。
+設定はWryのnative WebKit / WebView2 builderへ渡し、Rust hostでも再検証します。
+
+platform制約:
+
+- macOS proxyはWryの`mac-proxy` featureを使い、macOS 14以降が必要です。古いmacOSで
+  proxyを設定するとWebView startupを明示的に失敗させます。private sessionはWebKitの
+  non-persistent data storeを使います。
+- Windows proxyはWebView2 browser argumentを使います。custom User-AgentはWebView2
+  86.0.616.0以降、private modeは101.0.1210.39以降が必要で、古いruntimeではWebView2が
+  設定を無視します。
+- Linux packagingは未対応です。development buildではWry / WebKitGTKへ渡しますが、
+  Linuxはまだsupported distribution targetではありません。
+
+incognitoが制御するのはlocal WebView persistenceだけです。network anonymity、proxy / server
+からのclient秘匿、app-level Node dataのprivate化は提供しません。通常windowは1つの
+application WebContextを共有するためcookie / storageも共有します。incognito有効時は
+Wryがshared contextを無視するため、複数incognito window間のsession共有はplatform依存で
+保証されません。
+[セキュリティ](/ja/docs/building/security#webview-network-and-private-sessions)も参照してください。
 
 ## `capabilities`
 
@@ -124,6 +182,21 @@ call元rendererごとに評価します。別originのページはnative bridge�
 window管理では `window:getLabel`、`window:open`、`window:list`、`window:manage` を使います。
 applicationのprogrammatic shutdownには `app:quit` が必要です。built-in updaterを有効に
 すると、検証済みrestart handshake用としてprimary windowへ自動付与されます。
+
+target-bearing commandを限定する場合はstructured `NativeCapabilityGrant`を使います。
+`deny`は`allow`より優先し、wildcardは末尾`/**`だけです。
+
+```ts
+capabilities: [
+  { permission: 'shell:openExternal', allow: { urls: ['https://example.com/help/**'] } },
+  { permission: 'shell:showItemInFolder', allow: { paths: ['/Users/me/Documents/**'] } },
+  { permission: 'window:manage', allow: { windows: ['settings', 'preview'] } },
+  { permission: 'systemPermission:request', allow: { permissions: ['camera'] } },
+]
+```
+
+互換性のためstring grantはtarget無制限です。URL/path scopeはconfig load時に検証し、
+Rust hostでも再度強制します。
 
 ## `systemPermissions`
 
@@ -257,6 +330,55 @@ bundle: {
 
 `resources` に secret を置かないでください。app bundle 内は user が読めます。native addon
 は全 target architecture でテストしてください。
+
+## `plugins`
+
+`defineMurasakiPlugin` で trusted build-time extension を宣言します。plugin は
+`murasaki.config.ts` と同じ Node.js 権限で実行されるため、信頼できるcodeだけを
+installしてください。
+
+```ts title="murasaki.config.ts"
+import { defineConfig, defineMurasakiPlugin } from 'murasaki'
+import inspect from 'vite-plugin-inspect'
+
+const assetsPlugin = defineMurasakiPlugin({
+  name: 'acme.assets',
+  vite: inspect(),
+  bundle: {
+    external: ['native-addon'],
+    resources: [{ from: 'models', to: 'models' }],
+  },
+  hooks: {
+    async before({ command, target, projectRoot, config }) {
+      // dev / build / bundle の前にfileを生成・検査する。
+    },
+    async after(context) {
+      // command成功後に宣言順で実行する。
+    },
+  },
+})
+
+export default defineConfig({
+  appId: 'app.murasaki.example',
+  productName: 'Murasaki App',
+  plugins: [assetsPlugin],
+})
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `name` | `string` | 必須のstable lowercase identifier。重複nameはconfig validation error。 |
+| `vite` | `PluginOption?` | Murasaki core pluginの後へ追加するVite contribution。nested array / async optionはVite semanticsに従う。 |
+| `bundle` | `BundleConfig?` | `external`、`noExternal`、`resources`をplugin宣言順で追加。完全重複は除去し、同じpackageが両方にあれば`noExternal`を優先。 |
+| `hooks.before` / `hooks.after` | `(context) => void \| Promise<void>` | serial CLI hook。throw / rejectでcommandを停止しplugin nameを表示。`after`は成功後のみ実行。 |
+
+hook contextには、plugin objectを除いたdeeply frozen config snapshot、absolute
+`projectRoot`、`command` (`dev` / `build` / `bundle`)、bundle時のconcrete `target`が
+入ります。plugin object / functionは`murasaki-meta.json`へserializeされません。
+
+このSDKが拡張するのは **build pipelineだけ** です。native Rust ABI、dynamic library
+loader、renderer/runtime plugin sandboxではありません。native featureは引き続き
+Murasaki native hostとcapability modelへ実装します。
 
 ## `build`
 

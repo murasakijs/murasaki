@@ -20,6 +20,9 @@
         "notification:show",
         "shell:openExternal",
         "shell:showItemInFolder",
+        "secureStorage:get",
+        "secureStorage:set",
+        "secureStorage:delete",
         "systemPermission:status",
         "systemPermission:request",
         "window:setTitle",
@@ -39,6 +42,8 @@
         "window:open",
         "window:list",
         "window:manage",
+        "globalShortcut:register",
+        "globalShortcut:unregister",
         "tray:create",
         "tray:remove",
         "tray:setTooltip",
@@ -86,6 +91,11 @@
           "description": "Same-origin path. Full URLs, protocol-relative URLs, and backslashes are rejected."
         },
         "visible": { "type": "boolean", "default": false },
+        "createOnLaunch": {
+          "type": "boolean",
+          "default": true,
+          "description": "Create this secondary during startup. False keeps the immutable declaration available for trusted Node Main create()."
+        },
         "capabilities": {
           "type": "array",
           "items": { "$ref": "#/$defs/nativeCapability" },
@@ -139,7 +149,7 @@
     },
     "windows": {
       "type": "object",
-      "description": "Secondary windows keyed by a safe 1-64 character label. `main` is reserved. Secondary windows default to visible=false and capabilities=[]; the primary-only console option is rejected.",
+      "description": "Secondary windows keyed by a safe 1-64 character label. `main` is reserved. Secondary windows default to createOnLaunch=true, visible=false, and capabilities=[]; the primary-only console option is rejected.",
       "propertyNames": {
         "pattern": "^(?![Mm][Aa][Ii][Nn]$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
       },
@@ -180,6 +190,9 @@
           "notification:show",
           "shell:openExternal",
           "shell:showItemInFolder",
+          "secureStorage:get",
+          "secureStorage:set",
+          "secureStorage:delete",
           "systemPermission:status",
           "systemPermission:request",
           "window:setTitle",
@@ -199,6 +212,8 @@
           "window:open",
           "window:list",
           "window:manage",
+          "globalShortcut:register",
+          "globalShortcut:unregister",
           "tray:create",
           "tray:remove",
           "tray:setTooltip",
@@ -255,6 +270,68 @@
                 }
               }
             ]
+          }
+        }
+      }
+    },
+    "webview": {
+      "type": "object",
+      "description": "Application-wide native WebView User-Agent, private-session, and unauthenticated proxy settings.",
+      "additionalProperties": false,
+      "properties": {
+        "userAgent": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "description": "Trimmed custom User-Agent with at most 512 UTF-8 bytes and no control characters. Runtime validation enforces the byte bound."
+        },
+        "incognito": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use a non-persistent/private WebView data store."
+        },
+        "proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["protocol", "host", "port"],
+          "properties": {
+            "protocol": { "enum": ["http", "socks5"] },
+            "host": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "description": "ASCII hostname, IPv4 address, or bracketed IPv6 literal; URLs and credentials are rejected."
+            },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        }
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "description": "Trusted build-time extensions. Plugin code has the same Node.js authority as murasaki.config.ts and is not a native/runtime sandbox.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"
+          },
+          "vite": {
+            "description": "A Vite PluginOption; executable JavaScript values cannot be represented completely in JSON Schema."
+          },
+          "bundle": { "$ref": "#/properties/bundle" },
+          "hooks": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "before": { "description": "A build-time JavaScript function run serially before the CLI command." },
+              "after": { "description": "A build-time JavaScript function run serially after a successful CLI command." }
+            }
           }
         }
       }

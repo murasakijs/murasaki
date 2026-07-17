@@ -10,8 +10,9 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 
 <Callout type="warn">
   renderer native command は deny-by-default で、型付き `capabilities` list から許可
-  します。宣言windowごとに独立したallowlistがありますが、argument / path / URL scope
-  はありません。renderer-to-Node関数もprivileged application codeとして扱い、surfaceを
+  します。宣言windowごとに独立したallowlistがあり、resourceを受け取るcommandでは
+  URL、path、target window、OS permissionをscopeできます。renderer-to-Node関数も
+  privileged application codeとして扱い、surfaceを
   小さく保ってください。
 </Callout>
 
@@ -30,6 +31,31 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 `localhost` / `127.0.0.1` / `[::1]` を許可し、cross-site Fetch Metadata を拒否します。
 session cookie は最初の document response が設定し、JavaScript からは読めません。
 
+## WebView network and private sessions
+
+`webview.userAgent`、`webview.incognito`、`webview.proxy`はapp-wide native browser
+設定で、renderer permissionではありません。native command allowlistを拡張せず、Murasakiの
+same-origin navigation / IPC checkも緩和しません。
+
+- private / incognito sessionはWebViewがappのpersistent browser profileを使わないように
+  します。userのIP addressを隠さず、Node Mainが書いたfileを消さず、app serverに対する
+  anonymityも提供しません。
+- 通常windowはcookieとWeb Storageを含む1つのapplication WebContextを共有し、destroy /
+  recreate後も利用できます。incognito有効時はWryがshared contextを無視するため、複数の
+  incognito windowが1つのprivate sessionを共有する保証はなく、動作はplatform依存です。
+- custom User-Agentはappがrequestするoriginへ送られ、fingerprinting情報を増やす場合が
+  あります。platform User-Agentの置換でserver compatibility / authentication flowが壊れる
+  可能性もあります。
+- HTTP CONNECT / SOCKSv5 proxyはdestinationとtraffic metadataを観測でき、暗号化されない
+  HTTP trafficも読めます。proxy operatorを信頼できる場合だけ使い、OS WebViewのTLS検証を
+  維持してください。
+- proxy credentialは受け付けません。`host`やbundle metadataへsecretを埋め込まないで
+  ください。Murasakiはstartup前にURL、credential、未知のproxy fieldを拒否し、Rustでも
+  endpointを再検証します。
+
+size limitとmacOS / WebView2 version要件は
+[設定](/ja/docs/building/configuration#webview)を参照してください。
+
 ## Native command を明示的に許可する
 
 ```ts title="murasaki.config.ts"
@@ -38,7 +64,21 @@ export default defineConfig({
   productName: 'Notes',
   window: {
     route: '/',
-    capabilities: ['app:quit', 'dialog:openFile', 'shell:openExternal', 'window:open'],
+    capabilities: [
+      'app:quit',
+      'dialog:openFile',
+      'secureStorage:get',
+      'secureStorage:set',
+      'secureStorage:delete',
+      'globalShortcut:register',
+      'globalShortcut:unregister',
+      {
+        permission: 'shell:openExternal',
+        allow: { urls: ['https://docs.example.com/**'] },
+        deny: { urls: ['https://docs.example.com/internal/**'] },
+      },
+      { permission: 'window:open', allow: { windows: ['settings'] } },
+    ],
   },
   windows: {
     preview: { route: '/preview', capabilities: ['clipboard:writeText'] },
@@ -50,12 +90,51 @@ export default defineConfig({
 capabilityを省略すると何も許可されません。ただしprimaryは`window.capabilities`がない
 場合だけlegacy top-level listへfallbackし、secondaryは継承しません。未知の文字列も何も
 許可せず、bridgeはtrusted app originと完全一致するcallだけを受け付けます。allowlistは
-command単位で、dialogを1 directory、external URLを1 hostに限定できません。
-`window:manage`は全宣言windowをtargetにできるため、信頼するrendererだけへ付与し、より
-狭いintentはapp codeでも強制します。application全体のprogrammatic shutdownは
+次のresource fieldをscopeできます。
+
+| Permission | Scope field |
+| --- | --- |
+| `shell:openExternal` | exact URL、またはHTTP(S)末尾`/**` subtreeの`urls` |
+| `shell:showItemInFolder` | absoluteかつ非traversalの`paths`。exactまたは末尾`/**` |
+| `window:open`、`window:manage` | 宣言済みlabelと完全一致する`windows` |
+| `systemPermission:status`、`systemPermission:request` | 完全一致する`permissions`名 |
+
+明示`deny`は`allow`より優先します。`deny`だけのstructured grantはそれ以外を許可し、
+従来のstring grantはそのcommandのtargetを制限しません。dialogなど他のcommandは引き続き
+command単位です。広いgrantは信頼するrendererだけへ付与し、より狭いintentはNode側でも
+強制します。application全体のprogrammatic shutdownは
 `app:quit` で別に制御されます。
 
-## シークレットは Node に置く
+runtime window作成は信頼されたNode Mainだけが、configで宣言したlabelに対して実行できます。
+private native transportが運ぶのはmethodとlabelだけで、URLやcapability listは受け取りません。
+Rust hostは設定済みtemplateのimmutableなrouteとpolicyを使用します。rendererの
+`windows.open()`はshow-onlyのままで、dormant / destroyed windowを生成できません。
+
+global shortcutもaccelerator scopeではなくcommand単位です。
+`globalShortcut:register`は上限付きnative parserが受理する任意acceleratorをrequestでき、
+`globalShortcut:unregister`は呼び出したrendererが所有する登録だけを解除できます。Murasakiは
+重複・予約chordを拒否しowner close時に登録を解放しますが、他appが取得済みのchordを奪う
+ことはできません。登録はtrusted rendererに置き、stable idを使い、availability errorを
+通常の競合として処理してください。
+
+## rendererが必要とするsecretをOS credential storeへ保存する
+
+`murasaki/native`の`secureStorage.get/set/delete`は、信頼済みrendererが必要とする短い
+string値向けです。native hostはmacOS KeychainまたはWindows Credential Managerだけへ
+保存します。service / account identifierは`appId`とkeyから導出し、空文字・NUL・UTF-8
+byte上限を検証します。plaintext fallbackはありません。未登録値は`null`、未登録keyの
+deleteも成功し、Linuxでは`unsupported`を返します。
+
+`secureStorage:get`、`secureStorage:set`、`secureStorage:delete`は別々にgrantしてください。
+これらはkey scopeではありません。read権限を持つrendererはapp namespace内のすべてのkeyを
+queryできるため、untrusted codeを読み込むwindowには付与しないでください。OS credential
+storeはat-rest dataを保護しますが、そのcapabilityで実行中のXSSからは保護しません。
+
+keyは256 UTF-8 byte以下、valueは2,048 UTF-8 byte以下で、どちらも空文字とNULを拒否します。
+native IPC body全体にも256 KiB上限があります。`appId`を変更すると新namespaceから既存entryを
+発見できなくなるため、release間で維持してください。
+
+## server-only secretはNodeに置く
 
 renderer code から import したものは public client JavaScript になり得ます。API token、
 private key、DB credential、license validation は `src/main.ts`、`'use main'`、
@@ -196,11 +275,14 @@ notarization または Murasaki の Windows Authenticode `--sign` flow、更新�
 
 ## 既知の security gap
 
-- Native capabilityはcommand単位・window別だが、path / URL / argument scopeや独立policy
-  fileがない
+- Native capabilityはwindow別で、一部のtarget-bearing commandはinline allow/deny scopeに
+  対応する。dialog default、clipboard content、tray menu content、secure storage keyなど
+  他のargumentはまだscopeできず、policyは独立署名fileではなくconfigで管理する
 - 宣言windowは1つのapplication originと認証済みlocal Node sessionを共有する。native
   allowlistはServer Actions、`'use main'`、API route、updater endpointを隔離しないため、
   application code側で操作を認証・認可する必要がある
+- incognitoはpersistent profileを使わないが、複数incognito windowが同じin-memory
+  sessionを共有する保証はない
 - Linux package signing は未実装。Windows Authenticode には developer が用意した
   certificate / Artifact Signing provider と Windows SDK SignTool が必要
 - Linux の protocol / file-association 登録は未実装。Windows portable archive は意図的に self-register しない

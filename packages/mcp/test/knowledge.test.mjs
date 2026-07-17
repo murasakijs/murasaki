@@ -72,6 +72,8 @@ test('configuration schema top-level properties track MurasakiConfig', async () 
   assert.deepEqual(schema.properties.fileAssociations.items.required, ['extensions'])
   assert.equal(schema.properties.fileAssociations.items.properties.extensions.minItems, 1)
   assert.deepEqual(schema.properties.fileAssociations.items.properties.role.enum, ['viewer', 'editor', 'shell', 'none'])
+  assert.equal(schema.$defs.windowConfig.properties.createOnLaunch.type, 'boolean')
+  assert.equal(schema.$defs.windowConfig.properties.createOnLaunch.default, true)
 })
 
 test('search_docs returns canonical localized documentation', async () => {
@@ -102,6 +104,7 @@ test('config schema supports dot paths and rejects unknown paths', async () => {
   const missing = await getConfigSchema({ path: 'window.alwaysOnTop' })
   assert.equal(missing.found, false)
   assert.ok(missing.availableProperties.includes('width'))
+
 })
 
 test('compatibility never upgrades planned features to supported', async () => {

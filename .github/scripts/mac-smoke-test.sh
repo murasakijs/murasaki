@@ -2,7 +2,9 @@
 # Smoke-test a packaged Murasaki macOS application without signing or
 # notarization. The bundle executable is launched directly, which avoids
 # Gatekeeper while exercising the same launcher and embedded production server
-# that users run after installation.
+# that users run after installation. Passing `true` as the fifth argument also
+# kills the bundled Node child and proves the host closes instead of leaving a
+# dead WebView behind.
 
 set -euo pipefail
 
@@ -10,13 +12,14 @@ APP_PATH=${1:-}
 LOG_DIR=${2:-"${RUNNER_TEMP:-/tmp}/murasaki-mac-smoke"}
 TIMEOUT_SECONDS=${3:-60}
 EXPECTED_MARKER=${4:-}
+EXPECT_BACKEND_CRASH=${5:-false}
 LAUNCHER_PID=''
 TREE_PIDS=()
 STDOUT_LOG="$LOG_DIR/launcher.stdout.log"
 STDERR_LOG="$LOG_DIR/launcher.stderr.log"
 
 usage() {
-  echo "usage: $0 <path-to-app> [log-directory] [timeout-seconds] [expected-marker]" >&2
+  echo "usage: $0 <path-to-app> [log-directory] [timeout-seconds] [expected-marker] [expect-backend-crash]" >&2
 }
 
 dump_logs() {
@@ -170,4 +173,35 @@ if ! kill -0 "$LAUNCHER_PID" 2>/dev/null; then
   fail 'launcher exited shortly after the backend became ready'
 fi
 
-echo 'Launcher is still running; macOS bundle smoke test passed.'
+if [[ "$EXPECT_BACKEND_CRASH" == true ]]; then
+  NODE_PID=$(pgrep -P "$LAUNCHER_PID" | head -n 1 || true)
+  if [[ -z "$NODE_PID" ]]; then
+    fail 'could not find the bundled Node child for crash supervision test'
+  fi
+  echo "Killing bundled Node child $NODE_PID to verify host supervision ..."
+  kill -KILL "$NODE_PID"
+  CRASH_DEADLINE=$((SECONDS + 10))
+  while (( SECONDS < CRASH_DEADLINE )); do
+    if ! kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  if kill -0 "$LAUNCHER_PID" 2>/dev/null; then
+    fail 'launcher left a dead UI running after the bundled Node child exited'
+  fi
+  set +e
+  wait "$LAUNCHER_PID"
+  LAUNCHER_STATUS=$?
+  set -e
+  LAUNCHER_PID=''
+  if [[ $LAUNCHER_STATUS -eq 0 ]]; then
+    fail 'launcher reported success after an unexpected bundled Node exit'
+  fi
+  if [[ -e "$APP_PATH/Contents/Resources/.murasaki-apply.json" ]]; then
+    fail 'launcher retained an unconfirmed update handoff after backend failure'
+  fi
+  echo 'Unexpected bundled Node exit closed the host with a non-zero status.'
+else
+  echo 'Launcher is still running; macOS bundle smoke test passed.'
+fi

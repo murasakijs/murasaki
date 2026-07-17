@@ -22,8 +22,8 @@ Murasaki は TypeScript ファーストのデスクトップフレームワー�
 ——を **React 19 + Vite** の上に構築し、**マシンに標準搭載の OS WebView** でレンダリングします
 (Chromium は同梱しません)。ネイティブウィンドウ、メニュー、OS 連携は自作の Rust バインディング
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) が担っており
-——あなたが書くのは TypeScript だけで、Rust を書くことはありません。対応ターゲットは
-本番向けの対応対象は **macOS / Windows** です。Linux は現在、開発ランタイムのみを提供し、
+——あなたが書くのは TypeScript だけで、Rust を書くことはありません。本番向けの
+対応対象は **macOS / Windows** です。Linux は現在、開発ランタイムのみを提供し、
 パッケージング対応は保証していません。
 
 ```bash
@@ -205,6 +205,21 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
 - **macOSシステム権限** — camera / microphoneの用途説明と任意の起動時promptをconfigに
   宣言し、信頼済みrendererからcamera、microphone、screen recording、accessibilityの
   status取得 / requestができます。
+- **Node Main lifecycleとhelper監視** — `src/main.ts`に長寿命TypeScriptを置き、`ready`、
+  cancel可能な`beforeQuit`、上限付き`shutdown`、second instance / deep link配送、構造化log、
+  diagnostic report、restart policy付きsidecarを利用できます。packaged hostはNodeの異常終了を
+  検出し、process treeを停止して非ゼロ終了するため、backendが死んだUIを残しません。
+- **宣言型multi-window runtime** — windowごとにrouteとdeny-by-default capabilityを設定し、
+  secondary templateをNode Mainの`windows.create()`までdormantにできます。破棄・再生成と
+  generation付きlifecycle eventに対応し、macOSでは`hud` / `sidebar` / `popover` vibrancyを
+  native materialとして適用します。
+- **本番向けsecurity primitive** — exact-origin native IPC、認証付きloopback endpoint、
+  上限付きwire payload、CSP default、URL / path / window / permission scope、macOS Keychain /
+  Windows Credential Manager、owner別global shortcut、app-wide private session / User-Agent /
+  proxy設定を型付きで提供します。正確な成熟度と制約は
+  [`capabilities.json`](./packages/murasaki/capabilities.json)を参照してください。
+- **build-time plugin SDK** — trusted pluginからVite option、bundle dependency / resource、
+  直列のdev / build / bundle hookを追加でき、Murasaki coreをpatchする必要はありません。
 - **実際に動く Server Actions** — `defineAction` + `useAction` は React 19 の
   `useActionState` の形をそのまま踏襲し、`'use server'` 関数は実際に Node 上で
   実行されます——開発時は Vite ミドルウェア、本番時はバンドルされた Node の

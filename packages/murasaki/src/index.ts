@@ -4,9 +4,18 @@
  * The public surface. Import from `"murasaki"` in user code.
  */
 
-export { defineConfig, resolveWindowDeclarations } from './config.js'
+export { defineConfig, defineMurasakiPlugin, resolveWindowDeclarations } from './config.js'
 export type {
+  BundleConfig,
+  BundleResource,
   MurasakiConfig,
+  MurasakiBuildTarget,
+  MurasakiDeepReadonly,
+  MurasakiPlugin,
+  MurasakiPluginCommand,
+  MurasakiPluginHookConfig,
+  MurasakiPluginHookContext,
+  MurasakiPluginHooks,
   FileAssociationConfig,
   MacOSCapturePermissionConfig,
   MacOSPromptPermissionConfig,
@@ -18,6 +27,8 @@ export type {
   SystemPermissionsConfig,
   UpdaterConfig,
   WindowsSigningConfig,
+  WebviewConfig,
+  WebviewProxyConfig,
   WindowConfig,
 } from './config.js'
 

@@ -5,8 +5,10 @@
 
 use std::{cell::RefCell, rc::Rc};
 
+use muda::{
+    accelerator::Accelerator, AboutMetadata, Icon, Menu, MenuItem, PredefinedMenuItem, Submenu,
+};
 use napi::bindgen_prelude::{Error, Result, Status};
-use muda::{accelerator::Accelerator, AboutMetadata, Icon, Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 use crate::types::MenuItemOptions;
 
@@ -20,10 +22,10 @@ use crate::types::MenuItemOptions;
 pub(crate) type SharedMenu = Rc<RefCell<Option<Menu>>>;
 
 pub(crate) mod native_menu_ids {
-  pub(crate) const QUIT: &str = "murasaki-menu:quit";
-  pub(crate) const CLOSE: &str = "murasaki-menu:close";
-  pub(crate) const MINIMIZE: &str = "murasaki-menu:minimize";
-  pub(crate) const ZOOM: &str = "murasaki-menu:zoom";
+    pub(crate) const QUIT: &str = "murasaki-menu:quit";
+    pub(crate) const CLOSE: &str = "murasaki-menu:close";
+    pub(crate) const MINIMIZE: &str = "murasaki-menu:minimize";
+    pub(crate) const ZOOM: &str = "murasaki-menu:zoom";
 }
 
 /// A single top-level menu in `useAppMenu`'s wire payload (`{ kind:
@@ -38,30 +40,30 @@ pub(crate) mod native_menu_ids {
 #[derive(Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub(crate) struct AppMenuSpec {
-  pub(crate) role: Option<String>,
-  pub(crate) label: Option<String>,
-  pub(crate) items: Option<Vec<MenuItemOptions>>,
+    pub(crate) role: Option<String>,
+    pub(crate) label: Option<String>,
+    pub(crate) items: Option<Vec<MenuItemOptions>>,
 }
 
 pub(crate) fn build_menu(items: &[MenuItemOptions]) -> Result<Menu> {
-  let menu = Menu::new();
-  for item in items {
-    append_item(&menu, item)?;
-  }
-  Ok(menu)
+    let menu = Menu::new();
+    for item in items {
+        append_item(&menu, item)?;
+    }
+    Ok(menu)
 }
 
 /// Inputs for the native "About <app>" panel. See `build_about_credits` and
 /// `build_default_app_menu` for how these map onto muda's `AboutMetadata` —
 /// macOS and Windows/Linux render different subsets of its fields.
 pub(crate) struct AboutInfo<'a> {
-  pub name: &'a str,
-  pub icon_path: Option<&'a str>,
-  pub version: Option<&'a str>,
-  pub description: Option<&'a str>,
-  pub copyright: Option<&'a str>,
-  pub homepage: Option<&'a str>,
-  pub authors: Option<&'a [String]>,
+    pub name: &'a str,
+    pub icon_path: Option<&'a str>,
+    pub version: Option<&'a str>,
+    pub description: Option<&'a str>,
+    pub copyright: Option<&'a str>,
+    pub homepage: Option<&'a str>,
+    pub authors: Option<&'a [String]>,
 }
 
 /// Owned counterpart of `AboutInfo` — needed wherever the about-metadata has
@@ -73,27 +75,27 @@ pub(crate) struct AboutInfo<'a> {
 /// menu was built from.
 #[derive(Clone)]
 pub(crate) struct AboutInfoOwned {
-  pub name: String,
-  pub icon_path: Option<String>,
-  pub version: Option<String>,
-  pub description: Option<String>,
-  pub copyright: Option<String>,
-  pub homepage: Option<String>,
-  pub authors: Option<Vec<String>>,
+    pub name: String,
+    pub icon_path: Option<String>,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub copyright: Option<String>,
+    pub homepage: Option<String>,
+    pub authors: Option<Vec<String>>,
 }
 
 impl AboutInfoOwned {
-  pub(crate) fn as_ref(&self) -> AboutInfo<'_> {
-    AboutInfo {
-      name: &self.name,
-      icon_path: self.icon_path.as_deref(),
-      version: self.version.as_deref(),
-      description: self.description.as_deref(),
-      copyright: self.copyright.as_deref(),
-      homepage: self.homepage.as_deref(),
-      authors: self.authors.as_deref(),
+    pub(crate) fn as_ref(&self) -> AboutInfo<'_> {
+        AboutInfo {
+            name: &self.name,
+            icon_path: self.icon_path.as_deref(),
+            version: self.version.as_deref(),
+            description: self.description.as_deref(),
+            copyright: self.copyright.as_deref(),
+            homepage: self.homepage.as_deref(),
+            authors: self.authors.as_deref(),
+        }
     }
-  }
 }
 
 /// Builds the standard macOS application menu bar (App / Edit / Window) for
@@ -114,102 +116,107 @@ impl AboutInfoOwned {
 /// factored out so both paths render identical App/Edit/Window submenus.
 #[cfg(target_os = "macos")]
 pub(crate) fn build_default_app_menu(
-  info: &AboutInfo,
-  labels: Option<&crate::types::MenuLabels>,
+    info: &AboutInfo,
+    labels: Option<&crate::types::MenuLabels>,
 ) -> Result<Menu> {
-  let menu = Menu::new();
-  let app_menu = build_macos_app_submenu(info, labels)?;
-  let edit_menu = build_macos_edit_submenu(labels)?;
-  let window_menu = build_macos_window_submenu(labels)?;
+    let menu = Menu::new();
+    let app_menu = build_macos_app_submenu(info, labels)?;
+    let edit_menu = build_macos_edit_submenu(labels)?;
+    let window_menu = build_macos_window_submenu(labels)?;
 
-  menu
-    .append_items(&[&app_menu, &edit_menu, &window_menu])
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    menu.append_items(&[&app_menu, &edit_menu, &window_menu])
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  Ok(menu)
+    Ok(menu)
 }
 
 /// The bold "app name" submenu (About/Services/Hide/HideOthers/ShowAll/Quit)
 /// — see `build_default_app_menu`'s doc comment.
 #[cfg(target_os = "macos")]
-fn build_macos_app_submenu(info: &AboutInfo, labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-  let about_label = labels
-    .and_then(|l| l.about.as_deref())
-    .map(String::from)
-    .unwrap_or_else(|| format!("About {}", info.name));
-  // Provide explicit metadata so the standard About panel shows the product
-  // name — without it macOS derives the panel from the running process, which
-  // is the bundled `node` binary, and the panel reads "node". Likewise, the
-  // panel only shows an icon if `icon` is `Some` — otherwise it falls back to
-  // the bundle icon, which the bundled `node` process isn't associated with.
-  let about_metadata = AboutMetadata {
-    name: Some(info.name.to_string()),
-    version: info.version.map(|s| s.to_string()),
-    comments: info.description.map(|s| s.to_string()),
-    copyright: info.copyright.map(|s| s.to_string()),
-    website: info.homepage.map(|s| s.to_string()),
-    authors: info.authors.map(|a| a.to_vec()),
-    credits: build_about_credits(info.description, info.homepage),
-    icon: info.icon_path.and_then(load_icon_rgba),
-    ..Default::default()
-  };
+fn build_macos_app_submenu(
+    info: &AboutInfo,
+    labels: Option<&crate::types::MenuLabels>,
+) -> Result<Submenu> {
+    let about_label = labels
+        .and_then(|l| l.about.as_deref())
+        .map(String::from)
+        .unwrap_or_else(|| format!("About {}", info.name));
+    // Provide explicit metadata so the standard About panel shows the product
+    // name — without it macOS derives the panel from the running process, which
+    // is the bundled `node` binary, and the panel reads "node". Likewise, the
+    // panel only shows an icon if `icon` is `Some` — otherwise it falls back to
+    // the bundle icon, which the bundled `node` process isn't associated with.
+    let about_metadata = AboutMetadata {
+        name: Some(info.name.to_string()),
+        version: info.version.map(|s| s.to_string()),
+        comments: info.description.map(|s| s.to_string()),
+        copyright: info.copyright.map(|s| s.to_string()),
+        website: info.homepage.map(|s| s.to_string()),
+        authors: info.authors.map(|a| a.to_vec()),
+        credits: build_about_credits(info.description, info.homepage),
+        icon: info.icon_path.and_then(load_icon_rgba),
+        ..Default::default()
+    };
 
-  let app_menu = Submenu::new(info.name, true);
-  let quit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit");
-  let quit_accelerator = "CmdOrCtrl+Q".parse::<Accelerator>().ok();
-  app_menu
-    .append_items(&[
-      &PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)),
-      &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::services(labels.and_then(|l| l.services.as_deref())),
-      &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::hide(labels.and_then(|l| l.hide.as_deref())),
-      &PredefinedMenuItem::hide_others(labels.and_then(|l| l.hide_others.as_deref())),
-      &PredefinedMenuItem::show_all(labels.and_then(|l| l.show_all.as_deref())),
-      &PredefinedMenuItem::separator(),
-      &MenuItem::with_id(native_menu_ids::QUIT, quit_label, true, quit_accelerator),
-    ])
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    let app_menu = Submenu::new(info.name, true);
+    let quit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit");
+    let quit_accelerator = "CmdOrCtrl+Q".parse::<Accelerator>().ok();
+    app_menu
+        .append_items(&[
+            &PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::services(labels.and_then(|l| l.services.as_deref())),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::hide(labels.and_then(|l| l.hide.as_deref())),
+            &PredefinedMenuItem::hide_others(labels.and_then(|l| l.hide_others.as_deref())),
+            &PredefinedMenuItem::show_all(labels.and_then(|l| l.show_all.as_deref())),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(native_menu_ids::QUIT, quit_label, true, quit_accelerator),
+        ])
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  Ok(app_menu)
+    Ok(app_menu)
 }
 
 /// The standard Edit submenu (Undo/Redo/sep/Cut/Copy/Paste/Select All) — see
 /// `build_default_app_menu`'s doc comment.
 #[cfg(target_os = "macos")]
 fn build_macos_edit_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-  let edit_menu = Submenu::new(labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"), true);
-  edit_menu
-    .append_items(&[
-      &PredefinedMenuItem::undo(labels.and_then(|l| l.undo.as_deref())),
-      &PredefinedMenuItem::redo(labels.and_then(|l| l.redo.as_deref())),
-      &PredefinedMenuItem::separator(),
-      &PredefinedMenuItem::cut(labels.and_then(|l| l.cut.as_deref())),
-      &PredefinedMenuItem::copy(labels.and_then(|l| l.copy.as_deref())),
-      &PredefinedMenuItem::paste(labels.and_then(|l| l.paste.as_deref())),
-      &PredefinedMenuItem::select_all(labels.and_then(|l| l.select_all.as_deref())),
-    ])
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    let edit_menu = Submenu::new(
+        labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"),
+        true,
+    );
+    edit_menu
+        .append_items(&[
+            &PredefinedMenuItem::undo(labels.and_then(|l| l.undo.as_deref())),
+            &PredefinedMenuItem::redo(labels.and_then(|l| l.redo.as_deref())),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::cut(labels.and_then(|l| l.cut.as_deref())),
+            &PredefinedMenuItem::copy(labels.and_then(|l| l.copy.as_deref())),
+            &PredefinedMenuItem::paste(labels.and_then(|l| l.paste.as_deref())),
+            &PredefinedMenuItem::select_all(labels.and_then(|l| l.select_all.as_deref())),
+        ])
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  Ok(edit_menu)
+    Ok(edit_menu)
 }
 
 /// The standard Window submenu (Minimize/Zoom) — see `build_default_app_menu`'s
 /// doc comment.
 #[cfg(target_os = "macos")]
 fn build_macos_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-  let window_menu = Submenu::new(
-    labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"),
-    true,
-  );
-  window_menu
-    .append_items(&[
-      &PredefinedMenuItem::minimize(labels.and_then(|l| l.minimize.as_deref())),
-      &PredefinedMenuItem::maximize(labels.and_then(|l| l.zoom.as_deref())),
-    ])
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    let window_menu = Submenu::new(
+        labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"),
+        true,
+    );
+    window_menu
+        .append_items(&[
+            &PredefinedMenuItem::minimize(labels.and_then(|l| l.minimize.as_deref())),
+            &PredefinedMenuItem::maximize(labels.and_then(|l| l.zoom.as_deref())),
+        ])
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  Ok(window_menu)
+    Ok(window_menu)
 }
 
 /// Builds a full menu bar from `useAppMenu`'s serialized spec (see
@@ -236,45 +243,41 @@ fn build_macos_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Resu
 /// why macOS never needed a persistent poll before this feature).
 #[cfg(target_os = "macos")]
 pub(crate) fn build_macos_app_menu_from_spec(
-  menus: &[crate::menu::AppMenuSpec],
-  info: &AboutInfo,
-  labels: Option<&crate::types::MenuLabels>,
+    menus: &[crate::menu::AppMenuSpec],
+    info: &AboutInfo,
+    labels: Option<&crate::types::MenuLabels>,
 ) -> Result<Menu> {
-  let menu = Menu::new();
+    let menu = Menu::new();
 
-  let app_menu = build_macos_app_submenu(info, labels)?;
-  menu
-    .append(&app_menu)
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    let app_menu = build_macos_app_submenu(info, labels)?;
+    menu.append(&app_menu)
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  for spec in menus {
-    match spec.role.as_deref() {
-      Some("editMenu") => {
-        let sub = build_macos_edit_submenu(labels)?;
-        menu
-          .append(&sub)
-          .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      }
-      Some("windowMenu") => {
-        let sub = build_macos_window_submenu(labels)?;
-        menu
-          .append(&sub)
-          .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      }
-      _ => {
-        let label = spec.label.as_deref().unwrap_or("");
-        let sub = Submenu::new(label, true);
-        for item in spec.items.as_deref().unwrap_or(&[]) {
-          append_app_menu_item_macos(&sub, item, labels)?;
+    for spec in menus {
+        match spec.role.as_deref() {
+            Some("editMenu") => {
+                let sub = build_macos_edit_submenu(labels)?;
+                menu.append(&sub)
+                    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            }
+            Some("windowMenu") => {
+                let sub = build_macos_window_submenu(labels)?;
+                menu.append(&sub)
+                    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            }
+            _ => {
+                let label = spec.label.as_deref().unwrap_or("");
+                let sub = Submenu::new(label, true);
+                for item in spec.items.as_deref().unwrap_or(&[]) {
+                    append_app_menu_item_macos(&sub, item, labels)?;
+                }
+                menu.append(&sub)
+                    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            }
         }
-        menu
-          .append(&sub)
-          .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      }
     }
-  }
 
-  Ok(menu)
+    Ok(menu)
 }
 
 /// Item-level role → muda `PredefinedMenuItem`, localized via `labels` (unlike
@@ -284,56 +287,70 @@ pub(crate) fn build_macos_app_menu_from_spec(
 /// `menu-locales.json` entry — same known gap as `build_windows_menu_bar`'s
 /// "File"/"Exit"), so it always falls back to muda's English default.
 #[cfg(target_os = "macos")]
-fn predefined_localized(role: &str, labels: Option<&crate::types::MenuLabels>) -> Option<PredefinedMenuItem> {
-  match role {
-    "undo" => Some(PredefinedMenuItem::undo(labels.and_then(|l| l.undo.as_deref()))),
-    "redo" => Some(PredefinedMenuItem::redo(labels.and_then(|l| l.redo.as_deref()))),
-    "cut" => Some(PredefinedMenuItem::cut(labels.and_then(|l| l.cut.as_deref()))),
-    "copy" => Some(PredefinedMenuItem::copy(labels.and_then(|l| l.copy.as_deref()))),
-    "paste" => Some(PredefinedMenuItem::paste(labels.and_then(|l| l.paste.as_deref()))),
-    "selectAll" => Some(PredefinedMenuItem::select_all(labels.and_then(|l| l.select_all.as_deref()))),
-    // A `{ separator: true }` spec is serialized to the wire as `role:
-    // "separator"` (see app-menu.tsx / context-menu.tsx), so it arrives here,
-    // not through `item.separator` — mirror the context-menu path's
-    // `predefined()`, which handles it the same way.
-    "separator" => Some(PredefinedMenuItem::separator()),
-    _ => None,
-  }
+fn predefined_localized(
+    role: &str,
+    labels: Option<&crate::types::MenuLabels>,
+) -> Option<PredefinedMenuItem> {
+    match role {
+        "undo" => Some(PredefinedMenuItem::undo(
+            labels.and_then(|l| l.undo.as_deref()),
+        )),
+        "redo" => Some(PredefinedMenuItem::redo(
+            labels.and_then(|l| l.redo.as_deref()),
+        )),
+        "cut" => Some(PredefinedMenuItem::cut(
+            labels.and_then(|l| l.cut.as_deref()),
+        )),
+        "copy" => Some(PredefinedMenuItem::copy(
+            labels.and_then(|l| l.copy.as_deref()),
+        )),
+        "paste" => Some(PredefinedMenuItem::paste(
+            labels.and_then(|l| l.paste.as_deref()),
+        )),
+        "selectAll" => Some(PredefinedMenuItem::select_all(
+            labels.and_then(|l| l.select_all.as_deref()),
+        )),
+        // A `{ separator: true }` spec is serialized to the wire as `role:
+        // "separator"` (see app-menu.tsx / context-menu.tsx), so it arrives here,
+        // not through `item.separator` — mirror the context-menu path's
+        // `predefined()`, which handles it the same way.
+        "separator" => Some(PredefinedMenuItem::separator()),
+        _ => None,
+    }
 }
 
 fn lifecycle_role_item(
-  role: &str,
-  label: &str,
-  enabled: bool,
-  accelerator: Option<Accelerator>,
+    role: &str,
+    label: &str,
+    enabled: bool,
+    accelerator: Option<Accelerator>,
 ) -> Option<MenuItem> {
-  let (id, fallback_label) = match role {
-    "quit" => (native_menu_ids::QUIT, "Quit"),
-    "close" | "closeWindow" | "close-window" => (native_menu_ids::CLOSE, "Close"),
-    "minimize" => (native_menu_ids::MINIMIZE, "Minimize"),
-    "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => {
-      (native_menu_ids::ZOOM, "Zoom")
-    }
-    _ => return None,
-  };
-  let accelerator = lifecycle_role_accelerator(role, accelerator);
-  Some(MenuItem::with_id(
-    id,
-    if label.is_empty() { fallback_label } else { label },
-    enabled,
-    accelerator,
-  ))
+    let (id, fallback_label) = match role {
+        "quit" => (native_menu_ids::QUIT, "Quit"),
+        "close" | "closeWindow" | "close-window" => (native_menu_ids::CLOSE, "Close"),
+        "minimize" => (native_menu_ids::MINIMIZE, "Minimize"),
+        "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => (native_menu_ids::ZOOM, "Zoom"),
+        _ => return None,
+    };
+    let accelerator = lifecycle_role_accelerator(role, accelerator);
+    Some(MenuItem::with_id(
+        id,
+        if label.is_empty() {
+            fallback_label
+        } else {
+            label
+        },
+        enabled,
+        accelerator,
+    ))
 }
 
-fn lifecycle_role_accelerator(
-  role: &str,
-  accelerator: Option<Accelerator>,
-) -> Option<Accelerator> {
-  accelerator.or_else(|| {
-    matches!(role, "close" | "closeWindow" | "close-window")
-      .then(|| "CmdOrCtrl+W".parse::<Accelerator>().ok())
-      .flatten()
-  })
+fn lifecycle_role_accelerator(role: &str, accelerator: Option<Accelerator>) -> Option<Accelerator> {
+    accelerator.or_else(|| {
+        matches!(role, "close" | "closeWindow" | "close-window")
+            .then(|| "CmdOrCtrl+W".parse::<Accelerator>().ok())
+            .flatten()
+    })
 }
 
 /// Recursive item builder for `build_macos_app_menu_from_spec` — mirrors
@@ -342,70 +359,67 @@ fn lifecycle_role_accelerator(
 /// `useAppMenu`'s role items get real localized text.
 #[cfg(target_os = "macos")]
 fn append_app_menu_item_macos(
-  sub: &Submenu,
-  item: &MenuItemOptions,
-  labels: Option<&crate::types::MenuLabels>,
+    sub: &Submenu,
+    item: &MenuItemOptions,
+    labels: Option<&crate::types::MenuLabels>,
 ) -> Result<()> {
-  if item.separator.unwrap_or(false) {
-    sub
-      .append(&PredefinedMenuItem::separator())
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-    return Ok(());
-  }
+    if item.separator.unwrap_or(false) {
+        sub.append(&PredefinedMenuItem::separator())
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+        return Ok(());
+    }
 
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
+    let label = item.label.as_deref().unwrap_or("");
+    let enabled = item.enabled.unwrap_or(true);
+    let accelerator = item
+        .accelerator
+        .as_deref()
+        .and_then(|s| s.parse::<Accelerator>().ok());
 
-  if let Some(role) = item.role.as_deref() {
-    let localized_label = if label.is_empty() {
-      match role {
-        "quit" => labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit"),
-        "minimize" => labels.and_then(|l| l.minimize.as_deref()).unwrap_or("Minimize"),
-        "zoom" | "maximize" => labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"),
-        "close" | "closeWindow" | "close-window" => "Close",
-        _ => label,
-      }
+    if let Some(role) = item.role.as_deref() {
+        let localized_label = if label.is_empty() {
+            match role {
+                "quit" => labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit"),
+                "minimize" => labels
+                    .and_then(|l| l.minimize.as_deref())
+                    .unwrap_or("Minimize"),
+                "zoom" | "maximize" => labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"),
+                "close" | "closeWindow" | "close-window" => "Close",
+                _ => label,
+            }
+        } else {
+            label
+        };
+        if let Some(mi) = lifecycle_role_item(role, localized_label, enabled, accelerator) {
+            sub.append(&mi)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
+        if let Some(predef) = predefined_localized(role, labels) {
+            sub.append(&predef)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
+    }
+
+    if let Some(inner_items) = &item.submenu {
+        let inner = Submenu::new(label, enabled);
+        for c in inner_items {
+            append_app_menu_item_macos(&inner, c, labels)?;
+        }
+        sub.append(&inner)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
     } else {
-      label
-    };
-    if let Some(mi) = lifecycle_role_item(role, localized_label, enabled, accelerator) {
-      sub
-        .append(&mi)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
+        let mi = if let Some(id) = &item.id {
+            MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+        } else {
+            MenuItem::new(label, enabled, accelerator)
+        };
+        sub.append(&mi)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
     }
-    if let Some(predef) = predefined_localized(role, labels) {
-      sub
-        .append(&predef)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
-    }
-  }
 
-  if let Some(inner_items) = &item.submenu {
-    let inner = Submenu::new(label, enabled);
-    for c in inner_items {
-      append_app_menu_item_macos(&inner, c, labels)?;
-    }
-    sub
-      .append(&inner)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  } else {
-    let mi = if let Some(id) = &item.id {
-      MenuItem::with_id(id.as_str(), label, enabled, accelerator)
-    } else {
-      MenuItem::new(label, enabled, accelerator)
-    };
-    sub
-      .append(&mi)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  }
-
-  Ok(())
+    Ok(())
 }
 
 /// macOS's standard About panel ignores `comments`/`website`, so fold the
@@ -414,22 +428,22 @@ fn append_app_menu_item_macos(
 /// instead, so both paths stay populated.
 #[cfg(target_os = "macos")]
 fn build_about_credits(description: Option<&str>, homepage: Option<&str>) -> Option<String> {
-  let mut lines: Vec<&str> = Vec::new();
-  if let Some(d) = description {
-    if !d.is_empty() {
-      lines.push(d);
+    let mut lines: Vec<&str> = Vec::new();
+    if let Some(d) = description {
+        if !d.is_empty() {
+            lines.push(d);
+        }
     }
-  }
-  if let Some(h) = homepage {
-    if !h.is_empty() {
-      lines.push(h);
+    if let Some(h) = homepage {
+        if !h.is_empty() {
+            lines.push(h);
+        }
     }
-  }
-  if lines.is_empty() {
-    None
-  } else {
-    Some(lines.join("\n"))
-  }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
+    }
 }
 
 /// Decodes a PNG at `path` into a `muda::Icon` for the About panel. Returns
@@ -437,30 +451,30 @@ fn build_about_credits(description: Option<&str>, homepage: Option<&str>) -> Opt
 /// etc.) — callers fall back to no icon rather than erroring out.
 #[cfg(target_os = "macos")]
 fn load_icon_rgba(path: &str) -> Option<Icon> {
-  let file = std::fs::File::open(path).ok()?;
-  let decoder = png::Decoder::new(file);
-  let mut reader = decoder.read_info().ok()?;
-  let mut buf = vec![0; reader.output_buffer_size()];
-  let frame = reader.next_frame(&mut buf).ok()?;
-  buf.truncate(frame.buffer_size());
+    let file = std::fs::File::open(path).ok()?;
+    let decoder = png::Decoder::new(file);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()];
+    let frame = reader.next_frame(&mut buf).ok()?;
+    buf.truncate(frame.buffer_size());
 
-  let info = reader.info();
-  let (width, height) = (info.width, info.height);
+    let info = reader.info();
+    let (width, height) = (info.width, info.height);
 
-  let rgba = match (info.color_type, info.bit_depth) {
-    (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
-    (png::ColorType::Rgb, png::BitDepth::Eight) => {
-      let mut out = Vec::with_capacity(buf.len() / 3 * 4);
-      for chunk in buf.chunks_exact(3) {
-        out.extend_from_slice(chunk);
-        out.push(255);
-      }
-      out
-    }
-    _ => return None,
-  };
+    let rgba = match (info.color_type, info.bit_depth) {
+        (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
+        (png::ColorType::Rgb, png::BitDepth::Eight) => {
+            let mut out = Vec::with_capacity(buf.len() / 3 * 4);
+            for chunk in buf.chunks_exact(3) {
+                out.extend_from_slice(chunk);
+                out.push(255);
+            }
+            out
+        }
+        _ => return None,
+    };
 
-  Icon::from_rgba(rgba, width, height).ok()
+    Icon::from_rgba(rgba, width, height).ok()
 }
 
 /// Windows only: stable item ids for `build_windows_menu_bar`'s custom
@@ -469,19 +483,19 @@ fn load_icon_rgba(path: &str) -> Option<Icon> {
 /// and the dispatcher never drift apart.
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_menu_bar_ids {
-  pub(crate) const EXIT: &str = super::native_menu_ids::QUIT;
-  pub(crate) const CLOSE: &str = super::native_menu_ids::CLOSE;
-  pub(crate) const UNDO: &str = "murasaki-menu-bar:undo";
-  pub(crate) const REDO: &str = "murasaki-menu-bar:redo";
-  pub(crate) const CUT: &str = "murasaki-menu-bar:cut";
-  pub(crate) const COPY: &str = "murasaki-menu-bar:copy";
-  pub(crate) const PASTE: &str = "murasaki-menu-bar:paste";
-  pub(crate) const SELECT_ALL: &str = "murasaki-menu-bar:selectAll";
-  pub(crate) const MINIMIZE: &str = super::native_menu_ids::MINIMIZE;
-  /// Added for `useAppMenu`'s `role: "zoom"` item (toggle-maximize) — the
-  /// startup default Windows bar has no Zoom item of its own (only
-  /// Minimize), so this id is only ever produced by `windows_role_item`.
-  pub(crate) const ZOOM: &str = super::native_menu_ids::ZOOM;
+    pub(crate) const EXIT: &str = super::native_menu_ids::QUIT;
+    pub(crate) const CLOSE: &str = super::native_menu_ids::CLOSE;
+    pub(crate) const UNDO: &str = "murasaki-menu-bar:undo";
+    pub(crate) const REDO: &str = "murasaki-menu-bar:redo";
+    pub(crate) const CUT: &str = "murasaki-menu-bar:cut";
+    pub(crate) const COPY: &str = "murasaki-menu-bar:copy";
+    pub(crate) const PASTE: &str = "murasaki-menu-bar:paste";
+    pub(crate) const SELECT_ALL: &str = "murasaki-menu-bar:selectAll";
+    pub(crate) const MINIMIZE: &str = super::native_menu_ids::MINIMIZE;
+    /// Added for `useAppMenu`'s `role: "zoom"` item (toggle-maximize) — the
+    /// startup default Windows bar has no Zoom item of its own (only
+    /// Minimize), so this id is only ever produced by `windows_role_item`.
+    pub(crate) const ZOOM: &str = super::native_menu_ids::ZOOM;
 }
 
 /// Builds the native Win32 menu bar (File / Edit / Window), attached via
@@ -517,64 +531,71 @@ pub(crate) mod windows_menu_bar_ids {
 /// doesn't actually fire. Left off rather than shipping a decorative-only,
 /// possibly-misleading label.
 #[cfg(target_os = "windows")]
-pub(crate) fn build_windows_menu_bar(about: Option<&AboutInfo>, labels: Option<&crate::types::MenuLabels>) -> Result<Menu> {
-  use windows_menu_bar_ids as ids;
+pub(crate) fn build_windows_menu_bar(
+    about: Option<&AboutInfo>,
+    labels: Option<&crate::types::MenuLabels>,
+) -> Result<Menu> {
+    use windows_menu_bar_ids as ids;
 
-  let menu = Menu::new();
+    let menu = Menu::new();
 
-  let file_menu = Submenu::new("File", true);
-  let exit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Exit");
-  file_menu
-    .append(&MenuItem::with_id(ids::EXIT, exit_label, true, None))
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    let file_menu = Submenu::new("File", true);
+    let exit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Exit");
+    file_menu
+        .append(&MenuItem::with_id(ids::EXIT, exit_label, true, None))
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  let edit_menu = build_windows_edit_submenu(labels)?;
-  let window_menu = build_windows_window_submenu(labels)?;
+    let edit_menu = build_windows_edit_submenu(labels)?;
+    let window_menu = build_windows_window_submenu(labels)?;
 
-  menu
-    .append_items(&[&file_menu, &edit_menu, &window_menu])
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    menu.append_items(&[&file_menu, &edit_menu, &window_menu])
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  // Help > About <app> — parity with macOS's app-name-submenu About panel
-  // (`build_macos_app_submenu`). `None` (no `AboutInfo` supplied, e.g. the
-  // dev-mode caller in `application.rs`, which has no config→native plumbing
-  // for this yet) leaves the bar unchanged.
-  if let Some(info) = about {
-    let help_menu = build_windows_help_submenu(info, labels)?;
-    menu
-      .append(&help_menu)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  }
+    // Help > About <app> — parity with macOS's app-name-submenu About panel
+    // (`build_macos_app_submenu`). `None` (no `AboutInfo` supplied, e.g. the
+    // dev-mode caller in `application.rs`, which has no config→native plumbing
+    // for this yet) leaves the bar unchanged.
+    if let Some(info) = about {
+        let help_menu = build_windows_help_submenu(info, labels)?;
+        menu.append(&help_menu)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    }
 
-  Ok(menu)
+    Ok(menu)
 }
 
 /// The Help submenu (About <app>) — see `build_windows_menu_bar`'s doc
 /// comment above for why it's conditionally appended there instead of always
 /// being part of this bar.
 #[cfg(target_os = "windows")]
-fn build_windows_help_submenu(info: &AboutInfo, labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-  let about_label = labels
-    .and_then(|l| l.about.as_deref())
-    .map(String::from)
-    .unwrap_or_else(|| format!("About {}", info.name));
-  let about_metadata = AboutMetadata {
-    name: Some(info.name.to_string()),
-    version: info.version.map(|s| s.to_string()),
-    comments: info.description.map(|s| s.to_string()),
-    copyright: info.copyright.map(|s| s.to_string()),
-    website: info.homepage.map(|s| s.to_string()),
-    authors: info.authors.map(|a| a.to_vec()),
-    ..Default::default()
-  };
-  // MenuLabels has no `help` field, so the Help submenu title is an English
-  // literal for now (i18n of the title is a follow-up). The About *item*
-  // label still uses the i18n'd `about` field above, matching macOS.
-  let help_menu = Submenu::new("Help", true);
-  help_menu
-    .append(&PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)))
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  Ok(help_menu)
+fn build_windows_help_submenu(
+    info: &AboutInfo,
+    labels: Option<&crate::types::MenuLabels>,
+) -> Result<Submenu> {
+    let about_label = labels
+        .and_then(|l| l.about.as_deref())
+        .map(String::from)
+        .unwrap_or_else(|| format!("About {}", info.name));
+    let about_metadata = AboutMetadata {
+        name: Some(info.name.to_string()),
+        version: info.version.map(|s| s.to_string()),
+        comments: info.description.map(|s| s.to_string()),
+        copyright: info.copyright.map(|s| s.to_string()),
+        website: info.homepage.map(|s| s.to_string()),
+        authors: info.authors.map(|a| a.to_vec()),
+        ..Default::default()
+    };
+    // MenuLabels has no `help` field, so the Help submenu title is an English
+    // literal for now (i18n of the title is a follow-up). The About *item*
+    // label still uses the i18n'd `about` field above, matching macOS.
+    let help_menu = Submenu::new("Help", true);
+    help_menu
+        .append(&PredefinedMenuItem::about(
+            Some(&about_label),
+            Some(about_metadata),
+        ))
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    Ok(help_menu)
 }
 
 /// The Edit submenu (Undo/Redo/sep/Cut/Copy/Paste/Select All) — factored out
@@ -584,46 +605,81 @@ fn build_windows_help_submenu(info: &AboutInfo, labels: Option<&crate::types::Me
 /// it came from the startup bar or an app-declared one).
 #[cfg(target_os = "windows")]
 fn build_windows_edit_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-  use windows_menu_bar_ids as ids;
+    use windows_menu_bar_ids as ids;
 
-  let edit_menu = Submenu::new(labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"), true);
-  edit_menu
-    .append_items(&[
-      &MenuItem::with_id(ids::UNDO, labels.and_then(|l| l.undo.as_deref()).unwrap_or("Undo"), true, None),
-      &MenuItem::with_id(ids::REDO, labels.and_then(|l| l.redo.as_deref()).unwrap_or("Redo"), true, None),
-      &PredefinedMenuItem::separator(),
-      &MenuItem::with_id(ids::CUT, labels.and_then(|l| l.cut.as_deref()).unwrap_or("Cut"), true, None),
-      &MenuItem::with_id(ids::COPY, labels.and_then(|l| l.copy.as_deref()).unwrap_or("Copy"), true, None),
-      &MenuItem::with_id(ids::PASTE, labels.and_then(|l| l.paste.as_deref()).unwrap_or("Paste"), true, None),
-      &MenuItem::with_id(
-        ids::SELECT_ALL,
-        labels.and_then(|l| l.select_all.as_deref()).unwrap_or("Select All"),
+    let edit_menu = Submenu::new(
+        labels.and_then(|l| l.edit.as_deref()).unwrap_or("Edit"),
         true,
-        None,
-      ),
-    ])
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    );
+    edit_menu
+        .append_items(&[
+            &MenuItem::with_id(
+                ids::UNDO,
+                labels.and_then(|l| l.undo.as_deref()).unwrap_or("Undo"),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(
+                ids::REDO,
+                labels.and_then(|l| l.redo.as_deref()).unwrap_or("Redo"),
+                true,
+                None,
+            ),
+            &PredefinedMenuItem::separator(),
+            &MenuItem::with_id(
+                ids::CUT,
+                labels.and_then(|l| l.cut.as_deref()).unwrap_or("Cut"),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(
+                ids::COPY,
+                labels.and_then(|l| l.copy.as_deref()).unwrap_or("Copy"),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(
+                ids::PASTE,
+                labels.and_then(|l| l.paste.as_deref()).unwrap_or("Paste"),
+                true,
+                None,
+            ),
+            &MenuItem::with_id(
+                ids::SELECT_ALL,
+                labels
+                    .and_then(|l| l.select_all.as_deref())
+                    .unwrap_or("Select All"),
+                true,
+                None,
+            ),
+        ])
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  Ok(edit_menu)
+    Ok(edit_menu)
 }
 
 /// The Window submenu (Minimize) — factored out of `build_windows_menu_bar`,
 /// same reasoning as `build_windows_edit_submenu` above.
 #[cfg(target_os = "windows")]
 fn build_windows_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Result<Submenu> {
-  use windows_menu_bar_ids as ids;
+    use windows_menu_bar_ids as ids;
 
-  let window_menu = Submenu::new(labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"), true);
-  window_menu
-    .append(&MenuItem::with_id(
-      ids::MINIMIZE,
-      labels.and_then(|l| l.minimize.as_deref()).unwrap_or("Minimize"),
-      true,
-      None,
-    ))
-    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    let window_menu = Submenu::new(
+        labels.and_then(|l| l.window.as_deref()).unwrap_or("Window"),
+        true,
+    );
+    window_menu
+        .append(&MenuItem::with_id(
+            ids::MINIMIZE,
+            labels
+                .and_then(|l| l.minimize.as_deref())
+                .unwrap_or("Minimize"),
+            true,
+            None,
+        ))
+        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
-  Ok(window_menu)
+    Ok(window_menu)
 }
 
 /// Builds a full menu bar from `useAppMenu`'s serialized spec — the Windows
@@ -632,39 +688,36 @@ fn build_windows_window_submenu(labels: Option<&crate::types::MenuLabels>) -> Re
 /// doc comment), so this just renders `menus` in order.
 #[cfg(target_os = "windows")]
 pub(crate) fn build_windows_app_menu_from_spec(
-  menus: &[crate::menu::AppMenuSpec],
-  labels: Option<&crate::types::MenuLabels>,
+    menus: &[crate::menu::AppMenuSpec],
+    labels: Option<&crate::types::MenuLabels>,
 ) -> Result<Menu> {
-  let menu = Menu::new();
+    let menu = Menu::new();
 
-  for spec in menus {
-    match spec.role.as_deref() {
-      Some("editMenu") => {
-        let sub = build_windows_edit_submenu(labels)?;
-        menu
-          .append(&sub)
-          .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      }
-      Some("windowMenu") => {
-        let sub = build_windows_window_submenu(labels)?;
-        menu
-          .append(&sub)
-          .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      }
-      _ => {
-        let label = spec.label.as_deref().unwrap_or("");
-        let sub = Submenu::new(label, true);
-        for item in spec.items.as_deref().unwrap_or(&[]) {
-          append_app_menu_item_windows(&sub, item, labels)?;
+    for spec in menus {
+        match spec.role.as_deref() {
+            Some("editMenu") => {
+                let sub = build_windows_edit_submenu(labels)?;
+                menu.append(&sub)
+                    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            }
+            Some("windowMenu") => {
+                let sub = build_windows_window_submenu(labels)?;
+                menu.append(&sub)
+                    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            }
+            _ => {
+                let label = spec.label.as_deref().unwrap_or("");
+                let sub = Submenu::new(label, true);
+                for item in spec.items.as_deref().unwrap_or(&[]) {
+                    append_app_menu_item_windows(&sub, item, labels)?;
+                }
+                menu.append(&sub)
+                    .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            }
         }
-        menu
-          .append(&sub)
-          .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      }
     }
-  }
 
-  Ok(menu)
+    Ok(menu)
 }
 
 /// Item-level role → a custom `MenuItem` with a stable id, localized via
@@ -676,44 +729,78 @@ pub(crate) fn build_windows_app_menu_from_spec(
 /// it falls back to the localized `quit` label, then the English literal.
 #[cfg(target_os = "windows")]
 fn windows_role_item(role: &str, labels: Option<&crate::types::MenuLabels>) -> Option<MenuItem> {
-  use windows_menu_bar_ids as ids;
+    use windows_menu_bar_ids as ids;
 
-  match role {
-    "undo" => Some(MenuItem::with_id(ids::UNDO, labels.and_then(|l| l.undo.as_deref()).unwrap_or("Undo"), true, None)),
-    "redo" => Some(MenuItem::with_id(ids::REDO, labels.and_then(|l| l.redo.as_deref()).unwrap_or("Redo"), true, None)),
-    "cut" => Some(MenuItem::with_id(ids::CUT, labels.and_then(|l| l.cut.as_deref()).unwrap_or("Cut"), true, None)),
-    "copy" => Some(MenuItem::with_id(ids::COPY, labels.and_then(|l| l.copy.as_deref()).unwrap_or("Copy"), true, None)),
-    "paste" => Some(MenuItem::with_id(ids::PASTE, labels.and_then(|l| l.paste.as_deref()).unwrap_or("Paste"), true, None)),
-    "selectAll" => Some(MenuItem::with_id(
-      ids::SELECT_ALL,
-      labels.and_then(|l| l.select_all.as_deref()).unwrap_or("Select All"),
-      true,
-      None,
-    )),
-    "minimize" => Some(MenuItem::with_id(
-      ids::MINIMIZE,
-      labels.and_then(|l| l.minimize.as_deref()).unwrap_or("Minimize"),
-      true,
-      None,
-    )),
-    "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => Some(MenuItem::with_id(
-      ids::ZOOM,
-      labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"),
-      true,
-      None,
-    )),
-    "quit" => Some(MenuItem::with_id(ids::EXIT, labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit"), true, None)),
-    "close" => Some(MenuItem::with_id(
-      ids::CLOSE,
-      labels.and_then(|l| l.quit.as_deref()).unwrap_or("Close"),
-      true,
-      // tao does not expose the raw Win32 TranslateAcceleratorW hook, so
-      // displaying a native accelerator here would be decorative. The React
-      // useAppMenu hook implements Ctrl+W through its keydown path instead.
-      None,
-    )),
-    _ => None,
-  }
+    match role {
+        "undo" => Some(MenuItem::with_id(
+            ids::UNDO,
+            labels.and_then(|l| l.undo.as_deref()).unwrap_or("Undo"),
+            true,
+            None,
+        )),
+        "redo" => Some(MenuItem::with_id(
+            ids::REDO,
+            labels.and_then(|l| l.redo.as_deref()).unwrap_or("Redo"),
+            true,
+            None,
+        )),
+        "cut" => Some(MenuItem::with_id(
+            ids::CUT,
+            labels.and_then(|l| l.cut.as_deref()).unwrap_or("Cut"),
+            true,
+            None,
+        )),
+        "copy" => Some(MenuItem::with_id(
+            ids::COPY,
+            labels.and_then(|l| l.copy.as_deref()).unwrap_or("Copy"),
+            true,
+            None,
+        )),
+        "paste" => Some(MenuItem::with_id(
+            ids::PASTE,
+            labels.and_then(|l| l.paste.as_deref()).unwrap_or("Paste"),
+            true,
+            None,
+        )),
+        "selectAll" => Some(MenuItem::with_id(
+            ids::SELECT_ALL,
+            labels
+                .and_then(|l| l.select_all.as_deref())
+                .unwrap_or("Select All"),
+            true,
+            None,
+        )),
+        "minimize" => Some(MenuItem::with_id(
+            ids::MINIMIZE,
+            labels
+                .and_then(|l| l.minimize.as_deref())
+                .unwrap_or("Minimize"),
+            true,
+            None,
+        )),
+        "zoom" | "maximize" | "fullscreen" | "toggleFullscreen" => Some(MenuItem::with_id(
+            ids::ZOOM,
+            labels.and_then(|l| l.zoom.as_deref()).unwrap_or("Zoom"),
+            true,
+            None,
+        )),
+        "quit" => Some(MenuItem::with_id(
+            ids::EXIT,
+            labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit"),
+            true,
+            None,
+        )),
+        "close" => Some(MenuItem::with_id(
+            ids::CLOSE,
+            labels.and_then(|l| l.quit.as_deref()).unwrap_or("Close"),
+            true,
+            // tao does not expose the raw Win32 TranslateAcceleratorW hook, so
+            // displaying a native accelerator here would be decorative. The React
+            // useAppMenu hook implements Ctrl+W through its keydown path instead.
+            None,
+        )),
+        _ => None,
+    }
 }
 
 /// Recursive item builder for `build_windows_app_menu_from_spec` — mirrors
@@ -723,196 +810,190 @@ fn windows_role_item(role: &str, labels: Option<&crate::types::MenuLabels>) -> O
 /// doc comment).
 #[cfg(target_os = "windows")]
 fn append_app_menu_item_windows(
-  sub: &Submenu,
-  item: &MenuItemOptions,
-  labels: Option<&crate::types::MenuLabels>,
+    sub: &Submenu,
+    item: &MenuItemOptions,
+    labels: Option<&crate::types::MenuLabels>,
 ) -> Result<()> {
-  if item.separator.unwrap_or(false) {
-    sub
-      .append(&PredefinedMenuItem::separator())
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-    return Ok(());
-  }
-
-  if let Some(role) = item.role.as_deref() {
-    // A `{ separator: true }` spec reaches the wire as `role: "separator"`
-    // (see app-menu.tsx), not `item.separator` — and `windows_role_item`
-    // returns `MenuItem`, which can't be a separator, so handle it here.
-    if role == "separator" {
-      sub
-        .append(&PredefinedMenuItem::separator())
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
+    if item.separator.unwrap_or(false) {
+        sub.append(&PredefinedMenuItem::separator())
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+        return Ok(());
     }
-    if let Some(mi) = windows_role_item(role, labels) {
-      sub
-        .append(&mi)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
-    }
-  }
 
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
-
-  if let Some(inner_items) = &item.submenu {
-    let inner = Submenu::new(label, enabled);
-    for c in inner_items {
-      append_app_menu_item_windows(&inner, c, labels)?;
+    if let Some(role) = item.role.as_deref() {
+        // A `{ separator: true }` spec reaches the wire as `role: "separator"`
+        // (see app-menu.tsx), not `item.separator` — and `windows_role_item`
+        // returns `MenuItem`, which can't be a separator, so handle it here.
+        if role == "separator" {
+            sub.append(&PredefinedMenuItem::separator())
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
+        if let Some(mi) = windows_role_item(role, labels) {
+            sub.append(&mi)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
     }
-    sub
-      .append(&inner)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  } else {
-    let mi = if let Some(id) = &item.id {
-      MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+
+    let label = item.label.as_deref().unwrap_or("");
+    let enabled = item.enabled.unwrap_or(true);
+    let accelerator = item
+        .accelerator
+        .as_deref()
+        .and_then(|s| s.parse::<Accelerator>().ok());
+
+    if let Some(inner_items) = &item.submenu {
+        let inner = Submenu::new(label, enabled);
+        for c in inner_items {
+            append_app_menu_item_windows(&inner, c, labels)?;
+        }
+        sub.append(&inner)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
     } else {
-      MenuItem::new(label, enabled, accelerator)
-    };
-    sub
-      .append(&mi)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  }
+        let mi = if let Some(id) = &item.id {
+            MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+        } else {
+            MenuItem::new(label, enabled, accelerator)
+        };
+        sub.append(&mi)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    }
 
-  Ok(())
+    Ok(())
 }
 
 fn append_item(menu: &Menu, item: &MenuItemOptions) -> Result<()> {
-  if item.separator.unwrap_or(false) {
-    menu
-      .append(&PredefinedMenuItem::separator())
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-    return Ok(());
-  }
-
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
-
-  if let Some(role) = item.role.as_deref() {
-    if let Some(mi) = lifecycle_role_item(role, label, enabled, accelerator) {
-      menu
-        .append(&mi)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
+    if item.separator.unwrap_or(false) {
+        menu.append(&PredefinedMenuItem::separator())
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+        return Ok(());
     }
-    if let Some(predef) = predefined(role) {
-      menu
-        .append(&predef)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
-    }
-  }
 
-  if let Some(sub_items) = &item.submenu {
-    let sub = Submenu::new(label, enabled);
-    for child in sub_items {
-      append_submenu_item(&sub, child)?;
+    let label = item.label.as_deref().unwrap_or("");
+    let enabled = item.enabled.unwrap_or(true);
+    let accelerator = item
+        .accelerator
+        .as_deref()
+        .and_then(|s| s.parse::<Accelerator>().ok());
+
+    if let Some(role) = item.role.as_deref() {
+        if let Some(mi) = lifecycle_role_item(role, label, enabled, accelerator) {
+            menu.append(&mi)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
+        if let Some(predef) = predefined(role) {
+            menu.append(&predef)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
     }
-    menu
-      .append(&sub)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  } else {
-    let mi = if let Some(id) = &item.id {
-      MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+
+    if let Some(sub_items) = &item.submenu {
+        let sub = Submenu::new(label, enabled);
+        for child in sub_items {
+            append_submenu_item(&sub, child)?;
+        }
+        menu.append(&sub)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
     } else {
-      MenuItem::new(label, enabled, accelerator)
-    };
-    menu
-      .append(&mi)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  }
+        let mi = if let Some(id) = &item.id {
+            MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+        } else {
+            MenuItem::new(label, enabled, accelerator)
+        };
+        menu.append(&mi)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    }
 
-  Ok(())
+    Ok(())
 }
 
 fn append_submenu_item(sub: &Submenu, item: &MenuItemOptions) -> Result<()> {
-  if item.separator.unwrap_or(false) {
-    sub
-      .append(&PredefinedMenuItem::separator())
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-    return Ok(());
-  }
-
-  let label = item.label.as_deref().unwrap_or("");
-  let enabled = item.enabled.unwrap_or(true);
-  let accelerator = item
-    .accelerator
-    .as_deref()
-    .and_then(|s| s.parse::<Accelerator>().ok());
-
-  if let Some(role) = item.role.as_deref() {
-    if let Some(mi) = lifecycle_role_item(role, label, enabled, accelerator) {
-      sub
-        .append(&mi)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
+    if item.separator.unwrap_or(false) {
+        sub.append(&PredefinedMenuItem::separator())
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+        return Ok(());
     }
-    if let Some(predef) = predefined(role) {
-      sub
-        .append(&predef)
-        .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-      return Ok(());
-    }
-  }
 
-  if let Some(inner_items) = &item.submenu {
-    let inner = Submenu::new(label, enabled);
-    for c in inner_items {
-      append_submenu_item(&inner, c)?;
+    let label = item.label.as_deref().unwrap_or("");
+    let enabled = item.enabled.unwrap_or(true);
+    let accelerator = item
+        .accelerator
+        .as_deref()
+        .and_then(|s| s.parse::<Accelerator>().ok());
+
+    if let Some(role) = item.role.as_deref() {
+        if let Some(mi) = lifecycle_role_item(role, label, enabled, accelerator) {
+            sub.append(&mi)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
+        if let Some(predef) = predefined(role) {
+            sub.append(&predef)
+                .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+            return Ok(());
+        }
     }
-    sub
-      .append(&inner)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  } else {
-    let mi = if let Some(id) = &item.id {
-      MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+
+    if let Some(inner_items) = &item.submenu {
+        let inner = Submenu::new(label, enabled);
+        for c in inner_items {
+            append_submenu_item(&inner, c)?;
+        }
+        sub.append(&inner)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
     } else {
-      MenuItem::new(label, enabled, accelerator)
-    };
-    sub
-      .append(&mi)
-      .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
-  }
+        let mi = if let Some(id) = &item.id {
+            MenuItem::with_id(id.as_str(), label, enabled, accelerator)
+        } else {
+            MenuItem::new(label, enabled, accelerator)
+        };
+        sub.append(&mi)
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    }
 
-  Ok(())
+    Ok(())
 }
 
 fn predefined(role: &str) -> Option<PredefinedMenuItem> {
-  match role {
-    "about" => Some(PredefinedMenuItem::about(None, None)),
-    "copy" => Some(PredefinedMenuItem::copy(None)),
-    "cut" => Some(PredefinedMenuItem::cut(None)),
-    "paste" => Some(PredefinedMenuItem::paste(None)),
-    "selectAll" | "select-all" => Some(PredefinedMenuItem::select_all(None)),
-    "undo" => Some(PredefinedMenuItem::undo(None)),
-    "redo" => Some(PredefinedMenuItem::redo(None)),
-    "separator" => Some(PredefinedMenuItem::separator()),
-    _ => None,
-  }
+    match role {
+        "about" => Some(PredefinedMenuItem::about(None, None)),
+        "copy" => Some(PredefinedMenuItem::copy(None)),
+        "cut" => Some(PredefinedMenuItem::cut(None)),
+        "paste" => Some(PredefinedMenuItem::paste(None)),
+        "selectAll" | "select-all" => Some(PredefinedMenuItem::select_all(None)),
+        "undo" => Some(PredefinedMenuItem::undo(None)),
+        "redo" => Some(PredefinedMenuItem::redo(None)),
+        "separator" => Some(PredefinedMenuItem::separator()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-  use super::lifecycle_role_accelerator;
-  use muda::accelerator::Accelerator;
+    use super::lifecycle_role_accelerator;
+    use muda::accelerator::Accelerator;
 
-  #[test]
-  fn close_role_defaults_to_platform_command_or_control_w() {
-    let expected = "CmdOrCtrl+W".parse::<Accelerator>().unwrap();
-    assert_eq!(lifecycle_role_accelerator("close", None), Some(expected));
-    assert_eq!(lifecycle_role_accelerator("closeWindow", None), Some(expected));
-    assert_eq!(lifecycle_role_accelerator("close-window", None), Some(expected));
+    #[test]
+    fn close_role_defaults_to_platform_command_or_control_w() {
+        let expected = "CmdOrCtrl+W".parse::<Accelerator>().unwrap();
+        assert_eq!(lifecycle_role_accelerator("close", None), Some(expected));
+        assert_eq!(
+            lifecycle_role_accelerator("closeWindow", None),
+            Some(expected)
+        );
+        assert_eq!(
+            lifecycle_role_accelerator("close-window", None),
+            Some(expected)
+        );
 
-    let explicit = "Shift+W".parse::<Accelerator>().unwrap();
-    assert_eq!(lifecycle_role_accelerator("close", Some(explicit)), Some(explicit));
-    assert_eq!(lifecycle_role_accelerator("quit", None), None);
-  }
+        let explicit = "Shift+W".parse::<Accelerator>().unwrap();
+        assert_eq!(
+            lifecycle_role_accelerator("close", Some(explicit)),
+            Some(explicit)
+        );
+        assert_eq!(lifecycle_role_accelerator("quit", None), None);
+    }
 }

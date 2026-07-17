@@ -9,6 +9,11 @@ export declare class Application {
   configureShutdown(port: number, runtimeToken: string, timeoutMs: number): void
   /** Create a native window bound to this Application's event loop. */
   createWindow(opts?: WindowOptions | undefined | null): BrowserWindow
+  /**
+   * Freeze every native window/WebView declaration before the event loop
+   * starts. Runtime commands may subsequently name only these templates.
+   */
+  configureWindows(templates: Array<RuntimeWindowTemplate>): void
   /** Sugar: create a window + attach a webview in one call. */
   createWebview(windowOpts: WindowOptions | undefined | null, webviewOpts: WebviewOptions): Webview
   /** Run the tao event loop. Blocks the calling thread until quit. */
@@ -152,6 +157,16 @@ export interface Position {
   y: number
 }
 
+/**
+ * Immutable native window template configured before the event loop starts.
+ * Runtime create/destroy commands may reference only these labels.
+ */
+export interface RuntimeWindowTemplate {
+  window: WindowOptions
+  webview: WebviewOptions
+  createOnLaunch: boolean
+}
+
 export declare function saveFileDialog(opts?: SaveFileOptions | undefined | null): string | null
 
 export interface SaveFileOptions {
@@ -179,8 +194,22 @@ export interface WebviewOptions {
    * (notably WebView2 profiles on Windows) between Murasaki applications.
    */
   appId?: string
+  /** Complete custom User-Agent value for this WebView. */
+  userAgent?: string
+  /**
+   * Use a non-persistent private browsing session. The WebContext profile
+   * is ignored by Wry when enabled.
+   */
+  incognito?: boolean
+  /** Unauthenticated HTTP CONNECT or SOCKSv5 proxy. */
+  proxy?: WebviewProxyOptions
   /** Exact renderer-native command permissions. Missing/empty is deny-all. */
   capabilities?: Array<string>
+  /**
+   * Versioned JSON policy carrying value-level allow/deny scopes. Omitted
+   * metadata keeps the legacy permission-name behavior for compatibility.
+   */
+  capabilityPolicy?: string
   /** Default packaged/development PNG used when creating a tray icon. */
   trayIcon?: string
   /**
@@ -191,6 +220,12 @@ export interface WebviewOptions {
    * `url`/`html` when set.
    */
   serveDir?: string
+}
+
+export interface WebviewProxyOptions {
+  protocol: string
+  host: string
+  port: number
 }
 
 export interface WindowOptions {

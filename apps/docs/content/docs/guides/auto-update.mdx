@@ -260,6 +260,32 @@ those steps to the same `macos` job.
   before `--manifest` ever runs.
 </Callout>
 
+## Apply transaction and first-launch rollback
+
+The native launcher does not delete the current install before hoping the new
+one works. It writes an owner-only, atomically replaced journal beside the
+installed app, renames the current install to a same-volume backup, installs
+the verified payload, and retains that backup across relaunch.
+
+The new version acknowledges health only after the packaged Node server is
+listening, the primary-instance endpoint is published, and every
+`createOnLaunch: true` native window/WebView was created. Dormant templates are
+validated as metadata but are outside this first-launch checkpoint. If the update helper dies during the swap,
+or the first new launcher exits before that checkpoint, the next launch copies
+a recovery helper outside the install target, restores the previous version,
+and relaunches it. PID ownership, an exclusive journal lock, and app-scoped
+single-component backup names prevent another process or path traversal from
+claiming the transaction.
+
+<Callout type="warn">
+  Rollback covers the application files through the first-launch checkpoint.
+  It does not roll back a later crash, and Windows registry/shortcut changes
+  made by NSIS are outside the file transaction. A power loss during the
+  recovery rename itself can still require manual repair. Keep application
+  data migrations backward-compatible until the new version has established
+  its own durable migration checkpoint.
+</Callout>
+
 ## Security model
 
 Signature verification is **mandatory — there is no config option to disable

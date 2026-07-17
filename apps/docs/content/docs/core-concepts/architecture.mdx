@@ -7,24 +7,32 @@ Murasaki is a three-layer desktop runtime. React renders in the operating
 system WebView, application backend code runs in a bundled Node.js process,
 and a small Rust host owns the native window and application lifecycle.
 
-```txt
-┌──────────────── Native application ────────────────┐
-│                                                    │
-│  Rust host (tao / wry / muda)                      │
-│  windows · WebViews · native menus · update handoff│
-│                       │                            │
-│                       │ launches / supervises      │
-│                       ▼                            │
-│  Local Node runtime                                │
-│  src/main.ts · use-main · use-server · API routes  │
-│                       │                            │
-│                       │ authenticated loopback HTTP│
-│                       ▼                            │
-│  OS WebView                                        │
-│  React 19 · Murasaki router · your renderer code   │
-│                                                    │
-└────────────────────────────────────────────────────┘
-```
+<div className="architecture-diagram" aria-label="Murasaki runtime architecture">
+  <div className="architecture-diagram__title">Native application</div>
+  <div className="architecture-layer">
+    <span>01 · native host</span>
+    <strong>Rust · tao / wry / muda</strong>
+    <p>Windows, WebViews, native menus, lifecycle, and update handoff</p>
+  </div>
+  <div className="architecture-connector">
+    <span>launches &amp; supervises</span>
+    <b aria-hidden="true">↓</b>
+  </div>
+  <div className="architecture-layer">
+    <span>02 · application backend</span>
+    <strong>Local Node runtime</strong>
+    <p>src/main.ts · use-main · use-server · API routes</p>
+  </div>
+  <div className="architecture-connector">
+    <span>authenticated loopback HTTP</span>
+    <b aria-hidden="true">↓</b>
+  </div>
+  <div className="architecture-layer">
+    <span>03 · renderer</span>
+    <strong>OS WebView</strong>
+    <p>React 19 · Murasaki router · your renderer code</p>
+  </div>
+</div>
 
 This is deliberately different from Electron's embedded Chromium + Node
 renderer model. Renderer code does not receive Node globals. Put filesystem,
@@ -37,14 +45,15 @@ database, socket, worker, and secret-bearing code in
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| Rust host | Native event loop, declared application windows, per-window navigation/capability policy, OS open-request normalization, menus, Node child supervision, final update handoff | Business logic and React state |
-| Local Node runtime | Long-lived main lifecycle, registered URL/file handling, actions, API routes, update verification, application resources and data | Arbitrary native window creation |
+| Rust host | Native event loop, configured window template catalog, per-window navigation/capability policy, OS open-request normalization, menus, Node child supervision, final update handoff | Business logic and React state |
+| Local Node runtime | Long-lived main lifecycle, create/destroy of configured secondary templates, registered URL/file handling, actions, API routes, update verification, application resources and data | Arbitrary URLs or runtime capability policies for native windows |
 | Renderer | UI, routing, browser APIs, typed backend calls, permitted management of declared windows | Direct filesystem/Node/native module access |
 
 <Callout type="warn">
   Murasaki is pre-1.0. Declared windows have independent, deny-by-default
-  command allowlists, but capability arguments and path/URL scopes are not yet
-  policy-controlled. Packaged macOS/Windows apps enforce a single instance,
+  command allowlists. URL, filesystem path, target-window, and OS-permission
+  arguments support explicit allow/deny scopes; other command arguments remain
+  command-level. Packaged macOS/Windows apps enforce a single instance,
   can register URL schemes and file associations, and expose matching
   activations to Node Main through `openRequested()`. Check [Platform & feature
   status](/docs/core-concepts/platform-feature-status) before committing a
@@ -61,7 +70,7 @@ processes differ:
 | Web assets | Vite dev server with HMR | `dist/client` served by bundled Node |
 | Node backend | Vite child process | Portable Node runtime inside app resources |
 | Native host | CLI process loads `@murasakijs/native` | Standalone Rust launcher |
-| Declared windows | All routes created with individual dev WebViews | All routes created from resolved bundle metadata |
+| Declared windows | Full template catalog passed to the native host; only `createOnLaunch` templates start immediately | Full catalog loaded from bundle metadata; only `createOnLaunch` templates start immediately |
 | Main entry | Loaded with Vite SSR; exact entry hot-reloads | Compiled to `server/main.mjs` |
 | Backend calls | Vite middleware | Bundled loopback HTTP server |
 | URL/file registration | Not installed by dev mode | macOS app metadata or Windows installer registry |
@@ -71,6 +80,12 @@ renderer a stable origin across launches. The Windows WebView2 profile is also
 isolated by `appId`. Keep `appId` stable after release: changing it can change
 the application data paths, browser profile, bundle identity, single-instance
 lock, and local origin.
+
+Normal windows share an application WebContext, so their browser session
+survives destroy/recreate within the process. Routes and native capability
+policies remain template-specific. Incognito WebViews are an exception: Wry
+ignores the shared context for them, so cross-window incognito session sharing
+is platform-dependent and not guaranteed.
 
 ## Next.js-like, not Next.js itself
 

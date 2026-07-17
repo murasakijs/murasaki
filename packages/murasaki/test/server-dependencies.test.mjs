@@ -177,6 +177,14 @@ test('staging reports missing dynamic dependencies and rejects reserved resource
     }),
     /unsafe or reserved bundle resource destination/,
   )
+  await assert.rejects(
+    stageBundleResources(root, resources, {
+      appId: 'com.example.fixture',
+      productName: 'Fixture',
+      bundle: { resources: [{ from: 'package.json', to: '.murasaki-runtime/package.json' }] },
+    }),
+    /unsafe or reserved bundle resource destination/,
+  )
 
   await writeFile(
     join(server, 'runtime-dependencies.json'),

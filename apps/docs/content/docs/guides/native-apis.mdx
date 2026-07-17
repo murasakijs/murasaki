@@ -34,7 +34,7 @@ by the Rust host:
 ```tsx
 'use client'
 
-import { app, appWindow, clipboard, dialog, notification, shell, systemPermission, tray, windows } from 'murasaki/native'
+import { app, appWindow, clipboard, dialog, globalShortcut, notification, secureStorage, shell, systemPermission, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -55,9 +55,11 @@ await shell.showItemInFolder(files[0])
 | `clipboard` | `readText`, `writeText` |
 | `notification` | `show` |
 | `shell` | `openExternal` (safe URL schemes only), `showItemInFolder` |
+| `secureStorage` | OS-backed `get`, `set`, `delete` for string values |
 | `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, and accessibility |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
 | `windows` | `open`, `list`, `show`, `hide`, `focus`, `close` for declared labels |
+| `globalShortcut` | process-wide `register`, `unregister`, `unregisterAll`, `onTriggered` |
 | `tray` | `create`, `remove`, `setTooltip`, `setIcon`, `setMenu`, `onClick`, `onMenuItem` |
 
 `app.quit()` and the root `quit()` helper both require `app:quit`; an
@@ -74,10 +76,55 @@ unprivileged secondary renderer cannot terminate the whole application.
   These APIs run in trusted renderer code, not directly in `src/main.ts`.
   The bridge accepts messages only from the app's exact origin and exposes a
   fixed, default-deny command allowlist. Grant only the commands each renderer
-  uses through `window.capabilities` / `windows[label].capabilities`. Argument
-  and path/URL scopes are still planned, so do not load untrusted remote
-  content into a privileged app window.
+  uses through `window.capabilities` / `windows[label].capabilities`. Structured
+  grants can scope shell URLs/paths, target window labels, and OS permission
+  names with allow/deny rules. Other arguments remain command-level, so do not
+  load untrusted remote content into a privileged app window.
 </Callout>
+
+## Secure storage
+
+Use `secureStorage` when trusted renderer code must persist a refresh token,
+license value, or another short string that should not be written to a plain
+file. macOS uses Keychain and Windows uses Credential Manager. Linux and other
+targets return an explicit `unsupported` error; Murasaki never falls back to a
+plaintext file.
+
+```ts
+import { secureStorage } from 'murasaki/native'
+
+await secureStorage.set('refresh-token', token)
+const saved = await secureStorage.get('refresh-token') // string | null
+await secureStorage.delete('refresh-token')            // absent is also OK
+```
+
+Grant each operation independently to only the windows that need it:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    capabilities: [
+      'secureStorage:get',
+      'secureStorage:set',
+      'secureStorage:delete',
+    ],
+  },
+})
+```
+
+Entries are namespaced from `appId` and key using SHA-256-derived identifiers,
+so keep `appId` stable across releases. Keys are non-empty strings up to 256
+UTF-8 bytes; values are non-empty strings up to 2,048 UTF-8 bytes. NUL is
+rejected, the native IPC body remains capped at 256 KiB, and corrupt/non-UTF-8
+stored data is returned as an error rather than silently decoded.
+
+Capabilities are operation-level, not per-key: a renderer with
+`secureStorage:get` can read every key it knows or guesses inside that app's
+namespace. Keychain/Credential Manager protects data at rest from plaintext
+files; it does not protect a secret from XSS running in an already-authorized
+renderer. Keep secrets the renderer never needs in Node/server-only code.
 
 ## Tray icon
 
@@ -133,7 +180,79 @@ export default defineConfig({
 Tray menu items are event-driven: every clickable item needs a unique `id`,
 and privileged actions such as quitting still pass through their own native
 capability. Closing the renderer that created the process-wide icon removes
-it. Global shortcuts and Linux tray support are not available yet.
+it. Linux tray support is not available yet.
+
+## Global shortcuts
+
+Trusted client components can register process-wide shortcuts on macOS and
+Windows. Registration and removal are separate, deny-by-default capabilities:
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    capabilities: [
+      'globalShortcut:register',
+      'globalShortcut:unregister',
+    ],
+  },
+})
+```
+
+```tsx
+'use client'
+
+import { useEffect } from 'react'
+import { globalShortcut } from 'murasaki/native'
+
+export function CaptureShortcut() {
+  useEffect(() => {
+    let active = true
+    const unsubscribe = globalShortcut.onTriggered(({ id }) => {
+      if (id === 'capture-region') startCapture()
+    })
+
+    void globalShortcut.register('CmdOrCtrl+Shift+K', 'capture-region')
+      .catch((error) => {
+        if (active) console.error('Shortcut unavailable', error)
+      })
+
+    return () => {
+      active = false
+      unsubscribe()
+      void globalShortcut.unregister('capture-region')
+    }
+  }, [])
+
+  return null
+}
+```
+
+`register(accelerator, id?)` resolves to `{ id, accelerator }`. The returned
+accelerator is platform-resolved and canonical; `CmdOrCtrl` becomes Command on
+macOS and Control on Windows. If `id` is omitted, that canonical accelerator
+is the id. `unregisterAll()` removes only registrations owned by the calling
+renderer, not another window's registrations.
+
+Accelerators are bounded ASCII strings with one to four modifiers followed by
+one known key. Duplicate modifiers, key-only shortcuts, malformed/unknown
+keys, lifecycle/OS-reserved chords (for example Command+Q or Alt+F4), duplicate
+ids, duplicate accelerators, and chords already owned by another application
+are rejected. At most 64 shortcuts may be live in one process. Shortcut ids
+are 1–128 characters and accept letters, numbers, `.`, `_`, `:`, `-`, and `+`.
+
+Ownership follows the renderer window. Closing/disposal automatically releases
+its registrations; application shutdown releases all registrations. Trigger
+events are live-only and are sent only to the owner, with no replay after a
+reload. Linux is not implemented.
+
+<Callout type="info">
+  Parser, ownership, capability, macOS build, and Windows x64/arm64 build paths
+  are automated. OS-level availability depends on other installed apps, the
+  active keyboard layout, remote-desktop software, and OS-reserved bindings,
+  so smoke-test the exact packaged shortcut on each supported OS before release.
+</Callout>
 
 ## System permissions
 
@@ -220,8 +339,9 @@ const { status, latest, check, download, install } = useUpdate()
 security model, and a GitHub Actions release workflow.
 
 <Callout type="warn">
-  Global shortcuts and argument/path-scoped capability rules are not public
-  yet. Check the
+  Only shell URLs/paths, target window labels, and OS permission names have
+  structured capability scopes; global shortcut accelerators, dialog defaults,
+  and other arguments remain command-level. Check the
   [platform feature status](/docs/core-concepts/platform-feature-status)
   before designing around them.
 </Callout>

@@ -16,6 +16,11 @@
  * — no separate preset/config bridging is needed.
  */
 @source "../../../packages/ui/src/**/*.{ts,tsx}";
+/* Fumadocs renders className values declared directly in MDX, but Tailwind's
+ * automatic source detection does not reliably discover those files. Keep
+ * MDX-only components (for example the architecture diagram) from being
+ * removed as unused CSS. */
+@source "../content/docs/**/*.{md,mdx}";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -267,6 +272,76 @@ html > body[data-scroll-locked] {
   html {
     @apply font-sans;
   }
+}
+
+/* Responsive replacement for the architecture page's fixed-width text art.
+ * The cards keep their hierarchy when Japanese copy wraps or the docs column
+ * narrows, so diagram geometry never depends on glyph display widths. */
+.architecture-diagram {
+  margin-block: 1.5rem;
+  border: 1px solid color-mix(in oklch, currentColor 22%, transparent);
+  border-radius: 1rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--color-fd-primary) 8%, transparent), transparent 44%),
+    color-mix(in oklch, currentColor 3%, transparent);
+}
+
+.architecture-diagram__title {
+  margin-bottom: 1rem;
+  text-align: center;
+  color: var(--color-fd-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.architecture-layer {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid color-mix(in oklch, currentColor 18%, transparent);
+  border-radius: 0.75rem;
+  padding: 0.9rem 1rem;
+  background: color-mix(in oklch, var(--color-fd-background) 92%, transparent);
+  box-shadow: 0 1px 0 color-mix(in oklch, currentColor 7%, transparent);
+}
+
+.architecture-layer > span {
+  color: var(--color-fd-primary);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.architecture-layer > strong {
+  font-size: clamp(0.98rem, 2vw, 1.12rem);
+}
+
+.architecture-layer > p {
+  margin: 0;
+  color: color-mix(in oklch, currentColor 68%, transparent);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.architecture-connector {
+  display: grid;
+  justify-items: center;
+  gap: 0.1rem;
+  padding-block: 0.5rem;
+  color: color-mix(in oklch, currentColor 62%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+}
+
+.architecture-connector > b {
+  color: var(--color-fd-primary);
+  font-size: 1rem;
+  line-height: 1;
 }
 
 /*

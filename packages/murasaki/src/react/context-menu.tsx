@@ -416,13 +416,9 @@ export const Action = {
  * straight into a menu item's `action`, alongside the built-ins. Define your
  * app's actions once (typically in `src/lib/action.ts`, backed by a store so
  * they're callable from anywhere) and reuse them across menus without a
- * per-call-site wrapper:
- *
- *   // src/lib/action.ts
- *   export const Action = createActions({
- *     increment: () => useCounter.getState().increment(),
- *   })
- *   // …then: { label: 'Increment', action: <Action.increment /> }
+ * per-call-site wrapper. For example, define an `increment` entry with
+ * `createActions`, then use the resulting `Action.increment` component as the
+ * menu item's action.
  *
  * The returned object also includes the built-in `Action.Copy` / `Action.Reload`
  * / … so a file can import a single `Action`.

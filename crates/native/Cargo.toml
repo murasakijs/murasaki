@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.36.0"
+version = "0.37.0"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
@@ -32,7 +32,7 @@ fs2 = "0.4"
 # GUI stack (skipped on freebsd/android)
 [target.'cfg(not(any(target_os = "freebsd", target_os = "android")))'.dependencies]
 tao = { version = "0.35", features = ["rwh_06"] }
-wry = { version = "0.55", features = ["devtools"] }
+wry = { version = "0.55", features = ["devtools", "mac-proxy"] }
 muda = "0.19"
 rfd = "0.15"
 tray-icon = "0.24"
@@ -43,6 +43,10 @@ png = "0.17"
 url = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+global-hotkey = "0.8"
+window-vibrancy = "0.6"
+security-framework = "3.7"
+security-framework-sys = "2.17"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSVisualEffectView", "NSView", "NSWindow", "NSImage"] }
 objc2-foundation = "0.3"
@@ -59,10 +63,12 @@ libc = "0.2"
 # crash, since Windows has no ppid-reparenting orphan signal to fall back on
 # (unlike macOS/Linux — see prod-server.mjs's `ppid === 1` check).
 [target.'cfg(target_os = "windows")'.dependencies]
+global-hotkey = "0.8"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Globalization",
   "Win32_Security",
+  "Win32_Security_Credentials",
   "Win32_System_JobObjects",
   "Win32_System_Registry",
   "Win32_System_Threading",

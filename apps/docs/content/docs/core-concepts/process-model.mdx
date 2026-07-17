@@ -74,9 +74,9 @@ reloads, ignore cancellation. The combined hooks default to a 10-second limit;
   The OS close control and `appWindow.close()` hide a secondary, so it can be
   shown again with `windows.open()`. Closing the primary `main` window is an
   application quit request and follows the sequence above. Cancellation is
-  application-wide; Murasaki does not expose per-window close lifecycle events.
-  Explicit `windows.close(label)` destroys a secondary target, which cannot
-  currently be recreated in the same process.
+  application-wide; Murasaki does not expose a cancellable per-window close
+  hook. Node Main `windows.destroy(label)` releases a secondary target, and
+  `windows.create(label)` can recreate its configured declaration.
 </Callout>
 
 ## Development reloads
@@ -110,11 +110,14 @@ bundle.
 
 ## Process failures
 
-The host owns the Node child lifetime. On macOS/Linux the bundled server exits
-if it becomes orphaned; on Windows it is assigned to a Job Object that is
-closed with the launcher. Murasaki does not yet expose a public crash-restart
-policy, health-check hook, or multiple supervised worker processes. If you
-spawn workers or child processes from Main, you own their shutdown behavior.
+The host owns and polls the Node child lifetime. If the packaged backend exits
+unexpectedly, the launcher discards any unconfirmed update handoff, closes its
+WebViews, terminates the backend process tree, and exits non-zero rather than
+leaving a dead UI. Windows uses a Job Object; macOS launches Node and its
+sidecars in a dedicated process group. Murasaki does not yet expose a public
+crash-restart policy, health-check hook, or multiple independently supervised
+worker groups. Use the Main sidecar supervisor when a helper needs an explicit
+restart policy.
 
 ## Next
 

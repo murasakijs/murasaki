@@ -16,6 +16,10 @@
   renderer-produced marker on launcher stdout. CI uses this to prove a hidden
   secondary WebView completed its native IPC checks.
 
+  When ExpectBackendCrash is set, the script kills the bundled Node child and
+  requires the native host to terminate non-zero without retaining an update
+  handoff, proving backend failure cannot leave a dead WebView behind.
+
   Also asserts the launcher process is still alive a couple seconds after the
   backend responds: node comes up *before* the tao window / wry WebView2
   webview are created (see imp_win::run_inner's ordering), so a 200 response
@@ -33,7 +37,9 @@ param(
 
   [int]$TimeoutSeconds = 60,
 
-  [string]$ExpectedMarker = ''
+  [string]$ExpectedMarker = '',
+
+  [switch]$ExpectBackendCrash
 )
 
 $ErrorActionPreference = 'Stop'
@@ -171,7 +177,32 @@ try {
     throw 'post-exit'
   }
 
-  Write-Host 'murasaki-launcher is still running — smoke test passed.'
+  if ($ExpectBackendCrash) {
+    $nodeId = Get-ChildProcessIds $proc.Id | Select-Object -First 1
+    if (-not $nodeId) {
+      Write-Error 'Could not find the bundled Node child for crash supervision test.'
+      throw 'node-child-missing'
+    }
+    Write-Host "Killing bundled Node child $nodeId to verify host supervision ..."
+    Stop-Process -Id $nodeId -Force
+    if (-not $proc.WaitForExit(10000)) {
+      Write-Error 'Launcher left a dead UI running after the bundled Node child exited.'
+      throw 'dead-ui-after-node-exit'
+    }
+    if ($proc.ExitCode -eq 0) {
+      Write-Error 'Launcher reported success after an unexpected bundled Node exit.'
+      throw 'unexpected-success-after-node-exit'
+    }
+    $resources = Join-Path (Split-Path -Parent $ExePath) 'resources'
+    $handoff = Join-Path $resources '.murasaki-apply.json'
+    if (Test-Path -LiteralPath $handoff) {
+      Write-Error 'Launcher retained an unconfirmed update handoff after backend failure.'
+      throw 'stale-update-handoff'
+    }
+    Write-Host 'Unexpected bundled Node exit closed the host with a non-zero status.'
+  } else {
+    Write-Host 'murasaki-launcher is still running — smoke test passed.'
+  }
   $exitCode = 0
 } finally {
   if (-not $proc.HasExited) {

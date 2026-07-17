@@ -28,12 +28,12 @@ interface PackageJson {
 }
 
 const RESERVED_RESOURCE_NAMES = new Set([
+  '.murasaki-runtime',
   'client',
   'server',
   'node_modules',
   'prod-server.mjs',
   'wire.mjs',
-  'main-runtime.mjs',
   'updater-engine.mjs',
   'murasaki-meta.json',
   'menu-locales.json',

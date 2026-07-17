@@ -36,14 +36,21 @@ export default defineConfig({
       visible: false,
       capabilities: ['clipboard:readText'],
     },
+    report: {
+      route: '/report',
+      createOnLaunch: false,
+      capabilities: [],
+    },
   },
 })
 ```
 
-All declared windows are created by the host. Secondary windows start hidden
-unless `visible: true` is set. A secondary window with no `capabilities` is
-deny-all; it never inherits the top-level list. For backwards compatibility,
-the primary window resolves permissions as
+Declared windows use `createOnLaunch: true` by default. A startup-created
+secondary starts hidden unless `visible: true` is set. Set
+`createOnLaunch: false` to keep a declaration dormant until trusted Node Main
+calls `windows.create(label)`. A secondary with no `capabilities` is deny-all;
+it never inherits the top-level list. The primary is always created at launch
+and resolves permissions as
 `window.capabilities ?? capabilities ?? []`.
 
 Open a hidden secondary from a visible renderer, normally `main`. WebKit and
@@ -107,14 +114,16 @@ interface WindowInfo {
 | `windows.show(label)` / `hide(label)` / `focus(label)` / `close(label)` | `window:manage` | Manages another declared window. |
 
 Only labels declared in configuration are available. These APIs do not create
-an arbitrary route or a new runtime window.
+an arbitrary route or a new runtime window. `windows.open(label)` is show-only:
+it rejects when the declared label is dormant or has been destroyed. Use the
+Node Main window manager to create that declaration first.
 
 <Callout type="warn">
   The OS close control and `appWindow.close()` hide a secondary window, so
   `windows.open(label)` can show that same declared window again. In contrast,
   `windows.close(label)` explicitly destroys a secondary target; a destroyed
-  secondary cannot be recreated in the current release. Closing `main` remains
-  an application quit request.
+  secondary can only be recreated by trusted Node Main. Closing `main` remains
+  an application quit request. See [Node Main](/docs/guides/node-main#control-declared-windows-from-node-main).
 </Callout>
 
 ## Primary close and application lifecycle
@@ -123,8 +132,15 @@ Using the OS close control or `appWindow.close()` on a secondary hides that
 window and affects no other window. Closing `main` is an application quit
 request: it runs `beforeQuit()`, can be cancelled there, and then runs bounded
 `shutdown()` before the native host exits. Murasaki does not currently expose
-a separate per-window close hook. Use `windows.close(label)` only when the
-secondary should be destroyed for the rest of the process lifetime.
+a separate per-window close hook.
+
+## Session sharing
+
+Normal windows share the application WebContext, so cookies and Web Storage
+are shared across startup-created, dynamically created, and recreated windows.
+Every window still uses its own route and capability policy. With
+`webview.incognito: true`, Wry ignores the shared WebContext; session sharing
+between multiple incognito windows is platform-dependent and not guaranteed.
 
 ## Per-window least privilege
 
@@ -139,7 +155,11 @@ export default defineConfig({
   productName: 'Notes',
   window: {
     route: '/',
-    capabilities: ['window:open', 'window:list', 'window:manage'],
+    capabilities: [
+      'window:list',
+      { permission: 'window:open', allow: { windows: ['settings'] } },
+      { permission: 'window:manage', allow: { windows: ['settings'] } },
+    ],
   },
   windows: {
     settings: { route: '/settings', capabilities: [] },
@@ -149,8 +169,9 @@ export default defineConfig({
 ```
 
 Per-window capability lists limit which native command names a compromised
-renderer can call. They do not scope arguments: `window:manage` is broad, and
-`dialog:openFile` cannot yet be limited to one directory. Do not load remote
+renderer can call. Structured `window:open` and `window:manage` grants also
+limit exact target labels; `deny` takes precedence over `allow`. Dialog
+defaults and many other command arguments are not scopeable. Do not load remote
 or user-authored executable content into any privileged renderer, and validate
 app-level intent before broad operations.
 

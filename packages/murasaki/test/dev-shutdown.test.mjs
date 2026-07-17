@@ -212,3 +212,65 @@ test('a cancelled native shutdown resumes main-module HMR', async (t) => {
   }
   assert.equal(loadCalls, 2)
 })
+
+test('a rejected beforeQuit also resumes main-module HMR', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'murasaki-dev-rejected-shutdown-'))
+  const entry = join(root, 'src/main.ts')
+  await mkdir(join(root, 'src'))
+  await writeFile(entry, 'export default {}')
+  t.after(() => rm(root, { recursive: true, force: true }))
+
+  let middleware
+  let changed
+  let loadCalls = 0
+  const plugin = mainProcessPlugin({
+    config: {
+      appId: 'dev.test.rejected-shutdown',
+      productName: 'Rejected Shutdown Test',
+      main: { shutdownTimeoutMs: 100 },
+    },
+  })
+  const afterConfigure = plugin.configureServer({
+    config: { root },
+    middlewares: { use(handler) { middleware = handler } },
+    watcher: { on(event, handler) { if (event === 'change') changed = handler } },
+    httpServer: { once() {} },
+    moduleGraph: { getModuleById() { return undefined }, invalidateModule() {} },
+    logger: { error() {} },
+    async ssrLoadModule() {
+      loadCalls++
+      return { default: { beforeQuit: () => { throw new Error('dev quit veto failed') } } }
+    },
+  })
+  await afterConfigure()
+
+  const server = http.createServer((req, res) => middleware(req, res, () => {
+    res.statusCode = 404
+    res.end()
+  }))
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  t.after(() => server.close())
+
+  const token = runtimeToken()
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/__murasaki/main/shutdown`,
+    {
+      method: 'POST',
+      headers: {
+        cookie: `murasaki_runtime=${token}`,
+        'content-type': 'application/json',
+        'x-murasaki-native-token': token,
+      },
+      body: JSON.stringify({ reason: 'window-close' }),
+    },
+  )
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { cancelled: true, timedOut: false })
+
+  changed(entry)
+  for (let attempt = 0; attempt < 20 && loadCalls < 2; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.equal(loadCalls, 2)
+})

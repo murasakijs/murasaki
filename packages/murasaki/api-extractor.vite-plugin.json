@@ -1,0 +1,5 @@
+{
+  "extends": "./api-extractor.json",
+  "mainEntryPointFilePath": "<projectFolder>/dist/vite-plugin/index.d.ts",
+  "apiReport": { "reportFileName": "vite-plugin.api.md" }
+}

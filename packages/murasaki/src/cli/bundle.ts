@@ -8,22 +8,25 @@ import { spawnSync } from 'node:child_process'
 import pngToIco from 'png-to-ico'
 import { PNG } from 'pngjs'
 import { NtExecutable, NtExecutableResource, Data, Resource } from 'resedit'
-import build from './build.js'
+import { buildProject } from './build.js'
 import buildServer from './build-server.js'
 import { dim, success, warn, unsignedNote } from './brand.js'
 import { ensureNodeBinary, type NodePlatform } from './node-runtime.js'
 import {
+  resolveWebviewNetworkConfig,
   resolveStartupSystemPermissions,
-  resolveWindowDeclarations,
   validateMainShutdownTimeoutMs,
   type MurasakiConfig,
+  type MurasakiBuildTarget,
 } from '../config.js'
+import { serializeWindowTemplates } from './window-metadata.js'
 import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
 import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
 import { resolveAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
 import { signWindowsArtifact } from './windows-signing.js'
+import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
 
 export { loadUserConfig } from './load-config.js'
 
@@ -50,7 +53,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  */
 export default async function bundle(argv: string[]) {
   const cwd = process.cwd()
-  const config = await loadUserConfig(cwd)
+  const loadedConfig = await loadUserConfig(cwd)
   // Target platform+arch for the produced bundle — defaults to the host
   // platform/arch, but `--target win32-x64` (etc.) or `config.targets[0]`
   // cross-bundles a different platform from this machine. `--arch
@@ -58,7 +61,14 @@ export default async function bundle(argv: string[]) {
   // the host platform, e.g. letting a single arm64 Mac also produce an Intel
   // `.app`. Drives both the fetched Node runtime and the `murasaki-launcher`
   // binary selection below.
-  const target = parseTarget(argv, config)
+  const target = parseTarget(argv, loadedConfig)
+  const prepared = preparePlugins(loadedConfig)
+  const config = prepared.config
+  const hookOptions = {
+    projectRoot: cwd,
+    command: 'bundle' as const,
+    target: `${target.platform}-${target.arch}` as MurasakiBuildTarget,
+  }
   // Rebuild the client every time by default — bundling is a release step, so
   // silently packaging a stale `dist/client` from an earlier run is a footgun.
   // `--no-build` opts back into reuse (but still builds if it's missing).
@@ -74,7 +84,8 @@ export default async function bundle(argv: string[]) {
         'Cross-bundle without --sign, then run the signed release job on Windows.',
     )
   }
-  if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await build(argv)
+  await runPluginHooks(prepared, 'before', hookOptions)
+  if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await buildProject(cwd, config)
   // Always (re)built — cheap relative to the client build, and must exist
   // before packaging even if dist/client was already up to date.
   await buildServer(cwd, resolve(cwd, 'src'), config)
@@ -85,11 +96,13 @@ export default async function bundle(argv: string[]) {
   // verification off a Mac.
   if (target.platform === 'win32') {
     await bundleWin32(cwd, config, target.arch, shouldSign)
+    await runPluginHooks(prepared, 'after', hookOptions)
     return
   }
 
   if (target.platform !== 'darwin') {
     process.stdout.write(`\n${warn(`bundle: ${target.platform} is not supported yet.`)}\n\n`)
+    await runPluginHooks(prepared, 'after', hookOptions)
     return
   }
 
@@ -97,6 +110,7 @@ export default async function bundle(argv: string[]) {
     process.stdout.write(
       `\n${warn('bundle: a darwin .app can only be built while running on macOS (win32 targets can be cross-bundled from anywhere).')}\n\n`,
     )
+    await runPluginHooks(prepared, 'after', hookOptions)
     return
   }
 
@@ -165,9 +179,10 @@ export default async function bundle(argv: string[]) {
   const wireCodecSrc = resolve(__dirname, '../runtime/wire.js')
   await copyFile(wireCodecSrc, join(resourcesDir, 'wire.mjs'))
 
-  // Contents/Resources/main-runtime.mjs — lifecycle runner shared by dev and prod.
-  const mainRuntimeSrc = resolve(__dirname, '../runtime/main-runtime.js')
-  await copyFile(mainRuntimeSrc, join(resourcesDir, 'main-runtime.mjs'))
+  // Contents/Resources/.murasaki-runtime — the lifecycle runner and its
+  // private logger/sidecar dependencies, preserving their compiled relative
+  // imports. The directory is reserved from config.bundle.resources.
+  await copyMainRuntime(resourcesDir)
 
   // Contents/Resources/menu-locales.json — read by the launcher binary at
   // runtime to localize the default app menu for the end user's locale (see
@@ -253,6 +268,7 @@ export default async function bundle(argv: string[]) {
   process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
 
   if (!shouldSign) process.stdout.write(unsignedNote(appDir))
+  await runPluginHooks(prepared, 'after', hookOptions)
 }
 
 /**
@@ -311,9 +327,8 @@ async function bundleWin32(
   const wireCodecSrc = resolve(__dirname, '../runtime/wire.js')
   await copyFile(wireCodecSrc, join(resourcesDir, 'wire.mjs'))
 
-  // resources/main-runtime.mjs — lifecycle runner shared by dev and prod.
-  const mainRuntimeSrc = resolve(__dirname, '../runtime/main-runtime.js')
-  await copyFile(mainRuntimeSrc, join(resourcesDir, 'main-runtime.mjs'))
+  // resources/.murasaki-runtime — lifecycle runner and private dependencies.
+  await copyMainRuntime(resourcesDir)
 
   // resources/menu-locales.json — read by the launcher binary at runtime to
   // localize the default app menu for the end user's locale.
@@ -468,6 +483,30 @@ async function zipDarwinApp(
 }
 
 /**
+ * Copy the Node Main lifecycle runtime without flattening its compiled module
+ * graph. `main-runtime.js` imports `../main/logger.js` and
+ * `../main/sidecar.js`; preserving that layout prevents packaged apps from
+ * starting with an ERR_MODULE_NOT_FOUND after those production services are
+ * enabled. A private package boundary marks the copied `.js` files as ESM.
+ */
+async function copyMainRuntime(resourcesDir: string): Promise<void> {
+  const root = join(resourcesDir, '.murasaki-runtime')
+  const runtimeDir = join(root, 'runtime')
+  const mainDir = join(root, 'main')
+  await mkdir(runtimeDir, { recursive: true })
+  await mkdir(mainDir, { recursive: true })
+  await Promise.all([
+    copyFile(
+      resolve(__dirname, '../runtime/main-runtime.js'),
+      join(runtimeDir, 'main-runtime.js'),
+    ),
+    copyFile(resolve(__dirname, '../main/logger.js'), join(mainDir, 'logger.js')),
+    copyFile(resolve(__dirname, '../main/sidecar.js'), join(mainDir, 'sidecar.js')),
+    writeFile(join(root, 'package.json'), '{"private":true,"type":"module"}\n'),
+  ])
+}
+
+/**
  * The `murasaki-meta.json` object written into both the `.app`'s
  * `Contents/Resources/` and the win32 folder's `resources/` — read by
  * `murasaki-launcher` at runtime for window title/size, About panel fields,
@@ -489,21 +528,7 @@ export function metaJson(
   // here rather than a silent runtime no-op.
   const updater = resolveUpdater(config.updater, { projectRoot: cwd })
   const associations = resolveAssociations(config)
-  const windows = resolveWindowDeclarations(config).map((declaration) => ({
-    label: declaration.label,
-    primary: declaration.primary,
-    route: declaration.route,
-    visible: declaration.visible,
-    title: declaration.title,
-    width: declaration.width,
-    height: declaration.height,
-    minWidth: declaration.minWidth,
-    minHeight: declaration.minHeight,
-    resizable: declaration.resizable,
-    transparent: declaration.transparent,
-    vibrancy: declaration.vibrancy,
-    capabilities: declaration.capabilities,
-  }))
+  const windows = serializeWindowTemplates(config)
   const primaryWindow = windows[0]
   return JSON.stringify(
     {
@@ -523,7 +548,9 @@ export function metaJson(
       resizable: primaryWindow.resizable,
       transparent: primaryWindow.transparent,
       capabilities: primaryWindow.capabilities,
+      capabilityPolicy: primaryWindow.capabilityPolicy,
       systemPermissionsOnLaunch: resolveStartupSystemPermissions(config),
+      webview: resolveWebviewNetworkConfig(config),
       mainShutdownTimeoutMs,
       vibrancy: primaryWindow.vibrancy,
       console: config.window?.console,

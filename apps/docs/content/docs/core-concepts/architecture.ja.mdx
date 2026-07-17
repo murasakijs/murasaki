@@ -7,24 +7,32 @@ Murasaki は 3 層のデスクトップランタイムです。React は OS の 
 アプリのバックエンドコードは同梱された Node.js プロセスで実行され、小さな Rust
 ホストがネイティブウィンドウとアプリのライフサイクルを管理します。
 
-```txt
-┌─────────────── ネイティブアプリ ────────────────┐
-│                                                 │
-│  Rust host (tao / wry / muda)                   │
-│  windows · WebViews · native menu · update handoff│
-│                      │                          │
-│                      │ 起動 / 監視              │
-│                      ▼                          │
-│  Local Node runtime                             │
-│  src/main.ts · use-main · use-server · API route│
-│                      │                          │
-│                      │ 認証付き loopback HTTP   │
-│                      ▼                          │
-│  OS WebView                                     │
-│  React 19 · Murasaki router · renderer code     │
-│                                                 │
-└─────────────────────────────────────────────────┘
-```
+<div className="architecture-diagram" aria-label="Murasaki ランタイムのアーキテクチャ">
+  <div className="architecture-diagram__title">ネイティブアプリ</div>
+  <div className="architecture-layer">
+    <span>01 · ネイティブホスト</span>
+    <strong>Rust · tao / wry / muda</strong>
+    <p>ウィンドウ、WebView、ネイティブメニュー、ライフサイクル、更新引き渡し</p>
+  </div>
+  <div className="architecture-connector">
+    <span>起動・監視</span>
+    <b aria-hidden="true">↓</b>
+  </div>
+  <div className="architecture-layer">
+    <span>02 · アプリバックエンド</span>
+    <strong>ローカル Node ランタイム</strong>
+    <p>src/main.ts · use-main · use-server · API routes</p>
+  </div>
+  <div className="architecture-connector">
+    <span>認証付き loopback HTTP</span>
+    <b aria-hidden="true">↓</b>
+  </div>
+  <div className="architecture-layer">
+    <span>03 · レンダラー</span>
+    <strong>OS WebView</strong>
+    <p>React 19 · Murasaki router · renderer code</p>
+  </div>
+</div>
 
 これは Electron の Chromium + Node レンダラーモデルとは異なります。レンダラーに
 Node グローバルはありません。ファイル、DB、ソケット、Worker、シークレットを扱う
@@ -36,13 +44,14 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 
 | レイヤー | 担当 | 担当しないもの |
 | --- | --- | --- |
-| Rust ホスト | native event loop、宣言済みapp window、window別navigation / capability policy、OS open request normalize、menu、Node子process監視、更新の最終適用 | business logic、React state |
-| ローカル Node | Main lifecycle、登録済みURL / file処理、Action、API route、更新検証、app resource / data | 任意native windowの動的生成 |
+| Rust ホスト | native event loop、設定済みwindow template catalog、window別navigation / capability policy、OS open request normalize、menu、Node子process監視、更新の最終適用 | business logic、React state |
+| ローカル Node | Main lifecycle、設定済みsecondary templateのcreate / destroy、登録済みURL / file処理、Action、API route、更新検証、app resource / data | native windowへの任意URLやruntime capability policyの指定 |
 | レンダラー | UI、routing、browser API、型付きbackend call、許可済み宣言windowの操作 | filesystem・Node・native moduleへの直接access |
 
 <Callout type="warn">
   Murasaki は 1.0 未満です。宣言windowには独立したdeny-by-default command allowlistが
-  ありますが、capability argumentやpath / URL scopeはpolicy制御されません。packaged
+  あります。URL、filesystem path、target window、OS permissionはallow / deny scopeで
+  制限できますが、その他のcommand argumentはcommand単位です。packaged
   macOS / Windows appはsingle instanceを強制し、URL scheme / file associationを登録して、
   一致するactivationをNode Mainの`openRequested()`へ渡せます。本番設計を確定する前に
   [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)を
@@ -58,7 +67,7 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 | Web アセット | HMR 付き Vite dev server | 同梱 Node が `dist/client` を配信 |
 | Node バックエンド | Vite 子プロセス | アプリ内のポータブル Node |
 | ネイティブホスト | CLI が `@murasakijs/native` をロード | 単体の Rust launcher |
-| 宣言window | 個別dev WebViewとして全routeを作成 | resolved bundle metadataから全routeを作成 |
+| 宣言window | 全template catalogをnative hostへ渡し、`createOnLaunch`だけ即時作成 | bundle metadataから全catalogを読み、`createOnLaunch`だけ即時作成 |
 | Main entry | Vite SSR で読み込み、entry の変更で hot reload | `server/main.mjs` にコンパイル |
 | バックエンド呼び出し | Vite middleware | 同梱 loopback HTTP server |
 | URL / file 登録 | dev mode では OS に登録しない | macOS app metadata または Windows installer registry |
@@ -67,6 +76,11 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 origin が安定します。Windows の WebView2 profile も `appId` ごとに分離されます。
 リリース後は `appId` を安易に変更しないでください。データパス、WebView profile、
 bundle identity、single-instance lock、ローカル origin が変わる可能性があります。
+
+通常windowはapplication WebContextを共有するため、process内のdestroy / recreateをまたいで
+browser sessionを利用できます。routeとnative capability policyはtemplateごとに独立します。
+ただしincognito WebViewではWryがshared contextを無視するため、window間のincognito
+session共有はplatform依存であり保証されません。
 
 ## Next.js 風であり、Next.js そのものではない
 

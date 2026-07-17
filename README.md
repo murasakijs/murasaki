@@ -216,6 +216,27 @@ we've benchmarked head-to-head:
 - **macOS system permissions.** Declare camera/microphone purpose strings and
   optional launch prompts in config; query/request camera, microphone, screen
   recording, and accessibility consent from trusted renderer code.
+- **Node Main lifecycle and supervised helpers.** Put long-lived TypeScript in
+  `src/main.ts` with `ready`, cancellable `beforeQuit`, bounded `shutdown`,
+  second-instance/deep-link delivery, structured logging, diagnostic reports,
+  and contained sidecars with explicit restart policies. A packaged host
+  detects an unexpected Node exit, tears down the process tree, and exits
+  non-zero instead of leaving a dead UI running.
+- **Declared multi-window runtime.** Give each window its own route and
+  deny-by-default capability policy. Keep secondary templates dormant until
+  Node Main calls `windows.create()`, then destroy and recreate them with
+  generation-scoped lifecycle events. macOS `hud`, `sidebar`, and `popover`
+  vibrancy materials are applied natively.
+- **Production security primitives.** Exact-origin native IPC, authenticated
+  loopback endpoints, bounded wire payloads, CSP defaults, scoped URL/path/
+  window/permission grants, macOS Keychain / Windows Credential Manager,
+  owner-scoped global shortcuts, and app-wide private-session/User-Agent/proxy
+  configuration ship as typed APIs. See the canonical
+  [`capabilities.json`](https://github.com/murasakijs/murasaki/blob/main/packages/murasaki/capabilities.json)
+  for exact maturity and limitations.
+- **Build-time plugin SDK.** Trusted plugins can contribute Vite options,
+  bundle dependencies/resources, and serial dev/build/bundle hooks without
+  patching Murasaki core.
 - **Server Actions, running end-to-end.** `defineAction` + `useAction` mirror
   React 19's `useActionState` shape, and the `'use server'` function actually
   runs in Node — via a Vite middleware in dev, via a bundled Node child server

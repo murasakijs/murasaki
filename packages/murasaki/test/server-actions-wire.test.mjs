@@ -13,6 +13,20 @@ import { serverActionsPlugin } from '../dist/vite-plugin/server-actions.js'
 
 const packageDir = resolve(import.meta.dirname, '..')
 
+async function copyMainRuntimeFixture(root) {
+  const runtimeRoot = join(root, '.murasaki-runtime')
+  const runtimeDir = join(runtimeRoot, 'runtime')
+  const mainDir = join(runtimeRoot, 'main')
+  await mkdir(runtimeDir, { recursive: true })
+  await mkdir(mainDir, { recursive: true })
+  await Promise.all([
+    copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(runtimeDir, 'main-runtime.js')),
+    copyFile(join(packageDir, 'dist/main/logger.js'), join(mainDir, 'logger.js')),
+    copyFile(join(packageDir, 'dist/main/sidecar.js'), join(mainDir, 'sidecar.js')),
+    writeFile(join(runtimeRoot, 'package.json'), '{"private":true,"type":"module"}\n'),
+  ])
+}
+
 function richArgument() {
   const value = {
     date: new Date('2026-07-16T07:01:00.000Z'),
@@ -163,7 +177,7 @@ export const registry = {
   await copyFile(join(packageDir, 'assets/prod-server.mjs'), join(root, 'prod-server.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/updater.js'), join(root, 'updater-engine.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/wire.js'), join(root, 'wire.mjs'))
-  await copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(root, 'main-runtime.mjs'))
+  await copyMainRuntimeFixture(root)
 
   const child = spawn(
     process.execPath,

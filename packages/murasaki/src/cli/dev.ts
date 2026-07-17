@@ -4,10 +4,12 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import http from 'node:http'
 import net from 'node:net'
-import { loadNative } from '../runtime/native.js'
+import { loadNative, type RuntimeWindowTemplate } from '../runtime/native.js'
 import { detectLocale, resolveMenuLabels } from '../menu-i18n.js'
-import { resolveWindowDeclarations } from '../config.js'
+import { resolveWebviewNetworkConfig, type MurasakiConfig } from '../config.js'
 import { loadUserConfig } from './load-config.js'
+import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
+import { serializeWindowTemplates } from './window-metadata.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -19,7 +21,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
  */
 export default async function dev(_argv: string[]) {
   const cwd = process.cwd()
-  const config = await loadUserConfig(cwd)
+  const prepared = preparePlugins(await loadUserConfig(cwd))
+  const config = prepared.config
+  const hookOptions = { projectRoot: cwd, command: 'dev' as const }
+  await runPluginHooks(prepared, 'before', hookOptions)
   // The bundled `node` binary is otherwise the process's own name (visible in
   // the bold macOS app menu and the About panel) — prefer the product name.
   process.title = config.productName
@@ -57,48 +62,7 @@ export default async function dev(_argv: string[]) {
       // configureShutdown + run_return, so this callback is only a fallback.
       app.onQuit(() => vite.kill())
     }
-    const declarations = resolveWindowDeclarations(config)
-    // Keep every native webview strongly referenced for the lifetime of the
-    // blocking app loop. Secondary windows are created eagerly but default to
-    // hidden; the declarative window API opens/manages them by label.
-    const webviews = declarations.map((declaration) => app.createWebview(
-      {
-        label: declaration.label,
-        primary: declaration.primary,
-        title: declaration.title ?? config.productName,
-        width: declaration.width ?? 1280,
-        height: declaration.height ?? 800,
-        minWidth: declaration.minWidth,
-        minHeight: declaration.minHeight,
-        resizable: declaration.resizable,
-        transparent: declaration.transparent,
-        visible: declaration.visible,
-        // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
-        // undefined: napi's Option<String> maps undefined to None but rejects an
-        // explicit null with "Failed to convert Null into String".
-        vibrancy: declaration.vibrancy ?? undefined,
-        icon: config.icon ? resolve(cwd, config.icon) : undefined,
-        version: config.version,
-        description: config.description,
-        copyright: config.copyright,
-        homepage: config.homepage,
-        authors: config.authors,
-        menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
-      },
-      {
-        url: new URL(declaration.route, url).href,
-        devtools: true,
-        appId: config.appId,
-        capabilities: declaration.capabilities,
-        trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,
-      },
-    ))
-
-    // Context menus are handled natively on the Rust side (see
-    // crates/native/src/webview.rs) — Application::run() blocks Node's event
-    // loop, so this callback never fires while the app is open anyway. Kept
-    // for future use (e.g. once the run loop is wired to also pump libuv).
-    for (const webview of webviews) webview.onIpcMessage(() => {})
+    app.configureWindows(createDevWindowTemplates(config, cwd, url))
 
     // Do not install JavaScript SIGINT/SIGTERM listeners here. `app.run()` is
     // a blocking native event loop, so libuv cannot execute those callbacks;
@@ -120,6 +84,51 @@ export default async function dev(_argv: string[]) {
   } finally {
     await stopViteChild(vite)
   }
+  await runPluginHooks(prepared, 'after', hookOptions)
+}
+
+/** @internal Resolve the immutable catalog passed to the native dev host. */
+export function createDevWindowTemplates(
+  config: MurasakiConfig,
+  cwd: string,
+  url: string,
+): RuntimeWindowTemplate[] {
+  const webviewNetwork = resolveWebviewNetworkConfig(config)
+  return serializeWindowTemplates(config).map((declaration) => ({
+    window: {
+      label: declaration.label,
+      primary: declaration.primary,
+      title: declaration.title ?? config.productName,
+      width: declaration.width ?? 1280,
+      height: declaration.height ?? 800,
+      minWidth: declaration.minWidth,
+      minHeight: declaration.minHeight,
+      resizable: declaration.resizable,
+      transparent: declaration.transparent,
+      visible: declaration.visible,
+      // Coerce `null` (a valid WindowConfig.vibrancy value meaning "none") to
+      // undefined: napi's Option<String> maps undefined to None but rejects an
+      // explicit null with "Failed to convert Null into String".
+      vibrancy: declaration.vibrancy ?? undefined,
+      icon: config.icon ? resolve(cwd, config.icon) : undefined,
+      version: config.version,
+      description: config.description,
+      copyright: config.copyright,
+      homepage: config.homepage,
+      authors: config.authors,
+      menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
+    },
+    webview: {
+      url: new URL(declaration.route, url).href,
+      devtools: true,
+      appId: config.appId,
+      ...webviewNetwork,
+      capabilities: declaration.capabilities,
+      capabilityPolicy: declaration.capabilityPolicy,
+      trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,
+    },
+    createOnLaunch: declaration.createOnLaunch,
+  }))
 }
 
 // Keep the port probe, Vite child, native shutdown client, and WebView on the

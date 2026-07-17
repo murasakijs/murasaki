@@ -6,7 +6,9 @@ import {
   appWindow,
   clipboard,
   dialog,
+  globalShortcut,
   notification,
+  secureStorage,
   shell,
   systemPermission,
   tray,
@@ -36,6 +38,11 @@ test('renderer native API uses request-correlated bridge calls', async () => {
         'window.isMinimized': false,
         'systemPermission.status': 'notDetermined',
         'systemPermission.request': 'granted',
+        'secureStorage.get': call.args.key === 'missing' ? null : 'stored-secret',
+        'globalShortcut.register': {
+          id: call.args.id ?? 'Control+Shift+KeyK',
+          accelerator: 'Control+Shift+KeyK',
+        },
       }
       queueMicrotask(() => fakeWindow.dispatchEvent(new CustomEvent('murasaki:nativeresponse', {
         detail: {
@@ -53,6 +60,10 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   await clipboard.writeText('next')
   await notification.show({ title: 'Ready' })
   await shell.openExternal('https://example.com')
+  assert.equal(await secureStorage.get('session'), 'stored-secret')
+  assert.equal(await secureStorage.get('missing'), null)
+  await secureStorage.set('session', 'next-secret')
+  await secureStorage.delete('session')
   assert.equal(await systemPermission.status('camera'), 'notDetermined')
   assert.equal(await systemPermission.request('camera'), 'granted')
   assert.equal(await appWindow.getLabel(), 'main')
@@ -75,6 +86,17 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   await windows.hide('settings')
   await windows.focus('settings')
   await windows.close('settings')
+  assert.deepEqual(await globalShortcut.register('Control+Shift+K', 'capture'), {
+    id: 'capture', accelerator: 'Control+Shift+KeyK',
+  })
+  let shortcut
+  const stopShortcut = globalShortcut.onTriggered((event) => { shortcut = event })
+  fakeWindow.dispatchEvent(new CustomEvent('murasaki:globalshortcut', {
+    detail: { id: 'capture', accelerator: 'Control+Shift+KeyK' },
+  }))
+  stopShortcut()
+  await globalShortcut.unregister('capture')
+  await globalShortcut.unregisterAll()
   await tray.create({ tooltip: 'Murasaki' })
   await tray.setTooltip('Ready')
   await tray.setIcon('/tmp/tray.png')
@@ -98,6 +120,10 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'clipboard.writeText',
     'notification.show',
     'shell.openExternal',
+    'secureStorage.get',
+    'secureStorage.get',
+    'secureStorage.set',
+    'secureStorage.delete',
     'systemPermission.status',
     'systemPermission.request',
     'window.getLabel',
@@ -117,6 +143,9 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'window.hideOther',
     'window.focusOther',
     'window.closeOther',
+    'globalShortcut.register',
+    'globalShortcut.unregister',
+    'globalShortcut.unregisterAll',
     'tray.create',
     'tray.setTooltip',
     'tray.setIcon',
@@ -125,11 +154,20 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   ])
   assert.equal(calls[1].args.multiple, true)
   assert.equal(calls[3].args.text, 'next')
+  assert.deepEqual(calls.find(({ method }) => method === 'secureStorage.set').args, {
+    key: 'session',
+    value: 'next-secret',
+  })
   assert.deepEqual(calls.find(({ method }) => method === 'window.open').args, { label: 'settings' })
+  assert.deepEqual(calls.find(({ method }) => method === 'globalShortcut.register').args, {
+    accelerator: 'Control+Shift+K',
+    id: 'capture',
+  })
   assert.equal(new Set(calls.map(({ requestId }) => requestId)).size, calls.length)
   assert.equal(calls.every(({ requestId }) => typeof requestId === 'string' && requestId.length > 0), true)
   assert.deepEqual(trayClick, { button: 'left', double: false })
   assert.equal(trayMenuItem, 'open')
+  assert.deepEqual(shortcut, { id: 'capture', accelerator: 'Control+Shift+KeyK' })
   delete globalThis.window
 })
 

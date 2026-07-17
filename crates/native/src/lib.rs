@@ -14,35 +14,41 @@ mod types;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod application;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-mod window;
-#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-mod webview;
-#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-mod menu;
-#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-mod dialog;
+mod capability_policy;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod clipboard;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod dialog;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod global_shortcut;
+mod launcher;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod menu;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod notification;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod secure_storage;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod shell;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod system_permission;
-mod launcher;
 mod updater;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod webview;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod window;
 
 pub use types::*;
 
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 pub use application::Application;
-#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
-pub use window::BrowserWindow;
+pub use launcher::run_launcher;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 pub use webview::Webview;
-pub use launcher::run_launcher;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+pub use window::BrowserWindow;
 
 #[napi]
 pub fn version() -> String {
-  env!("CARGO_PKG_VERSION").to_string()
+    env!("CARGO_PKG_VERSION").to_string()
 }

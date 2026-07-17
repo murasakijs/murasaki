@@ -69,9 +69,9 @@ process signal や開発時 Main reload を含む強制終了ではキャンセ�
 <Callout type="warn">
   OSのclose controlと `appWindow.close()` はsecondaryをhideするため、`windows.open()`
   で再表示できます。primaryの`main`を閉じるとapp quit requestになり、上記sequenceへ
-  進みます。cancelはapp全体に対するもので、window別close lifecycle eventはありません。
-  明示的な `windows.close(label)` はsecondary targetを破棄し、同じprocess内では現在
-  再生成できません。
+  進みます。cancelはapp全体に対するもので、cancel可能なwindow別close hookはありません。
+  Node Mainの`windows.destroy(label)`はsecondary targetを解放し、`windows.create(label)`で
+  設定済み宣言を再生成できます。
 </Callout>
 
 ## 開発時の reload
@@ -103,11 +103,12 @@ Main が import するコードも Vite module graph に従いますが、現状
 
 ## プロセス障害
 
-ホストが Node 子プロセスの lifetime を所有します。macOS / Linux では server が孤児に
-なると終了し、Windows では launcher と共に閉じる Job Object に割り当てられます。
-crash restart policy、health check hook、複数 worker の監視 API はまだ公開されて
-いません。Main から worker / child process を生成する場合、その終了処理はアプリ側の
-責務です。
+ホストはNode子プロセスのlifetimeを所有し、定期的に生存を確認します。packaged backendが
+予期せず終了した場合、launcherは未確認のupdate handoffを破棄し、WebViewを閉じ、backend
+process treeを終了して非0で終了します。dead UIだけが残ることはありません。Windowsは
+Job Object、macOSはNodeとsidecar専用のprocess groupを使います。publicなcrash restart
+policy、health check hook、複数の独立worker groupを監視するAPIはまだありません。helperに
+明示的なrestart policyが必要な場合はMainのsidecar supervisorを使用してください。
 
 ## 次へ
 

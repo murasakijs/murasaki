@@ -9,5 +9,5 @@
 #![windows_subsystem = "windows"]
 
 fn main() {
-  murasaki_native::run_launcher();
+    murasaki_native::run_launcher();
 }

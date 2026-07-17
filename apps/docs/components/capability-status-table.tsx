@@ -131,11 +131,11 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "node-main-lifecycle": [
     "src/main.ts lifecycleはready、cancel可能なbeforeQuit、時間制限付きshutdown、second-launch配送、app path、AbortSignal、renderer向けtyped live eventを提供します。",
-    "window管理はrenderer向けで、src/main.tsからは利用できません。crash-restart policyとprocess supervision APIも未実装です。",
+    "src/main.tsから宣言済みwindowを生成・破棄できます。packaged hostはNodeの異常終了を検出して非ゼロ終了しますが、公開されたcrash-restart policyとhealth-check APIは未実装です。",
   ],
   "native-window": [
-    "primary / secondary windowを宣言し、識別、表示、非表示、focus、一覧、open、明示的closeを行えます。runtimeでの任意作成とwindow別lifecycle subscriptionは未実装です。",
-    "window vibrancyは現在も宣言のみのno-opです。",
+    "primary / secondary windowを宣言し、識別、表示、非表示、focus、一覧、open、明示的closeを行えます。Node Mainは宣言済みtemplateの生成・破棄に対応しますが、任意URLや任意policyを持つwindowは生成できません。",
+    "macOSではhud / sidebar / popover vibrancyをnative materialとして適用し、Windows / LinuxではこのmacOS専用optionを無視します。",
   ],
   "application-menu": [
     "macOSとWindowsではnative application menuを利用できますが、roleの挙動にはplatform差があります。",
@@ -147,7 +147,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "native-utilities": [
     "dialog、clipboard、notification、shell helper、window操作はsame-origin native bridgeとwindow別allowlistを通してtrusted rendererへ公開されます。",
-    "capabilityはcommand単位でargument / path scopeを持たず、renderer native APIはsrc/main.tsから直接利用できません。",
+    "URL、path、対象window、OS permissionを受け取る一部commandはallow/deny scopeに対応します。それ以外はcommand単位で、renderer native APIはsrc/main.tsから直接利用できません。",
   ],
   "auto-update": [
     "署名付きmanifest、上限付きdownload、SHA-256 payload検証、staging handoff、relaunchをpackaged app向けに実装しています。",
@@ -174,8 +174,8 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "secondaryのOS/self closeは再openできるようhideし、親からの明示的closeは再起動まで破棄します。application menuはprocess-globalです。",
   ],
   "tray-and-global-shortcuts": [
-    "macOS / Windowsではtooltipとclick eventを持つ1個のtray icon APIを利用できます。",
-    "tray menu、動的icon差し替え、global shortcut、Linux trayは未実装です。",
+    "macOS / Windowsではnative menuと動的差し替えを備えたtray icon、およびowner管理されたglobal shortcut APIを利用できます。",
+    "global shortcutはOSや他appとの競合を実機確認する必要があります。Linux tray / global shortcutは未実装です。",
   ],
   "single-instance-and-deep-links": [
     "packaged macOS appとinstaller経由のWindows appは、設定したURL schemeとfile associationを登録し、single-instanceを維持したままOpenRequestEventをsrc/main.tsへ渡します。",

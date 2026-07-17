@@ -36,13 +36,20 @@ export default defineConfig({
       visible: false,
       capabilities: ['clipboard:readText'],
     },
+    report: {
+      route: '/report',
+      createOnLaunch: false,
+      capabilities: [],
+    },
   },
 })
 ```
 
-host は宣言済みウィンドウをすべて作成します。secondary は `visible: true` を指定しない
-限り非表示で開始します。secondary で `capabilities` を省略するとdeny-allであり、
-top-level listを継承しません。後方互換のため、primaryだけは
+宣言windowの`createOnLaunch`は既定`true`です。起動時に作成するsecondaryは
+`visible: true`を指定しない限り非表示で開始します。`createOnLaunch: false`にすると、
+信頼されたNode Mainが`windows.create(label)`を呼ぶまで宣言をdormantにできます。
+secondaryで`capabilities`を省略するとdeny-allであり、top-level listを継承しません。
+primaryは常に起動時に作成され、
 `window.capabilities ?? capabilities ?? []` の順に権限を解決します。
 
 非表示secondaryは、通常 `main` など表示中のrendererから開いてください。WebKitや
@@ -101,13 +108,15 @@ interface WindowInfo {
 | `windows.show(label)` / `hide(label)` / `focus(label)` / `close(label)` | `window:manage` | 別の宣言済みwindowを操作する。 |
 
 設定にないlabelは利用できません。任意のrouteやruntime windowを動的生成するAPIでは
-ありません。
+ありません。`windows.open(label)`はshow-onlyであり、dormantまたは破棄済みの宣言では
+rejectします。先にNode Mainのwindow managerでその宣言を作成してください。
 
 <Callout type="warn">
   OSのclose controlと `appWindow.close()` はsecondaryをhideするため、
   `windows.open(label)` で同じ宣言済みwindowを再表示できます。一方、
   `windows.close(label)` はsecondary targetを明示的に破棄します。破棄したsecondaryは
-  現行版では再生成できません。`main` のcloseは引き続きapp quit requestです。
+  信頼されたNode Mainからだけ再生成できます。`main` のcloseは引き続きapp quit requestです。
+  [Node Main](/ja/docs/guides/node-main#node-mainから宣言windowを操作する)も参照してください。
 </Callout>
 
 ## Primary closeとアプリライフサイクル
@@ -115,8 +124,14 @@ interface WindowInfo {
 secondaryでOSのclose controlまたは `appWindow.close()` を使うと、そのwindowだけが
 hideされます。`main` のcloseはアプリのquit requestであり、`beforeQuit()` が実行され、
 そこでcancel可能です。その後、上限付き `shutdown()` を経てnative hostが終了します。
-window別close hookはまだありません。`windows.close(label)` は、そのprocess lifetime中
-に再利用しないsecondaryを明示的に破棄するときだけ使ってください。
+window別close hookはまだありません。
+
+## Session共有
+
+通常windowはapplication WebContextを共有するため、起動時作成・動的作成・再作成した
+window間でcookieとWeb Storageを共有します。routeとcapability policyはwindowごとに
+独立しています。`webview.incognito: true`ではWryがshared WebContextを無視するため、
+複数incognito window間のsession共有はplatform依存であり保証されません。
 
 ## Window別の最小権限
 
@@ -130,7 +145,11 @@ export default defineConfig({
   productName: 'Notes',
   window: {
     route: '/',
-    capabilities: ['window:open', 'window:list', 'window:manage'],
+    capabilities: [
+      'window:list',
+      { permission: 'window:open', allow: { windows: ['settings'] } },
+      { permission: 'window:manage', allow: { windows: ['settings'] } },
+    ],
   },
   windows: {
     settings: { route: '/settings', capabilities: [] },
@@ -139,9 +158,10 @@ export default defineConfig({
 })
 ```
 
-window別capability listは、侵害されたrendererが呼べるnative command名を制限しますが、
-argumentはscopeしません。`window:manage` は広い権限であり、`dialog:openFile` を特定の
-directoryだけに限定することもまだできません。権限を持つrendererにremote contentや
+window別capability listは、侵害されたrendererが呼べるnative command名を制限します。
+structured `window:open` / `window:manage` grantでは完全一致するtarget labelも限定でき、
+`deny`は`allow`より優先します。dialog defaultなど他のcommand argumentはまだscope
+できません。権限を持つrendererにremote contentや
 実行可能なuser-authored contentを読み込まず、広い操作のapp-level intentも検証して
 ください。
 

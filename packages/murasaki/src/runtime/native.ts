@@ -68,13 +68,33 @@ export interface WebviewOptions {
   transparent?: boolean
   /** Stable application id used to isolate the native WebView profile. */
   appId?: string
+  /** Complete custom User-Agent value for the native WebView. */
+  userAgent?: string
+  /** Use a non-persistent private session. */
+  incognito?: boolean
+  /** Unauthenticated application-wide HTTP CONNECT or SOCKSv5 proxy. */
+  proxy?: {
+    protocol: 'http' | 'socks5'
+    host: string
+    port: number
+  }
   /** Native renderer command allowlist. Omitted means deny-all. */
   capabilities?: string[]
+  /** Versioned JSON value-scope policy. `capabilities` remains the legacy
+   * permission-name projection for older native binaries. */
+  capabilityPolicy?: string
   /** Default PNG path used by the renderer tray API. */
   trayIcon?: string
   /** Production only: serves this directory via the native custom protocol
    * (`murasaki://localhost/…`), taking priority over `url`/`html`. */
   serveDir?: string
+}
+
+/** Immutable native window template configured before the application loop starts. */
+export interface RuntimeWindowTemplate {
+  window: WindowOptions
+  webview: WebviewOptions
+  createOnLaunch: boolean
 }
 
 export interface NativeWebview {
@@ -97,6 +117,7 @@ interface NativeModule {
   Application: new () => {
     createWindow(opts: WindowOptions): NativeWindow
     createWebview(windowOpts: WindowOptions, webviewOpts: WebviewOptions): NativeWebview
+    configureWindows(templates: RuntimeWindowTemplate[]): void
     configureShutdown?(port: number, runtimeToken: string, timeoutMs: number): void
     run(): void
     exit(): void

@@ -48,6 +48,9 @@ jobs:
       - name: Build workspace packages
         run: pnpm build
 
+      - name: Verify public API reports
+        run: pnpm --filter murasaki api:check
+
       - name: Test Murasaki framework
         run: pnpm --filter murasaki test
 
@@ -207,6 +210,7 @@ jobs:
                 width: 640,
                 height: 480,
                 visible: false,
+                createOnLaunch: false,
                 capabilities: ['window:getLabel', 'window:list'],
               },
             },
@@ -226,17 +230,24 @@ jobs:
               started = true
               void (async () => {
                 const before = await windows.list()
-                const labels = before.map((window) => window.label).sort()
-                const probe = before.find((window) => window.label === 'probe')
-                if (labels.join(',') !== 'main,probe') throw new Error('window list is incomplete')
-                if (!probe || probe.visible) throw new Error('probe did not start hidden')
+                if (before.map((window) => window.label).join(',') !== 'main') {
+                  throw new Error('dormant probe was created on launch')
+                }
 
                 const staged = await fetch('/api/multiwindow-probe', {
                   method: 'POST',
                   headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify({ stage: 'primary', labels, initiallyHidden: true }),
+                  body: JSON.stringify({ stage: 'primary' }),
                 })
                 if (!staged.ok) throw new Error('primary probe stage was rejected')
+                let after = await windows.list()
+                for (let attempt = 0; attempt < 100; attempt++) {
+                  if (after.some((window) => window.label === 'probe')) break
+                  await new Promise((resolve) => setTimeout(resolve, 50))
+                  after = await windows.list()
+                }
+                const probe = after.find((window) => window.label === 'probe')
+                if (!probe || probe.visible) throw new Error('recreated probe is not hidden')
                 await windows.open('probe')
               })().catch((error) => console.error('MURASAKI_MULTIWINDOW_PRIMARY_FAIL', error))
             }, [])
@@ -309,6 +320,7 @@ jobs:
 
           fs.mkdirSync('examples/ci-mac-app/src/api/multiwindow-probe', { recursive: true })
           fs.writeFileSync('examples/ci-mac-app/src/api/multiwindow-probe/route.ts', `import type { RouteHandler } from 'murasaki'
+          import { windows as mainWindows } from 'murasaki/main'
 
           const marker = 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened'
           let primaryReady = false
@@ -320,11 +332,20 @@ jobs:
               return Response.json({ ok: false }, { status: 500 })
             }
             if (body.stage === 'primary') {
-              const valid = JSON.stringify(body.labels) === JSON.stringify(['main', 'probe'])
-                && body.initiallyHidden === true
+              const dormant = await mainWindows.list()
+              if (dormant.map((window) => window.label).join(',') !== 'main') {
+                return Response.json({ ok: false }, { status: 400 })
+              }
+              const first = await mainWindows.create('probe')
+              await mainWindows.destroy('probe')
+              const second = await mainWindows.create('probe')
+              const valid = first.label === 'probe'
+                && second.label === 'probe'
+                && second.generation > first.generation
+                && second.visible === false
               if (!valid) return Response.json({ ok: false }, { status: 400 })
               primaryReady = true
-              return Response.json({ ok: true }, { status: 202 })
+              return Response.json({ ok: true, generation: second.generation }, { status: 202 })
             }
 
             const valid = primaryReady
@@ -389,6 +410,7 @@ jobs:
           "$RUNNER_TEMP/murasaki-mac-smoke"
           60
           "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
+          "true"
 
       - uses: actions/upload-artifact@v4
         if: failure()
@@ -458,6 +480,7 @@ jobs:
                 width: 640,
                 height: 480,
                 visible: false,
+                createOnLaunch: false,
                 capabilities: ['window:getLabel', 'window:list'],
               },
             },
@@ -477,17 +500,24 @@ jobs:
               started = true
               void (async () => {
                 const before = await windows.list()
-                const labels = before.map((window) => window.label).sort()
-                const probe = before.find((window) => window.label === 'probe')
-                if (labels.join(',') !== 'main,probe') throw new Error('window list is incomplete')
-                if (!probe || probe.visible) throw new Error('probe did not start hidden')
+                if (before.map((window) => window.label).join(',') !== 'main') {
+                  throw new Error('dormant probe was created on launch')
+                }
 
                 const staged = await fetch('/api/multiwindow-probe', {
                   method: 'POST',
                   headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify({ stage: 'primary', labels, initiallyHidden: true }),
+                  body: JSON.stringify({ stage: 'primary' }),
                 })
                 if (!staged.ok) throw new Error('primary probe stage was rejected')
+                let after = await windows.list()
+                for (let attempt = 0; attempt < 100; attempt++) {
+                  if (after.some((window) => window.label === 'probe')) break
+                  await new Promise((resolve) => setTimeout(resolve, 50))
+                  after = await windows.list()
+                }
+                const probe = after.find((window) => window.label === 'probe')
+                if (!probe || probe.visible) throw new Error('recreated probe is not hidden')
                 await windows.open('probe')
               })().catch((error) => console.error('MURASAKI_MULTIWINDOW_PRIMARY_FAIL', error))
             }, [])
@@ -560,6 +590,7 @@ jobs:
 
           fs.mkdirSync('examples/ci-win-app/src/api/multiwindow-probe', { recursive: true })
           fs.writeFileSync('examples/ci-win-app/src/api/multiwindow-probe/route.ts', `import type { RouteHandler } from 'murasaki'
+          import { windows as mainWindows } from 'murasaki/main'
 
           const marker = 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened'
           let primaryReady = false
@@ -571,11 +602,20 @@ jobs:
               return Response.json({ ok: false }, { status: 500 })
             }
             if (body.stage === 'primary') {
-              const valid = JSON.stringify(body.labels) === JSON.stringify(['main', 'probe'])
-                && body.initiallyHidden === true
+              const dormant = await mainWindows.list()
+              if (dormant.map((window) => window.label).join(',') !== 'main') {
+                return Response.json({ ok: false }, { status: 400 })
+              }
+              const first = await mainWindows.create('probe')
+              await mainWindows.destroy('probe')
+              const second = await mainWindows.create('probe')
+              const valid = first.label === 'probe'
+                && second.label === 'probe'
+                && second.generation > first.generation
+                && second.visible === false
               if (!valid) return Response.json({ ok: false }, { status: 400 })
               primaryReady = true
-              return Response.json({ ok: true }, { status: 202 })
+              return Response.json({ ok: true, generation: second.generation }, { status: 202 })
             }
 
             const valid = primaryReady
@@ -638,6 +678,7 @@ jobs:
           -ExePath "${{ steps.bundle.outputs.exePath }}"
           -TimeoutSeconds 60
           -ExpectedMarker "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
+          -ExpectBackendCrash
 
       - name: Generate ephemeral code-signing PFX
         shell: pwsh
@@ -755,7 +796,8 @@ jobs:
           .github/scripts/win-smoke-test.ps1 `
             -ExePath $app `
             -TimeoutSeconds 60 `
-            -ExpectedMarker 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened'
+            -ExpectedMarker 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened' `
+            -ExpectBackendCrash
 
       - uses: actions/upload-artifact@v4
         if: failure()

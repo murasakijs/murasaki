@@ -94,6 +94,7 @@ const recipes = [
   ['multi-window-permissions', 'guides/windows'],
   ['node-main-lifecycle', 'guides/node-main'],
   ['tray-icon', 'guides/native-apis'],
+  ['global-shortcuts', 'guides/native-apis'],
   ['system-permissions', 'guides/native-apis'],
   ['auto-update', 'guides/auto-update'],
   ['deep-links-and-file-associations', 'guides/deep-links'],

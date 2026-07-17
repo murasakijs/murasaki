@@ -34,7 +34,7 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 ```tsx
 'use client'
 
-import { app, appWindow, clipboard, dialog, notification, shell, systemPermission, tray, windows } from 'murasaki/native'
+import { app, appWindow, clipboard, dialog, globalShortcut, notification, secureStorage, shell, systemPermission, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -55,9 +55,11 @@ await shell.showItemInFolder(files[0])
 | `clipboard` | `readText`, `writeText` |
 | `notification` | `show` |
 | `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder` |
+| `secureStorage` | string値向けのOS-backed `get`, `set`, `delete` |
 | `systemPermission` | macOSのcamera / microphone / screen recording / accessibility向け`status`, `request` |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
 | `windows` | 宣言label向け`open`, `list`, `show`, `hide`, `focus`, `close` |
+| `globalShortcut` | process-wideな`register`, `unregister`, `unregisterAll`, `onTriggered` |
 | `tray` | `create`, `remove`, `setTooltip`, `setIcon`, `setMenu`, `onClick`, `onMenuItem` |
 
 `app.quit()` とrootの `quit()` helperはいずれも `app:quit` が必要です。権限のない
@@ -74,9 +76,51 @@ secondary rendererからapplication全体を終了することはできません
   これらは `src/main.ts` から直接呼ぶAPIではなく、信頼済みレンダラー向けです。
   ブリッジはアプリと完全一致するoriginだけを受け付け、固定allowlistのコマンドだけを
   公開します。各rendererが使うcommandだけを `window.capabilities` /
-  `windows[label].capabilities` で許可してください。argument / path / URL scopeは
-  計画中なので、権限を持つwindowに信頼できないremote contentを読み込まないでください。
+  `windows[label].capabilities` で許可してください。structured grantではshell URL/path、
+  target window label、OS permission名をallow/denyでscopeできます。他のargumentは
+  command単位なので、権限を持つwindowに信頼できないremote contentを読み込まないでください。
 </Callout>
+
+## セキュアストレージ
+
+信頼済みrendererがrefresh token、license値などの短いstringを永続化する必要があり、plain
+fileへ保存したくない場合は`secureStorage`を使います。macOSではKeychain、Windowsでは
+Credential Managerを使用します。Linuxなど未対応platformは明示的な`unsupported` errorを
+返し、Murasakiがplaintext fileへfallbackすることはありません。
+
+```ts
+import { secureStorage } from 'murasaki/native'
+
+await secureStorage.set('refresh-token', token)
+const saved = await secureStorage.get('refresh-token') // string | null
+await secureStorage.delete('refresh-token')            // 未登録でも成功
+```
+
+必要なwindowだけへ操作ごとに独立してgrantします。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    capabilities: [
+      'secureStorage:get',
+      'secureStorage:set',
+      'secureStorage:delete',
+    ],
+  },
+})
+```
+
+entryは`appId`とkeyからSHA-256で導出したidentifierでnamespace分離されるため、release間で
+`appId`を維持してください。keyは空でない256 UTF-8 byte以下、valueは空でない2,048
+UTF-8 byte以下です。NULは拒否され、native IPC bodyにも256 KiB上限があります。保存済み
+dataが破損、非UTF-8、上限超過なら暗黙変換せずerrorを返します。
+
+capabilityはkey別ではなく操作単位です。`secureStorage:get`を持つrendererは、そのapp
+namespace内で既知または推測可能なすべてのkeyを読めます。Keychain / Credential Managerは
+at-restのplaintext fileを避ける仕組みで、認可済みrenderer内のXSSからsecretを守るものでは
+ありません。rendererが必要としないsecretはNode / server-only codeに置いてください。
 
 ## トレイアイコン
 
@@ -130,7 +174,75 @@ export default defineConfig({
 `template` はmacOS専用です。もう一度 `create` すると既存アイコンを置き換えます。
 tray menuはevent駆動で、click可能な項目には一意な`id`が必要です。quitなどのprivileged
 actionは、それぞれ本来のnative capabilityを通過します。process-wide iconを作成した
-rendererを閉じるとiconも削除されます。global shortcutとLinux trayは未対応です。
+rendererを閉じるとiconも削除されます。Linux trayは未対応です。
+
+## グローバルショートカット
+
+信頼済みclient componentから、macOS / Windowsのprocess-wide shortcutを登録できます。
+登録と解除は別々のdeny-by-default capabilityです。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  window: {
+    capabilities: [
+      'globalShortcut:register',
+      'globalShortcut:unregister',
+    ],
+  },
+})
+```
+
+```tsx
+'use client'
+
+import { useEffect } from 'react'
+import { globalShortcut } from 'murasaki/native'
+
+export function CaptureShortcut() {
+  useEffect(() => {
+    let active = true
+    const unsubscribe = globalShortcut.onTriggered(({ id }) => {
+      if (id === 'capture-region') startCapture()
+    })
+
+    void globalShortcut.register('CmdOrCtrl+Shift+K', 'capture-region')
+      .catch((error) => {
+        if (active) console.error('shortcutを利用できません', error)
+      })
+
+    return () => {
+      active = false
+      unsubscribe()
+      void globalShortcut.unregister('capture-region')
+    }
+  }, [])
+
+  return null
+}
+```
+
+`register(accelerator, id?)`は`{ id, accelerator }`を返します。返されるacceleratorは
+platform解決済みのcanonical値で、`CmdOrCtrl`はmacOSでCommand、WindowsでControlに
+なります。`id`省略時はcanonical acceleratorがidです。`unregisterAll()`が解除するのは
+呼び出したrendererの登録だけで、他windowの登録には触れません。
+
+acceleratorは上限付きASCII stringで、1〜4個のmodifierの後に既知のkeyを1個置きます。
+modifier重複、keyだけのshortcut、不正・未知のkey、lifecycle / OS予約chord（Command+Q、
+Alt+F4など）、重複id、重複accelerator、他appが取得済みのchordは拒否されます。同時登録は
+processあたり64件までです。idは1〜128文字で、英数字と`.`、`_`、`:`、`-`、`+`を使えます。
+
+所有権はrenderer windowに紐づき、close / disposeでその登録を自動解除し、app shutdownで
+全登録を解除します。trigger eventはlive-onlyかつownerだけに届き、reload後のreplayは
+ありません。Linuxは未実装です。
+
+<Callout type="info">
+  parser、所有権、capability、macOS build、Windows x64/arm64 buildは自動検証します。
+  OS-levelの利用可否は他のinstalled app、keyboard layout、remote desktop software、OS予約
+  bindingにも依存するため、release前に各対応OSのpackaged appで実際のchordをsmoke test
+  してください。
+</Callout>
 
 ## システム権限
 
@@ -215,7 +327,8 @@ const { status, latest, check, download, install } = useUpdate()
 用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
-  global shortcut、argument / path単位のcapability ruleはまだ公開されていません。
+  structured capability scopeはshell URL/path、target window label、OS permission名だけで、
+  global shortcut accelerator、dialog defaultなど他のargumentはcommand単位です。
   設計前に
   [プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。
 </Callout>

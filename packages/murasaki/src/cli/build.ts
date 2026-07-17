@@ -8,12 +8,21 @@ import { murasaki } from '../vite-plugin/index.js'
 import { SHELL_HTML_PATH } from '../vite-plugin/shell.js'
 import { loadUserConfig } from './load-config.js'
 import { banner, dim, error, success, viteLogger } from './brand.js'
+import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
+import type { MurasakiConfig } from '../config.js'
 
 type EmittedFile = { fileName: string; code?: string; source?: string | Uint8Array }
 
 export default async function build(_argv: string[]) {
   const cwd = process.cwd()
-  const config = await loadUserConfig(cwd)
+  const prepared = preparePlugins(await loadUserConfig(cwd))
+  await runPluginHooks(prepared, 'before', { projectRoot: cwd, command: 'build' })
+  await buildProject(cwd, prepared.config)
+  await runPluginHooks(prepared, 'after', { projectRoot: cwd, command: 'build' })
+}
+
+/** Internal build path reused by `bundle` without running build hooks twice. */
+export async function buildProject(cwd: string, config: MurasakiConfig): Promise<void> {
   const srcDir = resolve(cwd, 'src')
 
   process.stdout.write(`\n${banner({ mode: 'build' })}\n\n`)

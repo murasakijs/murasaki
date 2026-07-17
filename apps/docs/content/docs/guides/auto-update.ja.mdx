@@ -259,6 +259,28 @@ jobs:
   じ `dist/` に置かれると、`--manifest` が実行される前に互いを上書きしてしまいます。
 </Callout>
 
+## Apply transactionと初回起動rollback
+
+native launcherは、new installが動くことを期待してcurrent installを先に削除しません。
+installed appの隣にowner-only journalをatomic replaceで書き、current installを同一volumeの
+backupへrenameし、検証済みpayloadをinstallして、そのbackupをrelaunch後も保持します。
+
+new versionがhealthをACKするのは、packaged Node serverがlistenし、primary-instance
+endpointをpublishし、`createOnLaunch: true`のnative window / WebViewをすべて作成できた
+後です。dormant templateはmetadataとして検証されますが、この初回起動checkpointの対象外
+です。swap中に
+update helperが停止した場合や、new launcherの初回起動がcheckpoint前に終了した場合、
+次回起動はinstall target外へrecovery helperをcopyし、旧versionをrestoreしてrelaunch
+します。PID owner確認、exclusive journal lock、app namespace内の単一component backup名に
+より、別processやpath traversalがtransactionを奪えないようにしています。
+
+<Callout type="warn">
+  rollback対象は初回起動checkpointまでのapplication fileです。それ以降のcrashや、NSISが
+  変更したWindows registry / shortcutはfile transactionの対象外です。recovery rename
+  自体の瞬間に電源断すると手動修復が必要な場合もあります。new version側の永続migration
+  checkpointが完了するまでは、app data migrationを旧versionと後方互換にしてください。
+</Callout>
+
 ## セキュリティモデル
 
 署名検証は**必須です — それを無効化する設定オプションはありません。** すべての

@@ -77,11 +77,90 @@ export default defineConfig({
 | `paths.cache` | 再生成可能な cache |
 | `paths.logs` | log file |
 | `paths.temp` | 一時 staging data |
+| `log` | 構造化rotation logと診断report生成 |
+| `sidecars` | app同梱executable resource向け上限付きsupervisor |
 | `signal` | `beforeQuit` 後、`shutdown` 前に abort |
 
 終了理由は `window-close`、`app-quit`、`signal`、`restart`、`dev-reload`、
 `startup-failure` です。順序とキャンセルは
 [プロセスモデル](/ja/docs/core-concepts/process-model)を参照してください。
+
+## Logと診断report
+
+アプリ独自のfile loggerを作る代わりに`context.log`を使用します。recordはJSON Linesとして
+`paths.logs/murasaki-main.jsonl`へ書かれ、既定では5 MiBでrotateし、過去5fileを保持します。
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ log }) {
+    log.info('database opened', { engine: 'sqlite', schemaVersion: 4 })
+  },
+  async shutdown({ log }) {
+    log.info('database closed')
+  },
+})
+```
+
+ユーザーが明示的に同意した後だけ、共有用の上限付き診断snapshotを生成してください。
+application/runtime metadata、上限付きlog末尾、任意のapp-owned stateを含められます。
+
+```ts
+const reportPath = await context.log.createDiagnosticReport({
+  extra: { database: { integrity: 'ok' }, queueDepth: 0 },
+})
+```
+
+`authorization`、`cookie`、`password`、`secret`、`token`、`apiKey`、
+`privateKey`などcredentialに見えるfield名はredactされます。値、nest、array、同梱する
+log末尾には上限があり、OSが対応する場合reportはowner-only permissionで作成されます。
+ただしredactionは安全網であり、secretを記録してよいという意味ではありません。access
+token、file content、個人情報をmessageや非構造化stringへ書かないでください。通常の
+上限付きshutdownではMurasakiがloggerをflushします。app独自のcrash/restart境界で全record
+を永続化したい場合は先に`await log.flush()`を呼びます。
+
+## 同梱sidecarを監督する
+
+helper executableを`bundle.resources`へ置き、`context.sidecars`から起動します。Murasakiは
+実体pathが`resourcesPath`配下にあることを確認し、shellを使わず、argument / environment /
+restart回数を上限化し、shutdown時にlive helperをすべて停止します。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  appId: 'com.example.notes',
+  productName: 'Notes',
+  bundle: { resources: ['sidecars/search-indexer'] },
+})
+```
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ sidecars, signal, log }) {
+    const indexer = await sidecars.spawn({
+      name: 'search-indexer',
+      resource: 'sidecars/search-indexer',
+      args: ['--stdio'],
+      cwd: 'data',
+      restart: { maxRestarts: 3, delayMs: 1_000 },
+    })
+    indexer.onEvent((event) => {
+      if (event.type === 'stderr') log.warn('indexer stderr', { output: event.data })
+    })
+    signal.addEventListener('abort', () => void indexer.stop(), { once: true })
+  },
+})
+```
+
+`resource`はrelative pathだけを受け付け、解決後の実体がpackaged resource root内に残る
+必要があります。symlink escapeとtraversalは拒否し、POSIXではexecutable bitも要求します。
+必要ならtarget別buildで`search-indexer.exe`のようなplatform固有filenameを使います。
+working directoryは`resources`、`data`、`cache`、`temp`だけです。sidecarはNode Mainの
+environmentと明示`env`を継承するため、信頼できないexecutableを起動せず、renderer由来の
+argumentは検証してください。Windowsの子孫processはlauncher Job Objectにも含まれ、通常
+stopはterminationを送り、上限時間後に強制終了へ進みます。
 
 ### `secondInstance(context, event)`
 
@@ -112,6 +191,61 @@ argv、second-instance argv、native URL / file event を型付き URL / file ta
 
 event shape、設定、packaging behavior、security requirement は
 [Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
+
+## Node Mainから宣言windowを操作する
+
+`windows`は`murasaki.config.*`で宣言したlabelだけを操作します。呼び出しはlaunchごとの
+runtime tokenで認証されたnative-host-onlyのloopback channelを通り、rendererへ追加の
+native capabilityを付与しません。
+
+```ts title="src/main.ts"
+import { defineMain, windows } from 'murasaki/main'
+
+const unsubscribe = windows.subscribe((event) => {
+  console.log(event.type, event.label, event.generation, event.state)
+})
+
+export default defineMain({
+  async secondInstance() {
+    await windows.show('main')
+    await windows.focus('main')
+  },
+  async openRequested() {
+    const report = await windows.get('report')
+      ?? await windows.create('report')
+    console.log('report generation', report.generation)
+  },
+  async shutdown() {
+    unsubscribe()
+  },
+})
+```
+
+`list()`、`get(label)`、`create(label)`、`show(label)`、`hide(label)`、`focus(label)`、
+`destroy(label)`を提供します。`create()`は設定済みで現在dormantなsecondary labelだけを
+受け付け、URLやruntime capability listは受け取りません。`destroy()`でlive secondaryの
+native resourceを解放すると、同じ宣言を再作成できます。primaryはこのAPIでcreate / destroy
+できません。
+
+`subscribe()`には`created`、`shown`、`hidden`、`focused`、`blurred`、`closed` eventが
+届きます。state snapshotとeventには、そのlabelのnative instanceを表す単調増加の
+`generation`が含まれます。destroy / recreateをまたぐ長時間処理の対応付けではlabelと
+generationの両方を使用してください。snapshotにはprimary、visible、focused、minimized、
+maximizedも含まれます。
+
+<Callout type="warn">
+  `ready()`内で購読はできますが、この初期releaseではwindow commandをawaitしないで
+  ください。native windowは`ready()`完了後に接続されるため、startup deadlockを避ける
+  目的でhook内のcommandはrejectされます。後続のlifecycle callback、background処理、
+  または`'use main'`関数から実行してください。
+</Callout>
+
+windowは引き続き宣言式で、未宣言labelを作成したり、route・network設定・capability policyを
+runtime overrideしたりできません。起動時に作らないsecondaryには`createOnLaunch: false`を
+設定します。再表示するlive windowには`hide()`、native resourceを解放する場合は
+`destroy()`を使用してください。primaryのcloseは通常のapp終了lifecycleです。lifecycle
+eventはcreate、visibility、focus、closeを対象とし、move、resize、minimize、maximize通知は
+含みません。
 
 ## `'use main'` で renderer から Node を呼ぶ
 
@@ -227,8 +361,11 @@ version 付き wire codec は primitive、`undefined`、`bigint`、`Date`、`Map
 
 ## 現在の制限
 
-Node Mainにはimperativeなnative window生成APIがありません。宣言windowはtrusted renderer
-から`murasaki/native`で操作します。tray menuはそのrenderer APIから利用できますが、
+Node Mainは`murasaki.config.*`に宣言したsecondary window templateだけをcreate / destroy
+できます。runtimeでad-hoc URL、capability policy、未宣言native windowを構築することは
+できません。宣言windowはNode Mainの`windows` manager、またはtrusted rendererから
+`murasaki/native`で操作します。tray menuは
+そのrenderer APIから利用できますが、
 Node Main自体に直接のtray menu / global shortcut APIはまだありません。
 packaged macOS / Windows の single-instance delivery は `secondInstance()`、設定済み
 URL scheme / file association は `openRequested()` で利用できます。Windows portable

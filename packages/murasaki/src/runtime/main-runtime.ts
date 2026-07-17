@@ -9,6 +9,8 @@ import type {
   QuitReason,
   SecondInstanceEvent,
 } from '../main/index.js'
+import { createMainLogger } from '../main/logger.js'
+import { createSidecarSupervisor } from '../main/sidecar.js'
 
 const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS = 10_000
 const MAX_MAIN_SHUTDOWN_TIMEOUT_MS = 300_000
@@ -45,6 +47,32 @@ export interface ShutdownResult {
 }
 
 type RuntimeState = 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed'
+
+type WindowControlPhase = 'starting' | 'running' | 'stopping'
+
+function setMainWindowControlPhase(phase: WindowControlPhase): void {
+  const phaseKey = Symbol.for('murasaki.main.window-control.phase.v1')
+  const busKey = Symbol.for('murasaki.main.window-control.v1')
+  const root = globalThis as typeof globalThis & { [key: symbol]: unknown }
+  root[phaseKey] = phase
+  const bus = root[busKey] as {
+    phase: WindowControlPhase
+    commands: unknown[]
+    pending: Map<string, {
+      timer: ReturnType<typeof setTimeout>
+      reject(error: Error): void
+    }>
+  } | undefined
+  if (!bus) return
+  bus.phase = phase
+  if (phase !== 'stopping') return
+  for (const pending of bus.pending.values()) {
+    clearTimeout(pending.timer)
+    pending.reject(new Error('native window control stopped'))
+  }
+  bus.pending.clear()
+  bus.commands.length = 0
+}
 
 type DeadlineResult<T> =
   | { completed: true; value: T }
@@ -104,6 +132,7 @@ export class MainRuntime {
     }
 
     this.#state = 'starting'
+    setMainWindowControlPhase('starting')
     this.#startPromise = (async () => {
       try {
         const context = await createMainContext(this.options, this.#abortController.signal)
@@ -111,14 +140,27 @@ export class MainRuntime {
         const candidate = unwrapMainDefinition(loaded)
         this.#definition = candidate
         this.#context = context
+        context.log.info('main runtime starting', { packaged: context.isPackaged })
         await candidate.ready?.(context)
         // A bounded shutdown may have timed out while ready() ignored its
         // AbortSignal. A late resolution must not resurrect a runtime the host
         // has already committed to stopping.
-        if (this.#state === 'starting') this.#state = 'running'
+        if (this.#state === 'starting') {
+          this.#state = 'running'
+          setMainWindowControlPhase('running')
+          context.log.info('main runtime ready')
+          // `start()` is the durability boundary for lifecycle diagnostics;
+          // callers may immediately tear down an isolated/test runtime.
+          await context.log.flush()
+        }
         return context
       } catch (error) {
+        if (this.#context) {
+          this.#context.log.error('main runtime startup failed', { error })
+          await this.#context.log.flush()
+        }
         if (this.#state !== 'stopped') this.#state = 'failed'
+        setMainWindowControlPhase('stopping')
         this.#abortController.abort(error)
         throw error
       }
@@ -176,9 +218,19 @@ export class MainRuntime {
     return result
   }
 
+  #resetCancelledShutdown(): void {
+    this.#state = 'running'
+    setMainWindowControlPhase('running')
+    this.#shutdownPromise = null
+    this.#forceShutdownSignal = null
+    this.#resolveForceShutdown = null
+    this.#forceShutdownReason = null
+  }
+
   async #shutdown(options: ShutdownOptions): Promise<ShutdownResult> {
     if (this.#state === 'idle' || this.#state === 'stopped') {
       this.#state = 'stopped'
+      setMainWindowControlPhase('stopping')
       return { cancelled: false, timedOut: false }
     }
 
@@ -194,6 +246,7 @@ export class MainRuntime {
       if (!start.completed) {
         this.#abortController.abort(options.reason)
         this.#state = 'stopped'
+        setMainWindowControlPhase('stopping')
         return { cancelled: false, timedOut: true }
       }
     } catch {
@@ -207,11 +260,13 @@ export class MainRuntime {
     const context = this.#context
     if (!definition || !context) {
       this.#state = 'stopped'
+      setMainWindowControlPhase('stopping')
       return { cancelled: false, timedOut: false }
     }
 
     this.#state = 'stopping'
     let quitContext: QuitContext = { ...context, reason: options.reason }
+    let shutdownCommitted = options.force === true
     try {
       // One end-to-end budget covers both beforeQuit and shutdown. The native
       // transport waits for this budget plus a small response grace period, so
@@ -220,40 +275,56 @@ export class MainRuntime {
       if (!options.force) {
         const beforeQuit = await Promise.race([
           runBeforeDeadline(deadline, () => definition.beforeQuit?.(quitContext))
-            .then((outcome) => ({ kind: 'hook' as const, outcome })),
+            .then(
+              (outcome) => ({ kind: 'hook' as const, outcome }),
+              (error: unknown) => ({ kind: 'error' as const, error }),
+            ),
           (this.#forceShutdownSignal ?? new Promise<void>(() => {}))
             .then(() => ({ kind: 'force' as const })),
         ])
-        if (beforeQuit.kind === 'force') {
+        if (beforeQuit.kind === 'force'
+          || (beforeQuit.kind === 'error' && this.#forceShutdownReason !== null)) {
+          shutdownCommitted = true
           quitContext = {
             ...context,
             reason: this.#forceShutdownReason ?? options.reason,
           }
+        } else if (beforeQuit.kind === 'error') {
+          throw beforeQuit.error
         } else if (!beforeQuit.outcome.completed) {
+          shutdownCommitted = true
+          setMainWindowControlPhase('stopping')
           this.#abortController.abort(options.reason)
           this.#state = 'stopped'
           return { cancelled: false, timedOut: true }
         } else if (beforeQuit.outcome.value === false) {
-          this.#state = 'running'
-          this.#shutdownPromise = null
-          this.#forceShutdownSignal = null
-          this.#resolveForceShutdown = null
-          this.#forceShutdownReason = null
+          this.#resetCancelledShutdown()
           return { cancelled: true, timedOut: false }
         }
       }
 
+      shutdownCommitted = true
+      setMainWindowControlPhase('stopping')
       this.#abortController.abort(quitContext.reason)
-      const cleanup = await runBeforeDeadline(
-        deadline,
-        () => definition.shutdown?.(quitContext),
-      )
+      context.log.info('main runtime shutting down', { reason: quitContext.reason })
+      const cleanup = await runBeforeDeadline(deadline, async () => {
+        await definition.shutdown?.(quitContext)
+        await context.sidecars.stopAll()
+        await context.log.flush()
+      })
       this.#state = 'stopped'
       return { cancelled: false, timedOut: !cleanup.completed }
     } catch (error) {
-      // A failing hook must fail the transport open (so the native host can
-      // fail open and exit), but it must not pin this runtime forever in
-      // `stopping` with a permanently rejected single-flight Promise.
+      if (!shutdownCommitted) {
+        // beforeQuit runs before the irreversible abort/cleanup boundary.
+        // Treat a thrown/rejected veto like a cancelled quit. Record the
+        // failure, but keep Main and dev HMR live for a retry.
+        context.log.error('beforeQuit failed; shutdown cancelled', { error })
+        this.#resetCancelledShutdown()
+        return { cancelled: true, timedOut: false }
+      }
+      // Failure after shutdown commits must fail the transport open so the
+      // native host can exit, without pinning a rejected single-flight.
       this.#abortController.abort(quitContext.reason)
       this.#state = 'stopped'
       this.#shutdownPromise = null
@@ -288,16 +359,33 @@ async function createMainContext(
 ): Promise<MainContext> {
   const paths = options.paths ?? resolveAppPaths(options.appId)
   await Promise.all(Object.values(paths).map((path) => mkdir(path, { recursive: true })))
+  const version = options.version ?? '0.0.0'
+  const log = createMainLogger({
+    directory: paths.logs,
+    appId: options.appId,
+    productName: options.productName,
+    version,
+    console: false,
+  })
+  const resourcesPath = resolve(options.resourcesPath ?? options.projectRoot)
+  const sidecars = await createSidecarSupervisor({
+    resourcesPath,
+    paths,
+    signal,
+    log,
+  })
   return {
     appId: options.appId,
     productName: options.productName,
-    version: options.version ?? '0.0.0',
+    version,
     isPackaged: options.isPackaged,
     platform: process.platform,
     arch: process.arch,
     projectRoot: resolve(options.projectRoot),
-    resourcesPath: resolve(options.resourcesPath ?? options.projectRoot),
+    resourcesPath,
     paths,
+    log,
+    sidecars,
     signal,
   }
 }
