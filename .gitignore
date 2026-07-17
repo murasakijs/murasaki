@@ -35,3 +35,4 @@ tmp/
 
 # agent worktrees / local
 .claude/
+.ph-assets/

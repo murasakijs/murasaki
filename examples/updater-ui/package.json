@@ -1,0 +1,32 @@
+{
+  "name": "updater-ui-test",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "repository": "ichi1007/murasaki-update-test",
+  "scripts": {
+    "dev": "murasaki dev",
+    "build": "murasaki build",
+    "bundle": "murasaki bundle",
+    "installer": "murasaki installer",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "murasaki": "workspace:*",
+    "@murasakijs/ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^1.23.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/node": "^22",
+    "typescript": "^5.7.0",
+    "vite": "^7.3.6",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0"
+  }
+}
