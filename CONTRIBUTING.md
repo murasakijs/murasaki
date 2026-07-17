@@ -43,13 +43,13 @@ Prerequisites:
 git clone https://github.com/murasakijs/murasaki.git
 cd murasaki
 pnpm install
-pnpm --filter murasaki tsc -p tsconfig.build.json
-cd examples/app-router
+pnpm --filter murasaki build
+cd examples/violet-notes
 pnpm dev
 ```
 
 The dev server opens a WebView window and reloads on file changes. Edit
-files under `src/` in the root of the repo or under `examples/app-router/src/`
+files under `packages/murasaki/src/` or under `examples/violet-notes/src/`
 — both hot-reload.
 
 ### Optional tooling for cross-compile
@@ -96,9 +96,9 @@ workflow:
 3. **Fork + branch** from `main` using a short descriptive name
    (`fix/close-button-hang`, `feat/data-table`).
 4. **Make the change** with focused commits.
-5. **Run `pnpm --filter murasaki tsc -p tsconfig.build.json`** to
-   confirm the whole build compiles.
-6. **Verify by hand** with `examples/app-router`.
+5. **Run `pnpm --filter murasaki build`** to confirm it compiles, then
+   **`pnpm --filter murasaki test`** to run the test suite.
+6. **Verify by hand** with `examples/violet-notes`.
 7. **Open a PR** referencing the issue.
 
 ---
@@ -111,8 +111,8 @@ Before filing a new issue:
    including closed ones.
 2. Confirm you're running the **latest version** of murasaki
    (`pnpm add murasaki@latest`).
-3. Try to reproduce with `examples/app-router` — a minimal reproducer helps
-   enormously.
+3. Try to reproduce from a fresh `npm create murasaki@latest` scaffold, or a
+   minimal repo you can link to — a small reproducer helps enormously.
 
 Please include:
 
@@ -203,11 +203,12 @@ surrounding code.
 
 ## Testing manually
 
-We don't have an automated test suite yet. Please run through the
-smoke checklist below before opening a PR that touches runtime code:
+`pnpm --filter murasaki test` covers the framework's unit tests, but PRs that
+touch runtime/CLI behavior should also go through the smoke checklist below
+before opening a PR:
 
-1. `pnpm --filter murasaki tsc -p tsconfig.build.json` — clean compile.
-2. `cd examples/app-router && pnpm dev` — window opens, HMR works.
+1. `pnpm --filter murasaki build` — clean compile — then `pnpm --filter murasaki test` — automated tests pass.
+2. `cd examples/violet-notes && pnpm dev` — window opens, HMR works.
 3. `pnpm build && node dist/server.cjs` — production bundle boots.
 4. `pnpm bundle` — `.app` (or the OS-native folder) is produced and launches.
 5. `pnpm installer` — installer file is produced.
