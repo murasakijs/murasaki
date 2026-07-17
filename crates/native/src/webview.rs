@@ -429,7 +429,6 @@ pub(crate) fn quit_requested() -> bool {
 /// below). Named/typed like `window::SharedWindow` for the same reason: the
 /// menu bar/app menu is persistent, so unlike the context-menu popup below,
 /// nothing can grab this synchronously off a single call's `self`.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) type SharedWebview = crate::window::SharedWebview;
 
 /// Extra context `Webview::new` needs to install/replace the application

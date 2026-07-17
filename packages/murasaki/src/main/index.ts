@@ -192,7 +192,6 @@ function invokeWindowControl<T>(method: MainWindowMethod, label?: string): Promi
       bus.pending.delete(id)
       rejectFail(new Error(`native window command ${method} timed out`))
     }, WINDOW_CONTROL_TIMEOUT_MS)
-    timer.unref?.()
     bus.pending.set(id, {
       resolve: (value) => resolveOk(value as T),
       reject: rejectFail,
