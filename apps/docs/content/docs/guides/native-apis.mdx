@@ -50,11 +50,11 @@ await shell.showItemInFolder(files[0])
 
 | API | Operations |
 | --- | --- |
-| `app` | `quit` (graceful application shutdown) |
+| `app` | `quit` (graceful application shutdown), `isElevated` (read-only self-query) |
 | `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage` (native OS message box) |
 | `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
 | `notification` | `show` (resolves to a locally-generated id) |
-| `shell` | `openExternal` (safe URL schemes only), `showItemInFolder`, `trashItem`, `openPath` |
+| `shell` | `openExternal` (safe URL schemes only), `showItemInFolder`, `trashItem`, `openPath`, `runElevated` (Windows-only UAC launch) |
 | `secureStorage` | OS-backed `get`, `set`, `delete` for string values |
 | `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, accessibility, input monitoring, location, full disk access, photos, contacts, calendar, reminders, speech recognition, Bluetooth, Apple Events (automation), and local network |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
@@ -104,6 +104,60 @@ path; use `shell.openExternal` to open a URL instead.
   grants can scope shell URLs/paths, target window labels, and OS permission
   names with allow/deny rules. Other arguments remain command-level, so do not
   load untrusted remote content into a privileged app window.
+</Callout>
+
+## Privilege elevation (Windows)
+
+```ts
+import { app, shell } from 'murasaki/native'
+
+if (!(await app.isElevated())) {
+  try {
+    await shell.runElevated({
+      executable: 'C:/Program Files/Example/updater.exe',
+      args: ['--apply'],
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('cancelled by the user')) {
+      // The user declined the UAC prompt — handle it gracefully.
+    } else {
+      throw error
+    }
+  }
+}
+```
+
+`app.isElevated()` is a read-only, capability-gated (`app:isElevated`) query of
+whether the native host process is already running elevated. On Windows this
+reads the process token's elevation state; on macOS/Linux "elevated" means
+running as effective root — rare and discouraged for a GUI app, and supported
+here only as the closest analog. It works, and requires the capability, on
+every platform, and never fails: any underlying query error just resolves
+`false`, since a query that can't determine elevation has told an
+already-unprivileged renderer nothing it didn't already know.
+
+`shell.runElevated({ executable, args? })` launches `executable` under a
+fresh process through the Windows "Run as administrator" (UAC) consent
+prompt, and is Windows-only — every other platform rejects with an
+`unsupported` error, since macOS's `SMJobBless`/`AuthorizationExecuteWithPrivileges`
+are deprecated and Linux has no single equivalent mechanism. `executable` must
+be an absolute, non-traversing path to an existing file; like
+`shell.openPath`, its `shell:runElevated` capability can be scoped to an
+allowed path subtree. `args` (at most 64 entries, each at most 4096 UTF-8
+bytes, and free of control characters) are passed directly to the elevated
+process — never through a shell — quoted using the same rules as
+`CommandLineToArgvW`. The call is fire-and-forget: it resolves once the
+elevated process has launched, not when it exits.
+
+If the user declines the consent prompt, `shell.runElevated` rejects with an
+error whose message is exactly `"elevation was cancelled by the user"`, so
+your app can handle a declined prompt differently from every other failure.
+
+<Callout type="warn">
+  `shell:runElevated` is a powerful capability: granting it lets the renderer
+  trigger a UAC prompt to run any allowed executable elevated. Scope it to a
+  narrow path subtree (or a single exact path) and grant it only to the
+  windows that genuinely need to launch an elevated helper.
 </Callout>
 
 ## Secure storage

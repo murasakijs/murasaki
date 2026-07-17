@@ -7,6 +7,7 @@
 // @public (undocumented)
 export const app: {
     quit(): Promise<void>;
+    isElevated(): Promise<boolean>;
 };
 
 // @public (undocumented)
@@ -138,6 +139,12 @@ export interface OpenFileOptions {
 }
 
 // @public (undocumented)
+export interface RunElevatedOptions {
+    args?: string[];
+    executable: string;
+}
+
+// @public (undocumented)
 export interface SaveFileOptions {
     // (undocumented)
     defaultName?: string;
@@ -162,6 +169,7 @@ export const shell: {
     showItemInFolder(target: string): Promise<void>;
     trashItem(path: string): Promise<void>;
     openPath(path: string): Promise<void>;
+    runElevated(options: RunElevatedOptions): Promise<void>;
 };
 
 // @public

@@ -23,6 +23,8 @@ mod dialog;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod download;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod elevation;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod global_shortcut;
 mod launcher;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]

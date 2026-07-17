@@ -203,7 +203,9 @@
         "Dialogs, clipboard, notifications, shell helpers, secure storage, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
         "Selected target-bearing commands support inline allow/deny scopes; other arguments remain command-level, and the native renderer API is not available directly inside src/main.ts.",
         "dialog.showMessage shows a native OS message box; clipboard also supports PNG image and HTML read/write, each bounded and independently permissioned; shell.trashItem and shell.openPath are path-scoped like shell.showItemInFolder, and shell.openPath rejects URLs and UNC/device paths.",
-        "notification.show returns a generated id for local bookkeeping only; upstream notify-rust cannot deliver click/action callbacks on macOS or Windows, so the id never correlates with a later event."
+        "notification.show returns a generated id for local bookkeeping only; upstream notify-rust cannot deliver click/action callbacks on macOS or Windows, so the id never correlates with a later event.",
+        "app.isElevated() is a read-only, capability-gated self-query on every platform (Windows: process token elevation state; macOS/Linux: effective root) and never fails.",
+        "shell.runElevated({ executable, args? }) launches an existing absolute, non-traversing executable through the Windows UAC \"runas\" prompt: Windows-only, path-scoped like shell.openPath, never routed through a shell, and fire-and-forget (resolves once launched, not on exit). A user-declined prompt rejects with the distinct message \"elevation was cancelled by the user\"; every other platform rejects with an unsupported error."
       ],
       "apiSymbols": [
         "murasaki/native.dialog",
