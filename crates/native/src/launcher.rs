@@ -52,7 +52,7 @@ pub(crate) mod shared {
     use fs2::FileExt;
     use serde::{Deserialize, Serialize};
 
-    use crate::types::{MenuLabels, WebviewProxyOptions};
+    use crate::types::{MenuLabels, WebviewDownloadsOptions, WebviewProxyOptions};
     use crate::window::{WindowControlCommand, WindowLifecycleEvent};
 
     const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 10_000;
@@ -148,6 +148,12 @@ pub(crate) mod shared {
         pub(super) incognito: Option<bool>,
         #[serde(default)]
         pub(super) proxy: Option<WebviewProxyOptions>,
+        #[serde(default)]
+        pub(super) downloads: Option<WebviewDownloadsOptions>,
+        #[serde(default)]
+        pub(super) init_scripts: Option<Vec<String>>,
+        #[serde(default)]
+        pub(super) hotkeys_zoom: Option<bool>,
     }
 
     pub(super) fn main_shutdown_transport_timeout(meta: &Meta) -> Result<Duration, String> {
@@ -2062,6 +2068,9 @@ mod imp_macos {
                             .and_then(|path| path.to_str())
                             .map(String::from),
                         serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
@@ -3014,6 +3023,9 @@ mod imp_win {
                             .as_ref()
                             .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
                         serve_dir: None,
+                        downloads: meta.webview.downloads.clone(),
+                        init_scripts: meta.webview.init_scripts.clone(),
+                        hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };

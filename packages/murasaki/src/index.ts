@@ -28,6 +28,7 @@ export type {
   UpdaterConfig,
   WindowsSigningConfig,
   WebviewConfig,
+  WebviewDownloadsConfig,
   WebviewProxyConfig,
   WindowConfig,
 } from './config.js'
@@ -96,3 +97,9 @@ export { UpdateButton } from './react/update-button.js'
 export type { UpdateButtonProps } from './react/update-button.js'
 
 export { useWindowDrag } from './react/window.js'
+
+export { subscribeDownloads } from './react/downloads.js'
+export type { DownloadEvent } from './react/downloads.js'
+
+export { subscribeFileDrops, useFileDrop } from './react/file-drop.js'
+export type { FileDropEvent } from './react/file-drop.js'

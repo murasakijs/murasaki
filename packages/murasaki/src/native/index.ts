@@ -441,3 +441,62 @@ export const tray = {
     return () => window.removeEventListener('murasaki:traymenuclick', handler)
   },
 }
+
+/** A cookie as returned by `webview.getCookies()`. The murasaki runtime's own
+ * session auth cookie is always filtered out and never appears here. */
+export interface WebviewCookie {
+  name: string
+  value: string
+  domain: string | null
+  path: string | null
+  secure: boolean
+  httpOnly: boolean
+  /** Unix epoch milliseconds, or absent for a session cookie. */
+  expiresAt?: number
+}
+
+export interface WebviewSetCookieOptions {
+  /** Absolute http/https URL the cookie applies to. */
+  url: string
+  name: string
+  value: string
+  /** Defaults to the URL's host. */
+  domain?: string
+  /** Defaults to `/`. */
+  path?: string
+  secure?: boolean
+  httpOnly?: boolean
+  /** Unix epoch milliseconds. Omitted creates a session cookie. */
+  expiresAt?: number
+}
+
+/** WebView content features: cookies, page zoom, and printing. */
+export const webview = {
+  /** Reads the WebView's cookies, optionally scoped to `url`. Capped at 1000
+   * entries with each value truncated at 4 KiB. The murasaki runtime's own
+   * session cookie is never included. Requires `webview:readCookies`. */
+  getCookies(options: { url?: string } = {}): Promise<{ cookies: WebviewCookie[] }> {
+    return invokeNative('webview.getCookies', options)
+  },
+  /** Creates or replaces a cookie. Requires `webview:writeCookies`. Rejects
+   * the murasaki runtime's own reserved session cookie name. */
+  setCookie(options: WebviewSetCookieOptions): Promise<void> {
+    return invokeNative('webview.setCookie', options)
+  },
+  /** Deletes a cookie (matched by name, the URL's host as domain, and the
+   * default `/` path). Requires `webview:writeCookies`. Rejects the murasaki
+   * runtime's own reserved session cookie name. */
+  deleteCookie(options: { url: string; name: string }): Promise<void> {
+    return invokeNative('webview.deleteCookie', options)
+  },
+  /** Sets the page zoom factor, from 0.25 to 5.0 inclusive. Requires
+   * `webview:zoom`. */
+  setZoom(factor: number): Promise<void> {
+    return invokeNative('webview.setZoom', { factor })
+  },
+  /** Opens the native print dialog for the current page. Requires
+   * `webview:print`. */
+  print(): Promise<void> {
+    return invokeNative('webview.print')
+  },
+}

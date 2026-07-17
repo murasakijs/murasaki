@@ -10,6 +10,7 @@ import { resolveWebviewNetworkConfig, type MurasakiConfig } from '../config.js'
 import { loadUserConfig } from './load-config.js'
 import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
 import { serializeWindowTemplates } from './window-metadata.js'
+import { resolveInitScripts } from './init-scripts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -94,6 +95,7 @@ export function createDevWindowTemplates(
   url: string,
 ): RuntimeWindowTemplate[] {
   const webviewNetwork = resolveWebviewNetworkConfig(config)
+  const initScripts = resolveInitScripts(config, cwd)
   return serializeWindowTemplates(config).map((declaration) => ({
     window: {
       label: declaration.label,
@@ -128,6 +130,7 @@ export function createDevWindowTemplates(
       devtools: true,
       appId: config.appId,
       ...webviewNetwork,
+      initScripts,
       capabilities: declaration.capabilities,
       capabilityPolicy: declaration.capabilityPolicy,
       trayIcon: config.icon ? resolve(cwd, config.icon) : undefined,

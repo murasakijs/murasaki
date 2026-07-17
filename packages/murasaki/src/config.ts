@@ -28,6 +28,15 @@ export interface WebviewProxyConfig {
   port: number
 }
 
+/** `webview:download`-granted downloads' confinement directory. */
+export interface WebviewDownloadsConfig {
+  /**
+   * Absolute directory downloads are confined to. Defaults to the OS user
+   * Downloads folder when omitted (resolved natively per-OS).
+   */
+  directory?: string
+}
+
 /** Application-wide native WebView session and network configuration. */
 export interface WebviewConfig {
   /** Complete custom User-Agent header value. */
@@ -36,6 +45,22 @@ export interface WebviewConfig {
   incognito?: boolean
   /** Unauthenticated proxy applied to every application WebView. */
   proxy?: WebviewProxyConfig
+  /** Confines `webview:download`-granted downloads to a directory. */
+  downloads?: WebviewDownloadsConfig
+  /**
+   * Trusted, project-root-relative JavaScript file paths injected into every
+   * page before load (in this declaration order), via
+   * `with_initialization_script_for_main_only`. Not capability-gated —
+   * config is already fully trusted, unlike renderer-triggered commands.
+   * Each file is bounded to 256 KiB and the combined total to 1 MiB,
+   * enforced when the project is loaded (see `resolveInitScripts`).
+   */
+  initScripts?: string[]
+  /**
+   * Enables OS page-zoom hotkeys/gestures. Effective on Windows (WebView2)
+   * only; no-op on macOS/Linux.
+   */
+  hotkeysZoom?: boolean
 }
 
 export type MurasakiPluginCommand = 'dev' | 'build' | 'bundle'
@@ -515,6 +540,12 @@ export const NATIVE_CAPABILITIES = [
   'tray:setTooltip',
   'tray:setIcon',
   'tray:setMenu',
+  'webview:download',
+  'webview:dragDrop',
+  'webview:zoom',
+  'webview:print',
+  'webview:readCookies',
+  'webview:writeCookies',
 ] as const
 
 export type NativeCapability = (typeof NATIVE_CAPABILITIES)[number]
@@ -632,6 +663,11 @@ function validateBuildConfig(value: unknown): void {
 
 const MAX_USER_AGENT_BYTES = 512
 const MAX_PROXY_HOST_BYTES = 253
+/** A sane ceiling on the number of declared init scripts. Per-file (256 KiB)
+ * and combined-total (1 MiB) byte bounds are enforced where file contents are
+ * actually read (see `resolveInitScripts` in `cli/init-scripts.ts`), since
+ * this module stays free of Node builtins and cannot read files itself. */
+const MAX_INIT_SCRIPTS = 64
 
 function validateWebviewConfig(value: unknown): void {
   if (value === undefined) return
@@ -639,7 +675,11 @@ function validateWebviewConfig(value: unknown): void {
     throw new TypeError('webview must be an object')
   }
   const webview = value as Record<string, unknown>
-  rejectUnknownFields(webview, ['userAgent', 'incognito', 'proxy'], 'webview')
+  rejectUnknownFields(
+    webview,
+    ['userAgent', 'incognito', 'proxy', 'downloads', 'initScripts', 'hotkeysZoom'],
+    'webview',
+  )
 
   if (webview.userAgent !== undefined) {
     if (typeof webview.userAgent !== 'string'
@@ -658,26 +698,55 @@ function validateWebviewConfig(value: unknown): void {
   if (webview.incognito !== undefined && typeof webview.incognito !== 'boolean') {
     throw new TypeError('webview.incognito must be a boolean')
   }
-  if (webview.proxy === undefined) return
-  if (!webview.proxy || typeof webview.proxy !== 'object' || Array.isArray(webview.proxy)) {
-    throw new TypeError('webview.proxy must be an object')
+  if (webview.hotkeysZoom !== undefined && typeof webview.hotkeysZoom !== 'boolean') {
+    throw new TypeError('webview.hotkeysZoom must be a boolean')
   }
-  const proxy = webview.proxy as Record<string, unknown>
-  rejectUnknownFields(proxy, ['protocol', 'host', 'port'], 'webview.proxy')
-  if (proxy.protocol !== 'http' && proxy.protocol !== 'socks5') {
-    throw new TypeError('webview.proxy.protocol must be http or socks5')
+  if (webview.initScripts !== undefined) {
+    if (!Array.isArray(webview.initScripts)
+      || webview.initScripts.length > MAX_INIT_SCRIPTS
+      || webview.initScripts.some((entry) => typeof entry !== 'string' || entry.trim().length === 0)) {
+      throw new TypeError(
+        `webview.initScripts must be an array of at most ${MAX_INIT_SCRIPTS} non-empty file paths`,
+      )
+    }
   }
-  if (typeof proxy.host !== 'string' || !validProxyHost(proxy.host)) {
-    throw new TypeError(
-      'webview.proxy.host must be a hostname or IP literal without a scheme, credentials, path, query, or fragment',
-    )
+  if (webview.downloads !== undefined) {
+    if (!webview.downloads || typeof webview.downloads !== 'object' || Array.isArray(webview.downloads)) {
+      throw new TypeError('webview.downloads must be an object')
+    }
+    const downloads = webview.downloads as Record<string, unknown>
+    rejectUnknownFields(downloads, ['directory'], 'webview.downloads')
+    if (downloads.directory !== undefined && !validAbsolutePath(downloads.directory)) {
+      throw new TypeError(
+        'webview.downloads.directory must be a non-empty absolute path without traversal segments',
+      )
+    }
   }
-  if (!Number.isSafeInteger(proxy.port) || (proxy.port as number) < 1 || (proxy.port as number) > 65_535) {
-    throw new TypeError('webview.proxy.port must be an integer between 1 and 65535')
+  if (webview.proxy !== undefined) {
+    if (!webview.proxy || typeof webview.proxy !== 'object' || Array.isArray(webview.proxy)) {
+      throw new TypeError('webview.proxy must be an object')
+    }
+    const proxy = webview.proxy as Record<string, unknown>
+    rejectUnknownFields(proxy, ['protocol', 'host', 'port'], 'webview.proxy')
+    if (proxy.protocol !== 'http' && proxy.protocol !== 'socks5') {
+      throw new TypeError('webview.proxy.protocol must be http or socks5')
+    }
+    if (typeof proxy.host !== 'string' || !validProxyHost(proxy.host)) {
+      throw new TypeError(
+        'webview.proxy.host must be a hostname or IP literal without a scheme, credentials, path, query, or fragment',
+      )
+    }
+    if (!Number.isSafeInteger(proxy.port) || (proxy.port as number) < 1 || (proxy.port as number) > 65_535) {
+      throw new TypeError('webview.proxy.port must be an integer between 1 and 65535')
+    }
   }
 }
 
-/** @internal One normalized app-level value shared by dev and bundle metadata. */
+/** @internal One normalized app-level value shared by dev and bundle metadata.
+ * `initScripts` is deliberately excluded — its file contents are resolved by
+ * the Node-only `resolveInitScripts` (see `cli/init-scripts.ts`), since this
+ * module stays free of Node builtins (see the module doc comment above
+ * `resolveUpdater`'s reference). */
 export function resolveWebviewNetworkConfig(
   config: Pick<MurasakiConfig, 'webview'>,
 ): WebviewConfig | undefined {
@@ -693,7 +762,25 @@ export function resolveWebviewNetworkConfig(
     ...(config.webview.proxy
       ? { proxy: { ...config.webview.proxy } }
       : {}),
+    ...(config.webview.downloads
+      ? { downloads: { ...config.webview.downloads } }
+      : {}),
+    ...(config.webview.hotkeysZoom !== undefined
+      ? { hotkeysZoom: config.webview.hotkeysZoom }
+      : {}),
   }
+}
+
+/** Absolute, traversal-free path check shared by `webview.downloads.directory`
+ * — same absoluteness/`..`-segment rules as capability path scopes (see
+ * `validateCapabilityPathPattern`), without that function's wildcard support. */
+function validAbsolutePath(value: unknown): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false
+  const absolute = value.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || /^\\\\[^\\]+\\[^\\]+/.test(value)
+  const segments = value.split(/[\\/]+/)
+  return absolute && !segments.includes('..')
 }
 
 function validProxyHost(host: string): boolean {

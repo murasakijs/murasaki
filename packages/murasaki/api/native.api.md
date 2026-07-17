@@ -220,6 +220,55 @@ export interface TrayOptions {
 }
 
 // @public
+export const webview: {
+    getCookies(options?: {
+        url?: string;
+    }): Promise<{
+        cookies: WebviewCookie[];
+    }>;
+    setCookie(options: WebviewSetCookieOptions): Promise<void>;
+    deleteCookie(options: {
+        url: string;
+        name: string;
+    }): Promise<void>;
+    setZoom(factor: number): Promise<void>;
+    print(): Promise<void>;
+};
+
+// @public
+export interface WebviewCookie {
+    // (undocumented)
+    domain: string | null;
+    expiresAt?: number;
+    // (undocumented)
+    httpOnly: boolean;
+    // (undocumented)
+    name: string;
+    // (undocumented)
+    path: string | null;
+    // (undocumented)
+    secure: boolean;
+    // (undocumented)
+    value: string;
+}
+
+// @public (undocumented)
+export interface WebviewSetCookieOptions {
+    domain?: string;
+    expiresAt?: number;
+    // (undocumented)
+    httpOnly?: boolean;
+    // (undocumented)
+    name: string;
+    path?: string;
+    // (undocumented)
+    secure?: boolean;
+    url: string;
+    // (undocumented)
+    value: string;
+}
+
+// @public
 export interface WindowInfo {
     // (undocumented)
     focused: boolean;

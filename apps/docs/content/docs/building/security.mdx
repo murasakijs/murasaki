@@ -286,6 +286,27 @@ protection.
 - Close the listener in `shutdown()`.
 - Never reuse the Murasaki runtime token as your protocol credential.
 
+## In-page permission requests (getUserMedia, geolocation)
+
+Murasaki does not intercept in-page permission requests today — calling
+`navigator.mediaDevices.getUserMedia()`, `navigator.geolocation`, or similar
+web APIs from renderer JavaScript falls through to the platform WebView's own
+default behavior, not a Murasaki-mediated prompt or capability. Wry 0.55 has
+no permission-request handler to hook; the underlying API exists only in an
+unreleased upstream version. Interception (routing these requests through
+Murasaki's own capability/consent model) is planned once Wry ships
+`with_permission_handler`.
+
+Until then, behavior is whatever the host OS WebView does by default per
+platform (for example, WebKit's own permission UI on macOS, WebView2's on
+Windows). On macOS, camera/microphone capture is still governed by the OS's
+TCC privacy database — the `systemPermissions.macOS.camera`/`microphone` usage
+strings and launch-time prompts described above apply to native capture
+through `AVFoundation`, not to a page's own `getUserMedia()` call, which
+prompts (or is silently denied) independently at the WebKit layer. Do not load
+untrusted remote content into a window that might unexpectedly grant it camera,
+microphone, or location access through the OS's default WebView prompt.
+
 ## Signing and update keys are different
 
 Code signing answers “who produced this executable?” to the operating system.

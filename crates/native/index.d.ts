@@ -231,6 +231,14 @@ export declare function showNotification(opts: NotificationOptions): string
 
 export declare function version(): string
 
+/**
+ * `webview:download`'s confinement directory — see `config.ts`'s
+ * `WebviewConfig.downloads` and `crate::download`.
+ */
+export interface WebviewDownloadsOptions {
+  directory?: string
+}
+
 export interface WebviewOptions {
   url?: string
   html?: string
@@ -267,6 +275,24 @@ export interface WebviewOptions {
    * `url`/`html` when set.
    */
   serveDir?: string
+  /**
+   * Confines `webview:download`-granted downloads to this directory.
+   * Omitted/absent `directory` resolves to the OS user Downloads folder.
+   */
+  downloads?: WebviewDownloadsOptions
+  /**
+   * Trusted, project-authored JavaScript injected before every page load
+   * (`with_initialization_script_for_main_only`), in declaration order.
+   * Content, not paths — resolved from `config.webview.initScripts` at
+   * dev/bundle time. Not capability-gated: this is config-owned, not
+   * renderer-triggerable.
+   */
+  initScripts?: Array<string>
+  /**
+   * Whether OS zoom hotkeys/gestures are enabled. Effective on Windows
+   * only (WebView2); no-op elsewhere. Not capability-gated — config-owned.
+   */
+  hotkeysZoom?: boolean
 }
 
 export interface WebviewProxyOptions {

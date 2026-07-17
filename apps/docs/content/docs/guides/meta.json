@@ -10,6 +10,7 @@
     "middleware",
     "windows",
     "native-apis",
+    "webview",
     "auto-update",
     "context-menu",
     "app-menu",

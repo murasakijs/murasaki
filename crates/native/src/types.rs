@@ -129,6 +129,18 @@ pub struct WebviewOptions {
     /// `Application::run()` blocks Node's event loop. Takes priority over
     /// `url`/`html` when set.
     pub serve_dir: Option<String>,
+    /// Confines `webview:download`-granted downloads to this directory.
+    /// Omitted/absent `directory` resolves to the OS user Downloads folder.
+    pub downloads: Option<WebviewDownloadsOptions>,
+    /// Trusted, project-authored JavaScript injected before every page load
+    /// (`with_initialization_script_for_main_only`), in declaration order.
+    /// Content, not paths — resolved from `config.webview.initScripts` at
+    /// dev/bundle time. Not capability-gated: this is config-owned, not
+    /// renderer-triggerable.
+    pub init_scripts: Option<Vec<String>>,
+    /// Whether OS zoom hotkeys/gestures are enabled. Effective on Windows
+    /// only (WebView2); no-op elsewhere. Not capability-gated — config-owned.
+    pub hotkeys_zoom: Option<bool>,
 }
 
 #[napi(object)]
@@ -138,6 +150,15 @@ pub struct WebviewProxyOptions {
     pub protocol: String,
     pub host: String,
     pub port: u32,
+}
+
+/// `webview:download`'s confinement directory — see `config.ts`'s
+/// `WebviewConfig.downloads` and `crate::download`.
+#[napi(object)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields, default)]
+pub struct WebviewDownloadsOptions {
+    pub directory: Option<String>,
 }
 
 /// Also parsed straight out of the IPC JSON payload (`kind: "contextMenu"`)

@@ -197,6 +197,19 @@ export function defineConfig(config: MurasakiConfig): MurasakiConfig;
 export function defineMurasakiPlugin(plugin: MurasakiPlugin): MurasakiPlugin;
 
 // @public
+export type DownloadEvent = {
+    type: 'started';
+    id: string;
+    url: string;
+    path: string;
+} | {
+    type: 'completed';
+    url: string;
+    path: string | null;
+    success: boolean;
+};
+
+// @public
 export interface FileAssociationConfig {
     description?: string;
     extensions: string[];
@@ -204,6 +217,25 @@ export interface FileAssociationConfig {
     name?: string;
     role?: 'viewer' | 'editor' | 'shell' | 'none';
 }
+
+// @public
+export type FileDropEvent = {
+    type: 'enter';
+    paths: string[];
+    x: number;
+    y: number;
+} | {
+    type: 'over';
+    x: number;
+    y: number;
+} | {
+    type: 'drop';
+    paths: string[];
+    x: number;
+    y: number;
+} | {
+    type: 'leave';
+};
 
 // @public
 export type GenerateMetadata = (ctx: GenerateMetadataContext) => Metadata | Promise<Metadata>;
@@ -458,6 +490,12 @@ export type SecondaryWindowConfig = Omit<WindowConfig, 'console'> & {
 };
 
 // @public
+export function subscribeDownloads(handler: (event: DownloadEvent) => void): () => void;
+
+// @public
+export function subscribeFileDrops(handler: (event: FileDropEvent) => void): () => void;
+
+// @public
 export interface SystemPermissionsConfig {
     // (undocumented)
     macOS?: MacOSSystemPermissionsConfig;
@@ -520,6 +558,13 @@ export function useContextMenu(items: ContextMenuItemSpec[]): void;
 // @public (undocumented)
 export function useContextMenu(id: string, items: ContextMenuItemSpec[]): void;
 
+// @public
+export function useFileDrop(onDrop: (event: {
+    paths: string[];
+    x: number;
+    y: number;
+}) => void): void;
+
 // Warning: (ae-forgotten-export) The symbol "ContextMenuItem" needs to be exported by the entry point index.d.ts
 //
 // @public (undocumented)
@@ -556,9 +601,17 @@ export function useWindowDrag(): {
 
 // @public
 export interface WebviewConfig {
+    downloads?: WebviewDownloadsConfig;
+    hotkeysZoom?: boolean;
     incognito?: boolean;
+    initScripts?: string[];
     proxy?: WebviewProxyConfig;
     userAgent?: string;
+}
+
+// @public
+export interface WebviewDownloadsConfig {
+    directory?: string;
 }
 
 // @public (undocumented)

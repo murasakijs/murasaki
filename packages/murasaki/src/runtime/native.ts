@@ -97,6 +97,14 @@ export interface WebviewOptions {
   /** Production only: serves this directory via the native custom protocol
    * (`murasaki://localhost/…`), taking priority over `url`/`html`. */
   serveDir?: string
+  /** Confines `webview:download`-granted downloads to this directory.
+   * Omitted/absent `directory` resolves to the OS user Downloads folder. */
+  downloads?: { directory?: string }
+  /** Trusted JavaScript file contents (already read from disk), applied in
+   * declaration order before every page load. Not capability-gated. */
+  initScripts?: string[]
+  /** Enables OS page-zoom hotkeys/gestures. Effective on Windows only. */
+  hotkeysZoom?: boolean
 }
 
 /** Immutable native window template configured before the application loop starts. */

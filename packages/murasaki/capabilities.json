@@ -506,19 +506,32 @@
       },
       "limitations": [
         "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
-        "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported."
+        "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported.",
+        "webview:download confines sanitized, collision-resolved downloads to a configured (or OS default) directory and reports start/completion events; there is no reliable id correlating a completed event with the started event it followed, and macOS never reports a completed download's path (an upstream WebKit limitation).",
+        "webview:dragDrop reports file drag-and-drop events (dragover throttled to 20/sec) without ever blocking the OS default, so file inputs keep working regardless of the grant. webview.initScripts injects trusted, config-owned JavaScript before page load and is not capability-gated.",
+        "webview:zoom bounds page zoom to 0.25-5.0 and is available on macOS 11+/iOS 14+ only; webview.hotkeysZoom (config, not a capability) enables OS zoom hotkeys/gestures on Windows only. webview:print opens the platform print dialog; there is no find-in-page API because Wry exposes none.",
+        "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete; the murasaki runtime's own session-auth cookie is filtered out of reads and rejected from writes/deletes regardless of granted capabilities. deleteCookie matches by name, the URL host as domain, and the default / path only.",
+        "In-page permission requests (getUserMedia, geolocation) are not intercepted: Wry 0.55 has no permission handler, so these fall through to the platform WebView's own default behavior; interception is planned once Wry ships one."
       ],
       "apiSymbols": [
         "MurasakiConfig.webview",
         "WebviewConfig",
-        "WebviewProxyConfig"
+        "WebviewProxyConfig",
+        "WebviewDownloadsConfig",
+        "murasaki/native.webview",
+        "murasaki.subscribeDownloads",
+        "murasaki.subscribeFileDrops",
+        "murasaki.useFileDrop"
       ],
       "testEvidence": [
         "packages/murasaki/test/webview-config.test.mjs",
+        "packages/murasaki/test/webview-native-api.test.mjs",
+        "packages/murasaki/test/webview-events.test.mjs",
         "crates/native/src/webview.rs",
+        "crates/native/src/download.rs",
         "crates/native/src/launcher.rs"
       ],
-      "docsSlug": "/docs/building/configuration"
+      "docsSlug": "/docs/guides/webview"
     },
     {
       "id": "build-time-plugin-sdk",

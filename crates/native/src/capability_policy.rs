@@ -61,6 +61,12 @@ const KNOWN_CAPABILITIES: &[&str] = &[
     "tray:setTooltip",
     "tray:setIcon",
     "tray:setMenu",
+    "webview:download",
+    "webview:dragDrop",
+    "webview:zoom",
+    "webview:print",
+    "webview:readCookies",
+    "webview:writeCookies",
 ];
 
 #[derive(Clone, Debug)]
