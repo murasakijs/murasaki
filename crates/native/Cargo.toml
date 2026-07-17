@@ -17,6 +17,12 @@ crate-type = ["cdylib", "rlib"]
 name = "murasaki-launcher"
 path = "src/bin/murasaki-launcher.rs"
 
+[features]
+# Exposes the fuzz-only parse entry points in src/capability_policy.rs and
+# src/updater.rs (see crates/native/fuzz). Never enabled for the published
+# crate or the napi build.
+fuzzing = []
+
 [dependencies]
 napi = { version = "3", features = ["napi9"] }
 napi-derive = "3"

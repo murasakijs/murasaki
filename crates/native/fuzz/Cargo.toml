@@ -1,0 +1,31 @@
+[package]
+name = "murasaki-native-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.murasaki-native]
+path = ".."
+# Enables the fuzz-only parse entry points gated in
+# crates/native/src/capability_policy.rs and crates/native/src/updater.rs.
+features = ["fuzzing"]
+
+[[bin]]
+name = "fuzz_capability_policy"
+path = "fuzz_targets/fuzz_capability_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_update_journal"
+path = "fuzz_targets/fuzz_update_journal.rs"
+test = false
+doc = false
+bench = false

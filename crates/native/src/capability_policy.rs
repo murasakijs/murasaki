@@ -518,6 +518,17 @@ fn validate_capability_name(permission: &str) -> Result<(), String> {
     }
 }
 
+/// Fuzzing-only entry point exercising the JSON policy parser directly.
+/// Gated behind the `fuzzing` feature so it never ships in the published
+/// crate; `crates/native/fuzz`'s `fuzz_capability_policy` target enables the
+/// feature to fuzz this pure-parse surface without widening the normal
+/// public/crate API.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_parse_capability_policy(raw: &str) {
+    let _ = CapabilityPolicy::parse(Some(raw));
+}
+
 #[cfg(test)]
 mod tests {
     use super::{CapabilityPolicy, CapabilityResource};

@@ -1218,6 +1218,24 @@ fn relaunch(_target: &Path) -> Result<(), String> {
     Err("relaunch is only supported on macOS and Windows".to_string())
 }
 
+/// Fuzzing-only entry point exercising the update journal's JSON parsing and
+/// structural validation — the same two steps `read_journal` performs,
+/// minus the actual filesystem read. Gated behind the `fuzzing` feature so
+/// it never ships in the published crate; `crates/native/fuzz`'s
+/// `fuzz_update_journal` target enables the feature to fuzz this pure-parse
+/// surface (no OS calls) without widening the normal public/crate API. A
+/// fixed, arbitrary target path stands in for the real install path, since
+/// `validate_journal` only does string/path manipulation, never I/O.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub fn fuzz_parse_update_journal(raw: &str) {
+    let Ok(journal) = serde_json::from_str::<UpdateJournal>(raw) else {
+        return;
+    };
+    let target = Path::new("/murasaki-fuzz/App");
+    let _ = validate_journal(target, &journal);
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
