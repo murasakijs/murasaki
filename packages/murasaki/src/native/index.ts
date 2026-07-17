@@ -49,6 +49,14 @@ export type SystemPermissionName =
   | 'inputMonitoring'
   | 'location'
   | 'fullDiskAccess'
+  | 'photos'
+  | 'contacts'
+  | 'calendar'
+  | 'reminders'
+  | 'speechRecognition'
+  | 'bluetooth'
+  | 'appleEvents'
+  | 'localNetwork'
 
 export type SystemPermissionStatus =
   | 'granted'
@@ -57,7 +65,11 @@ export type SystemPermissionStatus =
   | 'notDetermined'
   | 'notGranted'
   | 'unsupported'
-  /** `fullDiskAccess`-only: the heuristic status check could not be performed. */
+  /**
+   * Returned by kinds with no real TCC query: `fullDiskAccess`'s heuristic
+   * status check could not be performed, or `appleEvents`/`localNetwork`
+   * (which have no query API at all — see `MacOSDeclarationOnlyPermissionConfig`).
+   */
   | 'unknown'
 
 export interface TrayOptions {

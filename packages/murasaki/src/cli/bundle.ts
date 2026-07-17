@@ -20,6 +20,7 @@ import {
   validateMainShutdownTimeoutMs,
   type MurasakiConfig,
   type MurasakiBuildTarget,
+  type SystemPermissionName,
 } from '../config.js'
 import { serializeWindowTemplates } from './window-metadata.js'
 import { resolveInitScripts } from './init-scripts.js'
@@ -961,10 +962,10 @@ function resolveSignIdentity(config: MurasakiConfig): string {
 
 /**
  * Entitlements for the hardened-runtime signing above. Uses
- * `config.sign.entitlements` if it's set and exists; otherwise writes a
- * default plist to a temp file. Node needs the JIT + unsigned-executable-
- * memory + no-library-validation entitlements to keep launching once the
- * hardened runtime is on — it JITs and loads unsigned `.node` add-ons.
+ * `config.sign.entitlements` VERBATIM if it's set and exists — a
+ * user-supplied entitlements file is never merged with the derivation below,
+ * only the generated default plist is. Otherwise writes `entitlementsPlist`'s
+ * generated default to a temp file.
  */
 async function resolveEntitlements(config: MurasakiConfig): Promise<string> {
   const custom = config.sign?.entitlements ? resolve(process.cwd(), config.sign.entitlements) : null
@@ -972,20 +973,81 @@ async function resolveEntitlements(config: MurasakiConfig): Promise<string> {
 
   const dir = await mkdtemp(join(tmpdir(), 'murasaki-entitlements-'))
   const path = join(dir, 'entitlements.plist')
-  await writeFile(path, DEFAULT_ENTITLEMENTS_PLIST)
+  await writeFile(path, entitlementsPlist(config))
   return path
 }
 
-const DEFAULT_ENTITLEMENTS_PLIST = `<?xml version="1.0" encoding="UTF-8"?>
+/**
+ * Per-kind macOS App Sandbox entitlement keys (Apple's documented
+ * `com.apple.security.device.*`/`com.apple.security.personal-information.*`
+ * categories), used only when `sign.appSandbox` is on (see `entitlementsPlist`
+ * below). `calendar` and `reminders` share the same `.calendars` key — Apple
+ * has never split Reminders into its own sandbox category, unlike TCC's
+ * separate `NSRemindersUsageDescription`. `photos` is deliberately absent:
+ * unlike Contacts/Calendars/Reminders (which predate TCC and kept their
+ * original Sandbox categories), Photos library access has always been
+ * mediated purely by TCC — there is no documented Photos App Sandbox
+ * entitlement to add, sandboxed or not.
+ */
+const APP_SANDBOX_ENTITLEMENT_KEYS: Partial<Record<SystemPermissionName, string>> = {
+  camera: 'com.apple.security.device.camera',
+  microphone: 'com.apple.security.device.audio-input',
+  location: 'com.apple.security.personal-information.location',
+  contacts: 'com.apple.security.personal-information.addressbook',
+  calendar: 'com.apple.security.personal-information.calendars',
+  reminders: 'com.apple.security.personal-information.calendars',
+  bluetooth: 'com.apple.security.device.bluetooth',
+}
+
+/**
+ * Builds the default hardened-runtime entitlements plist — pure string
+ * derivation from config, with no filesystem I/O, so it can be exercised
+ * directly by tests. Node always needs the JIT + unsigned-executable-memory +
+ * no-library-validation trio to keep launching once the hardened runtime is
+ * on (it JITs and loads unsigned `.node` add-ons); on top of that:
+ *
+ * - `com.apple.security.automation.apple-events` is added whenever
+ *   `appleEvents` is declared — the one TCC entitlement genuinely required
+ *   under Murasaki's default (hardened-runtime-only, no App Sandbox) posture.
+ *   Camera/microphone/photos/etc. all work with just their Info.plist usage
+ *   string under hardened runtime alone; adding their sandbox-only
+ *   entitlements here would be both unnecessary and (per Apple's notarization
+ *   review) actively unwise.
+ * - If `sign.appSandbox` is on, `com.apple.security.app-sandbox` plus every
+ *   declared kind's `APP_SANDBOX_ENTITLEMENT_KEYS` entry are added too — the
+ *   automation entitlement above still applies independently of sandboxing.
+ */
+export function entitlementsPlist(config: MurasakiConfig): string {
+  const declared = new Set(Object.keys(config.systemPermissions?.macOS ?? {}))
+  const appSandbox = config.sign?.appSandbox === true
+
+  const entries = [
+    '<key>com.apple.security.cs.allow-jit</key><true/>',
+    '<key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>',
+    '<key>com.apple.security.cs.disable-library-validation</key><true/>',
+  ]
+  if (declared.has('appleEvents')) {
+    entries.push('<key>com.apple.security.automation.apple-events</key><true/>')
+  }
+  if (appSandbox) {
+    entries.push('<key>com.apple.security.app-sandbox</key><true/>')
+    const sandboxKeys = new Set<string>()
+    for (const name of declared) {
+      const key = APP_SANDBOX_ENTITLEMENT_KEYS[name as SystemPermissionName]
+      if (key) sandboxKeys.add(key)
+    }
+    for (const key of sandboxKeys) entries.push(`<key>${key}</key><true/>`)
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>com.apple.security.cs.allow-jit</key><true/>
-  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-  <key>com.apple.security.cs.disable-library-validation</key><true/>
+${entries.map((entry) => `  ${entry}`).join('\n')}
 </dict>
 </plist>
 `
+}
 
 /** Recursively collect every `*.node` native add-on under `dir` — each needs
  * its own hardened-runtime signature before the outer bundle is sealed. */
@@ -1495,9 +1557,18 @@ export function infoPlist(config: MurasakiConfig, productName: string, hasIcon: 
   const locales = config.locales ?? DEFAULT_LOCALES
   const localizationsXml = locales.map((l) => `    <string>${escapeXml(l)}</string>`).join('\n')
   const associations = resolveAssociations(config)
-  const cameraUsageDescription = config.systemPermissions?.macOS?.camera?.usageDescription
-  const microphoneUsageDescription = config.systemPermissions?.macOS?.microphone?.usageDescription
-  const location = config.systemPermissions?.macOS?.location
+  const macOSPermissions = config.systemPermissions?.macOS
+  const cameraUsageDescription = macOSPermissions?.camera?.usageDescription
+  const microphoneUsageDescription = macOSPermissions?.microphone?.usageDescription
+  const location = macOSPermissions?.location
+  const photosUsageDescription = macOSPermissions?.photos?.usageDescription
+  const contactsUsageDescription = macOSPermissions?.contacts?.usageDescription
+  const calendarUsageDescription = macOSPermissions?.calendar?.usageDescription
+  const remindersUsageDescription = macOSPermissions?.reminders?.usageDescription
+  const speechRecognitionUsageDescription = macOSPermissions?.speechRecognition?.usageDescription
+  const bluetoothUsageDescription = macOSPermissions?.bluetooth?.usageDescription
+  const appleEventsUsageDescription = macOSPermissions?.appleEvents?.usageDescription
+  const localNetworkUsageDescription = macOSPermissions?.localNetwork?.usageDescription
   const permissionUsageXml = [
     cameraUsageDescription
       ? `\n  <key>NSCameraUsageDescription</key><string>${escapeXml(cameraUsageDescription)}</string>`
@@ -1511,6 +1582,35 @@ export function infoPlist(config: MurasakiConfig, productName: string, hasIcon: 
     // Apple requires the when-in-use key present even for an 'always' request.
     location?.mode === 'always'
       ? `\n  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key><string>${escapeXml(location.usageDescription)}</string>`
+      : '',
+    photosUsageDescription
+      ? `\n  <key>NSPhotoLibraryUsageDescription</key><string>${escapeXml(photosUsageDescription)}</string>`
+      : '',
+    contactsUsageDescription
+      ? `\n  <key>NSContactsUsageDescription</key><string>${escapeXml(contactsUsageDescription)}</string>`
+      : '',
+    // Both keys are written unconditionally (not gated by a config flag, unlike
+    // location's 'always' mode): a packaged app is a single build that may run
+    // on macOS 11 through 14+, and the native host's launch-time request picks
+    // whichever EventKit API the RUNNING system supports — see
+    // system_permission.rs's `ek_supports_full_access`.
+    calendarUsageDescription
+      ? `\n  <key>NSCalendarsUsageDescription</key><string>${escapeXml(calendarUsageDescription)}</string>\n  <key>NSCalendarsFullAccessUsageDescription</key><string>${escapeXml(calendarUsageDescription)}</string>`
+      : '',
+    remindersUsageDescription
+      ? `\n  <key>NSRemindersUsageDescription</key><string>${escapeXml(remindersUsageDescription)}</string>\n  <key>NSRemindersFullAccessUsageDescription</key><string>${escapeXml(remindersUsageDescription)}</string>`
+      : '',
+    speechRecognitionUsageDescription
+      ? `\n  <key>NSSpeechRecognitionUsageDescription</key><string>${escapeXml(speechRecognitionUsageDescription)}</string>`
+      : '',
+    bluetoothUsageDescription
+      ? `\n  <key>NSBluetoothAlwaysUsageDescription</key><string>${escapeXml(bluetoothUsageDescription)}</string>`
+      : '',
+    appleEventsUsageDescription
+      ? `\n  <key>NSAppleEventsUsageDescription</key><string>${escapeXml(appleEventsUsageDescription)}</string>`
+      : '',
+    localNetworkUsageDescription
+      ? `\n  <key>NSLocalNetworkUsageDescription</key><string>${escapeXml(localNetworkUsageDescription)}</string>`
       : '',
   ].join('')
   const protocolsXml = associations.protocols.length === 0 ? '' : `

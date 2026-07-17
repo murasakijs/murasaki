@@ -184,7 +184,7 @@ test('rejects ambiguous or unsafe structured capability scopes', () => {
     [{ permission: 'shell:trashItem', allow: { paths: ['relative/**'] } }],
     [{ permission: 'shell:openPath', allow: { urls: ['https://example.com/**'] } }],
     [{ permission: 'window:manage', allow: { windows: ['bad label'] } }],
-    [{ permission: 'systemPermission:request', allow: { permissions: ['contacts'] } }],
+    [{ permission: 'systemPermission:request', allow: { permissions: ['bogusPermission'] } }],
     [{ permission: 'secureStorage:get', allow: { paths: ['/tmp/**'] } }],
     ['window:manage', { permission: 'window:manage', allow: { windows: ['settings'] } }],
   ]) {

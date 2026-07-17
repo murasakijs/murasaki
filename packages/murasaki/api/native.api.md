@@ -171,11 +171,15 @@ export const systemPermission: {
 };
 
 // @public (undocumented)
-export type SystemPermissionName = 'camera' | 'microphone' | 'screenRecording' | 'accessibility' | 'inputMonitoring' | 'location' | 'fullDiskAccess';
+export type SystemPermissionName = 'camera' | 'microphone' | 'screenRecording' | 'accessibility' | 'inputMonitoring' | 'location' | 'fullDiskAccess' | 'photos' | 'contacts' | 'calendar' | 'reminders' | 'speechRecognition' | 'bluetooth' | 'appleEvents' | 'localNetwork';
 
 // @public (undocumented)
 export type SystemPermissionStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'notGranted' | 'unsupported'
-/** `fullDiskAccess`-only: the heuristic status check could not be performed. */
+/**
+* Returned by kinds with no real TCC query: `fullDiskAccess`'s heuristic
+* status check could not be performed, or `appleEvents`/`localNetwork`
+* (which have no query API at all — see `MacOSDeclarationOnlyPermissionConfig`).
+*/
 | 'unknown';
 
 // @public (undocumented)

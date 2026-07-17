@@ -809,6 +809,9 @@
         "entitlements": {
           "type": "string"
         },
+        "appSandbox": {
+          "type": "boolean"
+        },
         "windows": {
           "type": "object",
           "additionalProperties": false,

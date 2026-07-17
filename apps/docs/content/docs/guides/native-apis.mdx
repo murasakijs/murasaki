@@ -56,7 +56,7 @@ await shell.showItemInFolder(files[0])
 | `notification` | `show` (resolves to a locally-generated id) |
 | `shell` | `openExternal` (safe URL schemes only), `showItemInFolder`, `trashItem`, `openPath` |
 | `secureStorage` | OS-backed `get`, `set`, `delete` for string values |
-| `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, accessibility, input monitoring, location, and full disk access |
+| `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, accessibility, input monitoring, location, full disk access, photos, contacts, calendar, reminders, speech recognition, Bluetooth, Apple Events (automation), and local network |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
 | `windows` | `open`, `list`, `show`, `hide`, `focus`, `close` for declared labels |
 | `globalShortcut` | process-wide `register`, `unregister`, `unregisterAll`, `onTriggered` |
@@ -303,8 +303,8 @@ reload.
 
 OS consent is separate from Murasaki's renderer capability allowlist. For a
 packaged macOS app, declare purpose text and optional launch-time prompts in
-config. Purpose strings are written into `Info.plist`; missing camera or
-microphone descriptions are rejected before a prompt can crash the app:
+config. Purpose strings are written into `Info.plist`; missing usage
+descriptions are rejected before a prompt can crash the app:
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -326,6 +326,14 @@ export default defineConfig({
         mode: 'whenInUse',
       },
       fullDiskAccess: { requestOnLaunch: false },
+      photos: { usageDescription: 'Attach a photo to your post.' },
+      contacts: { usageDescription: 'Find your friends.' },
+      calendar: { usageDescription: 'See your schedule.' },
+      reminders: { usageDescription: 'See your reminders.' },
+      speechRecognition: { usageDescription: 'Transcribe your voice memos.' },
+      bluetooth: { usageDescription: 'Find nearby devices.' },
+      appleEvents: { usageDescription: 'Automate another app on your behalf.' },
+      localNetwork: { usageDescription: 'Discover devices on this network.' },
     },
   },
   capabilities: [
@@ -344,26 +352,63 @@ if (status === 'notDetermined') {
 }
 ```
 
-Camera, microphone, and location prompts complete asynchronously at the OS
-level, so `request()` may initially return `notDetermined`; query `status()`
-again when the app regains focus before enabling the protected feature.
+| Kind | Shape | Notes |
+| --- | --- | --- |
+| `camera` | request-capable | `NSCameraUsageDescription`. |
+| `microphone` | request-capable | `NSMicrophoneUsageDescription`. |
+| `location` | request-capable | `NSLocationWhenInUseUsageDescription` (+ `NSLocationAlwaysAndWhenInUseUsageDescription` for `mode: 'always'`). |
+| `photos` | request-capable | `NSPhotoLibraryUsageDescription`. Read-write library access. |
+| `contacts` | request-capable | `NSContactsUsageDescription`. |
+| `calendar` | request-capable | `NSCalendarsUsageDescription` + `NSCalendarsFullAccessUsageDescription` (both always written — see below). |
+| `reminders` | request-capable | `NSRemindersUsageDescription` + `NSRemindersFullAccessUsageDescription` (see below). |
+| `speechRecognition` | request-capable | `NSSpeechRecognitionUsageDescription`. |
+| `bluetooth` | request-capable, no explicit request call | `NSBluetoothAlwaysUsageDescription`. See below. |
+| `screenRecording` | prompt-style, no usage string | granted/notGranted only. |
+| `accessibility` | prompt-style, no usage string | granted/notGranted only. |
+| `inputMonitoring` | prompt-style, no usage string | granted/notGranted only. |
+| `fullDiskAccess` | guidance-only | See below. |
+| `appleEvents` | guidance-only, declaration-only | `NSAppleEventsUsageDescription`. See below. |
+| `localNetwork` | declaration-only | `NSLocalNetworkUsageDescription`. See below. |
 
-`requestOnLaunch` applies to packaged macOS apps. Test TCC behavior from a
-packaged build because development runs under the terminal/Node host identity.
-On Windows, unpackaged desktop camera/microphone consent is requested by the
-device API when it is used, not through a generic application-start prompt;
-Murasaki therefore reports `unsupported` instead of pretending permission was
-granted. Screen recording, accessibility, and input monitoring return
-`notGranted` when macOS cannot distinguish first-use from denial. All seven
-kinds are macOS-only — Windows and Linux have no OS-level equivalent of these
-TCC-gated prompts, so every call reports `unsupported` there instead of
-implying a grant that never happened.
+Camera, microphone, location, photos, contacts, calendar, reminders, and
+speech recognition prompts complete asynchronously at the OS level, so
+`request()` may initially return `notDetermined`; query `status()` again when
+the app regains focus before enabling the protected feature.
+
+`requestOnLaunch` applies to packaged macOS apps and every kind above except
+`appleEvents`/`localNetwork` (declaration-only — see below). Test TCC behavior
+from a packaged build because development runs under the terminal/Node host
+identity. On Windows, unpackaged desktop consent for the device-backed kinds
+is requested by the device API when it is used, not through a generic
+application-start prompt; Murasaki therefore reports `unsupported` instead of
+pretending permission was granted. Screen recording, accessibility, and input
+monitoring return `notGranted` when macOS cannot distinguish first-use from
+denial. All fifteen kinds are macOS-only — Windows and Linux have no OS-level
+equivalent of these TCC-gated prompts, so every call reports `unsupported`
+there instead of implying a grant that never happened.
 
 `location.usageDescription` is required, same as camera/microphone; it is
 written to `NSLocationWhenInUseUsageDescription`. `mode: 'always'` additionally
 writes `NSLocationAlwaysAndWhenInUseUsageDescription` (Apple requires the
 when-in-use key present even for an always request) and requests
 always-authorization instead of when-in-use.
+
+<Callout type="info">
+  `calendar`/`reminders` request full access on macOS 14+ and fall back to the
+  deprecated pre-14 EventKit API on older systems, checked against the
+  *running* system at request time — not the build machine — so a single
+  packaged app stays correct on both. Info.plist therefore always carries both
+  the legacy usage key and the 14+ full-access key together, regardless of
+  which system builds the app.
+</Callout>
+
+<Callout type="info">
+  `bluetooth` has no explicit request call: CoreBluetooth determines consent
+  implicitly the first time a central manager is created. `status()` reads
+  `CBManager.authorization` — a class-level property that needs no live
+  manager — so it is exactly as cheap as any other kind's status check;
+  `request()` creates a manager purely to trigger that OS-side determination.
+</Callout>
 
 <Callout type="warn">
   `fullDiskAccess` is guidance-only: macOS has no TCC request API for Full Disk
@@ -375,6 +420,50 @@ always-authorization instead of when-in-use.
   heuristic can't produce a confident answer, in addition to the usual
   `granted`/`notGranted`.
 </Callout>
+
+<Callout type="warn">
+  `appleEvents` and `localNetwork` are declaration-only — there is no
+  `requestOnLaunch` field for either, and Murasaki's only role is writing
+  their purpose string. Automation consent is granted per TARGET app and is
+  only resolvable by actually attempting to send an Apple Event, so
+  `appleEvents`'s `status()` always reports `unknown`, and `request()` only
+  opens System Settings' Automation pane as guidance (like `fullDiskAccess`
+  above) rather than claiming a grant it can't verify. `localNetwork` has no
+  query or request API at all — macOS prompts automatically the first time the
+  app actually attempts local-network traffic — so both `status()` and
+  `request()` are static `unknown` no-ops.
+</Callout>
+
+### Entitlements and the App Sandbox
+
+`murasaki bundle --sign`'s generated default entitlements plist (used unless
+you supply `sign.entitlements`) automatically adds only what your declared
+`systemPermissions` genuinely need:
+
+- Under Murasaki's default hardened-runtime-only posture (no App Sandbox),
+  camera/microphone/photos/etc. all work from their Info.plist usage string
+  alone — no extra entitlement is added for them. The one exception is
+  `appleEvents`: declaring it adds `com.apple.security.automation.apple-events`,
+  the one TCC entitlement hardened runtime genuinely requires.
+- Setting `sign.appSandbox: true` additionally adds
+  `com.apple.security.app-sandbox` plus each declared kind's documented
+  per-kind Sandbox entitlement: `camera` → `com.apple.security.device.camera`,
+  `microphone` → `com.apple.security.device.audio-input`, `location` →
+  `com.apple.security.personal-information.location`, `contacts` →
+  `com.apple.security.personal-information.addressbook`, `calendar`/
+  `reminders` → `com.apple.security.personal-information.calendars` (Apple has
+  never split Reminders into its own Sandbox category), `bluetooth` →
+  `com.apple.security.device.bluetooth`. `photos` has no documented App
+  Sandbox entitlement and is never added.
+- A custom `sign.entitlements` file is always used verbatim — this derivation
+  only ever applies to the generated default plist.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  sign: { appSandbox: true },
+})
+```
 
 ## Built-in menu actions
 
