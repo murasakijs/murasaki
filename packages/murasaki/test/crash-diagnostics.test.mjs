@@ -260,6 +260,8 @@ async function startProdServer(t, { diagnostics } = {}) {
         ...process.env,
         NODE_ENV: '',
         HOME: root,
+        APPDATA: join(root, 'appdata-roaming'),
+        LOCALAPPDATA: join(root, 'appdata-local'),
         XDG_DATA_HOME: join(root, 'xdg-data'),
         XDG_CACHE_HOME: join(root, 'xdg-cache'),
         XDG_STATE_HOME: join(root, 'xdg-state'),
@@ -289,7 +291,15 @@ async function startProdServer(t, { diagnostics } = {}) {
   return {
     root,
     port,
-    crashReportsDir: join(root, 'Library', 'Application Support', 'com.example.crash-diagnostics-test', 'crash-reports'),
+    // Mirrors resolveAppPaths' per-OS data-dir resolution against the child
+    // env above — the mac path keys off HOME, win32 off APPDATA, linux off
+    // XDG_DATA_HOME.
+    crashReportsDir:
+      process.platform === 'darwin'
+        ? join(root, 'Library', 'Application Support', 'com.example.crash-diagnostics-test', 'crash-reports')
+        : process.platform === 'win32'
+          ? join(root, 'appdata-roaming', 'com.example.crash-diagnostics-test', 'crash-reports')
+          : join(root, 'xdg-data', 'com.example.crash-diagnostics-test', 'crash-reports'),
     runtimeHeaders: { cookie: runtimeCookie, 'content-type': 'application/json' },
   }
 }
