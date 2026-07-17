@@ -274,6 +274,13 @@ export interface MacOSCapturePermissionConfig {
     usageDescription: string;
 }
 
+// @public
+export interface MacOSLocationPermissionConfig {
+    mode?: 'whenInUse' | 'always';
+    requestOnLaunch?: boolean;
+    usageDescription: string;
+}
+
 // @public (undocumented)
 export interface MacOSPromptPermissionConfig {
     requestOnLaunch?: boolean;
@@ -285,6 +292,10 @@ export interface MacOSSystemPermissionsConfig {
     accessibility?: MacOSPromptPermissionConfig;
     // (undocumented)
     camera?: MacOSCapturePermissionConfig;
+    fullDiskAccess?: MacOSPromptPermissionConfig;
+    inputMonitoring?: MacOSPromptPermissionConfig;
+    // (undocumented)
+    location?: MacOSLocationPermissionConfig;
     // (undocumented)
     microphone?: MacOSCapturePermissionConfig;
     // (undocumented)

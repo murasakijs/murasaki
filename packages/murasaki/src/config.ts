@@ -222,12 +222,41 @@ export interface MacOSPromptPermissionConfig {
   requestOnLaunch?: boolean
 }
 
+/**
+ * Core Location consent. Unlike `MacOSPromptPermissionConfig`, this requires
+ * a purpose string (Core Location refuses to prompt without one).
+ */
+export interface MacOSLocationPermissionConfig {
+  /** Text macOS shows in its consent dialog and System Settings. */
+  usageDescription: string
+  /**
+   * `'whenInUse'` (default) writes only `NSLocationWhenInUseUsageDescription`.
+   * `'always'` additionally writes `NSLocationAlwaysAndWhenInUseUsageDescription`
+   * (Apple requires the when-in-use key present even for an always request)
+   * and requests always-authorization instead of when-in-use.
+   */
+  mode?: 'whenInUse' | 'always'
+  /** Ask as the native host starts. Prefer an in-context request when possible. */
+  requestOnLaunch?: boolean
+}
+
 /** macOS TCC permissions supported by Murasaki's native host. */
 export interface MacOSSystemPermissionsConfig {
   camera?: MacOSCapturePermissionConfig
   microphone?: MacOSCapturePermissionConfig
   screenRecording?: MacOSPromptPermissionConfig
   accessibility?: MacOSPromptPermissionConfig
+  /** Listen Event access (global keyboard/mouse taps), e.g. for a global shortcut library. */
+  inputMonitoring?: MacOSPromptPermissionConfig
+  location?: MacOSLocationPermissionConfig
+  /**
+   * Full Disk Access has no TCC request API — macOS only lets a user grant it
+   * from System Settings. `requestOnLaunch` therefore means something
+   * different here than for the other permissions above: if the heuristic
+   * status isn't `granted`, the native host opens the Full Disk Access pane
+   * in System Settings instead of showing an in-app consent prompt.
+   */
+  fullDiskAccess?: MacOSPromptPermissionConfig
 }
 
 /** Host-OS consent declarations. Separate from renderer native capabilities. */
@@ -1027,7 +1056,7 @@ function validateSystemPermissionsConfig(value: unknown): void {
       )
     }
   }
-  for (const name of ['screenRecording', 'accessibility'] as const) {
+  for (const name of ['screenRecording', 'accessibility', 'inputMonitoring', 'fullDiskAccess'] as const) {
     const permission = permissions[name]
     if (permission === undefined) continue
     if (!permission || typeof permission !== 'object' || Array.isArray(permission)) {
@@ -1041,6 +1070,31 @@ function validateSystemPermissionsConfig(value: unknown): void {
       )
     }
   }
+  const location = permissions.location
+  if (location !== undefined) {
+    if (!location || typeof location !== 'object' || Array.isArray(location)) {
+      throw new TypeError('systemPermissions.macOS.location must be an object')
+    }
+    const config = location as Record<string, unknown>
+    if (typeof config.usageDescription !== 'string'
+      || config.usageDescription.trim().length === 0) {
+      throw new TypeError(
+        'systemPermissions.macOS.location.usageDescription must be a non-empty string',
+      )
+    }
+    if (config.mode !== undefined
+      && config.mode !== 'whenInUse' && config.mode !== 'always') {
+      throw new TypeError(
+        "systemPermissions.macOS.location.mode must be 'whenInUse' or 'always'",
+      )
+    }
+    if (config.requestOnLaunch !== undefined
+      && typeof config.requestOnLaunch !== 'boolean') {
+      throw new TypeError(
+        'systemPermissions.macOS.location.requestOnLaunch must be a boolean',
+      )
+    }
+  }
 }
 
 export type SystemPermissionName =
@@ -1048,6 +1102,9 @@ export type SystemPermissionName =
   | 'microphone'
   | 'screenRecording'
   | 'accessibility'
+  | 'inputMonitoring'
+  | 'location'
+  | 'fullDiskAccess'
 
 /** Resolve only the permissions explicitly opted into launch-time prompts. */
 export function resolveStartupSystemPermissions(
@@ -1060,6 +1117,9 @@ export function resolveStartupSystemPermissions(
     'microphone',
     'screenRecording',
     'accessibility',
+    'inputMonitoring',
+    'location',
+    'fullDiskAccess',
   ]
   return names.filter((name) => macOS[name]?.requestOnLaunch === true)
 }
@@ -1528,7 +1588,7 @@ function resolveCapabilityScope(
       })
       resolved.windows = unique as string[]
     } else if (key === 'permissions') {
-      const known = new Set<SystemPermissionName>(['camera', 'microphone', 'screenRecording', 'accessibility'])
+      const known = new Set<SystemPermissionName>(['camera', 'microphone', 'screenRecording', 'accessibility', 'inputMonitoring', 'location', 'fullDiskAccess'])
       unique.forEach((item) => {
         if (!known.has(item as SystemPermissionName)) throw new TypeError(`${path}.permissions contains unknown system permission ${JSON.stringify(item)}`)
       })

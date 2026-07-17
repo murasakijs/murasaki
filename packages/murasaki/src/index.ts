@@ -19,6 +19,7 @@ export type {
   MurasakiPluginHooks,
   FileAssociationConfig,
   MacOSCapturePermissionConfig,
+  MacOSLocationPermissionConfig,
   MacOSPromptPermissionConfig,
   MacOSSystemPermissionsConfig,
   NativeCapability,

@@ -56,7 +56,7 @@ await shell.showItemInFolder(files[0])
 | `notification` | `show` (resolves to a locally-generated id) |
 | `shell` | `openExternal` (safe URL schemes only), `showItemInFolder`, `trashItem`, `openPath` |
 | `secureStorage` | OS-backed `get`, `set`, `delete` for string values |
-| `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, and accessibility |
+| `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, accessibility, input monitoring, location, and full disk access |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
 | `windows` | `open`, `list`, `show`, `hide`, `focus`, `close` for declared labels |
 | `globalShortcut` | process-wide `register`, `unregister`, `unregisterAll`, `onTriggered` |
@@ -320,6 +320,12 @@ export default defineConfig({
       },
       screenRecording: { requestOnLaunch: false },
       accessibility: { requestOnLaunch: false },
+      inputMonitoring: { requestOnLaunch: false },
+      location: {
+        usageDescription: 'Show nearby points of interest.',
+        mode: 'whenInUse',
+      },
+      fullDiskAccess: { requestOnLaunch: false },
     },
   },
   capabilities: [
@@ -338,17 +344,37 @@ if (status === 'notDetermined') {
 }
 ```
 
-Camera and microphone prompts complete asynchronously at the OS level, so
-`request()` may initially return `notDetermined`; query `status()` again when
-the app regains focus before enabling the protected feature.
+Camera, microphone, and location prompts complete asynchronously at the OS
+level, so `request()` may initially return `notDetermined`; query `status()`
+again when the app regains focus before enabling the protected feature.
 
 `requestOnLaunch` applies to packaged macOS apps. Test TCC behavior from a
 packaged build because development runs under the terminal/Node host identity.
 On Windows, unpackaged desktop camera/microphone consent is requested by the
 device API when it is used, not through a generic application-start prompt;
 Murasaki therefore reports `unsupported` instead of pretending permission was
-granted. Screen recording and accessibility return `notGranted` when macOS
-cannot distinguish first-use from denial.
+granted. Screen recording, accessibility, and input monitoring return
+`notGranted` when macOS cannot distinguish first-use from denial. All seven
+kinds are macOS-only — Windows and Linux have no OS-level equivalent of these
+TCC-gated prompts, so every call reports `unsupported` there instead of
+implying a grant that never happened.
+
+`location.usageDescription` is required, same as camera/microphone; it is
+written to `NSLocationWhenInUseUsageDescription`. `mode: 'always'` additionally
+writes `NSLocationAlwaysAndWhenInUseUsageDescription` (Apple requires the
+when-in-use key present even for an always request) and requests
+always-authorization instead of when-in-use.
+
+<Callout type="warn">
+  `fullDiskAccess` is guidance-only: macOS has no TCC request API for Full Disk
+  Access, so `request()` can only open the Full Disk Access pane in System
+  Settings for the user to grant it themselves — it never claims a grant
+  happened. `status()` is a best-effort heuristic (it probes whether
+  `~/Library/Application Support/com.apple.TCC/TCC.db` is readable, since that
+  file is itself gated by Full Disk Access) and can return `unknown` when the
+  heuristic can't produce a confident answer, in addition to the usual
+  `granted`/`notGranted`.
+</Callout>
 
 ## Built-in menu actions
 

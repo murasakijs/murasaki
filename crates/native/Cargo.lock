@@ -1926,7 +1926,7 @@ dependencies = [
 
 [[package]]
 name = "murasaki-native"
-version = "0.38.0"
+version = "0.39.0"
 dependencies = [
  "arboard",
  "base64",
@@ -1947,6 +1947,7 @@ dependencies = [
  "objc2-av-foundation",
  "objc2-core-foundation",
  "objc2-core-graphics",
+ "objc2-core-location",
  "objc2-foundation",
  "open",
  "png 0.17.16",

@@ -415,12 +415,16 @@
         "linux": "unsupported"
       },
       "limitations": [
-        "Packaged macOS apps can declare camera/microphone usage descriptions, request camera, microphone, screen-recording, or accessibility consent at launch, and query/request the same permissions from a capability-gated renderer API.",
+        "Packaged macOS apps can declare camera/microphone/location usage descriptions, request camera, microphone, screen-recording, accessibility, input-monitoring, or location consent at launch, and query/request the same permissions from a capability-gated renderer API. This covers seven kinds; all are macOS-only, since Windows/Linux have no OS-level equivalent of the app-scoped TCC prompts they represent.",
+        "fullDiskAccess is guidance-only: macOS has no TCC request API for it, so `request()` only opens the Full Disk Access pane in System Settings (never claims a grant), and `status()` is a documented best-effort heuristic (reading a TCC-protected file) that can report `unknown` instead of a real answer.",
+        "location's `mode: 'always'` writes both `NSLocationWhenInUseUsageDescription` and `NSLocationAlwaysAndWhenInUseUsageDescription` to Info.plist and is read back from that same Info.plist key at request time, so it applies identically to `requestOnLaunch` and a runtime `systemPermission.request('location')` call without separate plumbing.",
         "Windows unpackaged desktop privacy consent is usage-driven rather than an app-scoped launch prompt, so these generic calls report unsupported there; Linux is not implemented. Development requests use the terminal/Node host identity and should be tested with a packaged app."
       ],
       "apiSymbols": [
         "MurasakiConfig.systemPermissions",
         "SystemPermissionsConfig",
+        "MacOSSystemPermissionsConfig",
+        "MacOSLocationPermissionConfig",
         "murasaki/native.systemPermission"
       ],
       "testEvidence": [

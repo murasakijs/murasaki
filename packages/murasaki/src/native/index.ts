@@ -46,6 +46,9 @@ export type SystemPermissionName =
   | 'microphone'
   | 'screenRecording'
   | 'accessibility'
+  | 'inputMonitoring'
+  | 'location'
+  | 'fullDiskAccess'
 
 export type SystemPermissionStatus =
   | 'granted'
@@ -54,6 +57,8 @@ export type SystemPermissionStatus =
   | 'notDetermined'
   | 'notGranted'
   | 'unsupported'
+  /** `fullDiskAccess`-only: the heuristic status check could not be performed. */
+  | 'unknown'
 
 export interface TrayOptions {
   /** Tooltip shown by the host OS. */

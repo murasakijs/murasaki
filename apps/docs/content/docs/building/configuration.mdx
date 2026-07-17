@@ -223,6 +223,12 @@ systemPermissions: {
     },
     screenRecording: { requestOnLaunch: false },
     accessibility: { requestOnLaunch: false },
+    inputMonitoring: { requestOnLaunch: false },
+    location: {
+      usageDescription: 'Show nearby points of interest.',
+      mode: 'whenInUse',
+    },
+    fullDiskAccess: { requestOnLaunch: false },
   },
 },
 ```
@@ -233,13 +239,18 @@ systemPermissions: {
 | `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSMicrophoneUsageDescription`; optionally prompts during packaged launch. |
 | `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | Optionally asks for screen-capture consent at packaged launch. |
 | `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | Optionally opens the macOS accessibility trust prompt at packaged launch. |
+| `macOS.inputMonitoring` | `{ requestOnLaunch?: boolean }` | Optionally asks for Input Monitoring (HID listen event) consent at packaged launch. |
+| `macOS.location` | `{ usageDescription: string; mode?: 'whenInUse' \| 'always'; requestOnLaunch?: boolean }` | Writes `NSLocationWhenInUseUsageDescription` (and, for `mode: 'always'`, also `NSLocationAlwaysAndWhenInUseUsageDescription`); optionally prompts during packaged launch. |
+| `macOS.fullDiskAccess` | `{ requestOnLaunch?: boolean }` | Guidance-only — there is no TCC request API, so `requestOnLaunch` opens the Full Disk Access pane in System Settings instead of showing an in-app prompt when status isn't already `granted`. |
 
 Prefer a contextual `systemPermission.request()` over launch-time prompts when
 the user can first understand the feature. Runtime calls additionally require
 `systemPermission:status` / `systemPermission:request` in that renderer's
 capability list. Windows unpackaged desktop consent is usage-driven, so it has
-no equivalent generic launch prompt. Test macOS TCC behavior from a packaged
-app, not the terminal/Node identity used by `murasaki dev`.
+no equivalent generic launch prompt; all seven permission kinds above are
+macOS-only, since Windows/Linux expose no OS-level equivalent of these
+TCC-gated prompts. Test macOS TCC behavior from a packaged app, not the
+terminal/Node identity used by `murasaki dev`.
 
 ## `main`
 

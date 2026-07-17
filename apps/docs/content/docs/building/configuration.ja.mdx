@@ -216,6 +216,12 @@ systemPermissions: {
     },
     screenRecording: { requestOnLaunch: false },
     accessibility: { requestOnLaunch: false },
+    inputMonitoring: { requestOnLaunch: false },
+    location: {
+      usageDescription: '近くのスポットを表示します。',
+      mode: 'whenInUse',
+    },
+    fullDiskAccess: { requestOnLaunch: false },
   },
 },
 ```
@@ -226,12 +232,17 @@ systemPermissions: {
 | `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSMicrophoneUsageDescription`を書き込み、任意でpackaged launch時にprompt。 |
 | `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にscreen capture同意を要求。 |
 | `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にmacOS accessibility trust promptを表示。 |
+| `macOS.inputMonitoring` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にInput Monitoring(HID listen event)同意を要求。 |
+| `macOS.location` | `{ usageDescription: string; mode?: 'whenInUse' \| 'always'; requestOnLaunch?: boolean }` | `NSLocationWhenInUseUsageDescription`を書き込み(`mode: 'always'`では`NSLocationAlwaysAndWhenInUseUsageDescription`も追加)、任意でpackaged launch時にprompt。 |
+| `macOS.fullDiskAccess` | `{ requestOnLaunch?: boolean }` | guidance-only — TCC request APIが存在しないため、`requestOnLaunch`はstatusが`granted`でない場合、in-app promptの代わりにSystem SettingsのFull Disk Accessペインを開きます。 |
 
 機能の必要性をuserが理解できる場合は、起動時promptより文脈に沿った
 `systemPermission.request()`を優先してください。runtime callにはrenderer capabilityの
 `systemPermission:status` / `systemPermission:request`も必要です。Windows unpackaged
-desktopの同意は利用時に発生するため、汎用的な起動時promptはありません。macOS TCCの
-実動作は`murasaki dev`のterminal / Node identityではなくpackaged appで確認してください。
+desktopの同意は利用時に発生するため、汎用的な起動時promptはありません。上記7種類は
+すべてmacOS専用です — WindowsとLinuxにはこれらTCC管理下promptに相当するOSレベルの機能が
+ありません。macOS TCCの実動作は`murasaki dev`のterminal / Node identityではなくpackaged
+appで確認してください。
 
 ## `main`
 

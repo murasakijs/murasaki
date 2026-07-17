@@ -171,10 +171,12 @@ export const systemPermission: {
 };
 
 // @public (undocumented)
-export type SystemPermissionName = 'camera' | 'microphone' | 'screenRecording' | 'accessibility';
+export type SystemPermissionName = 'camera' | 'microphone' | 'screenRecording' | 'accessibility' | 'inputMonitoring' | 'location' | 'fullDiskAccess';
 
 // @public (undocumented)
-export type SystemPermissionStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'notGranted' | 'unsupported';
+export type SystemPermissionStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'notGranted' | 'unsupported'
+/** `fullDiskAccess`-only: the heuristic status check could not be performed. */
+| 'unknown';
 
 // @public (undocumented)
 export const tray: {

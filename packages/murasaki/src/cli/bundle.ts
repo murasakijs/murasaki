@@ -1497,12 +1497,20 @@ export function infoPlist(config: MurasakiConfig, productName: string, hasIcon: 
   const associations = resolveAssociations(config)
   const cameraUsageDescription = config.systemPermissions?.macOS?.camera?.usageDescription
   const microphoneUsageDescription = config.systemPermissions?.macOS?.microphone?.usageDescription
+  const location = config.systemPermissions?.macOS?.location
   const permissionUsageXml = [
     cameraUsageDescription
       ? `\n  <key>NSCameraUsageDescription</key><string>${escapeXml(cameraUsageDescription)}</string>`
       : '',
     microphoneUsageDescription
       ? `\n  <key>NSMicrophoneUsageDescription</key><string>${escapeXml(microphoneUsageDescription)}</string>`
+      : '',
+    location
+      ? `\n  <key>NSLocationWhenInUseUsageDescription</key><string>${escapeXml(location.usageDescription)}</string>`
+      : '',
+    // Apple requires the when-in-use key present even for an 'always' request.
+    location?.mode === 'always'
+      ? `\n  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key><string>${escapeXml(location.usageDescription)}</string>`
       : '',
   ].join('')
   const protocolsXml = associations.protocols.length === 0 ? '' : `
