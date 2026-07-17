@@ -197,6 +197,12 @@ export function defineConfig(config: MurasakiConfig): MurasakiConfig;
 export function defineMurasakiPlugin(plugin: MurasakiPlugin): MurasakiPlugin;
 
 // @public
+export interface DiagnosticsConfig {
+    crashReports?: boolean;
+    keepReports?: number;
+}
+
+// @public
 export type DownloadEvent = {
     type: 'started';
     id: string;
@@ -243,7 +249,7 @@ export type GenerateMetadata = (ctx: GenerateMetadataContext) => Metadata | Prom
 // @public
 export interface GenerateMetadataContext {
     // (undocumented)
-    params: Record<string, string>;
+    params: Record<string, string | string[]>;
 }
 
 // @public (undocumented)
@@ -314,6 +320,7 @@ export type Middleware = (ctx: MiddlewareContext) => MiddlewareResult | Promise<
 export interface MiddlewareContext {
     // (undocumented)
     pathname: string;
+    search: string;
 }
 
 // @public (undocumented)
@@ -339,6 +346,7 @@ export interface MurasakiConfig {
     copyright?: string;
     description?: string;
     devPort?: number;
+    diagnostics?: DiagnosticsConfig;
     fileAssociations?: FileAssociationConfig[];
     homepage?: string;
     icon?: string;
@@ -528,6 +536,8 @@ export type UpdaterConfig = boolean | {
     checkOnStart?: boolean;
     checkInterval?: string | false;
     publicKey?: string;
+    publicKeys?: string[];
+    maxManifestAgeDays?: number;
 };
 
 // @public (undocumented)
@@ -571,7 +581,7 @@ export function useFileDrop(onDrop: (event: {
 export function useGlobalContextMenu(items: ContextMenuItem[] | ((target: EventTarget | null) => ContextMenuItem[]), onSelect?: (id: string) => void): void;
 
 // @public
-export function useParams(): Record<string, string>;
+export function useParams(): Record<string, string | string[]>;
 
 // @public (undocumented)
 export function usePathname(): string;
@@ -580,6 +590,9 @@ export function usePathname(): string;
 //
 // @public (undocumented)
 export function useRouter(): RouterCtx;
+
+// @public
+export function useSearchParams(): URLSearchParams;
 
 // Warning: (ae-forgotten-export) The symbol "ThemeCtx" needs to be exported by the entry point index.d.ts
 //
