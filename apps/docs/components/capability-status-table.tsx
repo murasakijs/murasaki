@@ -53,6 +53,7 @@ const FEATURE_LABELS: Record<string, Record<Locale, string>> = {
     en: "Native utilities",
     ja: "ネイティブユーティリティ",
   },
+  "secure-storage": { en: "Secure storage", ja: "セキュアストレージ" },
   "auto-update": { en: "Auto-update", ja: "自動アップデート" },
   "application-packaging": {
     en: "Application packaging",
@@ -63,11 +64,16 @@ const FEATURE_LABELS: Record<string, Record<Locale, string>> = {
     en: "Loopback endpoint protection",
     ja: "ループバックエンドポイント保護",
   },
+  "content-security-policy": {
+    en: "Content Security Policy",
+    ja: "Content Security Policy",
+  },
   "multi-window": { en: "Multi-window", ja: "マルチウィンドウ" },
   "tray-and-global-shortcuts": {
     en: "Tray and global shortcuts",
     ja: "トレイとグローバルショートカット",
   },
+  "system-permissions": { en: "System permissions", ja: "システム権限" },
   "single-instance-and-deep-links": {
     en: "Single instance and deep links",
     ja: "シングルインスタンスとディープリンク",
@@ -75,6 +81,18 @@ const FEATURE_LABELS: Record<string, Record<Locale, string>> = {
   "capability-permissions": {
     en: "Capability permissions",
     ja: "ケイパビリティ権限",
+  },
+  "diagnostics-and-logging": {
+    en: "Diagnostics and logging",
+    ja: "診断とロギング",
+  },
+  "webview-session-network": {
+    en: "WebView session & network",
+    ja: "WebViewセッションとネットワーク",
+  },
+  "build-time-plugin-sdk": {
+    en: "Build-time plugin SDK",
+    ja: "ビルド時プラグインSDK",
   },
   "linux-distribution": {
     en: "Linux distribution",
@@ -91,6 +109,8 @@ const CATEGORY_LABELS: Record<string, Record<Locale, string>> = {
   "native-integration": { en: "Native integration", ja: "ネイティブ統合" },
   distribution: { en: "Distribution", ja: "配布" },
   security: { en: "Security", ja: "セキュリティ" },
+  operations: { en: "Operations", ja: "運用" },
+  tooling: { en: "Tooling", ja: "ツール" },
 };
 
 const STATUS_LABELS: Record<FeatureStatus, Record<Locale, string>> = {
@@ -110,8 +130,8 @@ const PLATFORM_LABELS: Record<PlatformStatus, Record<Locale, string>> = {
 
 const JA_LIMITATIONS: Record<string, string[]> = {
   "file-routing": [
-    "page、layout、loading、error、not-found、route group、単一dynamic segmentは利用できますが、catch-allページsegmentは未実装です。",
-    "ルーターはクライアント側で動作し、Next.js App RouterやReact Server Componentsの全機能を提供するものではありません。",
+    "page、layout、loading、error、not-found、route group、単一dynamic segment、そしてcatch-all/optional catch-allページsegment([...slug]、[[...slug]])まで利用できます。",
+    "ルーターはクライアント側で動作し、Next.js App RouterやReact Server Componentsの完全なruntimeを提供するものではありません。",
   ],
   "server-actions": [
     "Actionは同梱されたローカルNode runtimeで実行されます。Next.js Server Actionsそのものでも、リモート公開RPCサービスでもありません。",
@@ -122,72 +142,108 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "Web Request / Response primitiveに沿いますが、Next.js Route Handler runtimeの完全な実装ではありません。",
   ],
   "navigation-middleware": [
-    "Middlewareはrenderer内でclient navigationの前に実行され、pathnameだけを受け取ります。",
+    "Middlewareはrenderer内でclient navigationの前に実行され、pathnameとquery stringだけを受け取ります。",
     "request/response header、cookie、edge実行、matcher設定は利用できません。",
   ],
   "route-metadata": [
-    "document title、description、favicon、一部のOpen Graph metadataをrendererへ反映します。",
-    "metadata shapeはNext.js完全互換ではなく、document metadataからnative window titleは更新されません。",
+    "document title、description、favicon、一部のOpen Graph metadataをrendererへ反映します。titleはさらにnative window titleへも反映されます(ベストエフォート、window:setTitle capabilityが必要)。",
+    "metadata shapeはNext.js完全互換ではありません。",
   ],
   "node-main-lifecycle": [
-    "src/main.ts lifecycleはready、cancel可能なbeforeQuit、時間制限付きshutdown、second-launch配送、app path、AbortSignal、renderer向けtyped live eventを提供します。",
-    "src/main.tsから宣言済みwindowを生成・破棄できます。packaged hostはNodeの異常終了を検出して非ゼロ終了しますが、公開されたcrash-restart policyとhealth-check APIは未実装です。",
+    "src/main.ts lifecycleはready、cancel可能なbeforeQuit、時間制限付きshutdown、second-launch配送、app path、AbortSignal、renderer向けtyped live event、そして開発・packaged両方でのdeclared window管理を提供します。",
+    "設定済みのsecondary windowはruntimeで生成・破棄でき、packaged hostは同梱Nodeの予期しない終了を検出すると未確定のupdate handoffを破棄し、backend process treeを終了させたうえでWebViewを残したままにせず非ゼロ終了します。再生可能なlifecycle event、公開されたcrash-restart policy、health-check APIは未実装です。macOSでは、外部からのDock QuitやOSログアウトはtao経由のcancel可能なbeforeQuitを保証できません。",
   ],
   "native-window": [
-    "primary / secondary windowを宣言し、識別、表示、非表示、focus、一覧、open、明示的closeを行えます。Node Mainは宣言済みtemplateの生成・破棄に対応しますが、任意URLや任意policyを持つwindowは生成できません。",
-    "macOSではhud / sidebar / popover vibrancyをnative materialとして適用し、Windows / LinuxではこのmacOS専用optionを無視します。",
+    "trusted Node Mainから設定済みのsecondary templateを生成・破棄・再生成でき、generation単位のlifecycle eventを受け取れます。rendererは宣言済みwindowの表示・管理に限定され、runtime URLやcapability policyを指定することはできません。",
+    "macOSのhud、sidebar、popover vibrancyはtransparentなwindow/WebView合成のうえでnative materialとして適用されます。Windows / LinuxはこのmacOS専用optionを無視します。",
+    "parent/child関係やmodal windowはサポートされません — taoにcross-platform対応がないため、宣言したwindowはすべて独立したtop-level windowになります。",
+    "borderless fullscreenのみ対応しており、exclusive/dedicated video mode fullscreenはありません。",
+    "titleBarStyle: 'hidden'はmacOS専用です(transparentなtitlebar + hidden title + full-size content view)。Windows / Linuxはこのoptionを受け取っても無視します。",
+    "getMonitors()が返すgeometry(position、size)はphysical pixelで、logical/CSS pixelではありません。",
   ],
   "application-menu": [
-    "macOSとWindowsではnative application menuを利用できますが、roleの挙動にはplatform差があります。",
-    "Linuxにはdefault/custom application menuの実装がありません。",
+    "native application menuはmacOS、Windows、Linux(GTK、muda経由)で利用できます。差し替えはprocess-globalでprimary rendererに限定され、menu:applicationと各privileged roleのcapabilityが必要です。",
+    "Linux / Windowsのmenuは、macOSのような太字のapp名submenuを持たない、plainなFile/Edit/Windowバーです。Edit項目はnative responder chainではなくfocus中のwebviewへdocument.execCommandを発行します。role capabilityが不足すると差し替え全体を拒否し、現在のmenuを維持します。",
   ],
   "context-menu": [
-    "macOSとWindowsではwindow全体およびscope付きのnative context menuを利用できます。",
-    "LinuxのIPC経路ではnative context menu未実装としてエラーになります。",
+    "window全体およびscope付きのnative context menuはmenu:context capabilityの下でmacOS、Windows、Linux(GTK)で利用できます。privileged native roleにはさらに対応するcapabilityが必要です。",
+    "Menu IPCはpayload、item数、depth、文字列長の上限で制限されます。Linuxではundo/redoのcontext menu role項目が無言で省略され(upstreamのmuda/GTKの制限)、cut/copy/paste/selectAllはX11 key eventの合成で配信されます(libxdoが必要で、XWayland抜きのWaylandでは利用できません)。",
   ],
   "native-utilities": [
-    "dialog、clipboard、notification、shell helper、window操作はsame-origin native bridgeとwindow別allowlistを通してtrusted rendererへ公開されます。",
-    "URL、path、対象window、OS permissionを受け取る一部commandはallow/deny scopeに対応します。それ以外はcommand単位で、renderer native APIはsrc/main.tsから直接利用できません。",
+    "dialog、clipboard、notification、shell helper、secure storage、window操作はsame-origin native bridgeとwindow別allowlistを通してtrusted rendererへ公開されます。",
+    "対象を指定する一部commandはinlineのallow/deny scopeに対応します。それ以外のargumentはcommand単位で、native renderer APIはsrc/main.tsから直接利用できません。",
+    "dialog.showMessageはnative OSのmessage boxを表示します。clipboardはPNG画像とHTMLの読み書きにも対応し、それぞれ上限付き・個別permissionです。shell.trashItemとshell.openPathはshell.showItemInFolderと同様にpathスコープで、shell.openPathはURLとUNC/device pathを拒否します。",
+    "notification.showが返すidはlocal bookkeeping専用の生成idです。upstreamのnotify-rustはmacOS/Windowsでclick/actionコールバックを配信できないため、このidが後続eventと対応することはありません。",
+  ],
+  "secure-storage": [
+    "文字列valueはmacOS Keychain、Windows Credential Manager、(Linuxでは)freedesktop.orgのSecret Service D-Bus APIへ、SHA-256から導出したappId/key namespaceの下で保存されます。存在しないkeyはnullを返し、inputとIPCは上限付きで、どのplatformにもplaintext fallbackはありません。",
+    "Linuxでは稼働中のSecret Service provider(gnome-keyring、KWalletのksecretsservice、KeePassXCなど)が必要です。到達可能なproviderがない場合、plaintext fallbackではなく構造化されたerrorですべてのoperationが失敗します。",
+    "get、set、deleteはそれぞれ独立したdeny-by-defaultのwindow別capabilityを持ちますが、許可はkey単位ではなくcommand単位です。rendererが侵害されると、そのapp namespace内で許可されたsecure-storage operationをすべて利用できてしまいます。",
   ],
   "auto-update": [
-    "署名付きmanifest、上限付きdownload、SHA-256 payload検証、staging handoff、relaunchをpackaged app向けに実装しています。",
-    "Linux packaging/updateは未対応です。現在のartifact名とmanifest scanではWindows arm64 updateを公開できません。",
+    "署名付きmanifest(pinned-key rotationとkeyIdヒント付き)、上限付きdownload、SHA-256によるpayload検証、manifestの鮮度・anti-replayチェック、段階的なpercentage rollout、staged handoff/relaunchはpackaged済みのmacOS、Windows(x64・arm64)、Linux AppImageアプリで実装済みです。",
+    "自前でホストするendpointはhttpsが必須です(loopback httpはlocal testing限定で許可)。delta/differential updateは未実装です。Linuxのself-updateはAppImage packaging形式でのみ動作します(実行中の.AppImageファイルをその場でjournal-swapし、--appimage-extract-and-runで再起動)。.debインストールや手動展開したAppDirには差し替えるファイルがないため、check()はerrorではなく構造化されたnot-available理由(updateはsystem package managerが管理)を返します。",
   ],
   "application-packaging": [
     "macOSの.app/.dmgと、Windowsのportable .zip、NSIS .exe、WiX .msiを生成できます。",
-    "Linux launcher packaging/installerは未実装です。MSIにはWiXが必要で、WiXはWindows上でのみ動作します。",
+    "Linux向けのAppDir/AppImage/deb artifact組み立ては実装済みです(murasaki bundle/installer --target linux-x64|linux-arm64)。macOS/Windows bundleと同じresource layoutから生成され、build hostにmksquashfs(squashfs-tools)が必要です。native launcherは生成されたAppImage/.debをwindow、webview、single-instance、deep link、AppImageのself-updateまでend-to-endで実行します。rpm packaging、repository metadata、コード署名は未実装です。MSIにはWiXが必要で、WiXはWindows上でのみ動作します。",
   ],
   "code-signing": [
     "開発者がcredentialを用意した場合、macOSのDeveloper ID署名とApple notarizationを利用できます。",
-    "Windows AuthenticodeとLinux package署名は未実装です。macOSのad-hoc署名は利用者からの信頼を確立しません。",
+    "Windows Authenticodeは、開発者が用意したPFX/store証明書またはMicrosoft Artifact Signing providerを通じて、application実行ファイル、portable ZIP payload、NSIS setup、MSIへ署名・検証します。Linuxのpackage署名は未実装で、macOSのad-hoc署名は利用者からの信頼を確立しません。",
   ],
   "loopback-endpoint-protection": [
     "開発時のprivileged endpointはHttpOnly SameSite runtime sessionを要求し、loopback Host、Origin、Fetch Metadataを検証します。",
-    "renderer native commandにはdeny-by-defaultのwindow別allowlistがありますが、argument / path / URL scopeとmulti-origin policyは未実装です。",
+    "renderer native commandにはdeny-by-defaultのwindow別allowlistと、値をscopeした一部のallow/deny ruleがありますが、multi-origin policyとすべてのcommand argumentへのscopeは未実装です。",
   ],
   "content-security-policy": [
     "Murasakiは環境別の既定CSPをframework / user-owned HTMLへ注入し、完全なsecurity.csp override、明示的opt-out、user-owned CSP tagのhead先頭への移動に対応します。",
     "policyはmeta tag配信のためframe-ancestors、sandbox、reportingなどheader専用directiveを強制できません。CSPはHTMLのsanitizeやNode関数の認可を行わず、互換性のためinline styleを許可します。",
   ],
   "multi-window": [
-    "windowはconfigで宣言して起動時に作成します。runtimeでの任意作成と、明示的に破棄したwindowの再作成は未実装です。",
-    "secondaryのOS/self closeは再openできるようhideし、親からの明示的closeは再起動まで破棄します。application menuはprocess-globalです。",
+    "windowはconfigでの宣言が必須です。secondary templateは起動時生成をopt outでき、trusted Node Mainから生成・破棄・再生成できます。任意のruntime URL、native policy、未宣言のlabelは拒否されます。",
+    "secondaryのOS/self closeは再openできるようhideし、Node Mainからのdestroyはnative resourceを解放し、再生成時にgenerationをincrementします。application menuはprocess-globalでprimary所有のままです。",
   ],
   "tray-and-global-shortcuts": [
-    "macOS / Windowsではnative menuと動的差し替えを備えたtray icon、およびowner管理されたglobal shortcut APIを利用できます。",
-    "global shortcutはOSや他appとの競合を実機確認する必要があります。Linux tray / global shortcutは未実装です。",
+    "macOS status item / Windows system-tray iconはprocess-wideで1つ、tooltip、click event、native nested menu、menu-item event、動的なicon/menu差し替えを備えます。最後に成功したcreateが以前のownerを置き換えます。",
+    "Linux trayはlibappindicatorを使用し、AppIndicator host(GNOMEではAppIndicator/KStatusNotifierItem Shell拡張)が必要です。tray-menuのclickと動的なicon/menu差し替えはmacOS/Windowsと同様に動作しますが、tray iconのclick/double-click eventは発火しません — AppIndicatorには「attachされたmenuを表示する」以外のsignalがないためです。",
+    "macOSとWindowsのglobal shortcutは、修飾キー+既知キーの組み合わせ(上限付き)、明示的なid、owner向けのpress event、同一process内のconflict検知、register/unregister capabilityによる自動owner/shutdown cleanupに対応します。",
+    "Linuxのglobal shortcutは同じaccelerator/idモデルをX11経由で使用し、X11またはXWaylandが必要です。純粋なWaylandセッション(DISPLAYなし)は登録せず構造化されたunsupported errorを返します。Linuxにはdesktop環境依存のため、macOS/Windowsのようなos-reserved-shortcut一覧がありません。",
+    "shortcutの利用可否はOS予約bindingや他のapplicationにも依存するため、packaged OSでのsmoke testingが必要です。",
+  ],
+  "system-permissions": [
+    "packaged済みのmacOS appはcamera/microphoneのusage descriptionを宣言し、起動時にcamera、microphone、screen-recording、accessibilityのconsentを要求できます。同じpermissionはcapability-gatedなrenderer APIからquery/requestできます。",
+    "Windowsのunpackaged desktopではprivacy consentがapp単位のlaunch promptではなくusage駆動のため、これらの汎用callはunsupportedを返します。Linuxは未実装です。開発時のrequestはterminal/Node hostのidentityを使うため、packaged appでの検証が必要です。",
   ],
   "single-instance-and-deep-links": [
-    "packaged macOS appとinstaller経由のWindows appは、設定したURL schemeとfile associationを登録し、single-instanceを維持したままOpenRequestEventをsrc/main.tsへ渡します。",
-    "Windows portable .zip／bare executableは自動登録を行いません。protocolとfile associationの登録はNSIS／MSI installerが担い、Linux対応はplannedです。",
+    "packaged macOS appとinstall済みのWindows appは、宣言したURL schemeとfile associationを登録し、per-userのsingle-instance lockを維持したまま、正規化したstartup、second-instance、system open requestをsrc/main.tsへ届けます。",
+    "Windowsのportable .zipとbare executable配布はprotocolやfile associationを自動登録しません — 登録はNSISとMSI installerが担います。Linuxも同じper-userのsingle-instance lockを維持し、cold-startのargv(.desktopのExec行が展開する%U/%F)とsecond-instanceのactivationを既存のloopback channel経由で届けます。protocol/file associationのMimeTypeエントリは.desktopファイルで宣言されます(.debがusr/share/applications配下へinstallし、update-desktop-databaseが反映)が、手動展開したAppImage/AppDirにはWindowsのNSIS/MSIのようなOSレベルの登録手順を検証する仕組みはありません。",
   ],
   "capability-permissions": [
-    "renderer native commandはdeny-by-defaultで、typedなwindow別capability allowlistから許可します。Rustはsender originとcommand名を検証します。",
-    "argument / path scopeと明示的deny overrideは未実装です。secondary windowはtop-level grantを継承しません。",
+    "renderer native commandはdeny-by-defaultで、runtimeで検証されるwindow別capability allowlistを通じて許可されます。Rustがsender originとcommand名を検証します。",
+    "URL、path、対象window、OS permissionのscopeは明示的なallow/deny ruleに対応します。それ以外のargumentはcommand単位のままで、secondary windowは意図的にtop-level grantを継承せず、privileged menu roleには対応するcapabilityが必要です。",
+  ],
+  "diagnostics-and-logging": [
+    "Node Mainは構造化されたJSONL logging、上限付きrotation、secretらしいfieldのredaction、shutdown時のflushing、application/runtime metadataとlog tailを含むopt-inの上限付きdiagnostic reportを提供します。",
+    "Murasakiはversion付きのlocal crash reportを3つのdomainにわたって取得します: Node側のuncaughtException/unhandledRejection、native launcherのpanicと予期しない終了metadata、そして(production buildのみ)未捕捉のrenderer errorとunhandled rejectionです。いずれもlog fieldと同じ方法で上限付き・redact済みで、MainContext.diagnosticsから読み取れます。",
+    "crash reportはlocalのJSONファイルのみで、Murasakiが送信することはありません。minidump/native symbolicationの対応、自動uploadはなく、murasaki dev下でのrenderer captureはno-opです(その代わりdevのerror overlayがUXを担います)。crash-reporting serviceへの連携はapplication側の責務です。",
+  ],
+  "webview-session-network": [
+    "application全体のcustom User-Agent、non-persistent/incognito session、上限付きの未認証HTTP CONNECTまたはSOCKSv5 proxy endpointは、runtimeで検証されたうえで開発・packaged済みmacOS/Windows WebViewのWryへ渡されます。",
+    "macOSのproxy設定にはmacOS 14以降が必要で、それより古いOSではstartupが失敗します。Windowsのcustom User-AgentにはWebView2 86.0.616.0以降、private modeには101.0.1210.39以降が必要で、古いruntimeはこれらの設定を無視します。window単位のoverrideとauthenticatedなproxyには対応していません。",
+    "webview:downloadは、sanitizeされ衝突解決済みのdownloadを設定済み(またはOS既定)のdirectoryへ限定し、start/completion eventを報告します。completion eventのidをstart eventと確実に対応付ける手段はなく、macOSは完了したdownloadのpathを報告しません(upstream WebKitの制限)。",
+    "webview:dragDropはfile drag-and-drop event(dragoverは20/秒にthrottle)を、OS既定の動作を妨げることなく報告します。file inputはgrantの有無に関わらず動作します。webview.initScriptsはtrustedでconfig所有のJavaScriptをpage load前に注入し、capabilityでは制御されません。",
+    "webview:zoomはpage zoomを0.25〜5.0に制限し、macOS 11+/iOS 14+でのみ利用できます。webview.hotkeysZoom(capabilityではなくconfig)はWindowsでのみOS zoom hotkey/gestureを有効にします。webview:printはplatformのprint dialogを開きます。Wryがfind-in-page APIを公開していないため、この機能はありません。",
+    "webview:readCookies/webview:writeCookiesは上限付きのcookie読み取り・設定・削除を公開します。murasaki runtime自身のsession-auth cookieは、許可されたcapabilityに関わらず読み取りから除外され、書き込み・削除からは拒否されます。deleteCookieはname、URLホストをdomainとして、default(/)pathのみで一致判定します。",
+    "page内のpermission request(getUserMedia、geolocation)はinterceptされません。Wry 0.55にはpermission handlerがないため、platform WebView既定の挙動にfall throughします。Wryがpermission handlerを提供次第、interceptionに対応する予定です。",
+  ],
+  "build-time-plugin-sdk": [
+    "trustedなbuild-time pluginは、Vite PluginOptions、決定的なbundle dependency/resource、runtimeで検証されたstable nameを持つ直列のdev/build/bundle lifecycle hookを提供できます。",
+    "native Rust ABI、dynamic library loader、renderer/runtime plugin sandbox、permission boundaryではありません。plugin codeはmurasaki.config.tsと同じNode.js権限を持ちます。",
   ],
   "linux-distribution": [
-    "Linux用prebuilt native binaryと開発対応だけでは、install可能なLinux application releaseにはなりません。",
-    "AppImage、deb、rpm、repository metadata、署名、update、launcher packagingは未実装です。",
+    "AppDir/AppImage/debのartifact組み立て(application-packaging capability参照)とnative launcher runtimeは、いずれもend-to-endで動作します: window/webview生成、single-instance lock、cold-startのdeep link(.desktopのExec行由来のargv)とsecond-instanceの転送、graceful shutdown、native crash reportingが、packaged済みのAppImageまたは.debから実行され、Docker上のXvfb + 専用D-Bus sessionおよびapp-package-linux.ymlで検証されています。",
+    "AppImageのself-updateは動作します(実行中の.AppImageをjournal付きで単一ファイル差し替えし、--appimage-extract-and-runで再起動、health checkに失敗した場合はfirst launchでrollback)。.debインストールや素の/手動展開したAppDirには差し替える単一ファイルがなくself-updateは提供されず、updateはsystem package managerが管理すると報告します。rpm packaging、repository metadata、コード署名は未実装です。",
   ],
 };
 

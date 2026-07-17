@@ -146,7 +146,7 @@ const en: HomeContent = {
   mockup: {
     heading: "This is what you ship.",
     caption:
-      "One command → a real native installer. macOS & Windows today — Linux next.",
+      "One command → a real native installer. macOS, Windows, and Linux (AppImage / .deb).",
     availableLabel: "Ships today",
     soonLabel: "Coming soon",
   },
@@ -316,10 +316,10 @@ const en: HomeContent = {
       },
       {
         name: "Linux",
-        status: "Roadmap",
-        available: false,
+        status: "Partial support",
+        available: true,
         description:
-          "murasaki dev runs today; @murasakijs/native ships prebuilt x64/arm64 binaries. App packaging is on the roadmap.",
+          "AppImage and .deb packages (x64 & arm64), with self-update for AppImage; rpm packaging and code signing aren't shipped yet.",
       },
     ],
   },
@@ -398,7 +398,7 @@ const ja: HomeContent = {
   mockup: {
     heading: "実際に届けるのは、これです。",
     caption:
-      "1コマンドで、本物のネイティブインストーラへ。macOS と Windows は今すぐ、Linux は近日。",
+      "1コマンドで、本物のネイティブインストーラへ。macOS・Windows・Linux(AppImage / .deb)。",
     availableLabel: "今すぐ",
     soonLabel: "近日",
   },
@@ -570,10 +570,10 @@ const ja: HomeContent = {
       },
       {
         name: "Linux",
-        status: "ロードマップ",
-        available: false,
+        status: "部分対応",
+        available: true,
         description:
-          "murasaki dev は今すぐ動作します。@murasakijs/native は x64/arm64 のビルド済みバイナリを提供済み。アプリのパッケージングはロードマップ上にあります。",
+          "AppImage と .deb パッケージ(x64 / arm64)。AppImage は自己更新にも対応。rpm パッケージングとコード署名は未対応です。",
       },
     ],
   },
