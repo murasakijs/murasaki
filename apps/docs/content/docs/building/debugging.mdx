@@ -1,0 +1,152 @@
+---
+title: Debugging
+description: Open the WebView inspector, use React DevTools in the browser, read the dev error overlay, and diagnose Node Main with structured logs and diagnostic reports.
+---
+
+`murasaki dev` runs two things at once: a Vite dev server — with your Node
+Main lifecycle loaded into it as a plugin — in one process, and a native
+WebView host on the main thread in another. Each half has its own debugging
+story. This page covers the WebView/renderer, the React tree inside it, and
+the long-lived Node Main process. For packaging, signing, and startup
+failures, see [Troubleshooting](/docs/building/troubleshooting).
+
+## WebView devtools
+
+`murasaki dev` always opens the window with devtools enabled, regardless of
+whether the native binary itself was built in debug or release mode. A
+packaged app is the opposite: devtools are always compiled out, and there is
+no config flag to turn them back on in a shipped build.
+
+- **macOS** uses WKWebView, which has no devtools UI of its own. Turn on
+  Safari's Develop menu (Safari → Settings → Advanced → **Show features for
+  web developers**), then use **Develop → \<your Mac\> → localhost** to
+  attach Safari's Web Inspector to the running window.
+- **Windows** uses WebView2, which embeds Chromium's own DevTools directly —
+  right-click the window and choose **Inspect**, or press **F12**.
+
+Right-click only opens the OS's native menu (with **Inspect**) when the
+window hasn't declared its own via
+[`useContextMenu`](/docs/guides/context-menu) — once a window has a
+whole-window context menu, right-clicks there open your menu instead. **F12**
+on Windows still works either way: Murasaki only intercepts keys that match
+one of your own declared shortcuts, so an unclaimed key reaches WebView2
+normally.
+
+<Callout type="info">
+  The native binding also exposes an `openDevtools()` method on the WebView
+  object, but nothing in Murasaki's current public API calls it — there's no
+  supported way to open devtools programmatically from Node Main or the
+  renderer yet. Use the WebView's own right-click menu or keyboard shortcut
+  instead.
+</Callout>
+
+## React DevTools in the browser
+
+`murasaki dev` serves your app over real HTTP
+(`http://127.0.0.1:<port>/`, not a custom protocol), so you can open that
+same URL in Chrome side by side with the native window, and the standard
+**React DevTools** browser extension attaches exactly like it would to any
+other page — no special integration required.
+
+A plain browser tab is not the app, though: `/api/*` and `/__murasaki/*` are
+protected by the native WebView's session, so Server Actions/API-route calls
+made from that Chrome tab correctly get `403`. Use the tab for inspecting the
+React tree and reach for the native window to exercise the app itself. See
+[Backend call returns
+403](/docs/building/troubleshooting#backend-call-returns-403).
+
+## The dev error overlay
+
+Uncaught errors surface as a full-screen, murasaki-branded overlay instead of
+a blank window or a console-only stack trace. It's fed by three capture
+paths:
+
+- render errors, via an error boundary's `componentDidCatch`,
+- uncaught exceptions, via `window.onerror`,
+- unhandled promise rejections, via `unhandledrejection`.
+
+The overlay always shows the most recent error, with its stack and (for
+render errors) the React component stack; a badge counts any earlier ones
+still queued. Identical consecutive errors are deduped, so a React Strict
+Mode double-invoke or a repeat-render doesn't spam the overlay with copies.
+Dismiss with **Esc** or the **Dismiss** button; **Reload** reloads the page.
+It's a no-op in production builds — the whole overlay compiles out.
+
+## Debugging Node Main
+
+Node Main runs as a Vite plugin inside the same dev-server process
+`murasaki dev` spawns, so a plain `console.log` in `ready()`, `shutdown()`,
+or any `'use main'` function prints straight to the terminal you ran
+`murasaki dev` from.
+
+`context.log` is different on purpose: it does **not** echo to that
+terminal. Every `log.info` / `warn` / `error` / `debug` call is written only
+as JSON Lines to `paths.logs/murasaki-main.jsonl`, rotated at 5 MiB and
+keeping five rotated files (`.1` … `.5`). Tail that file (or your platform's
+log viewer) to watch structured log output live:
+
+| Platform | `paths.logs` |
+| --- | --- |
+| macOS | `~/Library/Logs/<appId>` |
+| Windows | `%LOCALAPPDATA%\<appId>\Logs` |
+| Linux | `$XDG_STATE_HOME/<appId>/logs` (default `~/.local/state/<appId>/logs`) |
+
+Each line is `{ timestamp, level, message, fields? }`. Field values whose
+keys look like credentials (`authorization`, `cookie`, `password`, `secret`,
+`token`, `apiKey`, `privateKey`, …) are replaced with `[redacted]` before the
+line is written. See [Node Main → Logs and diagnostic
+reports](/docs/guides/node-main#logs-and-diagnostic-reports) for the full
+redaction/size rules and for `createDiagnosticReport()`, which bundles
+bounded log tails plus application/runtime metadata into one shareable JSON
+file under `paths.logs/diagnostics/`.
+
+### Sidecar output
+
+A sidecar's stdout/stderr only reaches you through
+[`sidecar.onEvent()`](/docs/guides/node-main#supervise-a-bundled-sidecar) —
+each chunk is capped at 64 KiB and suffixed `…[truncated]` past that, and
+none of it is written to `murasaki-main.jsonl` automatically. Log it
+yourself from the handler if you want it captured there too:
+
+```ts
+indexer.onEvent((event) => {
+  if (event.type === 'stderr') log.warn('indexer stderr', { output: event.data })
+})
+```
+
+### Debugging a packaged Windows app
+
+A packaged app has no visible console by default. Set `window.console: true`
+in `murasaki.config.ts` to show the backend Node console window on Windows
+— useful for one-off CLI/debug output — or rely on `paths.logs` and
+`createDiagnosticReport()` on both platforms for anything you need after
+launch. This release doesn't wire up a Node `--inspect` debugger port for
+Node Main; `console.log` (in dev) and `context.log` remain the supported
+paths.
+
+## Common issues
+
+- **Port already in use.** `murasaki dev` probes `config.devPort` (default
+  `5178`) and moves to the next free port automatically — see [Development
+  window does not
+  open](/docs/building/troubleshooting#development-window-does-not-open) and
+  [`devPort`](/docs/building/configuration#top-level-fields). If the dev
+  server itself fails to start, rerun with `MURASAKI_DEBUG=1` for the full
+  stack trace instead of the branded one-liner.
+- **WebView2 missing or outdated on Windows.** Murasaki's Windows WebView is
+  Microsoft Edge WebView2, not a bundled Chromium — a machine without a
+  current WebView2 Runtime can't render the window at all. Windows 11 and
+  most updated Windows 10 installs already have it; otherwise install the
+  Evergreen Runtime from Microsoft before debugging anything else.
+- **macOS says the app is damaged, or Gatekeeper blocks an unsigned build.**
+  Expected for an ad-hoc-signed development artifact — see [macOS says the
+  app is damaged or cannot be
+  verified](/docs/building/troubleshooting#macos-says-the-app-is-damaged-or-cannot-be-verified).
+
+## Next
+
+<Cards>
+  <Card title="Troubleshooting" href="/docs/building/troubleshooting" description="Packaging, signing, startup, and update failures." />
+  <Card title="Node Main" href="/docs/guides/node-main" description="Lifecycle, logs, diagnostic reports, and sidecars." />
+  <Card title="Configuration" href="/docs/building/configuration" description="devPort and the rest of murasaki.config.ts." />
+</Cards>
