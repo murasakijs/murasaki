@@ -1,9 +1,10 @@
 //! murasaki-native — Rust binding for murasaki.
 //!
 //! Exposes tao (window), wry (webview), muda (native menu — including
-//! **context menu popup**), rfd (dialog), arboard (clipboard),
-//! notify-rust (notification), tray-icon (tray), and `open` (shell
-//! openExternal) through napi-rs.
+//! **context menu popup**), rfd (dialog, including the native message box),
+//! arboard (clipboard, including PNG image and HTML support via `png` and
+//! `base64`), notify-rust (notification), tray-icon (tray), `open` (shell
+//! openExternal/openPath), and `trash` (shell trashItem) through napi-rs.
 
 #![deny(clippy::all)]
 

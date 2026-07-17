@@ -51,10 +51,10 @@ await shell.showItemInFolder(files[0])
 | API | 操作 |
 | --- | --- |
 | `app` | `quit`（gracefulなapplication shutdown） |
-| `dialog` | `openFile`, `openDirectory`, `saveFile` |
-| `clipboard` | `readText`, `writeText` |
-| `notification` | `show` |
-| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder` |
+| `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage`(ネイティブOSメッセージボックス) |
+| `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
+| `notification` | `show`(ローカル生成idを返す) |
+| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder`, `trashItem`, `openPath` |
 | `secureStorage` | string値向けのOS-backed `get`, `set`, `delete` |
 | `systemPermission` | macOSのcamera / microphone / screen recording / accessibility向け`status`, `request` |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
@@ -64,6 +64,28 @@ await shell.showItemInFolder(files[0])
 
 `app.quit()` とrootの `quit()` helperはいずれも `app:quit` が必要です。権限のない
 secondary rendererからapplication全体を終了することはできません。
+
+`dialog.showMessage({ title?, message, level?, buttons? })` はネイティブな
+main-thread message boxを表示します(`level`は既定`'info'`、`buttons`は既定`'ok'`)。
+押されたbuttonに解決されます(`'ok' | 'cancel' | 'yes' | 'no'`)。`title`は256
+UTF-8 byte、`message`は4096 UTF-8 byteまでで、どちらも制御文字は拒否されます
+(改行は`message`のみ許可)。`dialog:message`が必要です。
+
+`clipboard.readImage()` は `{ width, height, pngBase64 }` または、clipboardに
+imageがない場合は`null`を返します。`clipboard.writeImage({ pngBase64 })`
+はデコードしてclipboard imageを置き換えます(デコード後のpixelは64 MiB、各辺は
+16,384pxまで)。`clipboard.writeHtml({ html, altText? })` はHTMLと任意の
+plain-text fallbackを書き込みます(`html`は1 MiB、`altText`は64 KiBまで)。
+それぞれ `clipboard:readImage`, `clipboard:writeImage`, `clipboard:writeHtml`
+が必要です。
+
+`shell.trashItem(path)` は既存のfile / directoryをOSのtrash・recycle binへ
+移動します。`shell.openPath(path)` は既存のlocal file / directoryをOSの既定
+handlerで開きます(ダブルクリックと同様)。どちらもabsoluteでtraversalしない、
+実在するpathが必要です。`shell.showItemInFolder`と同様、`shell:trashItem` /
+`shell:openPath` capabilityは許可するpath subtreeへscopeできます。
+`shell.openPath` はURLとしてparseできるものやUNCのnetwork / device pathも
+拒否します。URLを開く場合は`shell.openExternal`を使ってください。
 
 <Callout type="warning">
   **0.50 migration:** 以前の`quit()`はpermissionなしのraw IPCを送っていました。

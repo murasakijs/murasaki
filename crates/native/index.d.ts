@@ -73,9 +73,36 @@ export declare class Webview {
   dispose(): void
 }
 
+/**
+ * `clipboard.readImage`'s result shape — decoded clipboard pixels
+ * re-encoded as a PNG and base64-wrapped for the wire (see
+ * `clipboard::clipboard_read_image`). Serialize-only: this never crosses the
+ * JS -> Rust direction.
+ */
+export interface ClipboardImageData {
+  width: number
+  height: number
+  pngBase64: string
+}
+
 export declare function clipboardRead(): string
 
+export declare function clipboardReadImage(): ClipboardImageData | null
+
 export declare function clipboardWrite(text: string): void
+
+export declare function clipboardWriteHtml(opts: ClipboardWriteHtmlOptions): void
+
+export interface ClipboardWriteHtmlOptions {
+  html: string
+  altText?: string
+}
+
+export declare function clipboardWriteImage(opts: ClipboardWriteImageOptions): void
+
+export interface ClipboardWriteImageOptions {
+  pngBase64: string
+}
 
 export interface DialogFilter {
   name: string
@@ -134,6 +161,19 @@ export interface MenuOptions {
   items: Array<MenuItemOptions>
 }
 
+/**
+ * `dialog.showMessage` options. `level` and `buttons` are validated and
+ * defaulted (`'info'`/`'ok'`) in `dialog::show_message_dialog` rather than
+ * here, so invalid values surface as a normal rejected Promise instead of an
+ * N-API argument-conversion panic.
+ */
+export interface MessageDialogOptions {
+  title?: string
+  message: string
+  level?: string
+  buttons?: string
+}
+
 export interface NotificationOptions {
   title: string
   body?: string
@@ -180,7 +220,14 @@ export declare function shellOpenExternal(target: string): void
 
 export declare function shellShowItemInFolder(path: string): void
 
-export declare function showNotification(opts: NotificationOptions): void
+/**
+ * Blocking, main-thread rfd message box — called synchronously from
+ * `handle_native_call` exactly like `open_file_dialog`/`save_file_dialog`
+ * above (no spawned thread or channel of its own).
+ */
+export declare function showMessageDialog(opts: MessageDialogOptions): string
+
+export declare function showNotification(opts: NotificationOptions): string
 
 export declare function version(): string
 

@@ -60,7 +60,27 @@ use crate::{
     window::{SharedProcessTray, SharedWindow, SharedWindowRegistry, WindowRegistry},
 };
 
-const MAX_IPC_BODY_BYTES: usize = 256 * 1024;
+/// Coarse gate applied to every renderer IPC message *before* its `kind` (and,
+/// for `nativeCall`, its `method`) is known — see `with_ipc_handler` below.
+/// Deliberately generous (16 MiB) so a `clipboard.writeImage` body can be
+/// parsed at all; the real per-message ceiling is enforced afterward by
+/// `DEFAULT_MAX_METHOD_BODY_BYTES`/`max_native_call_body_bytes` once the
+/// message kind/method is known, exactly as `MAX_IPC_BODY_BYTES` alone used
+/// to (pre-0.38, this constant *was* that ceiling).
+const MAX_IPC_PREPARSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// Per-method cap applied to every renderer `nativeCall`, plus every
+/// `contextMenu`/`appMenu` message and the plain Node-forwarded IPC channel —
+/// the original blanket ceiling every one of those relied on before the
+/// pre-parse gate above was raised to accommodate large `nativeCall` bodies.
+const DEFAULT_MAX_METHOD_BODY_BYTES: usize = 256 * 1024;
+/// `clipboard.writeImage` carries a base64-encoded PNG (see `clipboard.rs`);
+/// its wire budget matches `clipboard::MAX_CLIPBOARD_READ_IMAGE_PNG_BYTES` so
+/// the read and write directions share one round-trip size budget.
+const MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// `clipboard.writeHtml` carries HTML plus an optional plain-text alternative
+/// (see `clipboard::MAX_CLIPBOARD_HTML_BYTES`/`MAX_CLIPBOARD_HTML_ALT_TEXT_BYTES`),
+/// with headroom for JSON-string escaping overhead.
+const MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES: usize = 2 * 1024 * 1024;
 const MAX_MENU_ITEMS: usize = 256;
 const MAX_MENU_DEPTH: usize = 8;
 const MAX_MENU_STRING_BYTES: usize = 1024;
@@ -120,7 +140,22 @@ impl ProcessWebContext {
 }
 
 fn ipc_body_is_allowed(len: usize) -> bool {
-    len <= MAX_IPC_BODY_BYTES
+    len <= MAX_IPC_PREPARSE_BODY_BYTES
+}
+
+/// Per-method cap for a `nativeCall`'s raw IPC body length — measured the
+/// same way as `ipc_body_is_allowed` above, just against a tighter,
+/// method-specific ceiling once `method` is known.
+fn max_native_call_body_bytes(method: &str) -> usize {
+    match method {
+        "clipboard.writeImage" => MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES,
+        "clipboard.writeHtml" => MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
+        _ => DEFAULT_MAX_METHOD_BODY_BYTES,
+    }
+}
+
+fn native_call_body_is_allowed(method: &str, body_len: usize) -> bool {
+    body_len <= max_native_call_body_bytes(method)
 }
 
 /// Just enough of the IPC envelope to dispatch on `kind` before deciding
@@ -752,11 +787,17 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
         "dialog.openFile" => Some("dialog:openFile"),
         "dialog.openDirectory" => Some("dialog:openDirectory"),
         "dialog.saveFile" => Some("dialog:saveFile"),
+        "dialog.showMessage" => Some("dialog:message"),
         "clipboard.readText" => Some("clipboard:readText"),
         "clipboard.writeText" => Some("clipboard:writeText"),
+        "clipboard.readImage" => Some("clipboard:readImage"),
+        "clipboard.writeImage" => Some("clipboard:writeImage"),
+        "clipboard.writeHtml" => Some("clipboard:writeHtml"),
         "notification.show" => Some("notification:show"),
         "shell.openExternal" => Some("shell:openExternal"),
         "shell.showItemInFolder" => Some("shell:showItemInFolder"),
+        "shell.trashItem" => Some("shell:trashItem"),
+        "shell.openPath" => Some("shell:openPath"),
         "secureStorage.get" => Some("secureStorage:get"),
         "secureStorage.set" => Some("secureStorage:set"),
         "secureStorage.delete" => Some("secureStorage:delete"),
@@ -930,12 +971,21 @@ impl Webview {
                 return;
             }
             let body = request.body().clone();
+            let body_len = body.len();
 
             let kind = serde_json::from_str::<IpcEnvelope>(&body)
                 .ok()
                 .and_then(|e| e.kind);
 
             if kind.as_deref() == Some("contextMenu") {
+                // contextMenu/appMenu don't carry a per-method cap of their
+                // own (see `max_native_call_body_bytes`); re-enforce the
+                // original blanket ceiling here now that the pre-parse gate
+                // above has been raised for `nativeCall`'s sake.
+                if body_len > DEFAULT_MAX_METHOD_BODY_BYTES {
+                    eprintln!("murasaki: rejected oversized contextMenu payload");
+                    return;
+                }
                 if !context_menu_is_allowed(&ipc_capabilities) {
                     return;
                 }
@@ -956,6 +1006,10 @@ impl Webview {
             }
 
             if kind.as_deref() == Some("appMenu") {
+                if body_len > DEFAULT_MAX_METHOD_BODY_BYTES {
+                    eprintln!("murasaki: rejected oversized appMenu payload");
+                    return;
+                }
                 if !app_menu_is_allowed(&ipc_label, &ipc_capabilities) {
                     return;
                 }
@@ -970,6 +1024,13 @@ impl Webview {
 
             if kind.as_deref() == Some("nativeCall") {
                 if let Ok(payload) = serde_json::from_str::<NativeCallPayload>(&body) {
+                    if !native_call_body_is_allowed(&payload.method, body_len) {
+                        eprintln!(
+                            "murasaki: rejected oversized nativeCall payload for {}",
+                            payload.method
+                        );
+                        return;
+                    }
                     handle_native_call(
                         NativeCallContext {
                             window_slot: &ipc_window_slot,
@@ -989,6 +1050,12 @@ impl Webview {
                 return;
             }
 
+            // Plain Node-forwarded messages (`onIpcMessage`) never had a
+            // per-kind cap beyond the original blanket ceiling either.
+            if body_len > DEFAULT_MAX_METHOD_BODY_BYTES {
+                eprintln!("murasaki: rejected oversized forwarded IPC payload");
+                return;
+            }
             if let Some(tsf) = ipc_slot.borrow().as_ref() {
                 let _ = tsf.call(Ok(body), ThreadsafeFunctionCallMode::NonBlocking);
             }
@@ -1150,6 +1217,11 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         target: String,
     }
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct PathArg {
+        path: String,
+    }
+    #[derive(serde::Deserialize)]
     struct TitleArg {
         title: String,
     }
@@ -1255,6 +1327,12 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 .map(|value| serde_json::to_value(value).unwrap_or(serde_json::Value::Null))
                 .map_err(|e| e.to_string())
         }
+        "dialog.showMessage" => {
+            let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            crate::dialog::show_message_dialog(opts)
+                .map(serde_json::Value::from)
+                .map_err(|e| e.to_string())
+        }
         "clipboard.readText" => crate::clipboard::clipboard_read()
             .map(serde_json::Value::from)
             .map_err(|e| e.to_string()),
@@ -1264,10 +1342,25 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 .map(|_| serde_json::Value::Null)
                 .map_err(|e| e.to_string())
         }
+        "clipboard.readImage" => crate::clipboard::clipboard_read_image()
+            .map(|image| serde_json::to_value(image).unwrap_or(serde_json::Value::Null))
+            .map_err(|e| e.to_string()),
+        "clipboard.writeImage" => {
+            let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            crate::clipboard::clipboard_write_image(opts)
+                .map(|_| serde_json::Value::Null)
+                .map_err(|e| e.to_string())
+        }
+        "clipboard.writeHtml" => {
+            let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            crate::clipboard::clipboard_write_html(opts)
+                .map(|_| serde_json::Value::Null)
+                .map_err(|e| e.to_string())
+        }
         "notification.show" => {
             let args = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             crate::notification::show_notification(args)
-                .map(|_| serde_json::Value::Null)
+                .map(serde_json::Value::from)
                 .map_err(|e| e.to_string())
         }
         "shell.openExternal" => {
@@ -1306,6 +1399,24 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             crate::shell::shell_show_item_in_folder(args.target)
                 .map(|_| serde_json::Value::Null)
                 .map_err(|e| e.to_string())
+        }
+        "shell.trashItem" => {
+            let args: PathArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("shell:trashItem", CapabilityResource::Path(&args.path)) {
+                return Err(
+                    "shell.trashItem requires an allowed absolute non-traversing path".to_string(),
+                );
+            }
+            crate::shell::shell_trash_item(&args.path).map(|_| serde_json::Value::Null)
+        }
+        "shell.openPath" => {
+            let args: PathArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("shell:openPath", CapabilityResource::Path(&args.path)) {
+                return Err(
+                    "shell.openPath requires an allowed absolute non-traversing path".to_string(),
+                );
+            }
+            crate::shell::shell_open_path(&args.path).map(|_| serde_json::Value::Null)
         }
         "secureStorage.get" => {
             let args: SecureStorageKeyArg =
@@ -2466,11 +2577,12 @@ fn mime_for(path: &str) -> &'static str {
 mod tests {
     use super::{
         app_menu_is_allowed, context_menu_is_allowed, ipc_body_is_allowed, ipc_origin_is_trusted,
-        native_method_is_allowed, navigation_policy, prepare_tray_menu_items,
-        sanitize_profile_name, valid_proxy_host, validate_app_menu_payload,
-        validate_context_menu_payload, validate_webview_network, wry_proxy, AppMenuPayload,
-        ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol, MAX_IPC_BODY_BYTES,
-        TRAY_MENU_ID_PREFIX,
+        max_native_call_body_bytes, native_call_body_is_allowed, native_method_is_allowed,
+        navigation_policy, prepare_tray_menu_items, sanitize_profile_name, valid_proxy_host,
+        validate_app_menu_payload, validate_context_menu_payload, validate_webview_network,
+        wry_proxy, AppMenuPayload, ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol,
+        DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
+        MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES, MAX_IPC_PREPARSE_BODY_BYTES, TRAY_MENU_ID_PREFIX,
     };
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     use super::{retain_owned_menu_events, split_first_owned_menu_event, tray_event_is_current};
@@ -2669,6 +2781,17 @@ mod tests {
                 &["globalShortcut:register".to_string()]
             ));
         }
+        for (method, permission) in [
+            ("dialog.showMessage", "dialog:message"),
+            ("clipboard.readImage", "clipboard:readImage"),
+            ("clipboard.writeImage", "clipboard:writeImage"),
+            ("clipboard.writeHtml", "clipboard:writeHtml"),
+            ("shell.trashItem", "shell:trashItem"),
+            ("shell.openPath", "shell:openPath"),
+        ] {
+            assert!(!native_method_is_allowed(method, &[]));
+            assert!(native_method_is_allowed(method, &[permission.to_string()]));
+        }
     }
 
     #[test]
@@ -2688,8 +2811,8 @@ mod tests {
 
     #[test]
     fn renderer_ipc_and_menu_complexity_are_bounded() {
-        assert!(ipc_body_is_allowed(MAX_IPC_BODY_BYTES));
-        assert!(!ipc_body_is_allowed(MAX_IPC_BODY_BYTES + 1));
+        assert!(ipc_body_is_allowed(MAX_IPC_PREPARSE_BODY_BYTES));
+        assert!(!ipc_body_is_allowed(MAX_IPC_PREPARSE_BODY_BYTES + 1));
 
         let mut nested = MenuItemOptions::default();
         for _ in 0..9 {
@@ -2728,6 +2851,57 @@ mod tests {
             y: None,
         };
         assert!(validate_context_menu_payload(&too_many, &[]).is_err());
+    }
+
+    #[test]
+    fn native_call_bodies_are_capped_per_method_after_the_coarse_preparse_gate() {
+        // A normal method (no special entry in `max_native_call_body_bytes`)
+        // stays capped at the original 256 KiB ceiling even though the
+        // pre-parse gate above now allows up to 16 MiB through to be parsed.
+        assert_eq!(
+            max_native_call_body_bytes("clipboard.writeText"),
+            DEFAULT_MAX_METHOD_BODY_BYTES
+        );
+        assert!(native_call_body_is_allowed(
+            "clipboard.writeText",
+            DEFAULT_MAX_METHOD_BODY_BYTES
+        ));
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeText",
+            DEFAULT_MAX_METHOD_BODY_BYTES + 1
+        ));
+        // An oversized body for a normal method is rejected well below the
+        // raised 16 MiB pre-parse ceiling, not just above it.
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeText",
+            MAX_IPC_PREPARSE_BODY_BYTES
+        ));
+
+        assert_eq!(
+            max_native_call_body_bytes("clipboard.writeImage"),
+            MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES
+        );
+        assert!(native_call_body_is_allowed(
+            "clipboard.writeImage",
+            MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES
+        ));
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeImage",
+            MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES + 1
+        ));
+
+        assert_eq!(
+            max_native_call_body_bytes("clipboard.writeHtml"),
+            MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES
+        );
+        assert!(native_call_body_is_allowed(
+            "clipboard.writeHtml",
+            MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES
+        ));
+        assert!(!native_call_body_is_allowed(
+            "clipboard.writeHtml",
+            MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES + 1
+        ));
     }
 
     #[test]

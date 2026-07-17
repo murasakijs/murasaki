@@ -38,6 +38,7 @@ test('renderer native API uses request-correlated bridge calls', async () => {
         'window.isMinimized': false,
         'systemPermission.status': 'notDetermined',
         'systemPermission.request': 'granted',
+        'notification.show': 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         'secureStorage.get': call.args.key === 'missing' ? null : 'stored-secret',
         'globalShortcut.register': {
           id: call.args.id ?? 'Control+Shift+KeyK',
@@ -58,7 +59,7 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   assert.deepEqual(await dialog.openFile({ multiple: true }), ['/tmp/example.txt'])
   assert.equal(await clipboard.readText(), 'copied')
   await clipboard.writeText('next')
-  await notification.show({ title: 'Ready' })
+  assert.equal(await notification.show({ title: 'Ready' }), 'a1b2c3d4e5f60718293a4b5c6d7e8f90')
   await shell.openExternal('https://example.com')
   assert.equal(await secureStorage.get('session'), 'stored-secret')
   assert.equal(await secureStorage.get('missing'), null)

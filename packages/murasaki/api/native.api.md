@@ -31,13 +31,32 @@ export const appWindow: {
 export const clipboard: {
     readText(): Promise<string>;
     writeText(text: string): Promise<void>;
+    readImage(): Promise<ClipboardImageData | null>;
+    writeImage(image: {
+        pngBase64: string;
+    }): Promise<void>;
+    writeHtml(html: {
+        html: string;
+        altText?: string;
+    }): Promise<void>;
 };
+
+// @public (undocumented)
+export interface ClipboardImageData {
+    // (undocumented)
+    height: number;
+    // (undocumented)
+    pngBase64: string;
+    // (undocumented)
+    width: number;
+}
 
 // @public (undocumented)
 export const dialog: {
     openFile(options?: OpenFileOptions): Promise<string[]>;
     openDirectory(options?: Omit<OpenFileOptions, "multiple" | "filters">): Promise<string | null>;
     saveFile(options?: SaveFileOptions): Promise<string | null>;
+    showMessage(options: MessageDialogOptions): Promise<MessageDialogResult>;
 };
 
 // @public
@@ -64,8 +83,23 @@ export interface GlobalShortcutRegistration {
 }
 
 // @public (undocumented)
+export interface MessageDialogOptions {
+    // (undocumented)
+    buttons?: 'ok' | 'okCancel' | 'yesNo';
+    // (undocumented)
+    level?: 'info' | 'warning' | 'error';
+    // (undocumented)
+    message: string;
+    // (undocumented)
+    title?: string;
+}
+
+// @public (undocumented)
+export type MessageDialogResult = 'ok' | 'cancel' | 'yes' | 'no';
+
+// @public (undocumented)
 export const notification: {
-    show(options: NotificationOptions_2): Promise<void>;
+    show(options: NotificationOptions_2): Promise<string>;
 };
 
 // @public (undocumented)
@@ -116,6 +150,8 @@ export const secureStorage: {
 export const shell: {
     openExternal(target: string): Promise<void>;
     showItemInFolder(target: string): Promise<void>;
+    trashItem(path: string): Promise<void>;
+    openPath(path: string): Promise<void>;
 };
 
 // @public

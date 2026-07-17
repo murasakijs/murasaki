@@ -51,10 +51,10 @@ await shell.showItemInFolder(files[0])
 | API | Operations |
 | --- | --- |
 | `app` | `quit` (graceful application shutdown) |
-| `dialog` | `openFile`, `openDirectory`, `saveFile` |
-| `clipboard` | `readText`, `writeText` |
-| `notification` | `show` |
-| `shell` | `openExternal` (safe URL schemes only), `showItemInFolder` |
+| `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage` (native OS message box) |
+| `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
+| `notification` | `show` (resolves to a locally-generated id) |
+| `shell` | `openExternal` (safe URL schemes only), `showItemInFolder`, `trashItem`, `openPath` |
 | `secureStorage` | OS-backed `get`, `set`, `delete` for string values |
 | `systemPermission` | macOS `status`, `request` for camera, microphone, screen recording, and accessibility |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`, and state queries |
@@ -64,6 +64,30 @@ await shell.showItemInFolder(files[0])
 
 `app.quit()` and the root `quit()` helper both require `app:quit`; an
 unprivileged secondary renderer cannot terminate the whole application.
+
+`dialog.showMessage({ title?, message, level?, buttons? })` shows a native,
+main-thread message box (`level` defaults to `'info'`, `buttons` to `'ok'`) and
+resolves to whichever button was pressed (`'ok' | 'cancel' | 'yes' | 'no'`).
+`title` is bounded to 256 UTF-8 bytes and `message` to 4096, and both reject
+control characters (newlines are allowed in `message` only). It requires
+`dialog:message`.
+
+`clipboard.readImage()` returns `{ width, height, pngBase64 }` or `null` when
+the clipboard holds no image; `clipboard.writeImage({ pngBase64 })` decodes and
+replaces the clipboard image (decoded pixels bounded to 64 MiB, each dimension
+to 16,384px). `clipboard.writeHtml({ html, altText? })` writes HTML plus an
+optional plain-text fallback (`html` bounded to 1 MiB, `altText` to 64 KiB).
+These require `clipboard:readImage`, `clipboard:writeImage`, and
+`clipboard:writeHtml` respectively.
+
+`shell.trashItem(path)` moves an existing file or directory to the OS trash or
+recycle bin; `shell.openPath(path)` opens an existing local file or directory
+with the OS default handler, like double-clicking it. Both require an
+absolute, non-traversing path that exists, and — like
+`shell.showItemInFolder` — their `shell:trashItem`/`shell:openPath`
+capabilities can be scoped to an allowed path subtree. `shell.openPath`
+additionally rejects anything that parses as a URL or a UNC network/device
+path; use `shell.openExternal` to open a URL instead.
 
 <Callout type="warning">
   **0.50 migration:** `quit()` used to post an unpermissioned raw IPC message.

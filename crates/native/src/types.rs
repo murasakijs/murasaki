@@ -192,3 +192,45 @@ pub struct NotificationOptions {
     pub icon: Option<String>,
     pub sound: Option<bool>,
 }
+
+/// `dialog.showMessage` options. `level` and `buttons` are validated and
+/// defaulted (`'info'`/`'ok'`) in `dialog::show_message_dialog` rather than
+/// here, so invalid values surface as a normal rejected Promise instead of an
+/// N-API argument-conversion panic.
+#[napi(object)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MessageDialogOptions {
+    pub title: Option<String>,
+    pub message: String,
+    pub level: Option<String>,
+    pub buttons: Option<String>,
+}
+
+/// `clipboard.readImage`'s result shape — decoded clipboard pixels
+/// re-encoded as a PNG and base64-wrapped for the wire (see
+/// `clipboard::clipboard_read_image`). Serialize-only: this never crosses the
+/// JS -> Rust direction.
+#[napi(object)]
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardImageData {
+    pub width: i32,
+    pub height: i32,
+    pub png_base64: String,
+}
+
+#[napi(object)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardWriteImageOptions {
+    pub png_base64: String,
+}
+
+#[napi(object)]
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardWriteHtmlOptions {
+    pub html: String,
+    pub alt_text: Option<String>,
+}

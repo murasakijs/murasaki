@@ -452,13 +452,19 @@ export const NATIVE_CAPABILITIES = [
   'dialog:openFile',
   'dialog:openDirectory',
   'dialog:saveFile',
+  'dialog:message',
   'clipboard:readText',
   'clipboard:writeText',
+  'clipboard:readImage',
+  'clipboard:writeImage',
+  'clipboard:writeHtml',
   'menu:application',
   'menu:context',
   'notification:show',
   'shell:openExternal',
   'shell:showItemInFolder',
+  'shell:trashItem',
+  'shell:openPath',
   'secureStorage:get',
   'secureStorage:set',
   'secureStorage:delete',
@@ -1287,7 +1293,7 @@ function resolveCapabilityScope(
 
 function capabilityScopeKeys(permission: NativeCapability): Array<keyof NativeCapabilityScope> {
   if (permission === 'shell:openExternal') return ['urls']
-  if (permission === 'shell:showItemInFolder') return ['paths']
+  if (permission === 'shell:showItemInFolder' || permission === 'shell:trashItem' || permission === 'shell:openPath') return ['paths']
   if (permission === 'window:open' || permission === 'window:manage') return ['windows']
   if (permission === 'systemPermission:status' || permission === 'systemPermission:request') return ['permissions']
   return []

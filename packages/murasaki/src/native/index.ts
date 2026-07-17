@@ -26,6 +26,21 @@ export interface NotificationOptions {
   sound?: boolean
 }
 
+export interface MessageDialogOptions {
+  title?: string
+  message: string
+  level?: 'info' | 'warning' | 'error'
+  buttons?: 'ok' | 'okCancel' | 'yesNo'
+}
+
+export type MessageDialogResult = 'ok' | 'cancel' | 'yes' | 'no'
+
+export interface ClipboardImageData {
+  width: number
+  height: number
+  pngBase64: string
+}
+
 export type SystemPermissionName =
   | 'camera'
   | 'microphone'
@@ -187,6 +202,10 @@ export const dialog = {
   saveFile(options: SaveFileOptions = {}): Promise<string | null> {
     return invokeNative('dialog.saveFile', options)
   },
+  /** Native message box. Defaults to an info-level dialog with a single OK button. */
+  showMessage(options: MessageDialogOptions): Promise<MessageDialogResult> {
+    return invokeNative('dialog.showMessage', options)
+  },
 }
 
 export const clipboard = {
@@ -196,10 +215,25 @@ export const clipboard = {
   writeText(text: string): Promise<void> {
     return invokeNative('clipboard.writeText', { text })
   },
+  /** Reads the clipboard's image, PNG-encoded, or null when it holds no image. */
+  readImage(): Promise<ClipboardImageData | null> {
+    return invokeNative('clipboard.readImage')
+  },
+  /** Writes a PNG (base64-encoded) to the clipboard as an image. */
+  writeImage(image: { pngBase64: string }): Promise<void> {
+    return invokeNative('clipboard.writeImage', image)
+  },
+  /** Writes HTML, with an optional plain-text fallback, to the clipboard. */
+  writeHtml(html: { html: string; altText?: string }): Promise<void> {
+    return invokeNative('clipboard.writeHtml', html)
+  },
 }
 
 export const notification = {
-  show(options: NotificationOptions): Promise<void> {
+  /** Shows a system notification and returns a generated id for local bookkeeping.
+   * Upstream notify-rust cannot deliver click/action callbacks on macOS or Windows,
+   * so this id does not correlate with any later event. */
+  show(options: NotificationOptions): Promise<string> {
     return invokeNative('notification.show', options)
   },
 }
@@ -210,6 +244,15 @@ export const shell = {
   },
   showItemInFolder(target: string): Promise<void> {
     return invokeNative('shell.showItemInFolder', { target })
+  },
+  /** Moves an existing absolute, non-traversing path to the OS trash/recycle bin. */
+  trashItem(path: string): Promise<void> {
+    return invokeNative('shell.trashItem', { path })
+  },
+  /** Opens an existing local file/directory with the OS default handler. Paths
+   * only — URLs and UNC/device paths are rejected; use `shell.openExternal` for URLs. */
+  openPath(path: string): Promise<void> {
+    return invokeNative('shell.openPath', { path })
   },
 }
 
