@@ -5,15 +5,16 @@ description: 本物のネイティブインストーラを出荷する — ク�
 
 `murasaki bundle` / `murasaki installer` は、**macOS**(`.app` / `.dmg`)と
 **Windows**(ポータブル `.zip`、NSIS `.exe`、MSI `.msi`)で本物のインストーラを
-出力します。いずれもクロスアーキテクチャ(arm64 / x64)対応です。`@murasakijs/native`
-は Linux(x64/arm64)向けのビルド済みバイナリも提供しています — Linux 向けのアプリ
-パッケージングはロードマップに含まれています。
+出力します。いずれもクロスアーキテクチャ(arm64 / x64)対応です。`murasaki bundle`/
+`installer` は Linux 向け artifact(AppDir + `.AppImage` と `.deb`)も生成します
+が、ネイティブランチャーには Linux runtime がまだ無いため、それらの artifact は
+まだ動作しません(下記の「Linux: AppImage と .deb」セクションを参照)。
 
 | Target | Bundle | Installer | 公開 code signing |
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization を組み込み対応 |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`、Windows 上で WiX `.msi` | SignTool Authenticode を組み込み対応 |
-| Linux | — | — | 予定 |
+| Linux x64 / arm64 | AppDir + `.AppImage`(artifact のみ) | `.deb`(artifact のみ) | 予定 |
 
 <Callout type="warn">
   ファイルが生成されたことは distribution-ready を意味しません。clean machine で
@@ -67,7 +68,7 @@ target ごとの登録結果は次のとおりです。
 | Windows NSIS `.exe` | protocol、ProgID、Open With entry、Default Apps capability を既定で per-user、`installMode: 'perMachine'` で per-machine 登録 |
 | Windows WiX `.msi` | 同じ handler を per-machine 登録 |
 | Windows portable folder / `.zip` | registry を変更せず、自動登録しない |
-| Linux | 登録と app packaging は予定 |
+| Linux AppDir / `.AppImage` / `.deb` | `.desktop` ファイルに `MimeType=` 行(protocol ごとに `x-scheme-handler/<scheme>`、file association の拡張子ごとに `application/x-<extension>`)を書き込みますが、activation を実際に処理する launcher runtime がまだありません — 下記参照 |
 
 cold start、2 回目の起動、macOS open event のいずれでも、一致した URL / file は
 `ready()` 完了後に Node Main の `openRequested()` hook へ渡されます。Windows
@@ -279,6 +280,63 @@ base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
   これらのシークレットを設定やソースにコミットしないでください — `--notarize` は意図
   的に、環境変数からしかそれらを読み取りません。
 </Callout>
+
+## Linux: AppImage と .deb
+
+<Callout type="warn">
+  Linux 向け artifact の組み立ては実装済みですが、ネイティブランチャーには
+  Linux runtime がまだありません — 生成した AppDir / `.AppImage` / `.deb` は
+  動作しません。後続の runtime 実装が、固定された実際のレイアウトに対してビルド・
+  テストできるよう、パッケージングを先に用意しているという位置づけです。runtime が
+  出荷されるまでは、これらの artifact を「構造のみ」として扱ってください。
+</Callout>
+
+```bash
+murasaki bundle --target linux-x64      # dist/bundle/<Name>.AppDir/ + <Name>-<version>-linux-x64.AppImage
+murasaki bundle --target linux-arm64
+murasaki installer --target linux-x64   # dist/<debname>_<version>_amd64.deb
+murasaki installer --target linux-arm64 # dist/<debname>_<version>_arm64.deb
+```
+
+いずれも `bundle --target win32-x64` と同様に macOS / Windows / CI からクロス
+ビルドできます — Linux host は不要です。`bundle` は `.AppImage` を作るのに
+`mksquashfs` が PATH 上に必要です(AppDir フォルダ自体には追加要件はありません):
+
+```bash
+brew install squashfs              # macOS
+apt install squashfs-tools         # Debian/Ubuntu
+dnf install squashfs-tools         # Fedora
+```
+
+`installer` の `.deb` は pure-Node の `ar`/tar writer です — `dpkg-deb` も
+追加の host tool も不要です。
+
+AppDir は macOS `.app` の `Contents/Resources` と同じレイアウトを
+`usr/lib/<appId>/resources/` の下に反映します(client build、server actions、
+ダウンロードした Node runtime、`murasaki-meta.json` など)。加えて、あらゆる
+Linux desktop が期待する freedesktop.org 由来の要素 — `AppRun`、root と
+`usr/share/applications/<appId>.desktop`、`config.icon` から生成する
+`usr/share/icons/hicolor/` アイコンテーマ一式(16〜512px)— も含みます。
+
+### AppImage と .deb: update の扱いの違い
+
+- **`.AppImage`** は Murasaki 自身の self-contained update payload です —
+  Linux runtime が出荷されれば、macOS の `.app.zip` / Windows の NSIS setup
+  と同じ方法で update を適用します(`murasaki release --manifest` は既に
+  `<Name>-<version>-linux-{x64,arm64}.AppImage` をスキャンします。
+  [自動更新](/ja/docs/guides/auto-update) を参照)。
+- **`.deb`** はパッケージマネージャが所有します。update payload には決して
+  なりません — upgrade は apt/dpkg の仕事で、OS のパッケージマネージャが他の
+  installed package のライフサイクルを所有するのと同じです。
+  `murasaki release --manifest` が `.deb` を探すことはありません。
+
+### まだ実装されていないこと
+
+- launcher runtime がない — 生成した AppDir / `.AppImage` / `.deb` は起動しません。
+- `.rpm` や repository metadata(apt/dnf repo index)はありません。
+- Linux code signing(`debsign` / AppImage signing)と、`.AppImage` の
+  auto-update apply path はありません(上記の manifest scan は用意済みですが、
+  適用は runtime 待ちで未実装です)。
 
 ## Release checklist
 

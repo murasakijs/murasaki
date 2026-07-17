@@ -24,7 +24,8 @@ installed on your machine** — no bundled Chromium. The native window, menus,
 and OS integrations are powered by a self-authored Rust binding,
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
 you write TypeScript; you never write Rust. Production targets **macOS and
-Windows**; Linux currently has a development runtime but no packaging claim.
+Windows**; Linux ships packaging artifacts (AppDir/`.AppImage`/`.deb`), but
+the native launcher has no Linux runtime yet, so those artifacts don't run.
 
 ```bash
 npm create murasaki@latest my-app
@@ -292,13 +293,17 @@ murasaki help        Show this help
 | **macOS** (arm64, x64)     |  ✅   | `.app`             | `.dmg` — must be built on macOS   |     ✅      |
 | **Windows** (x64)          |  ✅   | folder / `.zip`    | NSIS `.exe`¹, `.msi`²             |     ✅      |
 | **Windows** (arm64)        |  ✅   | folder / `.zip`    | NSIS `.exe`¹                      |     ❌³     |
-| **Linux** (x64, arm64)     |  ✅   | —                  | —                                 |     ❌      |
+| **Linux** (x64, arm64)     |  ✅   | AppDir + `.AppImage`⁴ | `.deb`⁴                        |     ❌      |
 
 <sub>¹ needs `makensis` on the build machine — it cross-compiles from macOS/Linux.
 ² needs WiX v4, and must be built on Windows.
 ³ the Windows installer's filename doesn't encode the architecture yet, so the
 update manifest can't tell an arm64 build from an x64 one — tracked as a
-follow-up.</sub>
+follow-up.
+⁴ packaging artifacts only — `bundle`/`installer` need `mksquashfs`
+(`squashfs-tools`) to build the `.AppImage` and cross-compile from any host,
+but the native launcher has no Linux runtime yet, so produced bundles/
+installers don't run. Tracked as a follow-up.</sub>
 
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) ships
 prebuilt binaries for all six targets, so none of this asks you to install a
@@ -306,8 +311,10 @@ Rust toolchain.
 
 **Known limitations, stated plainly:**
 
-- **Linux app packaging isn't implemented.** `murasaki dev` works on Linux, but
-  there's no `bundle` or `installer` for it yet.
+- **Linux packages don't run yet.** `murasaki bundle`/`installer` produce a
+  real AppDir/`.AppImage`/`.deb` for Linux, but the native launcher has no
+  Linux runtime — the packaging step is ready for the runtime work that
+  follows it, not yet for end users.
 - **Windows Authenticode needs your own certificate or signing provider.**
   `--sign` wires SignTool across the app executable, portable ZIP payload,
   NSIS setup, and MSI, but Murasaki cannot establish publisher reputation for
@@ -585,7 +592,12 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
   in-place replacement + relaunch on macOS and Windows x64.
 - ✅ **Code signing** — macOS Developer ID + notarization and Windows
   Authenticode (PFX/store certificates or Microsoft Artifact Signing).
-- 🚧 **Next** — Linux packaging, Windows arm64 auto-update, and v1.0 stabilization.
+- ✅ **Linux packaging artifacts** — AppDir + `.AppImage` and `.deb`, cross-
+  compiled from macOS/Windows/Linux (`mksquashfs` required for the
+  `.AppImage`). The native launcher has no Linux runtime yet, so these don't
+  run end-to-end until that lands.
+- 🚧 **Next** — the Linux native launcher runtime, Windows arm64 auto-update,
+  and v1.0 stabilization.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something

@@ -323,18 +323,21 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today.",
-        "Linux launcher packaging and installers are not implemented. WiX is required for MSI and only runs on Windows."
+        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher has no Linux runtime yet, so produced bundles do not run — runtime lands next. WiX is required for MSI and only runs on Windows."
       ],
       "apiSymbols": [
         "murasaki bundle",
         "murasaki installer"
       ],
       "testEvidence": [
-        ".github/workflows/app-package-win.yml"
+        ".github/workflows/app-package-win.yml",
+        ".github/workflows/ci.yml",
+        "packages/murasaki/test/linux-bundle.test.mjs",
+        "packages/murasaki/test/linux-deb.test.mjs"
       ],
       "docsSlug": "/docs/building/distribution"
     },
@@ -653,8 +656,8 @@
         "linux": "planned"
       },
       "limitations": [
-        "Prebuilt Linux native binaries and development support do not constitute an installable Linux application release.",
-        "AppImage, deb, rpm, repository metadata, signing, updates, and launcher packaging are not implemented."
+        "AppDir/AppImage/deb artifact assembly is implemented (see the application-packaging capability); the launcher has no Linux runtime yet, so produced bundles do not run — runtime lands next.",
+        "rpm, repository metadata, signing, and auto-updates are not implemented."
       ],
       "apiSymbols": [],
       "testEvidence": [],

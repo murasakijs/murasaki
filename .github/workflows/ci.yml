@@ -116,9 +116,9 @@ jobs:
           pnpm --dir "$APP_DIR" build
 
   linux-native-build:
-    name: Linux x64 / native release build
+    name: Linux x64 / native release build, bundle smoke
     runs-on: ubuntu-22.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -131,7 +131,7 @@ jobs:
       - name: Install Linux native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev squashfs-tools
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -152,6 +152,107 @@ jobs:
       - name: Build Linux production launcher
         working-directory: crates/native
         run: cargo build --locked --release --bin murasaki-launcher --target x86_64-unknown-linux-gnu
+
+      - name: Stage the launcher binary under its published napi-triple name
+        working-directory: crates/native
+        run: cp target/x86_64-unknown-linux-gnu/release/murasaki-launcher murasaki-launcher.linux-x64-gnu
+
+      - name: Add a branch-local scaffold to the workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p examples/ci-linux-app
+          cp -r packages/create-murasaki/templates/default/. examples/ci-linux-app/
+          node <<'NODE'
+          const fs = require('node:fs')
+          const path = 'examples/ci-linux-app/package.json'
+          const manifest = JSON.parse(fs.readFileSync(path, 'utf8'))
+          manifest.name = 'ci-linux-app'
+          manifest.dependencies.murasaki = 'workspace:*'
+          manifest.dependencies['@murasakijs/ui'] = 'workspace:*'
+          fs.writeFileSync(path, `${JSON.stringify(manifest, null, 2)}\n`)
+
+          fs.writeFileSync('examples/ci-linux-app/murasaki.config.ts', `import { defineConfig } from 'murasaki'
+
+          export default defineConfig({
+            appId: 'app.murasaki.ci.linux',
+            productName: 'Murasaki CI Linux',
+            version: '0.0.0',
+            icon: 'src/assets/icon.png',
+            locales: ['en'],
+            protocols: [{ scheme: 'murasaki-ci-linux', name: 'Murasaki CI Linux link' }],
+            fileAssociations: [{
+              extensions: ['murasakici'],
+              name: 'Murasaki CI Linux document',
+              role: 'editor',
+            }],
+          })
+          `)
+          NODE
+
+      - name: Install workspace dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build framework packages
+        run: |
+          pnpm --filter @murasakijs/ui build
+          pnpm --filter murasaki build
+
+      - name: Build scaffolded app
+        working-directory: examples/ci-linux-app
+        run: pnpm exec murasaki build
+
+      - name: Bundle scaffolded app (AppDir + AppImage)
+        working-directory: examples/ci-linux-app
+        run: pnpm exec murasaki bundle --target linux-x64
+
+      - name: Verify AppDir layout and AppImage artifact
+        shell: bash
+        working-directory: examples/ci-linux-app
+        run: |
+          set -euo pipefail
+          APP_DIR=$(find dist/bundle -maxdepth 1 -type d -name '*.AppDir' -print -quit)
+          test -n "$APP_DIR"
+          echo "AppDir: $APP_DIR"
+
+          test -x "$APP_DIR/AppRun"
+          test -f "$APP_DIR/app.murasaki.ci.linux.desktop"
+          test -f "$APP_DIR/app.murasaki.ci.linux.png"
+          test -L "$APP_DIR/.DirIcon"
+          test -x "$APP_DIR/usr/bin/Murasaki-CI-Linux"
+          test -f "$APP_DIR/usr/share/applications/app.murasaki.ci.linux.desktop"
+          test -f "$APP_DIR/usr/lib/app.murasaki.ci.linux/resources/murasaki-meta.json"
+          test -x "$APP_DIR/usr/lib/app.murasaki.ci.linux/resources/node"
+          grep -q 'MimeType=x-scheme-handler/murasaki-ci-linux;application/x-murasakici;' "$APP_DIR/app.murasaki.ci.linux.desktop"
+          test -f "$APP_DIR/usr/share/icons/hicolor/256x256/apps/app.murasaki.ci.linux.png"
+
+          APPIMAGE=$(find dist/bundle -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          test -n "$APPIMAGE"
+          test -x "$APPIMAGE"
+          echo "AppImage: $APPIMAGE"
+
+      - name: Package the .deb installer
+        working-directory: examples/ci-linux-app
+        run: pnpm exec murasaki installer --target linux-x64 --no-build
+
+      - name: Verify the .deb artifact
+        shell: bash
+        working-directory: examples/ci-linux-app
+        run: |
+          set -euo pipefail
+          DEB=$(find dist -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$DEB"
+          echo ".deb: $DEB"
+          ar t "$DEB"
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: linux-x64-bundle-failure
+          path: |
+            examples/ci-linux-app/dist/bundle/**
+            examples/ci-linux-app/dist/*.deb
+          if-no-files-found: warn
 
   macos-framework-native:
     name: macOS arm64 / framework, native, bundle smoke

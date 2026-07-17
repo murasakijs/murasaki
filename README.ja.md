@@ -23,8 +23,9 @@ Murasaki は TypeScript ファーストのデスクトップフレームワー�
 (Chromium は同梱しません)。ネイティブウィンドウ、メニュー、OS 連携は自作の Rust バインディング
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) が担っており
 ——あなたが書くのは TypeScript だけで、Rust を書くことはありません。本番向けの
-対応対象は **macOS / Windows** です。Linux は現在、開発ランタイムのみを提供し、
-パッケージング対応は保証していません。
+対応対象は **macOS / Windows** です。Linux はパッケージング artifact(AppDir /
+`.AppImage` / `.deb`)を出力しますが、ネイティブランチャーに Linux runtime が
+まだ無いため、それらの artifact はまだ動作しません。
 
 ```bash
 npm create murasaki@latest my-app
@@ -276,12 +277,16 @@ murasaki help        このヘルプを表示
 | **macOS**(arm64, x64)         |  ✅   | `.app`           | `.dmg` — macOS 上でビルドが必要   |       ✅         |
 | **Windows**(x64)              |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹、`.msi`²          |       ✅         |
 | **Windows**(arm64)            |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹                   |      ❌³         |
-| **Linux**(x64, arm64)         |  ✅   | —                | —                                 |       ❌         |
+| **Linux**(x64, arm64)         |  ✅   | AppDir + `.AppImage`⁴ | `.deb`⁴                      |       ❌         |
 
 <sub>¹ ビルドマシンに `makensis` が必要です(macOS / Linux からクロスコンパイルできます)。
 ² WiX v4 が必要で、Windows 上でビルドする必要があります。
 ³ Windows インストーラのファイル名がまだアーキテクチャを含んでいないため、更新マニフェストが
-arm64 ビルドと x64 ビルドを区別できません。フォローアップとして管理しています。</sub>
+arm64 ビルドと x64 ビルドを区別できません。フォローアップとして管理しています。
+⁴ packaging artifact のみです — `bundle` / `installer` は `.AppImage` の生成と
+任意ホストからのクロスビルドに `mksquashfs`(`squashfs-tools`)が必要ですが、
+ネイティブランチャーに Linux runtime がまだ無いため、生成した bundle /
+installer は動作しません。フォローアップとして管理しています。</sub>
 
 [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) は
 6 ターゲットすべてのビルド済みバイナリを同梱しているため、Rust ツールチェーンの
@@ -289,8 +294,10 @@ arm64 ビルドと x64 ビルドを区別できません。フォローアップ
 
 **既知の制限(隠さず明記します):**
 
-- **Linux のアプリパッケージングは未実装です。** `murasaki dev` は Linux でも
-  動作しますが、`bundle` / `installer` はまだありません。
+- **Linux 向けパッケージはまだ動作しません。** `murasaki bundle` / `installer`
+  は実際の AppDir / `.AppImage` / `.deb` を Linux 向けに生成しますが、
+  ネイティブランチャーに Linux runtime がありません — パッケージング自体は
+  後続の runtime 実装に向けて用意済みですが、まだ end user 向けではありません。
 - **Windows バイナリは Authenticode 署名されていません。** murasaki 側で対応
   していないため、初回起動時に SmartScreen の警告が出ます。
 - **macOS の署名と notarization には、ご自身の有料 Apple Developer ID が必要です** —
@@ -532,7 +539,11 @@ murasaki は **pre-1.0** です——v1.0 までの間に API が変更される
   いずれも macOS / Linux からクロスコンパイルできます。
 - ✅ **自動アップデート** — 署名付きマニフェスト、SHA-256 検証付きダウンロード、
   そのまま自分自身を置き換えて再起動。macOS と Windows x64 に対応しています。
-- 🚧 **次にやること** — Linux パッケージング、Windows Authenticode 署名、
+- ✅ **Linux パッケージング artifact** — AppDir + `.AppImage` と `.deb`。
+  macOS / Windows / Linux からクロスコンパイルできます(`.AppImage` の生成には
+  `mksquashfs` が必要)。ネイティブランチャーに Linux runtime がまだ無いため、
+  これらは runtime が出荷されるまで end-to-end では動作しません。
+- 🚧 **次にやること** — Linux ネイティブランチャーの runtime、
   Windows arm64 の自動アップデート、v1.0 の安定化。
 - 🔭 **検討中(post-1.0)**: サーバーサイドレンダリング + ストリーミング。現状の
   アーキテクチャはクライアント側で完結してレンダリングしているため、これは

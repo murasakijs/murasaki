@@ -5,14 +5,16 @@ description: Shipping real native installers — cross-arch builds, signing, not
 
 `murasaki bundle` / `murasaki installer` ship real installers on **macOS**
 (`.app` / `.dmg`) and **Windows** (a portable `.zip`, an NSIS `.exe`, and an
-MSI `.msi`), cross-arch (arm64 / x64) on both. `@murasakijs/native` also ships
-prebuilt binaries for Linux (x64/arm64); Linux app packaging is on the roadmap.
+MSI `.msi`), cross-arch (arm64 / x64) on both. `murasaki bundle`/`installer`
+also produce Linux artifacts — an AppDir + `.AppImage` and a `.deb` — but the
+native launcher has no Linux runtime yet, so those artifacts don't run yet
+(see [Linux: AppImage and .deb](#linux-appimage-and-deb) below).
 
 | Target | Bundle | Installer | Public code signing |
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization built in |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Authenticode via SignTool built in |
-| Linux | — | — | Planned |
+| Linux x64 / arm64 | AppDir + `.AppImage` (artifacts only) | `.deb` (artifacts only) | Planned |
 
 <Callout type="warn">
   A generated file is not automatically distribution-ready. Test the
@@ -67,7 +69,7 @@ The packaging result differs by target:
 | Windows NSIS `.exe` | Registers protocols, ProgIDs, Open With entries, and Default Apps capabilities per-user by default, or per-machine with `installMode: 'perMachine'`. |
 | Windows WiX `.msi` | Registers the same handlers per-machine. |
 | Windows portable folder / `.zip` | Does not modify the registry or register itself automatically. |
-| Linux | Registration and application packaging are planned. |
+| Linux AppDir / `.AppImage` / `.deb` | `MimeType=` lines (`x-scheme-handler/<scheme>` per protocol, `application/x-<extension>` per file-association extension) are written into the `.desktop` file, but there's no launcher runtime yet to actually handle an activation — see below. |
 
 Matching cold-start, second-instance, and macOS open events are delivered to
 Node Main's `openRequested()` hook after `ready()`. The Windows portable build
@@ -293,6 +295,64 @@ Add these repository secrets to sign + notarize (omit them all for an unsigned
   Never commit these secrets to config or source — `--notarize` deliberately
   only reads them from the environment.
 </Callout>
+
+## Linux: AppImage and .deb
+
+<Callout type="warn">
+  Linux artifact assembly is implemented, but the native launcher has no
+  Linux runtime yet — a produced AppDir/`.AppImage`/`.deb` does not run.
+  Packaging is ready so the runtime work that follows can build and test
+  against a fixed, real layout; treat these artifacts as structural-only
+  until the runtime ships.
+</Callout>
+
+```bash
+murasaki bundle --target linux-x64      # dist/bundle/<Name>.AppDir/ + <Name>-<version>-linux-x64.AppImage
+murasaki bundle --target linux-arm64
+murasaki installer --target linux-x64   # dist/<debname>_<version>_amd64.deb
+murasaki installer --target linux-arm64 # dist/<debname>_<version>_arm64.deb
+```
+
+Both cross-build from macOS/Windows/CI the same way `bundle --target
+win32-x64` already does — no Linux host required. `bundle` needs `mksquashfs`
+on PATH to build the `.AppImage` (the AppDir folder itself has no extra
+requirement):
+
+```bash
+brew install squashfs              # macOS
+apt install squashfs-tools         # Debian/Ubuntu
+dnf install squashfs-tools         # Fedora
+```
+
+`installer`'s `.deb` is a pure-Node `ar`/tar writer — it needs no `dpkg-deb`
+and no extra host tool.
+
+The AppDir mirrors the macOS `.app`'s `Contents/Resources` layout under
+`usr/lib/<appId>/resources/` (client build, server actions, a downloaded
+Node runtime, `murasaki-meta.json`, …), plus the freedesktop.org pieces every
+Linux desktop expects: `AppRun`, a root and `usr/share/applications/
+<appId>.desktop`, and a `usr/share/icons/hicolor/` icon-theme fan-out
+generated from `config.icon` (16 through 512px).
+
+### AppImage vs .deb: different update stories
+
+- **`.AppImage`** is murasaki's self-contained update payload — once the
+  Linux runtime ships, it applies updates the same way the macOS `.app.zip`/
+  Windows NSIS setup do (`murasaki release --manifest` already scans for
+  `<Name>-<version>-linux-{x64,arm64}.AppImage`, see
+  [Auto-update](/docs/guides/auto-update)).
+- **`.deb`** is package-manager-owned. It's never an update payload —
+  upgrades are apt/dpkg's job, the same way an OS package manager owns any
+  other installed package's lifecycle. `murasaki release --manifest` never
+  looks for a `.deb`.
+
+### What's not implemented yet
+
+- No launcher runtime — the produced AppDir/`.AppImage`/`.deb` don't launch.
+- No `.rpm` or repository metadata (apt/dnf repo indexes).
+- No Linux code signing (`debsign`/AppImage signing) and no auto-update
+  application path for the `.AppImage` (the manifest scan above is ready;
+  applying it isn't, pending the runtime).
 
 ## Release checklist
 
