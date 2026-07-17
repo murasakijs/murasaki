@@ -43,10 +43,10 @@ pub(crate) mod shared {
         process::{Child, Command, Stdio},
         sync::{
             atomic::{AtomicBool, Ordering},
-            mpsc, Arc,
+            mpsc, Arc, Mutex, OnceLock,
         },
         thread,
-        time::Duration,
+        time::{Duration, SystemTime, UNIX_EPOCH},
     };
 
     use fs2::FileExt;
@@ -77,6 +77,13 @@ pub(crate) mod shared {
         pub(super) product_name: String,
         #[serde(default)]
         pub(super) version: Option<String>,
+        /// murasaki's own version (not `version` above, the app's) — written by
+        /// `cli/bundle.ts`'s `metaJson` via `murasakiVersion()`. Used only for
+        /// crash reports' `frameworkVersion` field.
+        #[serde(default)]
+        pub(super) framework_version: Option<String>,
+        #[serde(default)]
+        pub(super) diagnostics: DiagnosticsMeta,
         #[serde(default)]
         pub(super) description: Option<String>,
         #[serde(default)]
@@ -138,6 +145,18 @@ pub(crate) mod shared {
         pub(super) incognito: Option<bool>,
         #[serde(default)]
         pub(super) proxy: Option<WebviewProxyOptions>,
+    }
+
+    /// Fully-resolved by `cli/bundle.ts`'s `resolveDiagnosticsConfig` (defaults
+    /// already applied), but every field still tolerates a missing key so an
+    /// older `murasaki-meta.json` (before this feature shipped) still parses.
+    #[derive(Clone, Default, Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    pub(super) struct DiagnosticsMeta {
+        #[serde(default)]
+        pub(super) crash_reports: Option<bool>,
+        #[serde(default)]
+        pub(super) keep_reports: Option<u32>,
     }
 
     pub(super) fn main_shutdown_transport_timeout(meta: &Meta) -> Result<Duration, String> {
@@ -1184,6 +1203,421 @@ pub(crate) mod shared {
         transport_error.is_none()
     }
 
+    // ── Crash diagnostics (native domain) ──────────────────────────────────
+    //
+    // Mirrors `packages/murasaki/src/main/crash-reports.ts`'s report shape and
+    // storage convention exactly (`<appData>/<appId>/crash-reports/<safe-ISO-
+    // timestamp>-native.json`) so `MainContext.diagnostics` reads native
+    // reports the same way it reads Node/renderer ones. This crate has no
+    // date/time or app-dirs dependency, so both the timestamp formatter below
+    // and `app_data_dir` are small hand-rolled equivalents of what Node's
+    // `resolveAppPaths`/`Date.prototype.toISOString` already do — see that
+    // function's doc comment in `runtime/main-runtime.ts`.
+    //
+    // Every function here is best-effort: a crash report must never itself
+    // become a second crash, so all I/O failures are silently ignored.
+
+    const CRASH_REPORT_VERSION: u32 = 1;
+    const MAX_CRASH_MESSAGE_CHARS: usize = 8 * 1024;
+    const MAX_CRASH_VERSION_CHARS: usize = 256;
+    const DEFAULT_KEEP_CRASH_REPORTS: u32 = 20;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NativeCrashReport {
+        report_version: u32,
+        domain: &'static str,
+        timestamp: String,
+        app_version: String,
+        framework_version: String,
+        os: String,
+        arch: String,
+        message: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        stack: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        extra: Option<serde_json::Value>,
+    }
+
+    /// Truncates by character count (not bytes) — an approximation of the
+    /// TS side's UTF-16-length bound, consistent enough for a best-effort
+    /// diagnostic string that is never round-tripped byte-exactly.
+    fn bounded_chars(value: &str, max_chars: usize) -> String {
+        if value.chars().count() <= max_chars {
+            return value.to_string();
+        }
+        let truncated: String = value.chars().take(max_chars).collect();
+        format!("{truncated}…[truncated]")
+    }
+
+    /// Minimal UTC `YYYY-MM-DDTHH:MM:SS.mmmZ` formatter — see the module doc
+    /// comment above for why this crate hand-rolls it instead of adding a
+    /// date/time dependency for one timestamp.
+    fn iso8601_utc_now() -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let millis = now.as_millis();
+        let secs = (millis / 1000) as i64;
+        let ms = (millis % 1000) as u32;
+        let days = secs.div_euclid(86_400);
+        let secs_of_day = secs.rem_euclid(86_400);
+        let (year, month, day) = civil_from_days(days);
+        let hour = secs_of_day / 3600;
+        let minute = (secs_of_day % 3600) / 60;
+        let second = secs_of_day % 60;
+        format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{ms:03}Z")
+    }
+
+    /// Howard Hinnant's public-domain `civil_from_days`: days since the Unix
+    /// epoch (1970-01-01) -> proleptic-Gregorian (year, month, day).
+    fn civil_from_days(z: i64) -> (i64, u32, u32) {
+        let z = z + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = (z - era * 146_097) as u64; // [0, 146096]
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365; // [0, 399]
+        let y = yoe as i64 + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+        let mp = (5 * doy + 2) / 153; // [0, 11]
+        let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+        let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+        let year = if m <= 2 { y + 1 } else { y };
+        (year, m, d)
+    }
+
+    /// Filename-safe transform matching the TS writer's
+    /// `timestamp.replace(/[:.]/g, '-')` exactly, so filenames sort/compare
+    /// identically regardless of which side wrote them.
+    fn safe_timestamp_component(timestamp: &str) -> String {
+        timestamp.replace([':', '.'], "-")
+    }
+
+    fn build_crash_report(
+        domain: &'static str,
+        message: &str,
+        stack: Option<String>,
+        extra: Option<serde_json::Value>,
+        app_version: &str,
+        framework_version: &str,
+    ) -> NativeCrashReport {
+        NativeCrashReport {
+            report_version: CRASH_REPORT_VERSION,
+            domain,
+            timestamp: iso8601_utc_now(),
+            app_version: bounded_chars(app_version, MAX_CRASH_VERSION_CHARS),
+            framework_version: bounded_chars(framework_version, MAX_CRASH_VERSION_CHARS),
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+            message: bounded_chars(message, MAX_CRASH_MESSAGE_CHARS),
+            stack,
+            extra,
+        }
+    }
+
+    /// Panic message, source location, and thread name captured by the panic
+    /// hook — kept separate from `std::panic::PanicHookInfo` (which has no
+    /// public constructor) so the serialization below stays unit-testable.
+    pub(super) struct NativePanicDetails {
+        pub(super) message: String,
+        pub(super) location: Option<String>,
+        pub(super) thread_name: String,
+    }
+
+    /// Pure — no I/O — so this is the part unit tests exercise directly.
+    pub(super) fn native_panic_report_json(
+        details: &NativePanicDetails,
+        app_version: &str,
+        framework_version: &str,
+    ) -> String {
+        let extra = serde_json::json!({
+            "location": details.location,
+            "threadName": details.thread_name,
+        });
+        let report = build_crash_report(
+            "native",
+            &details.message,
+            None,
+            Some(extra),
+            app_version,
+            framework_version,
+        );
+        serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Pure — no I/O — companion to `native_panic_report_json` for the
+    /// unexpected-Node-exit path (message + `status`'s exit code/signal text).
+    pub(super) fn node_exit_report_json(
+        message: &str,
+        status: &str,
+        app_version: &str,
+        framework_version: &str,
+    ) -> String {
+        let extra = serde_json::json!({ "exitStatus": status });
+        let report = build_crash_report(
+            "native",
+            message,
+            None,
+            Some(extra),
+            app_version,
+            framework_version,
+        );
+        serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    /// Mirrors the TS writer's charset allowlist exactly — the only thing
+    /// standing between a crash-report filename and path traversal, since
+    /// `MainContext.diagnostics.readCrashReport(id)` joins `id` onto the
+    /// directory unchanged.
+    fn is_valid_crash_report_filename(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        first.is_ascii_alphanumeric()
+            && name.len() <= 200
+            && name.ends_with(".json")
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+    }
+
+    /// Keeps the newest `keep_reports` files (by sorted, timestamp-prefixed
+    /// name) in `dir` and removes the rest. Shared with the TS-side writer's
+    /// rotation, which applies the same policy to the same directory.
+    fn rotate_crash_reports(dir: &Path, keep_reports: u32) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| is_valid_crash_report_filename(name))
+            .collect();
+        names.sort();
+        let keep = keep_reports.max(1) as usize;
+        if names.len() <= keep {
+            return;
+        }
+        for name in &names[..names.len() - keep] {
+            let _ = fs::remove_file(dir.join(name));
+        }
+    }
+
+    /// Writes one native crash report synchronously and atomically (a temp
+    /// file, then a rename), then rotates. Best-effort throughout: any
+    /// failure here is silently ignored rather than risking a crash inside
+    /// crash reporting.
+    fn write_native_crash_report(dir: &Path, report_json: &str, keep_reports: u32) {
+        if fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        let filename = format!(
+            "{}-native.json",
+            safe_timestamp_component(&iso8601_utc_now())
+        );
+        let final_path = dir.join(&filename);
+        let temp_path = dir.join(format!(".{filename}.tmp-{}", std::process::id()));
+        if fs::write(&temp_path, report_json).is_err() {
+            return;
+        }
+        if fs::rename(&temp_path, &final_path).is_err() {
+            let _ = fs::remove_file(&temp_path);
+            return;
+        }
+        rotate_crash_reports(dir, keep_reports);
+    }
+
+    /// App-scoped context the panic hook and unexpected-Node-exit path read
+    /// from — set once `murasaki-meta.json` has been parsed (see
+    /// `set_crash_context`'s call sites in `imp_macos`/`imp_win`). `None`
+    /// until then, so a panic before that point is a best-effort no-op for
+    /// report writing (the default panic hook still runs — see
+    /// `install_panic_hook`).
+    #[derive(Clone)]
+    struct CrashContext {
+        dir: PathBuf,
+        app_version: String,
+        framework_version: String,
+        keep_reports: u32,
+    }
+
+    static CRASH_CONTEXT: OnceLock<Mutex<Option<CrashContext>>> = OnceLock::new();
+
+    /// Called once `resources_dir`/`meta` are known and diagnostics are
+    /// enabled (`meta.diagnostics.crashReports`, default `true`). Skipping
+    /// this call entirely (when disabled) keeps the panic hook and
+    /// unexpected-exit path pure no-ops, mirroring the Node side's "don't even
+    /// install the hooks" opt-out.
+    pub(super) fn set_crash_context(
+        dir: PathBuf,
+        app_version: String,
+        framework_version: String,
+        keep_reports: u32,
+    ) {
+        let cell = CRASH_CONTEXT.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = cell.lock() {
+            *guard = Some(CrashContext {
+                dir,
+                app_version,
+                framework_version,
+                keep_reports,
+            });
+        }
+    }
+
+    fn crash_context() -> Option<CrashContext> {
+        CRASH_CONTEXT.get()?.lock().ok()?.clone()
+    }
+
+    fn panic_message(info: &std::panic::PanicHookInfo<'_>) -> String {
+        if let Some(message) = info.payload().downcast_ref::<&str>() {
+            (*message).to_string()
+        } else if let Some(message) = info.payload().downcast_ref::<String>() {
+            message.clone()
+        } else {
+            "native panic".to_string()
+        }
+    }
+
+    /// Installs the panic hook as early as `run_launcher` can (see that
+    /// function): writes a `native` crash report (best-effort — a no-op until
+    /// `set_crash_context` has run), then always defers to the previously
+    /// installed hook so default panic/abort behavior — printing to stderr and
+    /// unwinding/aborting — is completely unchanged.
+    pub(super) fn install_panic_hook() {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if let Some(context) = crash_context() {
+                let details = NativePanicDetails {
+                    message: panic_message(info),
+                    location: info.location().map(|location| {
+                        format!(
+                            "{}:{}:{}",
+                            location.file(),
+                            location.line(),
+                            location.column()
+                        )
+                    }),
+                    thread_name: thread::current().name().unwrap_or("<unnamed>").to_string(),
+                };
+                let json = native_panic_report_json(
+                    &details,
+                    &context.app_version,
+                    &context.framework_version,
+                );
+                write_native_crash_report(&context.dir, &json, context.keep_reports);
+            }
+            default_hook(info);
+        }));
+    }
+
+    /// Called from every `poll_unexpected_child_exit` branch that observed the
+    /// bundled Node process exit (both before the startup health checkpoint
+    /// and during the running event loop, on both macOS and Windows).
+    /// Best-effort no-op if diagnostics are disabled or context isn't set yet.
+    /// Only exit code/signal metadata is captured — reading and tailing
+    /// Node's own log file would need a second, log-directory-specific
+    /// `app_*_dir` resolution in this crate for comparatively little extra
+    /// value, so it's deliberately left to Node's own crash report (written
+    /// before it exits) plus `MainContext.log`.
+    pub(super) fn report_unexpected_node_exit(message: &str, status: &str) {
+        if let Some(context) = crash_context() {
+            let json = node_exit_report_json(
+                message,
+                status,
+                &context.app_version,
+                &context.framework_version,
+            );
+            write_native_crash_report(&context.dir, &json, context.keep_reports);
+        }
+    }
+
+    /// Mirrors `runtime/main-runtime.ts`'s `resolveAppPaths().data` for this
+    /// process's own crash-report writes — same base directory, so
+    /// `MainContext.diagnostics` reads native reports out of the exact
+    /// directory this launcher wrote them into. Returns `None` when the
+    /// platform's home/profile directory can't be resolved (best-effort; the
+    /// caller simply skips crash context setup in that case).
+    pub(super) fn app_data_dir(app_id: &str) -> Option<PathBuf> {
+        let safe_id = safe_app_id(app_id);
+        #[cfg(target_os = "macos")]
+        {
+            let home = std::env::var_os("HOME")?;
+            Some(
+                PathBuf::from(home)
+                    .join("Library")
+                    .join("Application Support")
+                    .join(safe_id),
+            )
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var_os("APPDATA")?;
+            Some(PathBuf::from(appdata).join(safe_id))
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            if let Some(xdg_data_home) = std::env::var_os("XDG_DATA_HOME") {
+                return Some(PathBuf::from(xdg_data_home).join(safe_id));
+            }
+            let home = std::env::var_os("HOME")?;
+            Some(
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("share")
+                    .join(safe_id),
+            )
+        }
+    }
+
+    /// Mirrors `resolveAppPaths`'s `appId.replace(/[^A-Za-z0-9._-]/g, '_') ||
+    /// 'murasaki-app'` exactly.
+    fn safe_app_id(app_id: &str) -> String {
+        let mapped: String = app_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if mapped.is_empty() {
+            "murasaki-app".to_string()
+        } else {
+            mapped
+        }
+    }
+
+    /// Resolves `app_data_dir(app_id)/crash-reports` and calls
+    /// `set_crash_context` when `meta.diagnostics.crashReports` allows it
+    /// (default `true`) and the directory could be resolved — a no-op
+    /// otherwise, which keeps the panic hook and unexpected-exit path inert.
+    /// Shared by `imp_macos`/`imp_win`'s `run_inner`, called right after
+    /// `read_meta` succeeds.
+    pub(super) fn init_crash_context(app_id: &str, meta: &Meta) {
+        if !meta.diagnostics.crash_reports.unwrap_or(true) {
+            return;
+        }
+        let Some(dir) = app_data_dir(app_id) else {
+            return;
+        };
+        let keep_reports = meta
+            .diagnostics
+            .keep_reports
+            .unwrap_or(DEFAULT_KEEP_CRASH_REPORTS)
+            .clamp(1, 100);
+        set_crash_context(
+            dir.join("crash-reports"),
+            meta.version.clone().unwrap_or_else(|| "0.0.0".to_string()),
+            meta.framework_version
+                .clone()
+                .unwrap_or_else(|| "0.0.0".to_string()),
+            keep_reports,
+        );
+    }
+
     /// Checked on every clean exit path — `{ kind: "appQuit" }` and
     /// `WindowEvent::CloseRequested`, on both macOS and Windows — right before
     /// the launcher process exits (contract §7 REVISED step 6). If
@@ -1399,10 +1833,13 @@ pub(crate) mod shared {
         };
 
         use super::{
-            app_instance_key, app_origin_port, discard_apply_handoff,
-            main_shutdown_transport_timeout, open_targets_from_args, poll_unexpected_child_exit,
-            request_main_shutdown, resolve_windows, runtime_token, shutdown_allows_update, Meta,
-            OpenTarget, ShutdownCompletion, ShutdownCoordinator, ShutdownPoll,
+            app_data_dir, app_instance_key, app_origin_port, crash_context, discard_apply_handoff,
+            init_crash_context, is_valid_crash_report_filename, main_shutdown_transport_timeout,
+            native_panic_report_json, node_exit_report_json, open_targets_from_args,
+            poll_unexpected_child_exit, request_main_shutdown, resolve_windows,
+            rotate_crash_reports, runtime_token, shutdown_allows_update, write_native_crash_report,
+            Meta, NativePanicDetails, OpenTarget, ShutdownCompletion, ShutdownCoordinator,
+            ShutdownPoll,
         };
 
         #[test]
@@ -1750,6 +2187,191 @@ pub(crate) mod shared {
                 assert!(resolve_windows(&meta).is_err());
             }
         }
+
+        // ── Crash diagnostics (native domain) ──────────────────────────────
+
+        #[test]
+        fn native_panic_report_is_versioned_bounded_and_carries_location_and_thread() {
+            let details = NativePanicDetails {
+                message: "x".repeat(9_000),
+                location: Some("src/launcher.rs:42:5".to_string()),
+                thread_name: "main".to_string(),
+            };
+            let json = native_panic_report_json(&details, "1.2.3", "0.37.0");
+            let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(report["reportVersion"], 1);
+            assert_eq!(report["domain"], "native");
+            assert_eq!(report["appVersion"], "1.2.3");
+            assert_eq!(report["frameworkVersion"], "0.37.0");
+            assert!(report["timestamp"].as_str().unwrap().ends_with('Z'));
+            // 8 * 1024 chars + the "…[truncated]" marker, not the raw 9000.
+            assert!(report["message"].as_str().unwrap().len() < 9_000);
+            assert!(report["message"]
+                .as_str()
+                .unwrap()
+                .ends_with("…[truncated]"));
+            assert_eq!(report["extra"]["location"], "src/launcher.rs:42:5");
+            assert_eq!(report["extra"]["threadName"], "main");
+            assert!(report.get("stack").is_none());
+        }
+
+        #[test]
+        fn node_exit_report_carries_exit_status_in_extra() {
+            let json = node_exit_report_json(
+                "bundled Node process exited unexpectedly",
+                "signal: 11 (SIGSEGV)",
+                "1.0.0",
+                "0.37.0",
+            );
+            let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_eq!(report["domain"], "native");
+            assert_eq!(
+                report["message"],
+                "bundled Node process exited unexpectedly"
+            );
+            assert_eq!(report["extra"]["exitStatus"], "signal: 11 (SIGSEGV)");
+        }
+
+        #[test]
+        fn crash_report_filenames_reject_traversal_and_unsafe_characters() {
+            assert!(is_valid_crash_report_filename(
+                "2026-07-17T12-34-56-789Z-native.json"
+            ));
+            for unsafe_name in [
+                "..",
+                "../../etc/passwd.json",
+                "a/b.json",
+                "a\\b.json",
+                ".hidden.json",
+                "no-json-extension",
+                "",
+            ] {
+                assert!(
+                    !is_valid_crash_report_filename(unsafe_name),
+                    "expected {unsafe_name:?} to be rejected"
+                );
+            }
+        }
+
+        #[test]
+        fn rotation_keeps_only_the_newest_files_by_sorted_name() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "murasaki-crash-rotate-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+
+            for index in 0..5 {
+                fs::write(
+                    dir.join(format!("2026-01-0{}T00-00-00-000Z-native.json", index + 1)),
+                    "{}",
+                )
+                .unwrap();
+            }
+            // Not a valid crash-report name (no leading alnum after the dot) —
+            // rotation must not touch it.
+            fs::write(dir.join(".stray.json"), "{}").unwrap();
+
+            rotate_crash_reports(&dir, 2);
+
+            let mut remaining: Vec<String> = fs::read_dir(&dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            remaining.sort();
+            assert_eq!(
+                remaining,
+                vec![
+                    ".stray.json".to_string(),
+                    "2026-01-04T00-00-00-000Z-native.json".to_string(),
+                    "2026-01-05T00-00-00-000Z-native.json".to_string(),
+                ]
+            );
+
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn write_native_crash_report_is_atomic_and_rotates() {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!(
+                "murasaki-crash-write-{}-{nonce}",
+                std::process::id()
+            ));
+
+            for _ in 0..3 {
+                write_native_crash_report(&dir, "{\"reportVersion\":1}", 2);
+            }
+
+            let files: Vec<String> = fs::read_dir(&dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect();
+            assert_eq!(
+                files.len(),
+                2,
+                "rotation should cap at keep_reports: {files:?}"
+            );
+            assert!(files.iter().all(|name| name.ends_with("-native.json")));
+            assert!(files
+                .iter()
+                .all(|name| is_valid_crash_report_filename(name)));
+            // No leftover `.tmp-` staging files after a successful write.
+            assert!(!files.iter().any(|name| name.contains(".tmp-")));
+
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn app_data_dir_sanitizes_the_app_id_into_a_portable_path_component() {
+            let dir = app_data_dir("com/example app!*").expect("resolvable on this host");
+            let last = dir.file_name().unwrap().to_str().unwrap();
+            assert_eq!(last, "com_example_app__");
+            assert!(!last.chars().any(|c| "<>:\"/\\|?*".contains(c)));
+        }
+
+        #[test]
+        fn crash_context_is_populated_from_meta_and_respects_the_diagnostics_toggle() {
+            let meta_enabled: Meta = serde_json::from_value(serde_json::json!({
+                "productName": "Diagnostics Test",
+                "version": "1.2.3",
+                "frameworkVersion": "9.9.9",
+            }))
+            .unwrap();
+            init_crash_context("com.example.diagnostics-test", &meta_enabled);
+            let context = crash_context().expect("diagnostics default to enabled");
+            assert!(context.dir.ends_with("crash-reports"));
+            assert_eq!(context.app_version, "1.2.3");
+            assert_eq!(context.framework_version, "9.9.9");
+            assert_eq!(context.keep_reports, 20);
+
+            let meta_clamped: Meta = serde_json::from_value(serde_json::json!({
+                "productName": "Diagnostics Test",
+                "diagnostics": { "keepReports": 5_000 },
+            }))
+            .unwrap();
+            init_crash_context("com.example.diagnostics-test", &meta_clamped);
+            assert_eq!(crash_context().unwrap().keep_reports, 100);
+
+            let sentinel_dir = crash_context().unwrap().dir;
+            let meta_disabled: Meta = serde_json::from_value(serde_json::json!({
+                "productName": "Diagnostics Test",
+                "diagnostics": { "crashReports": false },
+            }))
+            .unwrap();
+            init_crash_context("com.example.diagnostics-test", &meta_disabled);
+            // Disabled is a no-op: it must leave any previous context in place
+            // rather than clear it, matching "never install the hooks" on the
+            // Node side.
+            assert_eq!(crash_context().unwrap().dir, sentinel_dir);
+        }
     }
 }
 
@@ -1779,12 +2401,13 @@ mod imp_macos {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, load_menu_locales,
-        main_shutdown_transport_timeout, maybe_spawn_apply_helper, normalize_locale,
-        open_targets_from_args, open_targets_from_urls, poll_unexpected_child_exit, read_meta,
-        request_main_open, resolve_menu_labels, resolve_windows, runtime_token,
-        shutdown_allows_update, spawn_prod_server, terminate_and_wait_child, InstanceRole,
-        ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
+        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
+        normalize_locale, open_targets_from_args, open_targets_from_urls,
+        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
+        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
+        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
+        ShutdownPoll, WindowControlCoordinator,
     };
 
     pub fn run() {
@@ -1837,6 +2460,7 @@ mod imp_macos {
         let meta = read_meta(&resources_dir)?;
         let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
         let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
+        init_crash_context(app_id, &meta);
         let mut primary_instance = match acquire_instance(app_id)? {
             InstanceRole::Primary(primary) => primary,
             InstanceRole::Secondary(secondary) => {
@@ -2014,6 +2638,10 @@ mod imp_macos {
         // templates are intentionally outside this startup checkpoint. Only
         // now is it safe to delete the previous bundle retained by the helper.
         if let Some(status) = poll_unexpected_child_exit(&mut child)? {
+            report_unexpected_node_exit(
+                "bundled Node process exited before startup health acknowledgement",
+                &status,
+            );
             discard_apply_handoff(&resources_dir);
             terminate_and_wait_child(&mut child);
             return Err(format!(
@@ -2052,6 +2680,10 @@ mod imp_macos {
                 Ok(Some(status)) => {
                     eprintln!(
                         "murasaki-launcher: bundled Node process exited unexpectedly: {status}"
+                    );
+                    report_unexpected_node_exit(
+                        "bundled Node process exited unexpectedly",
+                        &status,
                     );
                     discard_apply_handoff(&resources_dir);
                     let resources = windows.borrow_mut().prepare_close_all();
@@ -2493,12 +3125,13 @@ mod imp_win {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, load_menu_locales,
-        main_shutdown_transport_timeout, maybe_spawn_apply_helper, normalize_locale,
-        open_targets_from_args, open_targets_from_urls, poll_unexpected_child_exit, read_meta,
-        request_main_open, resolve_menu_labels, resolve_windows, runtime_token,
-        shutdown_allows_update, spawn_prod_server, terminate_and_wait_child, InstanceRole,
-        ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
+        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
+        normalize_locale, open_targets_from_args, open_targets_from_urls,
+        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
+        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
+        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
+        ShutdownPoll, WindowControlCoordinator,
     };
     use super::win_job::KillOnCloseJob;
 
@@ -2758,6 +3391,7 @@ mod imp_win {
         let meta = read_meta(&resources_dir)?;
         let shutdown_transport_timeout = main_shutdown_transport_timeout(&meta)?;
         let app_id = meta.app_id.as_deref().unwrap_or(&meta.product_name);
+        init_crash_context(app_id, &meta);
         let mut primary_instance = match acquire_instance(app_id)? {
             InstanceRole::Primary(primary) => primary,
             InstanceRole::Secondary(secondary) => {
@@ -2949,6 +3583,10 @@ mod imp_win {
         runtime_windows.create_on_launch(&event_loop)?;
 
         if let Some(status) = poll_unexpected_child_exit(&mut child)? {
+            report_unexpected_node_exit(
+                "bundled Node process exited before startup health acknowledgement",
+                &status,
+            );
             discard_apply_handoff(&resources_dir);
             job.terminate();
             return Err(format!(
@@ -2984,6 +3622,10 @@ mod imp_win {
                     let _ = writeln!(
                         std::io::stderr(),
                         "murasaki-launcher: bundled Node process exited unexpectedly: {status}"
+                    );
+                    report_unexpected_node_exit(
+                        "bundled Node process exited unexpectedly",
+                        &status,
                     );
                     discard_apply_handoff(&resources_dir);
                     let resources = windows.borrow_mut().prepare_close_all();
@@ -3276,6 +3918,15 @@ mod imp_win {
 /// headless right after the previous app instance has quit to make way for
 /// it.
 pub fn run_launcher() {
+    // Installed before anything else so a panic anywhere below — including
+    // update recovery/apply and association management — at least gets the
+    // chance to write a native crash report (best-effort no-op until
+    // `shared::init_crash_context` has run; see that function). Default
+    // panic/abort behavior is completely unchanged — see
+    // `shared::install_panic_hook`'s doc comment.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    shared::install_panic_hook();
+
     if let Some(code) = crate::updater::maybe_recover_update() {
         std::process::exit(code);
     }
