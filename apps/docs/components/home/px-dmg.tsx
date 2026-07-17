@@ -204,10 +204,10 @@ export function PxDmgInstaller({
               dragging ? "cursor-grabbing" : "cursor-grab"
             } ${installed ? "pointer-events-none opacity-0" : ""}`}
           >
-            <span className="flex aspect-square w-full items-center justify-center rounded-[22%] bg-[linear-gradient(180deg,#2b1248_0%,#13051f_100%)] p-2.5 shadow-[0_6px_16px_-4px_rgba(17,16,20,0.45)] ring-1 ring-white/10">
+            <span className="flex size-full shrink-0 items-center justify-center rounded-[22%] bg-[linear-gradient(180deg,#2b1248_0%,#13051f_100%)] p-2.5 shadow-[0_6px_16px_-4px_rgba(17,16,20,0.45)] ring-1 ring-white/10">
               <PixelButterfly className="h-full w-auto" />
             </span>
-            <span className="lp-sans text-[11px] font-medium text-[#111014]/70">
+            <span className="lp-sans pointer-events-none absolute left-1/2 top-full mt-1.5 -translate-x-1/2 whitespace-nowrap text-[11px] font-medium text-[#111014]/70">
               {appName}
             </span>
           </button>
