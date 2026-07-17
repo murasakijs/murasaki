@@ -77,12 +77,16 @@ export function resolveUpdater(
         : `https://github.com/${repo}/releases/download/${channel}/latest.json`
   }
 
+  const { publicKey, publicKeys } = resolvePublicKeys(opts, ctx.projectRoot)
+
   return {
     manifestUrl,
-    publicKey: resolvePublicKey(opts.publicKey, ctx.projectRoot),
+    publicKey,
+    publicKeys,
     channel,
     checkOnStart: opts.checkOnStart ?? true,
     checkIntervalMs: parseCheckInterval(opts.checkInterval),
+    maxManifestAgeDays: opts.maxManifestAgeDays ?? 90,
   }
 }
 
@@ -130,6 +134,30 @@ function resolvePublicKey(explicit: string | undefined, projectRoot: string): st
   throw new Error(
     'murasaki: updater is enabled but no public key was found. Run: murasaki release --keygen',
   )
+}
+
+/**
+ * Resolves the full pinned key set for rotation (contract §3-ish — see the
+ * auto-update guide's rotation runbook): `publicKey` (explicit config, env,
+ * or `.murasaki/update-key.pub` — same resolution as before) unioned with
+ * `publicKeys`, deduplicated. `publicKey` on the returned object stays the
+ * single primary key for back-compat; `publicKeys` is the complete set the
+ * runtime engine tries in order (hinted by the manifest's optional `keyId`).
+ */
+function resolvePublicKeys(
+  opts: { publicKey?: string; publicKeys?: string[] },
+  projectRoot: string,
+): { publicKey: string; publicKeys: string[] } {
+  const publicKey = resolvePublicKey(opts.publicKey, projectRoot)
+  const seen = new Set<string>()
+  const publicKeys: string[] = []
+  for (const key of [publicKey, ...(opts.publicKeys ?? [])]) {
+    const trimmed = key.trim()
+    if (seen.has(trimmed)) continue
+    seen.add(trimmed)
+    publicKeys.push(trimmed)
+  }
+  return { publicKey, publicKeys }
 }
 
 /** `'30m' | '6h' | '1d'` → milliseconds. `false` passes through. Defaults to `'6h'`. */

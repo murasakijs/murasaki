@@ -489,6 +489,8 @@ export type UpdaterConfig = boolean | {
     checkOnStart?: boolean;
     checkInterval?: string | false;
     publicKey?: string;
+    publicKeys?: string[];
+    maxManifestAgeDays?: number;
 };
 
 // @public (undocumented)

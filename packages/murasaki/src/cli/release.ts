@@ -15,7 +15,7 @@ import { loadUserConfig } from './load-config.js'
  * Three independent subcommands, dispatched by flag:
  *
  *   murasaki release --keygen
- *   murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]
+ *   murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory] [--rollout <0-100>]
  *   murasaki release --sign
  *
  * `--generate-manifest` is kept working as a deprecated alias of `--manifest`.
@@ -39,7 +39,7 @@ export default async function release(argv: string[]) {
   process.stdout.write(
     `\n  ${pc.yellow('!')} usage:\n` +
       `    murasaki release --keygen [--force]\n` +
-      `    murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory]\n` +
+      `    murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--mandatory] [--rollout <0-100>]\n` +
       `    murasaki release --sign\n\n`,
   )
 }
@@ -126,15 +126,17 @@ async function ensureGitignored(cwd: string, entry: string): Promise<void> {
 /**
  * Scans `dist/` for this version's payloads (contract §5:
  * `dist/bundle/<productName>-darwin-<arch>.app.zip`,
- * `dist/<productName>-<version>-setup.exe`), hashes whichever exist, and
- * writes `dist/latest.json`. Missing targets are skipped, not errors — an
- * app may only ship for some platforms; only zero payloads found is fatal.
+ * `dist/<productName>-<version>-setup-<arch>.exe`), hashes whichever exist,
+ * and writes `dist/latest.json`. Missing targets are skipped, not errors —
+ * an app may only ship for some platforms; only zero payloads found is
+ * fatal.
  */
 async function manifest(argv: string[], cwd: string): Promise<void> {
   const baseUrl = flag(argv, '--base-url')
   const version = flag(argv, '--version')
   const notes = flag(argv, '--notes') ?? ''
   const mandatory = argv.includes('--mandatory')
+  const rollout = parseRolloutFlag(argv)
   if (!baseUrl || !version) {
     process.stderr.write(`\n  ${pc.red('✗')} --base-url and --version are required\n\n`)
     process.exit(1)
@@ -143,25 +145,38 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
   const config = await loadUserConfig(cwd)
   const productName = config.productName
 
-  // The win32 NSIS installer's filename (installer.ts) doesn't currently
-  // encode arch, so only win32-x64 is distinguishable here — matching
-  // contract §5's payload table, which lists a single Windows row.
-  const targets: Array<{ key: string; file: string }> = [
-    { key: 'darwin-arm64', file: resolve(cwd, 'dist/bundle', `${productName}-darwin-arm64.app.zip`) },
-    { key: 'darwin-x64', file: resolve(cwd, 'dist/bundle', `${productName}-darwin-x64.app.zip`) },
-    { key: 'win32-x64', file: resolve(cwd, 'dist', `${productName}-${version}-setup.exe`) },
+  // Each win32 target lists its candidate filename(s) in preference order:
+  // installer.ts now names the NSIS installer `-setup-<arch>.exe` (win32
+  // arm64 support), but a win32-x64 build published before that change used
+  // the un-suffixed `-setup.exe` — still recognized here so already-published
+  // assets keep resolving.
+  const targets: Array<{ key: string; files: string[] }> = [
+    { key: 'darwin-arm64', files: [resolve(cwd, 'dist/bundle', `${productName}-darwin-arm64.app.zip`)] },
+    { key: 'darwin-x64', files: [resolve(cwd, 'dist/bundle', `${productName}-darwin-x64.app.zip`)] },
+    {
+      key: 'win32-x64',
+      files: [
+        resolve(cwd, 'dist', `${productName}-${version}-setup-x64.exe`),
+        resolve(cwd, 'dist', `${productName}-${version}-setup.exe`), // legacy, pre-arch-suffix name
+      ],
+    },
+    { key: 'win32-arm64', files: [resolve(cwd, 'dist', `${productName}-${version}-setup-arm64.exe`)] },
   ]
 
   const assets: Record<string, { url: string; sha256: string }> = {}
   for (const t of targets) {
-    try {
-      const buf = await readFile(t.file)
-      assets[t.key] = {
-        url: `${baseUrl.replace(/\/$/, '')}/${t.file.split(/[\\/]/).pop()}`,
-        sha256: createHash('sha256').update(buf).digest('hex'),
+    for (const file of t.files) {
+      try {
+        const buf = await readFile(file)
+        assets[t.key] = {
+          url: `${baseUrl.replace(/\/$/, '')}/${file.split(/[\\/]/).pop()}`,
+          sha256: createHash('sha256').update(buf).digest('hex'),
+        }
+        break // first existing candidate for this target wins
+      } catch {
+        // try the next candidate name, or skip the target — the app may
+        // only ship for some platforms
       }
-    } catch {
-      // skip missing target — the app may only ship for some platforms
     }
   }
 
@@ -172,11 +187,18 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
     process.exit(1)
   }
 
+  // `generatedAt` is the anti-freeze/replay guard the client checks against
+  // `updater.maxManifestAgeDays` — see runtime/updater.ts's
+  // `assertManifestFreshness`. Same instant as `publishedAt` (kept for
+  // back-compat / human display) so the two never drift apart.
+  const generatedAt = new Date().toISOString()
   const manifestObj = {
     version,
-    publishedAt: new Date().toISOString(),
+    publishedAt: generatedAt,
+    generatedAt,
     notes,
     mandatory,
+    ...(rollout !== undefined ? { rollout } : {}),
     assets,
   }
 
@@ -190,14 +212,37 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
   )
 }
 
+/** Parses `--rollout <0-100>` (staged rollout percentage — contract-adjacent, see the auto-update guide). Exits with an error on a malformed value; `undefined` (field omitted, meaning 100%) when the flag isn't passed. */
+function parseRolloutFlag(argv: string[]): number | undefined {
+  const raw = flag(argv, '--rollout')
+  if (raw === undefined) return undefined
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    process.stderr.write(`\n  ${pc.red('✗')} --rollout must be an integer between 0 and 100\n\n`)
+    process.exit(1)
+  }
+  return value
+}
+
 // ── --sign ──────────────────────────────────────────────────────────────
 
 /**
  * Signs `dist/latest.json` → `dist/latest.json.sig`: base64 of a detached
- * Ed25519 signature over the manifest's exact raw bytes (contract §1 — never
- * re-serialized, so the client verifies the bytes as received before
+ * Ed25519 signature over the manifest's exact raw bytes (contract §1 — the
+ * client never re-serializes them, verifying the bytes as received before
  * `JSON.parse`ing them). Key from `$MURASAKI_UPDATE_KEY`, else
  * `.murasaki/update-key`.
+ *
+ * When the committed public key file (`.murasaki/update-key.pub`) is
+ * present, this also injects a `keyId` field — the first 8 bytes (hex) of
+ * sha256 of the raw 32-byte public key — into `dist/latest.json` *before*
+ * signing, so it's covered by the signature like every other field. The
+ * client uses `keyId` only as a hint for which pinned key to try first
+ * during rotation (see the auto-update guide's rotation runbook); it never
+ * skips trying every pinned key. Skipped (not an error) when the public key
+ * file isn't available — e.g. a bring-your-own-key setup that only holds
+ * `$MURASAKI_UPDATE_KEY` — since the client already tries every pinned key
+ * regardless of a hint.
  */
 async function signManifest(cwd: string): Promise<void> {
   const manifestPath = resolve(cwd, 'dist/latest.json')
@@ -222,13 +267,36 @@ async function signManifest(cwd: string): Promise<void> {
     format: 'der',
     type: 'pkcs8',
   })
-  const data = await readFile(manifestPath)
+
+  const data = await injectKeyIdIfAvailable(cwd, manifestPath)
   const signature = signEd25519(null, data, privateKey)
 
   const sigPath = resolve(cwd, 'dist/latest.json.sig')
   await writeFile(sigPath, signature.toString('base64'))
 
   process.stdout.write(`\n  ${pc.green('✓')} wrote ${sigPath}\n\n`)
+}
+
+/**
+ * Rewrites `dist/latest.json` with a `keyId` field and returns its new raw
+ * bytes, or returns the manifest's bytes unchanged if `.murasaki/update-key.pub`
+ * doesn't exist or isn't a valid 32-byte key. See `signManifest`'s doc comment.
+ */
+async function injectKeyIdIfAvailable(cwd: string, manifestPath: string): Promise<Buffer> {
+  const original = await readFile(manifestPath)
+  const pubKeyPath = resolve(cwd, '.murasaki/update-key.pub')
+  if (!existsSync(pubKeyPath)) return original
+
+  const pubB64 = (await readFile(pubKeyPath, 'utf8')).trim()
+  const pubRaw = Buffer.from(pubB64, 'base64')
+  if (pubRaw.length !== 32) return original
+
+  const keyId = createHash('sha256').update(pubRaw).digest('hex').slice(0, 16)
+  const parsed = JSON.parse(original.toString('utf8'))
+  parsed.keyId = keyId
+  const updated = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`)
+  await writeFile(manifestPath, updated)
+  return updated
 }
 
 async function resolvePrivateKey(cwd: string): Promise<string> {

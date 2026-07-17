@@ -5,7 +5,7 @@ name: App package smoke test (Windows)
 # addon + murasaki-launcher freshly built from THIS branch — the published
 # @murasakijs/native@0.31.0 only ships the old macOS-only stub launcher (see
 # crates/native/src/launcher.rs), so testing against it would miss the whole
-# point of this workflow. Also builds and verifies the NSIS `-setup.exe` +
+# point of this workflow. Also builds and verifies the NSIS `-setup-<arch>.exe` +
 # WiX `.msi` installers (murasaki installer --target win32-<arch>, Phase 2 of
 # Windows packaging — see packages/murasaki/src/cli/installer.ts's win32
 # path), which only run for real on Windows (WiX in particular is
@@ -233,7 +233,7 @@ jobs:
 
       # Locates whichever installer artifacts got produced. The portable zip
       # has no external tool dependency, so it's always mandatory. The NSIS
-      # -setup.exe/.msi are mandatory on the x64 leg (both toolchains always
+      # -setup-<arch>.exe/.msi are mandatory on the x64 leg (both toolchains always
       # install cleanly there) but best-effort on the arm64 leg: if the
       # Install NSIS/WiX steps above degraded (see their comments), murasaki
       # installer already warned + skipped that installer type rather than
@@ -250,15 +250,15 @@ jobs:
 
           $mandatory = '${{ matrix.arch }}' -eq 'x64'
 
-          $setup = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *-setup.exe | Select-Object -First 1
+          $setup = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *-setup-*.exe | Select-Object -First 1
           if ($setup) {
-            Write-Host "setup.exe: $($setup.FullName) ($($setup.Length) bytes)"
+            Write-Host "setup exe: $($setup.FullName) ($($setup.Length) bytes)"
             "setupPath=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           } elseif ($mandatory) {
-            Write-Error 'No NSIS -setup.exe found under examples/win-smoke-app/dist'
+            Write-Error 'No NSIS -setup-<arch>.exe found under examples/win-smoke-app/dist'
             exit 1
           } else {
-            Write-Host '::warning::No NSIS -setup.exe found on the arm64 leg — makensis was likely unavailable on windows-11-arm (see the Install NSIS step above).'
+            Write-Host '::warning::No NSIS -setup-<arch>.exe found on the arm64 leg — makensis was likely unavailable on windows-11-arm (see the Install NSIS step above).'
           }
 
           $msi = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *.msi | Select-Object -First 1
@@ -274,7 +274,7 @@ jobs:
 
       # Asserts whichever installers were produced above are well-formed by
       # checking their magic bytes rather than trusting the file extension —
-      # cheap and doesn't need msiexec/admin rights: setup.exe must be a PE
+      # cheap and doesn't need msiexec/admin rights: the setup exe must be a PE
       # (MZ magic), .msi must be an OLE Compound File (the container format
       # Windows Installer uses). WiX/makensis already exited non-zero on a
       # real build failure (installer.ts throws/warns and the previous
@@ -290,10 +290,10 @@ jobs:
           if ($setupPath) {
             $setupBytes = [System.IO.File]::ReadAllBytes($setupPath)
             if ($setupBytes.Length -lt 2 -or $setupBytes[0] -ne 0x4D -or $setupBytes[1] -ne 0x5A) {
-              Write-Error 'setup.exe does not start with the MZ (PE) magic'
+              Write-Error 'setup exe does not start with the MZ (PE) magic'
               exit 1
             }
-            Write-Host 'setup.exe is well-formed.'
+            Write-Host 'setup exe is well-formed.'
           }
 
           $msiPath = "${{ steps.locate-installers.outputs.msiPath }}"
@@ -314,7 +314,7 @@ jobs:
       # `continue-on-error` per this workflow's spec — the mandatory checks
       # above already assert the installers themselves are real, so a flaky
       # silent-install/launch here shouldn't fail the whole job. Skipped
-      # entirely if setup.exe wasn't produced (only possible on the arm64
+      # entirely if the setup exe wasn't produced (only possible on the arm64
       # leg — see "Locate installer artifacts" above).
       - name: Silent-install the NSIS installer and smoke test
         id: silent-install
@@ -373,7 +373,7 @@ jobs:
       # .github/scripts/win-updater-e2e.ps1's header comment for the full story
       # and its assertions in order.
       #
-      # Needs a real NSIS `-setup.exe`, so it's gated on the same
+      # Needs a real NSIS `-setup-<arch>.exe`, so it's gated on the same
       # `setupPath` output as the bonus silent-install smoke test above —
       # but unlike that step, this one is NOT continue-on-error: a failure
       # here is the actual regression this workflow exists to catch, not a
@@ -427,7 +427,7 @@ jobs:
         working-directory: examples/win-smoke-app
         # Re-runs against the SAME staged bundle (now containing the marker
         # file from the previous step) with --no-build, so this overwrites
-        # the exact same dist/<productName>-<version>-setup.exe path
+        # the exact same dist/<productName>-<version>-setup-<arch>.exe path
         # steps.locate-installers.outputs.setupPath already points at —
         # that path now holds "v2"; steps.copy-v1's copy (above) is "v1".
         run: pnpm exec murasaki installer --target win32-${{ matrix.arch }} --no-build
@@ -455,7 +455,7 @@ jobs:
         with:
           name: win32-installers-${{ matrix.arch }}
           path: |
-            examples/win-smoke-app/dist/*-setup.exe
+            examples/win-smoke-app/dist/*-setup-*.exe
             examples/win-smoke-app/dist/*.msi
             examples/win-smoke-app/dist/bundle/*.zip
           if-no-files-found: warn
@@ -467,6 +467,6 @@ jobs:
         with:
           name: win32-setup-msi-${{ matrix.arch }}
           path: |
-            examples/win-smoke-app/dist/*-setup.exe
+            examples/win-smoke-app/dist/*-setup-*.exe
             examples/win-smoke-app/dist/*.msi
           if-no-files-found: warn

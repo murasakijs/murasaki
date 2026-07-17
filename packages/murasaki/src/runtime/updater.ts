@@ -26,9 +26,9 @@
  * implementation shared by dev and production; do not mirror its security-
  * sensitive manifest/download logic into the standalone server.
  */
-import { createHash, createPublicKey, randomBytes, verify as verifyEd25519 } from 'node:crypto'
+import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifyEd25519 } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
-import { chmod, mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, readFile, rename, rm } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -92,6 +92,13 @@ const DEFAULT_DOWNLOAD_TIMEOUT_MS = 10 * 60_000
 const DEFAULT_MAX_MANIFEST_BYTES = 1024 * 1024
 const DEFAULT_MAX_SIGNATURE_BYTES = 16 * 1024
 const DEFAULT_MAX_PAYLOAD_BYTES = 2 * 1024 * 1024 * 1024
+/** Fallback for `ResolvedUpdater.maxManifestAgeDays` if a caller hands the engine an older/incomplete resolved shape. `resolveUpdater()` itself always fills this in. */
+const DEFAULT_MAX_MANIFEST_AGE_DAYS = 90
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+/** A manifest's `generatedAt` up to this far in the future is tolerated as ordinary clock skew; beyond it is treated as a tampering/misconfiguration signal. */
+const CLOCK_SKEW_TOLERANCE_MS = 24 * 60 * 60 * 1000
+/** Persisted per-install random id used only to compute a stable staged-rollout bucket (contract-adjacent — see the auto-update guide's "Staged rollout" section). Colocated with `.murasaki-apply.json` (see `install()`). */
+const CLIENT_ID_FILENAME = 'update-client-id'
 
 export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   const listeners = new Set<(state: UpdateState) => void>()
@@ -101,6 +108,9 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   let stagedPath: string | undefined
   let stagedSha256: string | undefined
   let stagedDirectory: string | undefined
+  // Cached so every check() reuses the same id/bucket instead of re-reading
+  // (or re-creating) the file, and so concurrent checks join one resolution.
+  let clientIdPromise: Promise<string> | undefined
 
   const requestTimeoutMs = positiveLimit(opts.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS, 'requestTimeoutMs')
   const downloadTimeoutMs = positiveLimit(
@@ -166,7 +176,15 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
     }
 
     try {
-      const { manifestUrl, publicKey } = opts.resolvedUpdater
+      const { manifestUrl, publicKey, publicKeys, maxManifestAgeDays } = opts.resolvedUpdater
+
+      // Defense in depth: config.ts's validateUpdaterConfig already rejects a
+      // non-https `updater.endpoint` (except loopback, for local testing) at
+      // config-validation time. This is the fetch-time half of that pair —
+      // it protects against a config bypass (a hand-built `ResolvedUpdater`,
+      // or a future code path that skips validateConfig).
+      assertSecureManifestUrl(manifestUrl)
+
       const manifestBytes = await fetchLimitedBytes(
         manifestUrl,
         'manifest',
@@ -181,11 +199,19 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
       )
       const sigText = sigBytes.toString('utf8')
 
+      // `keyId` (contract-adjacent — see the auto-update guide's rotation
+      // runbook) is only a HINT for which pinned key to try first: it's read
+      // from the not-yet-verified bytes, so it carries no trust of its own.
+      // `verifyManifestSignature` always falls back to every pinned key
+      // regardless of whether the hint matched.
+      const keyIdHint = peekManifestKeyId(manifestBytes)
+      const pinnedKeys = publicKeys && publicKeys.length > 0 ? publicKeys : [publicKey]
+
       // Verify BEFORE parsing — the raw bytes are what was signed (contract
       // §1). A bad/missing signature is a hard error, never a silent pass:
       // this Ed25519 check is the only authenticity guarantee this project
       // has (there is no Authenticode signing on Windows at all).
-      if (!verifyManifestSignature(manifestBytes, sigText, publicKey)) {
+      if (!verifyManifestSignature(manifestBytes, sigText, pinnedKeys, keyIdHint)) {
         throw new Error('manifest signature verification failed — refusing to trust this manifest')
       }
 
@@ -193,6 +219,15 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
       if (typeof manifest?.version !== 'string' || typeof manifest?.assets !== 'object') {
         throw new Error('manifest is malformed (missing "version" or "assets")')
       }
+
+      // Anti-freeze/replay guard: refuse a manifest whose declared
+      // generation time is stale (an attacker who can only replay old,
+      // still-validly-signed manifests can otherwise freeze a fleet on a
+      // known-vulnerable version forever) or implausibly far in the future
+      // (a tampering/misconfiguration signal beyond ordinary clock skew). A
+      // manifest with no `generatedAt` at all predates this field and is
+      // still accepted, but logs a warning.
+      assertManifestFreshness(manifest.generatedAt, maxManifestAgeDays ?? DEFAULT_MAX_MANIFEST_AGE_DAYS)
 
       if (compareVersions(manifest.version, opts.currentVersion) <= 0) {
         manifestInfo = undefined
@@ -210,6 +245,26 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
         return setState({ status: 'not-available', current: opts.currentVersion, latest: manifest.version })
       }
 
+      // Staged rollout: an absent/100 `rollout` always passes. Below 100, a
+      // stable per-install bucket decides — this is a distribution knob, not
+      // a security boundary, so an excluded client is reported the same as
+      // "no update for you" (not-available), never `error`.
+      const rolloutPercent = resolveRolloutPercent(manifest.rollout)
+      if (rolloutPercent < 100) {
+        const clientId = await getClientId()
+        const bucket = rolloutBucket(clientId)
+        if (bucket >= rolloutPercent) {
+          manifestInfo = undefined
+          manifestAsset = undefined
+          logUpdaterEvent('info', 'updater.rollout.excluded', {
+            version: manifest.version,
+            rollout: rolloutPercent,
+            bucket,
+          })
+          return setState({ status: 'not-available', current: opts.currentVersion, latest: manifest.version })
+        }
+      }
+
       manifestInfo = { version: manifest.version, notes: manifest.notes, mandatory: manifest.mandatory }
       manifestAsset = { url: asset.url, sha256: asset.sha256 }
       return setState({
@@ -222,6 +277,39 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
     } catch (err) {
       return setState({ status: 'error', current: opts.currentVersion, error: errorMessage(err) })
     }
+  }
+
+  /**
+   * The stable per-install random id staged rollout buckets on — persisted
+   * as `update-client-id`, colocated with `install()`'s `.murasaki-apply.json`
+   * handoff file (same directory: `resourcesDir` in prod; dev has no
+   * `resourcesDir`, so it falls back to the download staging root). Reused
+   * (not regenerated) across restarts so a client's rollout bucket is stable;
+   * best-effort persistence — a write failure (e.g. read-only resources dir)
+   * still returns an id for this session so rollout gating keeps working.
+   */
+  function getClientId(): Promise<string> {
+    if (!clientIdPromise) clientIdPromise = loadOrCreateClientId()
+    return clientIdPromise
+  }
+
+  async function loadOrCreateClientId(): Promise<string> {
+    const dir = opts.resourcesDir ?? opts.stagingDir ?? join(tmpdir(), 'murasaki-update')
+    const path = join(dir, CLIENT_ID_FILENAME)
+    try {
+      const existing = (await readFile(path, 'utf8')).trim()
+      if (UUID_RE.test(existing)) return existing
+    } catch {
+      // missing/unreadable — create one below
+    }
+    const id = randomUUID()
+    try {
+      await mkdir(dir, { recursive: true })
+      await writeAtomicPrivateFile(path, id)
+    } catch {
+      // best-effort — see doc comment above
+    }
+    return id
   }
 
   let inFlightDownload: Promise<void> | undefined
@@ -387,8 +475,55 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   return { getState, onChange, check, download, install, dispose }
 }
 
-/** Wraps the raw 32-byte base64 public key (contract §2) as SPKI DER and verifies a detached Ed25519 signature over the raw manifest bytes. */
-function verifyManifestSignature(manifestBytes: Buffer, sigBase64: string, publicKeyB64: string): boolean {
+/**
+ * Verifies a detached Ed25519 signature over the raw manifest bytes against
+ * every pinned key in `publicKeys` (key rotation — see the auto-update
+ * guide's rotation runbook), until one succeeds. `keyIdHint` — read from the
+ * not-yet-verified manifest by `peekManifestKeyId` — only reorders which
+ * pinned key is tried first; every pinned key is still tried regardless of
+ * whether it matches, so a stale/wrong hint can never cause a false reject.
+ */
+function verifyManifestSignature(
+  manifestBytes: Buffer,
+  sigBase64: string,
+  publicKeys: readonly string[],
+  keyIdHint: string | undefined,
+): boolean {
+  const ordered = orderKeysByHint(publicKeys, keyIdHint)
+  return ordered.some((publicKeyB64) => verifyWithSingleKey(manifestBytes, sigBase64, publicKeyB64))
+}
+
+/** Moves the pinned key whose `keyId` matches `keyIdHint` (if any) to the front; leaves order untouched otherwise. */
+function orderKeysByHint(publicKeys: readonly string[], keyIdHint: string | undefined): readonly string[] {
+  if (!keyIdHint) return publicKeys
+  const matchIndex = publicKeys.findIndex((key) => computeKeyId(key) === keyIdHint)
+  if (matchIndex <= 0) return publicKeys
+  return [publicKeys[matchIndex], ...publicKeys.slice(0, matchIndex), ...publicKeys.slice(matchIndex + 1)]
+}
+
+/** The first 8 bytes (hex) of sha256(raw 32-byte public key) — matches `murasaki release --sign`'s `keyId`. `undefined` for a malformed key rather than throwing, so a bad pinned key just never matches a hint. */
+function computeKeyId(publicKeyB64: string): string | undefined {
+  try {
+    const rawKey = Buffer.from(publicKeyB64.trim(), 'base64')
+    if (rawKey.length !== 32) return undefined
+    return createHash('sha256').update(rawKey).digest('hex').slice(0, 16)
+  } catch {
+    return undefined
+  }
+}
+
+/** Reads a `keyId` hint out of the manifest bytes without trusting them — used only to pick which pinned key `verifyManifestSignature` tries first. */
+function peekManifestKeyId(manifestBytes: Buffer): string | undefined {
+  try {
+    const parsed = JSON.parse(manifestBytes.toString('utf8'))
+    return typeof parsed?.keyId === 'string' ? parsed.keyId : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Wraps the raw 32-byte base64 public key (contract §2) as SPKI DER and verifies a detached Ed25519 signature over the raw manifest bytes against a single key. */
+function verifyWithSingleKey(manifestBytes: Buffer, sigBase64: string, publicKeyB64: string): boolean {
   try {
     const rawKey = Buffer.from(publicKeyB64.trim(), 'base64')
     if (rawKey.length !== 32) return false
@@ -404,6 +539,89 @@ function verifyManifestSignature(manifestBytes: Buffer, sigBase64: string, publi
     // one — never let a parse error fall through as "unverified but ok".
     return false
   }
+}
+
+/**
+ * TLS enforcement for a custom `updater.endpoint` (fetch-time half of the
+ * defense-in-depth pair — see config.ts's `validateUpdaterConfig`, which
+ * rejects this at config-validation time). Duplicated (not imported) because
+ * this module compiles to a standalone `updater-engine.mjs` with no
+ * non-`node:` imports, copied alone into a packaged app's resources dir (see
+ * this file's top doc comment) — it can't reach into config.ts at runtime.
+ */
+function assertSecureManifestUrl(manifestUrl: string): void {
+  let parsed: URL
+  try {
+    parsed = new URL(manifestUrl)
+  } catch {
+    throw new Error('updater: manifestUrl is not a valid URL')
+  }
+  if (parsed.protocol === 'https:') return
+  if (parsed.protocol === 'http:' && isLoopbackUpdaterHost(parsed.hostname)) return
+  throw new Error(
+    'updater: manifestUrl must use https: (http: is only allowed for loopback hosts — ' +
+      '127.0.0.1, localhost, [::1] — for local testing)',
+  )
+}
+
+function isLoopbackUpdaterHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]'
+}
+
+/**
+ * Anti-freeze/replay guard for the manifest's optional `generatedAt`
+ * (written by `murasaki release --manifest`). Absent: accepted for
+ * back-compat with manifests published before this field existed, but logs a
+ * structured warning. Present: must parse as a real timestamp, must not be
+ * older than `maxAgeDays`, and must not be more than `CLOCK_SKEW_TOLERANCE_MS`
+ * in the future — both throw, becoming this check()'s `error` state.
+ */
+function assertManifestFreshness(generatedAt: unknown, maxAgeDays: number): void {
+  if (generatedAt === undefined) {
+    logUpdaterEvent('warn', 'updater.manifest.generated_at_missing', {})
+    return
+  }
+  if (typeof generatedAt !== 'string') {
+    throw new Error('manifest "generatedAt" must be an ISO 8601 timestamp string')
+  }
+  const generatedMs = Date.parse(generatedAt)
+  if (Number.isNaN(generatedMs)) {
+    throw new Error(`manifest "generatedAt" (${generatedAt}) is not a valid ISO 8601 timestamp`)
+  }
+  const ageMs = Date.now() - generatedMs
+  if (ageMs > maxAgeDays * MS_PER_DAY) {
+    throw new Error(
+      `manifest is older than the ${maxAgeDays}-day freshness limit (generatedAt: ${generatedAt}) — ` +
+        'refusing a possibly frozen or replayed manifest',
+    )
+  }
+  if (ageMs < -CLOCK_SKEW_TOLERANCE_MS) {
+    throw new Error(
+      `manifest "generatedAt" (${generatedAt}) is too far in the future — possible clock skew or tampering`,
+    )
+  }
+}
+
+/** Clamps a manifest's optional `rollout` to 0-100; a missing/malformed value means "no restriction" (100). */
+function resolveRolloutPercent(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 100
+  return Math.min(100, Math.max(0, Math.trunc(value)))
+}
+
+/** First byte of sha256(clientId) mod 100 — a stable, uniformly-distributed 0-99 bucket for staged rollout. */
+function rolloutBucket(clientId: string): number {
+  const digest = createHash('sha256').update(clientId).digest()
+  return digest[0] % 100
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** One-line structured JSON log for non-error updater events (manifest warnings, rollout exclusion) — mirrors `main/logger.ts`'s JSONL shape without depending on it (see this module's no-non-`node:`-imports constraint). */
+function logUpdaterEvent(level: 'info' | 'warn', event: string, fields: Record<string, unknown>): void {
+  const line = JSON.stringify({ timestamp: new Date().toISOString(), level, event, ...fields })
+  if (level === 'warn') console.warn(line)
+  else console.log(line)
 }
 
 /**

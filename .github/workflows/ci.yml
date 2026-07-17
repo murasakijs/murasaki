@@ -782,7 +782,7 @@ jobs:
           }
 
           $app = (Resolve-Path 'examples/ci-win-app/dist/bundle/Murasaki CI Windows/Murasaki CI Windows.exe').Path
-          $setup = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0-setup.exe').Path
+          $setup = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0-setup-x64.exe').Path
           $msi = (Resolve-Path 'examples/ci-win-app/dist/Murasaki CI Windows-0.0.0.msi').Path
           @($app, $setup, $msi) | ForEach-Object { Assert-CiAuthenticodeIntegrity -Path $_ }
 
