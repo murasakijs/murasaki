@@ -46,6 +46,17 @@ export type SystemPermissionName =
   | 'microphone'
   | 'screenRecording'
   | 'accessibility'
+  | 'inputMonitoring'
+  | 'location'
+  | 'fullDiskAccess'
+  | 'photos'
+  | 'contacts'
+  | 'calendar'
+  | 'reminders'
+  | 'speechRecognition'
+  | 'bluetooth'
+  | 'appleEvents'
+  | 'localNetwork'
 
 export type SystemPermissionStatus =
   | 'granted'
@@ -54,6 +65,12 @@ export type SystemPermissionStatus =
   | 'notDetermined'
   | 'notGranted'
   | 'unsupported'
+  /**
+   * Returned by kinds with no real TCC query: `fullDiskAccess`'s heuristic
+   * status check could not be performed, or `appleEvents`/`localNetwork`
+   * (which have no query API at all — see `MacOSDeclarationOnlyPermissionConfig`).
+   */
+  | 'unknown'
 
 export interface TrayOptions {
   /** Tooltip shown by the host OS. */
@@ -123,6 +140,16 @@ export const app = {
   /** Request graceful application shutdown through the native host. */
   quit(): Promise<void> {
     return invokeNative('app.quit')
+  },
+  /**
+   * Read-only, best-effort query of whether the native host process is
+   * already running elevated. On Windows this reflects the process token's
+   * elevation state; on macOS/Linux "elevated" means effective root (rare
+   * and discouraged for a GUI app) — never fails, so a query that can't
+   * determine elevation just resolves `false`. Requires `app:isElevated`.
+   */
+  isElevated(): Promise<boolean> {
+    return invokeNative('app.isElevated')
   },
 }
 
@@ -251,6 +278,27 @@ export const notification = {
   },
 }
 
+export interface RunElevatedOptions {
+  /** Absolute, non-traversing path to an existing executable. */
+  executable: string
+  /** Optional command-line arguments, passed directly — never through a shell. */
+  args?: string[]
+}
+
+/** `shell.runElevated`'s argument bounds — kept in lockstep with the native
+ * host's own limits (see `crates/native/src/elevation.rs`) so a request that
+ * would be rejected there fails fast, before the round trip. */
+const MAX_RUN_ELEVATED_ARGS = 64
+const MAX_RUN_ELEVATED_ARG_BYTES = 4096
+
+function isAbsoluteNonTraversingPath(value: string): boolean {
+  if (typeof value !== 'string' || value.length === 0) return false
+  const absolute = value.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || /^\\\\[^\\]+\\[^\\]+/.test(value)
+  return absolute && !value.split(/[\\/]+/).includes('..')
+}
+
 export const shell = {
   openExternal(target: string): Promise<void> {
     return invokeNative('shell.openExternal', { target })
@@ -266,6 +314,41 @@ export const shell = {
    * only — URLs and UNC/device paths are rejected; use `shell.openExternal` for URLs. */
   openPath(path: string): Promise<void> {
     return invokeNative('shell.openPath', { path })
+  },
+  /**
+   * Launches `executable` elevated through the Windows UAC "runas" verb —
+   * Windows only, every other platform rejects with an `unsupported` error.
+   * `executable` must be an absolute, non-traversing path to an existing
+   * file and is checked against the `shell:runElevated` capability scope,
+   * exactly like `shell.openPath`. `args` are passed directly (never
+   * through a shell) and are bounded to 64 entries of at most 4096 UTF-8
+   * bytes each. Fire-and-forget: resolves once the elevated process has
+   * launched, not when it exits.
+   *
+   * If the user declines the UAC consent prompt, this rejects with an error
+   * whose message is exactly `"elevation was cancelled by the user"`, so
+   * callers can handle a declined prompt distinctly from every other
+   * failure. Requires `shell:runElevated`.
+   */
+  runElevated(options: RunElevatedOptions): Promise<void> {
+    if (!isAbsoluteNonTraversingPath(options.executable)) {
+      return Promise.reject(
+        new Error('shell.runElevated executable must be an absolute, non-traversing path'),
+      )
+    }
+    const args = options.args ?? []
+    if (!Array.isArray(args) || args.length > MAX_RUN_ELEVATED_ARGS) {
+      return Promise.reject(
+        new Error(`shell.runElevated accepts at most ${MAX_RUN_ELEVATED_ARGS} arguments`),
+      )
+    }
+    if (args.some((arg) => typeof arg !== 'string'
+      || new TextEncoder().encode(arg).byteLength > MAX_RUN_ELEVATED_ARG_BYTES)) {
+      return Promise.reject(
+        new Error(`shell.runElevated arguments must be strings of at most ${MAX_RUN_ELEVATED_ARG_BYTES} UTF-8 bytes`),
+      )
+    }
+    return invokeNative('shell.runElevated', { executable: options.executable, args })
   },
 }
 

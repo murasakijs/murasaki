@@ -208,8 +208,8 @@ validated while loading config and enforced again by the Rust host.
 ## `systemPermissions`
 
 This config describes host-OS consent, not which renderer commands are trusted.
-For packaged macOS apps, Murasaki writes camera/microphone purpose text to
-`Info.plist` and can request selected permissions at launch:
+For packaged macOS apps, Murasaki writes purpose text to `Info.plist` and can
+request most permissions at launch:
 
 ```ts
 systemPermissions: {
@@ -223,6 +223,20 @@ systemPermissions: {
     },
     screenRecording: { requestOnLaunch: false },
     accessibility: { requestOnLaunch: false },
+    inputMonitoring: { requestOnLaunch: false },
+    location: {
+      usageDescription: 'Show nearby points of interest.',
+      mode: 'whenInUse',
+    },
+    fullDiskAccess: { requestOnLaunch: false },
+    photos: { usageDescription: 'Attach a photo to your post.' },
+    contacts: { usageDescription: 'Find your friends.' },
+    calendar: { usageDescription: 'See your schedule.' },
+    reminders: { usageDescription: 'See your reminders.' },
+    speechRecognition: { usageDescription: 'Transcribe your voice memos.' },
+    bluetooth: { usageDescription: 'Find nearby devices.' },
+    appleEvents: { usageDescription: 'Automate another app on your behalf.' },
+    localNetwork: { usageDescription: 'Discover devices on this network.' },
   },
 },
 ```
@@ -233,13 +247,40 @@ systemPermissions: {
 | `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSMicrophoneUsageDescription`; optionally prompts during packaged launch. |
 | `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | Optionally asks for screen-capture consent at packaged launch. |
 | `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | Optionally opens the macOS accessibility trust prompt at packaged launch. |
+| `macOS.inputMonitoring` | `{ requestOnLaunch?: boolean }` | Optionally asks for Input Monitoring (HID listen event) consent at packaged launch. |
+| `macOS.location` | `{ usageDescription: string; mode?: 'whenInUse' \| 'always'; requestOnLaunch?: boolean }` | Writes `NSLocationWhenInUseUsageDescription` (and, for `mode: 'always'`, also `NSLocationAlwaysAndWhenInUseUsageDescription`); optionally prompts during packaged launch. |
+| `macOS.fullDiskAccess` | `{ requestOnLaunch?: boolean }` | Guidance-only — there is no TCC request API, so `requestOnLaunch` opens the Full Disk Access pane in System Settings instead of showing an in-app prompt when status isn't already `granted`. |
+| `macOS.photos` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSPhotoLibraryUsageDescription` (read-write library access). |
+| `macOS.contacts` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSContactsUsageDescription`. |
+| `macOS.calendar` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSCalendarsUsageDescription` and `NSCalendarsFullAccessUsageDescription` (both always written, so one build stays correct on macOS 11 through 14+). |
+| `macOS.reminders` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSRemindersUsageDescription` and `NSRemindersFullAccessUsageDescription` (same reasoning as `calendar`). |
+| `macOS.speechRecognition` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSSpeechRecognitionUsageDescription`. |
+| `macOS.bluetooth` | `{ usageDescription: string; requestOnLaunch?: boolean }` | Writes `NSBluetoothAlwaysUsageDescription`. CoreBluetooth has no explicit request call — consent is determined implicitly the first time a central manager is created. |
+| `macOS.appleEvents` | `{ usageDescription: string }` | Writes `NSAppleEventsUsageDescription`. Declaration-only — no `requestOnLaunch`; automation consent is per-target-app, so `status()` always reports `unknown` and `request()` only opens System Settings' Automation pane as guidance. |
+| `macOS.localNetwork` | `{ usageDescription: string }` | Writes `NSLocalNetworkUsageDescription`. Declaration-only — no query/request API exists at all; macOS prompts automatically on first local-network access. |
 
 Prefer a contextual `systemPermission.request()` over launch-time prompts when
 the user can first understand the feature. Runtime calls additionally require
 `systemPermission:status` / `systemPermission:request` in that renderer's
 capability list. Windows unpackaged desktop consent is usage-driven, so it has
-no equivalent generic launch prompt. Test macOS TCC behavior from a packaged
-app, not the terminal/Node identity used by `murasaki dev`.
+no equivalent generic launch prompt; all fifteen permission kinds above are
+macOS-only, since Windows/Linux expose no OS-level equivalent of these
+TCC-gated prompts. Test macOS TCC behavior from a packaged app, not the
+terminal/Node identity used by `murasaki dev`.
+
+### Entitlements and the App Sandbox
+
+`sign.appSandbox` (default `false`) controls how `murasaki bundle --sign`'s
+generated default entitlements plist reacts to declared `systemPermissions`:
+with it off (Murasaki's default hardened-runtime-only posture), only
+`appleEvents` adds anything (`com.apple.security.automation.apple-events`) —
+every other kind works from its Info.plist usage string alone. With it on,
+`com.apple.security.app-sandbox` plus each declared kind's documented App
+Sandbox entitlement are added too (`photos` has none and is never added). This
+derivation only applies to the generated default plist — a custom
+`sign.entitlements` file is always used verbatim. See
+[Native APIs → Entitlements and the App Sandbox](/docs/guides/native-apis#entitlements-and-the-app-sandbox)
+for the full per-kind mapping.
 
 ## `main`
 
@@ -552,7 +593,8 @@ variables, never from this config — see
 | Field | Type | Description |
 | --- | --- | --- |
 | `identity` | `string?` | Signing identity, e.g. `"Developer ID Application: Name (TEAMID)"`. Defaults to `$MURASAKI_SIGN_IDENTITY`, then the first "Developer ID Application" identity in your keychain. |
-| `entitlements` | `string?` | Path to a custom entitlements `.plist`. Defaults to a Node-friendly hardened-runtime set (JIT + unsigned executable memory + disabled library validation). |
+| `entitlements` | `string?` | Path to a custom entitlements `.plist`. Defaults to a Node-friendly hardened-runtime set (JIT + unsigned executable memory + disabled library validation) plus a derivation from declared `systemPermissions` — see [`systemPermissions` → Entitlements and the App Sandbox](#systempermissions). |
+| `appSandbox` | `boolean?` | Opt into the macOS App Sandbox in the generated default entitlements plist. Default `false`. |
 
 ### `sign.windows`
 

@@ -16,6 +16,7 @@ const MAX_SCOPE_STRING_BYTES: usize = 8 * 1024;
 
 const KNOWN_CAPABILITIES: &[&str] = &[
     "app:quit",
+    "app:isElevated",
     "dialog:openFile",
     "dialog:openDirectory",
     "dialog:saveFile",
@@ -32,6 +33,7 @@ const KNOWN_CAPABILITIES: &[&str] = &[
     "shell:showItemInFolder",
     "shell:trashItem",
     "shell:openPath",
+    "shell:runElevated",
     "secureStorage:get",
     "secureStorage:set",
     "secureStorage:delete",
@@ -453,7 +455,7 @@ fn parse_scope(permission: &str, wire: ScopeWire) -> Result<ScopeMatcher, String
         "shell:openExternal" => {
             parse_entries(wire.urls, "urls", UrlPattern::parse).map(ScopeMatcher::Urls)
         }
-        "shell:showItemInFolder" | "shell:trashItem" | "shell:openPath" => {
+        "shell:showItemInFolder" | "shell:trashItem" | "shell:openPath" | "shell:runElevated" => {
             parse_entries(wire.paths, "paths", PathPattern::parse).map(ScopeMatcher::Paths)
         }
         "window:open" | "window:manage" => parse_exact_entries(wire.windows, "windows", |value| {
@@ -598,7 +600,7 @@ mod tests {
 
     #[test]
     fn trash_item_and_open_path_are_path_scoped_exactly_like_show_item_in_folder() {
-        for permission in ["shell:trashItem", "shell:openPath"] {
+        for permission in ["shell:trashItem", "shell:openPath", "shell:runElevated"] {
             let policy = CapabilityPolicy::parse(Some(&format!(
                 r#"{{"version":1,"grants":[{{"permission":"{permission}","allow":{{"paths":["/Users/example/Downloads/**"]}}}}]}}"#,
             )))

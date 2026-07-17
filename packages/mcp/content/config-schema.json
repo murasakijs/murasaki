@@ -13,6 +13,7 @@
     "nativeCapability": {
       "enum": [
         "app:quit",
+        "app:isElevated",
         "dialog:openFile",
         "dialog:openDirectory",
         "dialog:saveFile",
@@ -29,6 +30,7 @@
         "shell:showItemInFolder",
         "shell:trashItem",
         "shell:openPath",
+        "shell:runElevated",
         "secureStorage:get",
         "secureStorage:set",
         "secureStorage:delete",
@@ -296,6 +298,7 @@
       "items": {
         "enum": [
           "app:quit",
+          "app:isElevated",
           "dialog:openFile",
           "dialog:openDirectory",
           "dialog:saveFile",
@@ -312,6 +315,7 @@
           "shell:showItemInFolder",
           "shell:trashItem",
           "shell:openPath",
+          "shell:runElevated",
           "secureStorage:get",
           "secureStorage:set",
           "secureStorage:delete",
@@ -808,6 +812,9 @@
         },
         "entitlements": {
           "type": "string"
+        },
+        "appSandbox": {
+          "type": "boolean"
         },
         "windows": {
           "type": "object",

@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.38.0"
+version = "0.41.0"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
@@ -65,6 +65,30 @@ objc2-av-foundation = { version = "0.3", default-features = false, features = ["
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGWindow"] }
 objc2-application-services = { version = "0.3", default-features = false, features = ["std", "AXUIElement", "HIServices"] }
+# system_permission.rs's "location" kind — CLLocationManager.authorizationStatus
+# plus requestWhenInUseAuthorization/requestAlwaysAuthorization. No delegate,
+# no location fix: consent state only, so the default feature set (which pulls
+# in CLGeocoder, CLBeaconRegion, dispatch2, objc2-contacts, …) is skipped.
+objc2-core-location = { version = "0.3", default-features = false, features = ["std", "CLLocationManager"] }
+# system_permission.rs's "photos" kind — PHPhotoLibrary.authorizationStatusForAccessLevel:/
+# requestAuthorizationForAccessLevel:handler: (the `.readWrite` access level).
+objc2-photos = { version = "0.3", default-features = false, features = ["std", "PHPhotoLibrary", "block2"] }
+# system_permission.rs's "contacts" kind — CNContactStore.authorizationStatusForEntityType:/
+# requestAccessForEntityType:completionHandler:.
+objc2-contacts = { version = "0.3", default-features = false, features = ["std", "CNContactStore", "block2"] }
+# system_permission.rs's "calendar"/"reminders" kinds — EKEventStore.authorizationStatusForEntityType:
+# plus the macOS 14+ requestFullAccessTo{Events,Reminders}WithCompletion: (falling
+# back to the deprecated requestAccessToEntityType:completion: pre-14, checked at
+# runtime via NSProcessInfo since LSMinimumSystemVersion is 11.0).
+objc2-event-kit = { version = "0.3", default-features = false, features = ["std", "EKTypes", "EKEventStore", "block2"] }
+# system_permission.rs's "speechRecognition" kind — SFSpeechRecognizer.authorizationStatus/
+# requestAuthorization:.
+objc2-speech = { version = "0.3", default-features = false, features = ["std", "SFSpeechRecognizer", "block2"] }
+# system_permission.rs's "bluetooth" kind — CBManager.authorization (a class
+# property, readable without a live manager) for status, and instantiating a
+# delegate-less CBCentralManager (like CLLocationManager's no-delegate pattern
+# above) to trigger the OS's own permission prompt for request.
+objc2-core-bluetooth = { version = "0.3", default-features = false, features = ["std", "CBManager", "CBCentralManager"] }
 # `--apply-update`'s `--wait-pid` liveness check (updater.rs) — `libc::kill(pid, 0)`.
 libc = "0.2"
 

@@ -50,13 +50,13 @@ await shell.showItemInFolder(files[0])
 
 | API | 操作 |
 | --- | --- |
-| `app` | `quit`（gracefulなapplication shutdown） |
+| `app` | `quit`（gracefulなapplication shutdown）、`isElevated`（read-onlyな自己query） |
 | `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage`(ネイティブOSメッセージボックス) |
 | `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
 | `notification` | `show`(ローカル生成idを返す) |
-| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder`, `trashItem`, `openPath` |
+| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder`, `trashItem`, `openPath`, `runElevated`（Windows限定のUAC起動） |
 | `secureStorage` | string値向けのOS-backed `get`, `set`, `delete` |
-| `systemPermission` | macOSのcamera / microphone / screen recording / accessibility向け`status`, `request` |
+| `systemPermission` | macOSのcamera / microphone / screen recording / accessibility / input monitoring / location / full disk access / photos / contacts / calendar / reminders / speech recognition / Bluetooth / Apple Events (automation) / local network向け`status`, `request` |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
 | `windows` | 宣言label向け`open`, `list`, `show`, `hide`, `focus`, `close` |
 | `globalShortcut` | process-wideな`register`, `unregister`, `unregisterAll`, `onTriggered` |
@@ -101,6 +101,59 @@ handlerで開きます(ダブルクリックと同様)。どちらもabsoluteで
   `windows[label].capabilities` で許可してください。structured grantではshell URL/path、
   target window label、OS permission名をallow/denyでscopeできます。他のargumentは
   command単位なので、権限を持つwindowに信頼できないremote contentを読み込まないでください。
+</Callout>
+
+## 権限昇格(Windows)
+
+```ts
+import { app, shell } from 'murasaki/native'
+
+if (!(await app.isElevated())) {
+  try {
+    await shell.runElevated({
+      executable: 'C:/Program Files/Example/updater.exe',
+      args: ['--apply'],
+    })
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('cancelled by the user')) {
+      // ユーザーがUACプロンプトを拒否した場合はここでgracefulに処理する。
+    } else {
+      throw error
+    }
+  }
+}
+```
+
+`app.isElevated()` は、native hostプロセスがすでにelevatedで実行されているかを
+問い合わせる、read-onlyでcapability-gatedな(`app:isElevated`)queryです。
+Windowsではprocess tokenのelevation状態を読み取り、macOS/Linuxでは「elevated」
+はeffective rootとして実行されていることを意味します — GUIアプリでは稀かつ
+非推奨ですが、最も近い代替として対応しています。すべてのplatformで動作し
+capabilityが必要で、失敗することはありません。基盤となるqueryがエラーになった
+場合も単に`false`に解決されます。elevationを判定できなかったqueryは、
+すでに非特権のrendererにとって新しい情報を何も伝えていないためです。
+
+`shell.runElevated({ executable, args? })` はWindowsの「管理者として実行」
+(UAC)の同意プロンプトを通じて`executable`を新しいプロセスとして起動します。
+Windows限定です — macOSの`SMJobBless`/`AuthorizationExecuteWithPrivileges`は
+非推奨で、Linuxには単一の同等機構が存在しないため、他のplatformはすべて
+`unsupported` errorを返します。`executable`はabsoluteでtraversalしない、
+実在するfileへのpathである必要があります。`shell.openPath`と同様、
+`shell:runElevated` capabilityは許可するpath subtreeへscopeできます。
+`args`(最大64件、各要素は最大4096 UTF-8 byte、制御文字は不可)はshellを
+経由せず直接elevatedプロセスへ渡され、`CommandLineToArgvW`と同じルールで
+quoteされます。呼び出しはfire-and-forgetです — elevatedプロセスが起動した
+時点でresolveし、終了を待ちません。
+
+ユーザーが同意プロンプトを拒否した場合、`shell.runElevated`は正確に
+`"elevation was cancelled by the user"`というmessageのerrorでrejectされます。
+これにより、拒否されたプロンプトを他の失敗とは区別して処理できます。
+
+<Callout type="warn">
+  `shell:runElevated`は強力なcapabilityです — 付与すると、rendererが許可された
+  実行ファイルをelevatedで実行するUACプロンプトをtriggerできるようになります。
+  狭いpath subtree(または単一の正確なpath)へscopeし、elevatedなhelperの起動が
+  本当に必要なwindowにのみ付与してください。
 </Callout>
 
 ## セキュアストレージ
@@ -288,8 +341,8 @@ processあたり64件までです。idは1〜128文字で、英数字と`.`、`_
 ## システム権限
 
 OSの同意とMurasaki renderer capabilityは別物です。packaged macOS appでは、用途説明と
-任意の起動時requestをconfigに宣言できます。用途説明は`Info.plist`へ書き込まれ、camera /
-microphoneの説明が欠けた状態でpromptしてappがcrashすることを防ぎます。
+任意の起動時requestをconfigに宣言できます。用途説明は`Info.plist`へ書き込まれ、
+用途説明が欠けた状態でpromptしてappがcrashすることを防ぎます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -305,6 +358,20 @@ export default defineConfig({
       },
       screenRecording: { requestOnLaunch: false },
       accessibility: { requestOnLaunch: false },
+      inputMonitoring: { requestOnLaunch: false },
+      location: {
+        usageDescription: '近くのスポットを表示します。',
+        mode: 'whenInUse',
+      },
+      fullDiskAccess: { requestOnLaunch: false },
+      photos: { usageDescription: '投稿に写真を添付します。' },
+      contacts: { usageDescription: '友達を見つけます。' },
+      calendar: { usageDescription: '予定を確認します。' },
+      reminders: { usageDescription: 'リマインダーを確認します。' },
+      speechRecognition: { usageDescription: 'ボイスメモを文字起こしします。' },
+      bluetooth: { usageDescription: '近くのデバイスを見つけます。' },
+      appleEvents: { usageDescription: '他のappを代わりに自動操作します。' },
+      localNetwork: { usageDescription: 'このネットワーク上のデバイスを探します。' },
     },
   },
   capabilities: [
@@ -323,15 +390,111 @@ if (status === 'notDetermined') {
 }
 ```
 
-camera / microphoneのOS promptは非同期で完了するため、`request()`が最初は
+| 種類 | 形態 | 補足 |
+| --- | --- | --- |
+| `camera` | request可能 | `NSCameraUsageDescription`。 |
+| `microphone` | request可能 | `NSMicrophoneUsageDescription`。 |
+| `location` | request可能 | `NSLocationWhenInUseUsageDescription`(`mode: 'always'`では`NSLocationAlwaysAndWhenInUseUsageDescription`も追加)。 |
+| `photos` | request可能 | `NSPhotoLibraryUsageDescription`。read-writeのlibraryアクセス。 |
+| `contacts` | request可能 | `NSContactsUsageDescription`。 |
+| `calendar` | request可能 | `NSCalendarsUsageDescription` + `NSCalendarsFullAccessUsageDescription`(常に両方書き込み — 下記参照)。 |
+| `reminders` | request可能 | `NSRemindersUsageDescription` + `NSRemindersFullAccessUsageDescription`(下記参照)。 |
+| `speechRecognition` | request可能 | `NSSpeechRecognitionUsageDescription`。 |
+| `bluetooth` | request可能、明示的なrequest呼び出しなし | `NSBluetoothAlwaysUsageDescription`。下記参照。 |
+| `screenRecording` | prompt形式、用途説明なし | granted / notGrantedのみ。 |
+| `accessibility` | prompt形式、用途説明なし | granted / notGrantedのみ。 |
+| `inputMonitoring` | prompt形式、用途説明なし | granted / notGrantedのみ。 |
+| `fullDiskAccess` | guidance-only | 下記参照。 |
+| `appleEvents` | guidance-only、declaration-only | `NSAppleEventsUsageDescription`。下記参照。 |
+| `localNetwork` | declaration-only | `NSLocalNetworkUsageDescription`。下記参照。 |
+
+camera / microphone / location / photos / contacts / calendar / reminders /
+speech recognitionのOS promptは非同期で完了するため、`request()`が最初は
 `notDetermined`を返す場合があります。protected featureを有効にする前に、appが再び
 focusされた時点で`status()`を再確認してください。
 
-`requestOnLaunch`はpackaged macOS appに適用されます。developmentはterminal / Node hostの
-identityで動くため、TCCの実動作はpackage buildから確認してください。Windowsのunpackaged
-desktop appではcamera / microphoneを利用するdevice API側が同意を要求し、汎用的な起動時
-promptはありません。そのためMurasakiは権限取得を装わず`unsupported`を返します。macOSの
-screen recording / accessibilityは初回とdenyを区別できない場合`notGranted`です。
+`requestOnLaunch`はpackaged macOS appと、`appleEvents` / `localNetwork`(下記の
+declaration-only)を除く全種類に適用されます。developmentはterminal / Node hostの
+identityで動くため、TCCの実動作はpackage buildから確認してください。Windowsの
+unpackaged desktop appではdeviceに紐づく種類を利用するdevice API側が同意を要求し、
+汎用的な起動時promptはありません。そのためMurasakiは権限取得を装わず`unsupported`を
+返します。macOSのscreen recording / accessibility / input monitoringは初回とdenyを
+区別できない場合`notGranted`です。15種類すべてmacOS専用です — WindowsとLinuxには
+これらTCC管理下のpromptに相当するOSレベルの機能がないため、権限取得を装わず全呼び出しで
+`unsupported`を返します。
+
+`location.usageDescription`はcamera / microphoneと同様必須で、
+`NSLocationWhenInUseUsageDescription`へ書き込まれます。`mode: 'always'`を指定すると
+`NSLocationAlwaysAndWhenInUseUsageDescription`も追加で書き込み(Appleはalways requestでも
+when-in-useキーの存在を要求します)、when-in-useではなくalways-authorizationを要求します。
+
+<Callout type="info">
+  `calendar` / `reminders`はmacOS 14+ではfull accessをrequestし、それより古いsystemでは
+  非推奨のpre-14 EventKit APIにfallbackします。これはbuild machineではなく、
+  request時点で動いている「実際の」systemに対してcheckされるため、1つのpackaged appが
+  どちらのsystemでも正しく動作します。そのためInfo.plistには、buildしたsystemに関係なく
+  常にlegacyの用途説明キーと14+のfull accessキーの両方が書き込まれます。
+</Callout>
+
+<Callout type="info">
+  `bluetooth`には明示的なrequest呼び出しがありません — CoreBluetoothはcentral managerが
+  最初に作成された時点で暗黙的に同意を確定します。`status()`は`CBManager.authorization`
+  (live managerを必要としないclassレベルのproperty)を読むだけなので、他のどの種類の
+  status確認とも同じくらい低コストです。`request()`はそのOS側の判定をtriggerするためだけに
+  managerを作成します。
+</Callout>
+
+<Callout type="warn">
+  `fullDiskAccess`はguidance-onlyです。macOSにはFull Disk AccessのTCC request APIが
+  存在しないため、`request()`はSystem SettingsのFull Disk Accessペインを開いて
+  userに自分で許可してもらうことしかできません — 権限取得を装うことは決してありません。
+  `status()`はbest-effortのheuristicです(Full Disk Access自体で保護されている
+  `~/Library/Application Support/com.apple.TCC/TCC.db`が読めるかを確認します)。
+  通常の`granted` / `notGranted`に加え、heuristicで確信を持てない場合は
+  `unknown`を返すことがあります。
+</Callout>
+
+<Callout type="warn">
+  `appleEvents`と`localNetwork`はdeclaration-onlyです — どちらにも`requestOnLaunch`
+  フィールドはなく、Murasakiの役割は用途説明を書き込むことだけです。automationの同意は
+  対象appごとに付与され、実際にApple Eventを送信して初めて判定できるため、
+  `appleEvents`の`status()`は常に`unknown`を返し、`request()`は(上記の`fullDiskAccess`
+  と同様)確認できない許可を主張する代わりに、guidanceとしてSystem SettingsのAutomation
+  paneを開くだけです。`localNetwork`にはquery/request APIが一切存在しません —
+  appが実際にlocal networkへアクセスした最初のタイミングでmacOSが自動的にpromptするため、
+  `status()`と`request()`はどちらも静的な`unknown`のno-opです。
+</Callout>
+
+### EntitlementsとApp Sandbox
+
+`murasaki bundle --sign`が生成するdefaultのentitlements plist(`sign.entitlements`を
+指定しない限り使われます)は、宣言した`systemPermissions`が実際に必要とするものだけを
+自動的に追加します。
+
+- Murasakiのdefaultであるhardened-runtime-only(App Sandboxなし)の姿勢では、
+  camera / microphone / photosなどはInfo.plistの用途説明だけで動作し、追加の
+  entitlementは不要です。唯一の例外が`appleEvents`です — 宣言すると
+  `com.apple.security.automation.apple-events`が追加されます。これはhardened
+  runtimeが実際に必要とする唯一のTCC entitlementです。
+- `sign.appSandbox: true`を設定すると、`com.apple.security.app-sandbox`に加えて、
+  宣言した各種類のApple公式Sandbox entitlementが追加されます:
+  `camera` → `com.apple.security.device.camera`、
+  `microphone` → `com.apple.security.device.audio-input`、
+  `location` → `com.apple.security.personal-information.location`、
+  `contacts` → `com.apple.security.personal-information.addressbook`、
+  `calendar` / `reminders` → `com.apple.security.personal-information.calendars`
+  (AppleはReminders用に独自のSandbox categoryを分けたことがありません)、
+  `bluetooth` → `com.apple.security.device.bluetooth`。`photos`には文書化された
+  App Sandbox entitlementが存在しないため、追加されません。
+- カスタムの`sign.entitlements`ファイルは常にそのまま使われます — この自動導出は
+  生成されるdefault plistにのみ適用されます。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  // ...
+  sign: { appSandbox: true },
+})
+```
 
 ## 組み込みのメニューアクション
 

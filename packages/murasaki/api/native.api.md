@@ -7,6 +7,7 @@
 // @public (undocumented)
 export const app: {
     quit(): Promise<void>;
+    isElevated(): Promise<boolean>;
 };
 
 // @public (undocumented)
@@ -138,6 +139,12 @@ export interface OpenFileOptions {
 }
 
 // @public (undocumented)
+export interface RunElevatedOptions {
+    args?: string[];
+    executable: string;
+}
+
+// @public (undocumented)
 export interface SaveFileOptions {
     // (undocumented)
     defaultName?: string;
@@ -162,6 +169,7 @@ export const shell: {
     showItemInFolder(target: string): Promise<void>;
     trashItem(path: string): Promise<void>;
     openPath(path: string): Promise<void>;
+    runElevated(options: RunElevatedOptions): Promise<void>;
 };
 
 // @public
@@ -171,10 +179,16 @@ export const systemPermission: {
 };
 
 // @public (undocumented)
-export type SystemPermissionName = 'camera' | 'microphone' | 'screenRecording' | 'accessibility';
+export type SystemPermissionName = 'camera' | 'microphone' | 'screenRecording' | 'accessibility' | 'inputMonitoring' | 'location' | 'fullDiskAccess' | 'photos' | 'contacts' | 'calendar' | 'reminders' | 'speechRecognition' | 'bluetooth' | 'appleEvents' | 'localNetwork';
 
 // @public (undocumented)
-export type SystemPermissionStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'notGranted' | 'unsupported';
+export type SystemPermissionStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'notGranted' | 'unsupported'
+/**
+* Returned by kinds with no real TCC query: `fullDiskAccess`'s heuristic
+* status check could not be performed, or `appleEvents`/`localNetwork`
+* (which have no query API at all — see `MacOSDeclarationOnlyPermissionConfig`).
+*/
+| 'unknown';
 
 // @public (undocumented)
 export const tray: {

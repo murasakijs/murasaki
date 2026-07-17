@@ -274,6 +274,18 @@ export interface MacOSCapturePermissionConfig {
     usageDescription: string;
 }
 
+// @public
+export interface MacOSDeclarationOnlyPermissionConfig {
+    usageDescription: string;
+}
+
+// @public
+export interface MacOSLocationPermissionConfig {
+    mode?: 'whenInUse' | 'always';
+    requestOnLaunch?: boolean;
+    usageDescription: string;
+}
+
 // @public (undocumented)
 export interface MacOSPromptPermissionConfig {
     requestOnLaunch?: boolean;
@@ -283,12 +295,24 @@ export interface MacOSPromptPermissionConfig {
 export interface MacOSSystemPermissionsConfig {
     // (undocumented)
     accessibility?: MacOSPromptPermissionConfig;
+    appleEvents?: MacOSDeclarationOnlyPermissionConfig;
+    bluetooth?: MacOSCapturePermissionConfig;
+    calendar?: MacOSCapturePermissionConfig;
     // (undocumented)
     camera?: MacOSCapturePermissionConfig;
+    contacts?: MacOSCapturePermissionConfig;
+    fullDiskAccess?: MacOSPromptPermissionConfig;
+    inputMonitoring?: MacOSPromptPermissionConfig;
+    localNetwork?: MacOSDeclarationOnlyPermissionConfig;
+    // (undocumented)
+    location?: MacOSLocationPermissionConfig;
     // (undocumented)
     microphone?: MacOSCapturePermissionConfig;
+    photos?: MacOSCapturePermissionConfig;
+    reminders?: MacOSCapturePermissionConfig;
     // (undocumented)
     screenRecording?: MacOSPromptPermissionConfig;
+    speechRecognition?: MacOSCapturePermissionConfig;
 }
 
 // @public
@@ -382,6 +406,7 @@ export interface MurasakiConfig {
     sign?: {
         identity?: string;
         entitlements?: string;
+        appSandbox?: boolean;
         windows?: WindowsSigningConfig;
     };
     systemPermissions?: SystemPermissionsConfig;

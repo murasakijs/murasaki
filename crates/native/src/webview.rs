@@ -792,6 +792,7 @@ fn ipc_origin_is_trusted(target: &str, trusted: Option<&url::Url>) -> bool {
 fn permission_for_native_method(method: &str) -> Option<&'static str> {
     match method {
         "app.quit" => Some("app:quit"),
+        "app.isElevated" => Some("app:isElevated"),
         "dialog.openFile" => Some("dialog:openFile"),
         "dialog.openDirectory" => Some("dialog:openDirectory"),
         "dialog.saveFile" => Some("dialog:saveFile"),
@@ -806,6 +807,7 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
         "shell.showItemInFolder" => Some("shell:showItemInFolder"),
         "shell.trashItem" => Some("shell:trashItem"),
         "shell.openPath" => Some("shell:openPath"),
+        "shell.runElevated" => Some("shell:runElevated"),
         "secureStorage.get" => Some("secureStorage:get"),
         "secureStorage.set" => Some("secureStorage:set"),
         "secureStorage.delete" => Some("secureStorage:delete"),
@@ -1604,6 +1606,13 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         path: String,
     }
     #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct RunElevatedArg {
+        executable: String,
+        #[serde(default)]
+        args: Vec<String>,
+    }
+    #[derive(serde::Deserialize)]
     struct TitleArg {
         title: String,
     }
@@ -1738,6 +1747,7 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             wake();
             Ok(serde_json::Value::Null)
         }
+        "app.isElevated" => Ok(serde_json::Value::Bool(crate::elevation::is_elevated())),
         "dialog.openFile" => {
             let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             crate::dialog::open_file_dialog(Some(opts))
@@ -1846,6 +1856,21 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 );
             }
             crate::shell::shell_open_path(&args.path).map(|_| serde_json::Value::Null)
+        }
+        "shell.runElevated" => {
+            let args: RunElevatedArg =
+                serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows(
+                "shell:runElevated",
+                CapabilityResource::Path(&args.executable),
+            ) {
+                return Err(
+                    "shell.runElevated requires an allowed absolute non-traversing executable path"
+                        .to_string(),
+                );
+            }
+            crate::elevation::shell_run_elevated(&args.executable, &args.args)
+                .map(|_| serde_json::Value::Null)
         }
         "secureStorage.get" => {
             let args: SecureStorageKeyArg =
@@ -3468,6 +3493,8 @@ mod tests {
             ("clipboard.writeHtml", "clipboard:writeHtml"),
             ("shell.trashItem", "shell:trashItem"),
             ("shell.openPath", "shell:openPath"),
+            ("shell.runElevated", "shell:runElevated"),
+            ("app.isElevated", "app:isElevated"),
         ] {
             assert!(!native_method_is_allowed(method, &[]));
             assert!(native_method_is_allowed(method, &[permission.to_string()]));

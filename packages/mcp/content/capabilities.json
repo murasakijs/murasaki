@@ -247,7 +247,9 @@
         "Dialogs, clipboard, notifications, shell helpers, secure storage, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
         "Selected target-bearing commands support inline allow/deny scopes; other arguments remain command-level, and the native renderer API is not available directly inside src/main.ts.",
         "dialog.showMessage shows a native OS message box; clipboard also supports PNG image and HTML read/write, each bounded and independently permissioned; shell.trashItem and shell.openPath are path-scoped like shell.showItemInFolder, and shell.openPath rejects URLs and UNC/device paths.",
-        "notification.show returns a generated id for local bookkeeping only; upstream notify-rust cannot deliver click/action callbacks on macOS or Windows, so the id never correlates with a later event."
+        "notification.show returns a generated id for local bookkeeping only; upstream notify-rust cannot deliver click/action callbacks on macOS or Windows, so the id never correlates with a later event.",
+        "app.isElevated() is a read-only, capability-gated self-query on every platform (Windows: process token elevation state; macOS/Linux: effective root) and never fails.",
+        "shell.runElevated({ executable, args? }) launches an existing absolute, non-traversing executable through the Windows UAC \"runas\" prompt: Windows-only, path-scoped like shell.openPath, never routed through a shell, and fire-and-forget (resolves once launched, not on exit). A user-declined prompt rejects with the distinct message \"elevation was cancelled by the user\"; every other platform rejects with an unsupported error."
       ],
       "apiSymbols": [
         "murasaki/native.dialog",
@@ -480,12 +482,22 @@
         "linux": "unsupported"
       },
       "limitations": [
-        "Packaged macOS apps can declare camera/microphone usage descriptions, request camera, microphone, screen-recording, or accessibility consent at launch, and query/request the same permissions from a capability-gated renderer API.",
+        "Packaged macOS apps can declare usage descriptions and query/request consent, from a capability-gated renderer API and (for most kinds) an optional launch-time prompt, for camera, microphone, screen recording, accessibility, input monitoring, location, full disk access, photos, contacts, calendar, reminders, speech recognition, and Bluetooth. This covers thirteen request-capable kinds plus two declaration-only ones (appleEvents, localNetwork) below; all fifteen are macOS-only, since Windows/Linux have no OS-level equivalent of the app-scoped TCC prompts they represent.",
+        "fullDiskAccess is guidance-only: macOS has no TCC request API for it, so `request()` only opens the Full Disk Access pane in System Settings (never claims a grant), and `status()` is a documented best-effort heuristic (reading a TCC-protected file) that can report `unknown` instead of a real answer.",
+        "appleEvents and localNetwork are declaration-only: Murasaki writes their purpose string (NSAppleEventsUsageDescription/NSLocalNetworkUsageDescription) but there is no query API for either. appleEvents' `request()` only opens the Automation pane in System Settings as guidance (consent is per-target-app and only resolvable at send time); localNetwork's `status()`/`request()` are both static `unknown` no-ops since macOS prompts automatically on first actual local-network access. Neither has a `requestOnLaunch` config field.",
+        "bluetooth has no explicit request call: CoreBluetooth determines consent implicitly the first time a central manager is instantiated. `status()` reads `CBManager.authorization`, a class property that needs no live manager instance; `request()` instantiates one (delegate-less, like `location`) purely to trigger that OS-side determination.",
+        "calendar/reminders' launch-time and runtime `request()` use the macOS 14+ full-access EventKit API when the running system supports it, falling back to the deprecated pre-14 entity-type API otherwise (checked with NSProcessInfo at call time, not at build time), and Info.plist always carries both the legacy and 14+ full-access usage-description keys so one packaged build stays correct on both.",
+        "location's `mode: 'always'` writes both `NSLocationWhenInUseUsageDescription` and `NSLocationAlwaysAndWhenInUseUsageDescription` to Info.plist and is read back from that same Info.plist key at request time, so it applies identically to `requestOnLaunch` and a runtime `systemPermission.request('location')` call without separate plumbing.",
+        "Hardened-runtime signing (murasaki's default, no App Sandbox) automatically adds only the com.apple.security.automation.apple-events entitlement, and only when appleEvents is declared — every other declared kind works from its Info.plist usage string alone. Opting into `sign.appSandbox` additionally adds `com.apple.security.app-sandbox` plus each declared kind's documented per-kind Sandbox entitlement (camera, microphone, location, contacts, calendar/reminders sharing one `.calendars` key, bluetooth); photos has no documented Sandbox entitlement and is never added. A custom `sign.entitlements` file is used verbatim and never merged with this derivation.",
         "Windows unpackaged desktop privacy consent is usage-driven rather than an app-scoped launch prompt, so these generic calls report unsupported there; Linux is not implemented. Development requests use the terminal/Node host identity and should be tested with a packaged app."
       ],
       "apiSymbols": [
         "MurasakiConfig.systemPermissions",
         "SystemPermissionsConfig",
+        "MacOSSystemPermissionsConfig",
+        "MacOSLocationPermissionConfig",
+        "MacOSDeclarationOnlyPermissionConfig",
+        "MurasakiConfig.sign.appSandbox",
         "murasaki/native.systemPermission"
       ],
       "testEvidence": [

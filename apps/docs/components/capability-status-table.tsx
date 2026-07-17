@@ -212,7 +212,9 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "shortcutの利用可否はOS予約bindingや他のapplicationにも依存するため、packaged OSでのsmoke testingが必要です。",
   ],
   "system-permissions": [
-    "packaged済みのmacOS appはcamera/microphoneのusage descriptionを宣言し、起動時にcamera、microphone、screen-recording、accessibilityのconsentを要求できます。同じpermissionはcapability-gatedなrenderer APIからquery/requestできます。",
+    "packaged済みのmacOS appはcamera/microphone/locationのusage descriptionを宣言し、起動時にcamera、microphone、screen-recording、accessibility、input-monitoring、locationのconsentを要求できます。同じpermissionはcapability-gatedなrenderer APIからquery/requestできます。対応するのはこの7種類で、すべてmacOS専用です — WindowsとLinuxには、これらが表すapp-scopedなTCC promptに相当するOSレベルの機能がありません。",
+    "fullDiskAccessはguidance-onlyです。macOSにはこれに対応するTCC request APIが存在しないため、`request()`はSystem SettingsのFull Disk Accessペインを開くだけで(権限取得を装うことはありません)、`status()`はTCCで保護されたfileを読み取るdocument済みのbest-effort heuristicであり、実際の答えの代わりに`unknown`を返すことがあります。",
+    "locationの`mode: 'always'`はInfo.plistへ`NSLocationWhenInUseUsageDescription`と`NSLocationAlwaysAndWhenInUseUsageDescription`の両方を書き込み、request時にも同じInfo.plist keyを読み戻すため、追加の配線なしでrequestOnLaunchとruntimeの`systemPermission.request('location')`呼び出しの両方に同一に適用されます。",
     "Windowsのunpackaged desktopではprivacy consentがapp単位のlaunch promptではなくusage駆動のため、これらの汎用callはunsupportedを返します。Linuxは未実装です。開発時のrequestはterminal/Node hostのidentityを使うため、packaged appでの検証が必要です。",
   ],
   "single-instance-and-deep-links": [

@@ -201,8 +201,7 @@ Rust hostでも再度強制します。
 ## `systemPermissions`
 
 これは信頼するrenderer commandではなく、host OSの同意を宣言するconfigです。packaged
-macOS appではcamera / microphoneの用途説明を`Info.plist`へ書き込み、選択した権限を起動時
-に要求できます。
+macOS appでは用途説明を`Info.plist`へ書き込み、ほとんどの権限を起動時に要求できます。
 
 ```ts
 systemPermissions: {
@@ -216,6 +215,20 @@ systemPermissions: {
     },
     screenRecording: { requestOnLaunch: false },
     accessibility: { requestOnLaunch: false },
+    inputMonitoring: { requestOnLaunch: false },
+    location: {
+      usageDescription: '近くのスポットを表示します。',
+      mode: 'whenInUse',
+    },
+    fullDiskAccess: { requestOnLaunch: false },
+    photos: { usageDescription: '投稿に写真を添付します。' },
+    contacts: { usageDescription: '友達を見つけます。' },
+    calendar: { usageDescription: '予定を確認します。' },
+    reminders: { usageDescription: 'リマインダーを確認します。' },
+    speechRecognition: { usageDescription: 'ボイスメモを文字起こしします。' },
+    bluetooth: { usageDescription: '近くのデバイスを見つけます。' },
+    appleEvents: { usageDescription: '他のappを代わりに自動操作します。' },
+    localNetwork: { usageDescription: 'このネットワーク上のデバイスを探します。' },
   },
 },
 ```
@@ -226,12 +239,38 @@ systemPermissions: {
 | `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSMicrophoneUsageDescription`を書き込み、任意でpackaged launch時にprompt。 |
 | `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にscreen capture同意を要求。 |
 | `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にmacOS accessibility trust promptを表示。 |
+| `macOS.inputMonitoring` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にInput Monitoring(HID listen event)同意を要求。 |
+| `macOS.location` | `{ usageDescription: string; mode?: 'whenInUse' \| 'always'; requestOnLaunch?: boolean }` | `NSLocationWhenInUseUsageDescription`を書き込み(`mode: 'always'`では`NSLocationAlwaysAndWhenInUseUsageDescription`も追加)、任意でpackaged launch時にprompt。 |
+| `macOS.fullDiskAccess` | `{ requestOnLaunch?: boolean }` | guidance-only — TCC request APIが存在しないため、`requestOnLaunch`はstatusが`granted`でない場合、in-app promptの代わりにSystem SettingsのFull Disk Accessペインを開きます。 |
+| `macOS.photos` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSPhotoLibraryUsageDescription`を書き込み(read-writeのlibraryアクセス)。 |
+| `macOS.contacts` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSContactsUsageDescription`を書き込み。 |
+| `macOS.calendar` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSCalendarsUsageDescription`と`NSCalendarsFullAccessUsageDescription`を書き込み(常に両方書き込むことで、1つのbuildがmacOS 11から14+まで正しく動作します)。 |
+| `macOS.reminders` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSRemindersUsageDescription`と`NSRemindersFullAccessUsageDescription`を書き込み(`calendar`と同じ理由)。 |
+| `macOS.speechRecognition` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSSpeechRecognitionUsageDescription`を書き込み。 |
+| `macOS.bluetooth` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSBluetoothAlwaysUsageDescription`を書き込み。CoreBluetoothには明示的なrequest呼び出しがなく、central managerが最初に作成された時点で暗黙的に同意が確定します。 |
+| `macOS.appleEvents` | `{ usageDescription: string }` | `NSAppleEventsUsageDescription`を書き込み。declaration-only — `requestOnLaunch`はありません。automationの同意は対象appごとに付与されるため、`status()`は常に`unknown`を返し、`request()`はguidanceとしてSystem SettingsのAutomation paneを開くだけです。 |
+| `macOS.localNetwork` | `{ usageDescription: string }` | `NSLocalNetworkUsageDescription`を書き込み。declaration-only — query/request APIは一切存在せず、macOSは最初のlocal networkアクセス時に自動的にpromptします。 |
 
 機能の必要性をuserが理解できる場合は、起動時promptより文脈に沿った
 `systemPermission.request()`を優先してください。runtime callにはrenderer capabilityの
 `systemPermission:status` / `systemPermission:request`も必要です。Windows unpackaged
-desktopの同意は利用時に発生するため、汎用的な起動時promptはありません。macOS TCCの
-実動作は`murasaki dev`のterminal / Node identityではなくpackaged appで確認してください。
+desktopの同意は利用時に発生するため、汎用的な起動時promptはありません。上記15種類は
+すべてmacOS専用です — WindowsとLinuxにはこれらTCC管理下promptに相当するOSレベルの機能が
+ありません。macOS TCCの実動作は`murasaki dev`のterminal / Node identityではなくpackaged
+appで確認してください。
+
+### EntitlementsとApp Sandbox
+
+`sign.appSandbox`(default `false`)は、`murasaki bundle --sign`が生成するdefaultの
+entitlements plistが宣言済みの`systemPermissions`にどう反応するかを制御します。offの場合
+(Murasakiのdefaultであるhardened-runtime-onlyの姿勢)、`appleEvents`のみが何かを追加し
+(`com.apple.security.automation.apple-events`)、他のすべての種類はInfo.plistの用途説明
+だけで動作します。onにすると`com.apple.security.app-sandbox`に加え、宣言した各種類の
+文書化されたApp Sandbox entitlementも追加されます(`photos`には該当するものがなく、
+追加されません)。この自動導出は生成されるdefault plistにのみ適用されます — カスタムの
+`sign.entitlements`ファイルは常にそのまま使われます。種類ごとの完全な対応表は
+[Native APIs → EntitlementsとApp Sandbox](/ja/docs/guides/native-apis#entitlementsとapp-sandbox)
+を参照してください。
 
 ## `main`
 

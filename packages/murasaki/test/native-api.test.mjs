@@ -43,7 +43,7 @@ test('renderer native API uses request-correlated bridge calls', async () => {
             x: 0, y: 0, width: 3024, height: 1964, scaleFactor: 2,
           }],
         },
-        'systemPermission.status': 'notDetermined',
+        'systemPermission.status': call.args.permission === 'fullDiskAccess' ? 'unknown' : 'notDetermined',
         'systemPermission.request': 'granted',
         'notification.show': 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         'secureStorage.get': call.args.key === 'missing' ? null : 'stored-secret',
@@ -74,6 +74,9 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   await secureStorage.delete('session')
   assert.equal(await systemPermission.status('camera'), 'notDetermined')
   assert.equal(await systemPermission.request('camera'), 'granted')
+  assert.equal(await systemPermission.status('inputMonitoring'), 'notDetermined')
+  assert.equal(await systemPermission.request('location'), 'granted')
+  assert.equal(await systemPermission.status('fullDiskAccess'), 'unknown')
   assert.equal(await appWindow.getLabel(), 'main')
   await appWindow.setSize(900, 600)
   await appWindow.show()
@@ -145,6 +148,9 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'secureStorage.delete',
     'systemPermission.status',
     'systemPermission.request',
+    'systemPermission.status',
+    'systemPermission.request',
+    'systemPermission.status',
     'window.getLabel',
     'window.setSize',
     'window.show',

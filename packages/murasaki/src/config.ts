@@ -222,12 +222,93 @@ export interface MacOSPromptPermissionConfig {
   requestOnLaunch?: boolean
 }
 
+/**
+ * Core Location consent. Unlike `MacOSPromptPermissionConfig`, this requires
+ * a purpose string (Core Location refuses to prompt without one).
+ */
+export interface MacOSLocationPermissionConfig {
+  /** Text macOS shows in its consent dialog and System Settings. */
+  usageDescription: string
+  /**
+   * `'whenInUse'` (default) writes only `NSLocationWhenInUseUsageDescription`.
+   * `'always'` additionally writes `NSLocationAlwaysAndWhenInUseUsageDescription`
+   * (Apple requires the when-in-use key present even for an always request)
+   * and requests always-authorization instead of when-in-use.
+   */
+  mode?: 'whenInUse' | 'always'
+  /** Ask as the native host starts. Prefer an in-context request when possible. */
+  requestOnLaunch?: boolean
+}
+
+/**
+ * A macOS TCC purpose string with no meaningful launch-time request: the OS
+ * itself decides when to prompt (per-target automation, or the first actual
+ * local-network access), so there is no `requestOnLaunch` — see
+ * `appleEvents`/`localNetwork` below.
+ */
+export interface MacOSDeclarationOnlyPermissionConfig {
+  /** Text macOS shows in its consent dialog and System Settings. */
+  usageDescription: string
+}
+
 /** macOS TCC permissions supported by Murasaki's native host. */
 export interface MacOSSystemPermissionsConfig {
   camera?: MacOSCapturePermissionConfig
   microphone?: MacOSCapturePermissionConfig
   screenRecording?: MacOSPromptPermissionConfig
   accessibility?: MacOSPromptPermissionConfig
+  /** Listen Event access (global keyboard/mouse taps), e.g. for a global shortcut library. */
+  inputMonitoring?: MacOSPromptPermissionConfig
+  location?: MacOSLocationPermissionConfig
+  /**
+   * Full Disk Access has no TCC request API — macOS only lets a user grant it
+   * from System Settings. `requestOnLaunch` therefore means something
+   * different here than for the other permissions above: if the heuristic
+   * status isn't `granted`, the native host opens the Full Disk Access pane
+   * in System Settings instead of showing an in-app consent prompt.
+   */
+  fullDiskAccess?: MacOSPromptPermissionConfig
+  /** Photos library (read-write). Writes `NSPhotoLibraryUsageDescription`. */
+  photos?: MacOSCapturePermissionConfig
+  /** Writes `NSContactsUsageDescription`. */
+  contacts?: MacOSCapturePermissionConfig
+  /**
+   * Calendar events (EventKit). Writes `NSCalendarsUsageDescription` and,
+   * since the native host's launch-time request uses the macOS 14+ full-access
+   * API when running on 14+ (falling back to the deprecated pre-14 API
+   * otherwise), also writes `NSCalendarsFullAccessUsageDescription` so a
+   * single build stays correct on both.
+   */
+  calendar?: MacOSCapturePermissionConfig
+  /**
+   * Reminders (EventKit). Writes `NSRemindersUsageDescription` and (see
+   * `calendar` above for why) `NSRemindersFullAccessUsageDescription`.
+   */
+  reminders?: MacOSCapturePermissionConfig
+  /** Writes `NSSpeechRecognitionUsageDescription`. */
+  speechRecognition?: MacOSCapturePermissionConfig
+  /**
+   * CoreBluetooth has no explicit request call — consent is determined
+   * implicitly the first time the native host stands up a Bluetooth central
+   * manager. Writes `NSBluetoothAlwaysUsageDescription`.
+   */
+  bluetooth?: MacOSCapturePermissionConfig
+  /**
+   * Automation (sending Apple Events to another app). Writes
+   * `NSAppleEventsUsageDescription`. Declaration-only: consent is granted per
+   * TARGET app and only resolvable at send time, so there is no generic
+   * `status()`/`requestOnLaunch` — a runtime `systemPermission.request('appleEvents')`
+   * call only opens System Settings' Automation pane as guidance (like
+   * `fullDiskAccess`) and `status()` always reports `unknown`.
+   */
+  appleEvents?: MacOSDeclarationOnlyPermissionConfig
+  /**
+   * Writes `NSLocalNetworkUsageDescription`. Declaration-only: macOS has no
+   * query/request API at all for this — it prompts automatically the first
+   * time the app actually attempts local-network traffic. `status()`/
+   * `request()` both always report `unknown`.
+   */
+  localNetwork?: MacOSDeclarationOnlyPermissionConfig
 }
 
 /** Host-OS consent declarations. Separate from renderer native capabilities. */
@@ -526,6 +607,14 @@ export interface MurasakiConfig {
     identity?: string
     /** Path to a custom entitlements .plist. Defaults to a Node-friendly hardened-runtime set. */
     entitlements?: string
+    /**
+     * Opt into the macOS App Sandbox. Default `false` (Murasaki's default is
+     * hardened-runtime-only, no `com.apple.security.app-sandbox`
+     * entitlement). Only affects the generated default entitlements plist
+     * (ignored when `entitlements` points at a custom file) — see
+     * `entitlementsPlist` in cli/bundle.ts for the exact derivation.
+     */
+    appSandbox?: boolean
     /** Windows Authenticode signing for the application executable, portable ZIP payload,
      * NSIS setup executable, and MSI installer. */
     windows?: WindowsSigningConfig
@@ -535,6 +624,7 @@ export interface MurasakiConfig {
 /** Canonical runtime allowlist. Keep native permission dispatch in sync with this list. */
 export const NATIVE_CAPABILITIES = [
   'app:quit',
+  'app:isElevated',
   'dialog:openFile',
   'dialog:openDirectory',
   'dialog:saveFile',
@@ -551,6 +641,7 @@ export const NATIVE_CAPABILITIES = [
   'shell:showItemInFolder',
   'shell:trashItem',
   'shell:openPath',
+  'shell:runElevated',
   'secureStorage:get',
   'secureStorage:set',
   'secureStorage:delete',
@@ -1007,7 +1098,16 @@ function validateSystemPermissionsConfig(value: unknown): void {
     throw new TypeError('systemPermissions.macOS must be an object')
   }
   const permissions = macOS as Record<string, unknown>
-  for (const name of ['camera', 'microphone'] as const) {
+  for (const name of [
+    'camera',
+    'microphone',
+    'photos',
+    'contacts',
+    'calendar',
+    'reminders',
+    'speechRecognition',
+    'bluetooth',
+  ] as const) {
     const permission = permissions[name]
     if (permission === undefined) continue
     if (!permission || typeof permission !== 'object' || Array.isArray(permission)) {
@@ -1027,7 +1127,23 @@ function validateSystemPermissionsConfig(value: unknown): void {
       )
     }
   }
-  for (const name of ['screenRecording', 'accessibility'] as const) {
+  // Declaration-only kinds: a purpose string only, no meaningful launch-time
+  // request (see MacOSDeclarationOnlyPermissionConfig's doc comment).
+  for (const name of ['appleEvents', 'localNetwork'] as const) {
+    const permission = permissions[name]
+    if (permission === undefined) continue
+    if (!permission || typeof permission !== 'object' || Array.isArray(permission)) {
+      throw new TypeError(`systemPermissions.macOS.${name} must be an object`)
+    }
+    const declarationOnly = permission as Record<string, unknown>
+    if (typeof declarationOnly.usageDescription !== 'string'
+      || declarationOnly.usageDescription.trim().length === 0) {
+      throw new TypeError(
+        `systemPermissions.macOS.${name}.usageDescription must be a non-empty string`,
+      )
+    }
+  }
+  for (const name of ['screenRecording', 'accessibility', 'inputMonitoring', 'fullDiskAccess'] as const) {
     const permission = permissions[name]
     if (permission === undefined) continue
     if (!permission || typeof permission !== 'object' || Array.isArray(permission)) {
@@ -1041,6 +1157,31 @@ function validateSystemPermissionsConfig(value: unknown): void {
       )
     }
   }
+  const location = permissions.location
+  if (location !== undefined) {
+    if (!location || typeof location !== 'object' || Array.isArray(location)) {
+      throw new TypeError('systemPermissions.macOS.location must be an object')
+    }
+    const config = location as Record<string, unknown>
+    if (typeof config.usageDescription !== 'string'
+      || config.usageDescription.trim().length === 0) {
+      throw new TypeError(
+        'systemPermissions.macOS.location.usageDescription must be a non-empty string',
+      )
+    }
+    if (config.mode !== undefined
+      && config.mode !== 'whenInUse' && config.mode !== 'always') {
+      throw new TypeError(
+        "systemPermissions.macOS.location.mode must be 'whenInUse' or 'always'",
+      )
+    }
+    if (config.requestOnLaunch !== undefined
+      && typeof config.requestOnLaunch !== 'boolean') {
+      throw new TypeError(
+        'systemPermissions.macOS.location.requestOnLaunch must be a boolean',
+      )
+    }
+  }
 }
 
 export type SystemPermissionName =
@@ -1048,18 +1189,47 @@ export type SystemPermissionName =
   | 'microphone'
   | 'screenRecording'
   | 'accessibility'
+  | 'inputMonitoring'
+  | 'location'
+  | 'fullDiskAccess'
+  | 'photos'
+  | 'contacts'
+  | 'calendar'
+  | 'reminders'
+  | 'speechRecognition'
+  | 'bluetooth'
+  | 'appleEvents'
+  | 'localNetwork'
 
-/** Resolve only the permissions explicitly opted into launch-time prompts. */
+/**
+ * Resolve only the permissions explicitly opted into launch-time prompts.
+ * `appleEvents`/`localNetwork` are declaration-only (see
+ * `MacOSDeclarationOnlyPermissionConfig`) and have no `requestOnLaunch` field
+ * at all, so they are never included here — only reachable through a runtime
+ * `systemPermission.request()` call.
+ */
 export function resolveStartupSystemPermissions(
   config: Pick<MurasakiConfig, 'systemPermissions'>,
 ): SystemPermissionName[] {
   const macOS = config.systemPermissions?.macOS
   if (!macOS) return []
-  const names: SystemPermissionName[] = [
+  // Excludes 'appleEvents'/'localNetwork' (see the doc comment above) —
+  // narrowing the array element type keeps `macOS[name]` below resolved to
+  // config shapes that all actually declare `requestOnLaunch`.
+  const names: Exclude<SystemPermissionName, 'appleEvents' | 'localNetwork'>[] = [
     'camera',
     'microphone',
     'screenRecording',
     'accessibility',
+    'inputMonitoring',
+    'location',
+    'fullDiskAccess',
+    'photos',
+    'contacts',
+    'calendar',
+    'reminders',
+    'speechRecognition',
+    'bluetooth',
   ]
   return names.filter((name) => macOS[name]?.requestOnLaunch === true)
 }
@@ -1198,6 +1368,9 @@ function validateSignConfig(value: unknown): void {
       && (typeof sign[field] !== 'string' || sign[field].trim().length === 0)) {
       throw new TypeError(`sign.${field} must be a non-empty string`)
     }
+  }
+  if (sign.appSandbox !== undefined && typeof sign.appSandbox !== 'boolean') {
+    throw new TypeError('sign.appSandbox must be a boolean')
   }
   if (sign.windows === undefined) return
   if (!sign.windows || typeof sign.windows !== 'object' || Array.isArray(sign.windows)) {
@@ -1528,7 +1701,23 @@ function resolveCapabilityScope(
       })
       resolved.windows = unique as string[]
     } else if (key === 'permissions') {
-      const known = new Set<SystemPermissionName>(['camera', 'microphone', 'screenRecording', 'accessibility'])
+      const known = new Set<SystemPermissionName>([
+        'camera',
+        'microphone',
+        'screenRecording',
+        'accessibility',
+        'inputMonitoring',
+        'location',
+        'fullDiskAccess',
+        'photos',
+        'contacts',
+        'calendar',
+        'reminders',
+        'speechRecognition',
+        'bluetooth',
+        'appleEvents',
+        'localNetwork',
+      ])
       unique.forEach((item) => {
         if (!known.has(item as SystemPermissionName)) throw new TypeError(`${path}.permissions contains unknown system permission ${JSON.stringify(item)}`)
       })
@@ -1541,7 +1730,12 @@ function resolveCapabilityScope(
 
 function capabilityScopeKeys(permission: NativeCapability): Array<keyof NativeCapabilityScope> {
   if (permission === 'shell:openExternal') return ['urls']
-  if (permission === 'shell:showItemInFolder' || permission === 'shell:trashItem' || permission === 'shell:openPath') return ['paths']
+  if (
+    permission === 'shell:showItemInFolder'
+    || permission === 'shell:trashItem'
+    || permission === 'shell:openPath'
+    || permission === 'shell:runElevated'
+  ) return ['paths']
   if (permission === 'window:open' || permission === 'window:manage') return ['windows']
   if (permission === 'systemPermission:status' || permission === 'systemPermission:request') return ['permissions']
   return []

@@ -145,6 +145,10 @@ test('validates structured native capability scopes and preserves them in metada
       allow: { paths: ['/tmp/murasaki/**'] },
     },
     {
+      permission: 'shell:runElevated',
+      allow: { paths: ['/tmp/murasaki/**'] },
+    },
+    {
       permission: 'window:manage',
       allow: { windows: ['settings'] },
     },
@@ -183,8 +187,10 @@ test('rejects ambiguous or unsafe structured capability scopes', () => {
     [{ permission: 'shell:showItemInFolder', allow: { paths: ['/tmp/*/secret/**'] } }],
     [{ permission: 'shell:trashItem', allow: { paths: ['relative/**'] } }],
     [{ permission: 'shell:openPath', allow: { urls: ['https://example.com/**'] } }],
+    [{ permission: 'shell:runElevated', allow: { urls: ['https://example.com/**'] } }],
+    [{ permission: 'shell:runElevated', allow: { paths: ['relative/**'] } }],
     [{ permission: 'window:manage', allow: { windows: ['bad label'] } }],
-    [{ permission: 'systemPermission:request', allow: { permissions: ['contacts'] } }],
+    [{ permission: 'systemPermission:request', allow: { permissions: ['bogusPermission'] } }],
     [{ permission: 'secureStorage:get', allow: { paths: ['/tmp/**'] } }],
     ['window:manage', { permission: 'window:manage', allow: { windows: ['settings'] } }],
   ]) {
