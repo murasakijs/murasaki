@@ -16,6 +16,9 @@ target/
 crates/native/*.node
 crates/native/npm/**/*.node
 
+# prebuilt launcher binaries (produced by native-release; never commit build outputs)
+crates/native/murasaki-launcher.*
+
 # system
 .DS_Store
 Thumbs.db
@@ -35,3 +38,13 @@ tmp/
 
 # agent worktrees / local
 .claude/
+.ph-assets/
+
+# launch / marketing assets (kept local, never published)
+PRODUCT_HUNT_LAUNCH_RUNBOOK.md
+social/
+assets/social/
+scripts/generate-social-gifs.mjs
+
+# local scratch example, not a published workspace member
+examples/updater-ui/
