@@ -103,9 +103,9 @@ jobs:
 
       - name: Inspect every framework-release npm payload
         run: |
-          npm pack --dry-run --json --workspace packages/ui
-          npm pack --dry-run --json --workspace packages/murasaki
-          npm pack --dry-run --json --workspace packages/create-murasaki
+          npm pack --dry-run --json ./packages/ui
+          npm pack --dry-run --json ./packages/murasaki
+          npm pack --dry-run --json ./packages/create-murasaki
 
       # `npm publish` (unlike `pnpm publish`) ships `workspace:` specs verbatim,
       # and "workspace:^" is not a version anyone can install. Rewrite them to
@@ -155,9 +155,9 @@ jobs:
 
       - name: Inspect the exact rewritten npm payloads
         run: |
-          npm pack --dry-run --json --workspace packages/ui
-          npm pack --dry-run --json --workspace packages/murasaki
-          npm pack --dry-run --json --workspace packages/create-murasaki
+          npm pack --dry-run --json ./packages/ui
+          npm pack --dry-run --json ./packages/murasaki
+          npm pack --dry-run --json ./packages/create-murasaki
           if grep -R '"workspace:' packages/ui/package.json packages/murasaki/package.json packages/create-murasaki/package.json packages/create-murasaki/templates/default/package.json; then
             echo "::error::A workspace: dependency survived the release rewrite."
             exit 1
