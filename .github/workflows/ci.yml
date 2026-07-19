@@ -123,6 +123,7 @@ jobs:
             overrides: {
               ...(manifest.pnpm?.overrides ?? {}),
               '@murasakijs/native': `file:${process.env.NATIVE_TARBALL}`,
+              '@murasakijs/ui': `file:${process.env.UI_TARBALL}`,
             },
           }
           fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
@@ -951,6 +952,12 @@ jobs:
             Write-Error "Profile-isolation application executable was not produced: $exePath"
             exit 1
           }
+          # The preceding smoke intentionally terminates a live WebView2 tree.
+          # On hosted Windows runners its out-of-process COM server can take a
+          # moment to unregister; starting a second unrelated app immediately
+          # can otherwise fail transiently with CO_E_SERVER_EXEC_FAILURE even
+          # though both packaged apps are valid in isolation.
+          Start-Sleep -Seconds 5
           .github/scripts/win-smoke-test.ps1 `
             -ExePath $exePath `
             -TimeoutSeconds 60 `
