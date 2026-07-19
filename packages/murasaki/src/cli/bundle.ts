@@ -34,6 +34,7 @@ import {
 import { resolveAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
 import { signWindowsArtifact } from './windows-signing.js'
+import { signLinuxArtifact } from './linux-signing.js'
 import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
 
 export { loadUserConfig } from './load-config.js'
@@ -92,13 +93,6 @@ export default async function bundle(argv: string[]) {
         'Cross-bundle without --sign, then run the signed release job on Windows.',
     )
   }
-  if (target.platform === 'linux' && shouldSign) {
-    throw new Error(
-      'murasaki: Linux AppDir/AppImage signing is not implemented. Refusing to emit an '
-        + 'unsigned artifact for an explicit --sign request; bundle without --sign or sign it '
-        + 'in a documented downstream Linux release pipeline.',
-    )
-  }
   await runPluginHooks(prepared, 'before', hookOptions)
   if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await buildProject(cwd, config)
   // Always (re)built — cheap relative to the client build, and must exist
@@ -120,7 +114,7 @@ export default async function bundle(argv: string[]) {
   // any host — the only extra tool it needs is `mksquashfs` (see
   // appimage.ts), required only for the final AppImage-packing step.
   if (target.platform === 'linux') {
-    await bundleLinux(cwd, config, target.arch)
+    await bundleLinux(cwd, config, target.arch, shouldSign)
     await runPluginHooks(prepared, 'after', hookOptions)
     return
   }
@@ -432,9 +426,16 @@ async function bundleWin32(
  * Has no macOS-only dependency (same posture as `bundleWin32`), so this can
  * run on any host, including this one for cross-bundling off a Mac — the
  * only external tool `bundle` needs for Linux is `mksquashfs`, and only for
- * the final AppImage-packing step (see appimage.ts).
+ * the final AppImage-packing step (see appimage.ts). `shouldSign` GPG
+ * detach-signs the produced `.AppImage` (see linux-signing.ts) — mirrors
+ * `bundleWin32` Authenticode-signing its own produced executable.
  */
-async function bundleLinux(cwd: string, config: MurasakiConfig, arch: Arch): Promise<void> {
+async function bundleLinux(
+  cwd: string,
+  config: MurasakiConfig,
+  arch: Arch,
+  shouldSign: boolean,
+): Promise<void> {
   const productName = config.productName
   const appId = sanitizeLinuxAppId(config.appId)
   const execName = sanitizeLinuxExecName(productName)
@@ -555,6 +556,12 @@ async function bundleLinux(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   const appImagePath = resolve(cwd, 'dist/bundle', `${productName}-${version}-linux-${arch}.AppImage`)
   await buildAppImage(appDir, appImagePath, arch)
   process.stdout.write(`\n${success(`AppImage written  ${dim(appImagePath)}`)}\n\n`)
+
+  if (shouldSign) {
+    signLinuxArtifact(appImagePath, config)
+  } else {
+    process.stdout.write(unsignedNote(appImagePath, 'linux'))
+  }
 }
 
 /**

@@ -85,13 +85,21 @@ export function error(msg: string): string {
  * Store. Shared by `bundle` and `installer` (see cli/bundle.ts's and
  * cli/installer.ts's `--sign`/`--notarize` handling).
  */
-export function unsignedNote(path: string, platform: 'darwin' | 'win32' = 'darwin'): string {
+export function unsignedNote(path: string, platform: 'darwin' | 'win32' | 'linux' = 'darwin'): string {
   if (platform === 'win32') {
     return (
       `\n${warn('This Windows build is unsigned. SmartScreen or application-control policy may block it.')}\n` +
       `${dim(`  Artifact:  "${path}"`)}\n` +
       `${dim('  For distribution, configure sign.windows and run with --sign to Authenticode-sign the app and installers.')}\n` +
       `${dim('  Do not tell end users to disable Windows security controls.')}\n`
+    )
+  }
+  if (platform === 'linux') {
+    return (
+      `\n${warn('This Linux build is unsigned — no detached GPG signature was produced.')}\n` +
+      `${dim(`  Artifact:  "${path}"`)}\n` +
+      `${dim('  For distribution, set $MURASAKI_GPG_KEY (or config.sign.linux.gpgKey) and run with --sign to produce a')}\n` +
+      `${dim('  detached <artifact>.sig, verifiable with:  gpg --verify <artifact>.sig <artifact>')}\n`
     )
   }
   return (

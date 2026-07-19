@@ -269,6 +269,11 @@ export interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>,
     replace?: boolean;
 }
 
+// @public
+export interface LinuxSigningConfig {
+    gpgKey?: string;
+}
+
 // @public (undocumented)
 export interface MacOSCapturePermissionConfig {
     requestOnLaunch?: boolean;
@@ -412,6 +417,7 @@ export interface MurasakiConfig {
         helperEntitlements?: string;
         appSandbox?: boolean;
         windows?: WindowsSigningConfig;
+        linux?: LinuxSigningConfig;
     };
     systemPermissions?: SystemPermissionsConfig;
     targets?: MurasakiBuildTarget[];

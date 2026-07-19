@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { PNG } from 'pngjs'
 
-import bundle, {
+import {
   linuxAppRunScript,
   linuxDesktopEntry,
   metaJson,
@@ -48,24 +48,15 @@ async function withTempProject(t) {
   return root
 }
 
-test('an explicit Linux --sign request fails before producing an unsigned artifact', async (t) => {
-  const root = await withTempProject(t)
-  await writeFile(
-    join(root, 'murasaki.config.mjs'),
-    "export default { appId: 'dev.test.signing', productName: 'SigningFixture' }\n",
-  )
-  const previous = process.cwd()
-  process.chdir(root)
-  try {
-    await assert.rejects(
-      bundle(['--target', 'linux-x64', '--sign']),
-      /Linux AppDir\/AppImage signing is not implemented.*Refusing to emit an unsigned artifact/,
-    )
-  } finally {
-    process.chdir(previous)
-  }
-  assert.equal(existsSync(join(root, 'dist')), false)
-})
+// Linux `--sign` is now implemented as GPG detached-signing (see
+// linux-signing.ts and linux-signing.test.mjs for the sign-command
+// construction / key-selection precedence / config validation coverage —
+// `bundleLinux` itself needs a real launcher binary + a downloaded Node
+// runtime to run end-to-end, same constraint as the rest of this file, so it
+// isn't re-exercised here). `bundleLinux`'s own signing step (`buildAppImage`
+// then `signLinuxArtifact`) is covered end-to-end by CI's `linux-sign-smoke`
+// job (.github/workflows/app-package-linux.yml) and this feature's Docker
+// verification.
 
 // ── sanitizeLinuxExecName / sanitizeLinuxAppId ─────────────────────────────
 

@@ -12,6 +12,12 @@ import type { MurasakiConfig } from '../config.js'
 import { resolveAssociations, windowsProgId, type ResolvedAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
 import { signWindowsArtifact } from './windows-signing.js'
+import {
+  embedDebSignatureIfAvailable,
+  resolveLinuxSigningOptions,
+  signLinuxArtifact,
+  writeSha256Sums,
+} from './linux-signing.js'
 import { writeArArchive, writeUstarTar, type TarEntry } from './deb.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -42,13 +48,6 @@ export default async function installer(argv: string[]) {
   if (target.platform === 'linux') {
     if (argv.includes('--notarize')) {
       throw new Error('murasaki: --notarize is only available for macOS DMG installers.')
-    }
-    if (argv.includes('--sign')) {
-      throw new Error(
-        'murasaki: Linux .deb signing is not implemented. Refusing to emit an unsigned '
-          + 'package for an explicit --sign request; build without --sign or sign it in a '
-          + 'documented downstream Debian release pipeline.',
-      )
     }
     await installerLinux(argv, cwd, config, target.arch)
     return
@@ -1807,10 +1806,15 @@ async function installerLinux(
   const productName = config.productName
   const version = config.version ?? '0.0.0'
   const appDir = resolve(cwd, 'dist/bundle', `${productName}.AppDir`)
+  const shouldSign = argv.includes('--sign')
 
-  // Same re-bundle-by-default / --no-build convention as the darwin/win32 paths.
+  // Same re-bundle-by-default / --no-build convention as the darwin/win32
+  // paths. `--sign` forces a re-bundle so the exact `.AppImage` that ends up
+  // alongside this `.deb` is the one GPG-signed just now — `bundle` forwards
+  // `--sign` through to `bundleLinux`, which detach-signs the `.AppImage`
+  // itself (see bundle.ts / linux-signing.ts).
   const skipBuild = argv.includes('--no-build')
-  if (!skipBuild || !existsSync(appDir)) await bundle(argv)
+  if (!skipBuild || !existsSync(appDir) || shouldSign) await bundle(argv)
 
   await mkdir(resolve(cwd, 'dist'), { recursive: true })
 
@@ -1848,6 +1852,49 @@ async function installerLinux(
   await writeFile(debPath, deb)
 
   process.stdout.write(`\n${success(`installer written  ${dim(debPath)}`)}\n\n`)
+
+  if (!shouldSign) {
+    process.stdout.write(unsignedNote(debPath, 'linux'))
+    return
+  }
+
+  // Opportunistically embed a Debian-native signature via `dpkg-sig` FIRST,
+  // when that tool happens to be on PATH — `dpkg-sig --sign` mutates the
+  // `.deb` in place (it ar-appends a `_gpgbuilder` member), so it must run
+  // before the detached signature below, not after: signing first and
+  // embedding second would leave `<deb>.sig` covering bytes the published
+  // `.deb` no longer has, breaking `gpg --verify`. Its absence/failure never
+  // fails the build — the detached `.sig` produced next is what `--sign`
+  // actually guarantees.
+  const signingOptions = resolveLinuxSigningOptions(config)
+  const embedded = embedDebSignatureIfAvailable(debPath, signingOptions)
+  process.stdout.write(
+    `\n${dim(
+      embedded === 'dpkg-sig'
+        ? '.deb also carries an embedded dpkg-sig "builder" signature (dpkg-sig detected on PATH).'
+        : '.deb signature is the detached .sig only (dpkg-sig not found on PATH — install the `dpkg-sig` package to also embed a Debian-native signature).',
+    )}\n`,
+  )
+
+  // Detached, armored `.deb.sig` over the FINAL bytes (with or without the
+  // dpkg-sig member above) — the baseline `--sign` deliverable (see
+  // linux-signing.ts's module doc comment).
+  signLinuxArtifact(debPath, config)
+
+  // A combined SHA256SUMS (+ detached SHA256SUMS.sig) covering both Linux
+  // deliverables — the AppImage under dist/bundle/ (signed above, as part of
+  // `bundle`) and this .deb under dist/ — mirroring sample-release.yml's own
+  // `sha256sum -- * > SHA256SUMS` convention (relative paths, checked from
+  // `dist/`).
+  const appImagePath = resolve(cwd, 'dist/bundle', `${productName}-${version}-linux-${arch}.AppImage`)
+  const sumsEntries = [
+    { absPath: appImagePath, relPath: `bundle/${basename(appImagePath)}` },
+    { absPath: debPath, relPath: basename(debPath) },
+  ].filter((entry) => existsSync(entry.absPath))
+  const sumsPath = resolve(cwd, 'dist', 'SHA256SUMS')
+  await writeSha256Sums(sumsPath, sumsEntries)
+  process.stdout.write(`\n${success(`checksums written  ${dim(sumsPath)}`)}\n\n`)
+  signLinuxArtifact(sumsPath, config)
 }
 
 /**
