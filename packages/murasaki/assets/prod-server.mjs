@@ -1011,7 +1011,12 @@ function listenWithFallback(initialPort, maxAttempts) {
   const attempt = () => {
     attempts += 1
     const onError = (error) => {
-      if (error?.code === 'EADDRINUSE' && candidate !== 0 && attempts < maxAttempts) {
+      // Windows reports EACCES, rather than EADDRINUSE, when the deterministic
+      // private port falls inside an OS-excluded range (commonly reserved by
+      // Hyper-V/WinNAT). On a first launch both conditions mean this candidate
+      // cannot become the app's durable origin, so continue the bounded probe.
+      const retryable = error?.code === 'EADDRINUSE' || error?.code === 'EACCES'
+      if (retryable && candidate !== 0 && attempts < maxAttempts) {
         candidate = nextPrivatePort(candidate)
         setImmediate(attempt)
         return
