@@ -4,6 +4,12 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
+## 0.55.1 — release verification hardening
+
+- Makes npm payload inspection work from the pnpm workspace root.
+- Waits for npm registry propagation between dependency-ordered publishes.
+- Runs final integrity, git-head, and SLSA provenance verification correctly on Node.js 24.
+
 ## 0.55.0 — production-candidate foundations
 
 ### Added

@@ -205,10 +205,16 @@ jobs:
       - name: Verify @murasakijs/ui is published
         run: |
           UI_VERSION=$(node -p "require('./packages/ui/package.json').version")
-          if [ "$(npm view "@murasakijs/ui@${UI_VERSION}" version 2>/dev/null)" != "$UI_VERSION" ]; then
-            echo "::error::@murasakijs/ui@${UI_VERSION} is not on npm. murasaki depends on it, so publishing now would ship an uninstallable package."
-            exit 1
-          fi
+          for attempt in {1..12}; do
+            if [ "$(npm view "@murasakijs/ui@${UI_VERSION}" version 2>/dev/null)" = "$UI_VERSION" ]; then
+              break
+            fi
+            if [ "$attempt" = 12 ]; then
+              echo "::error::@murasakijs/ui@${UI_VERSION} is not on npm. murasaki depends on it, so publishing now would ship an uninstallable package."
+              exit 1
+            fi
+            sleep 5
+          done
           echo "@murasakijs/ui@${UI_VERSION} is published — OK to publish murasaki."
 
       - name: Publish packages/murasaki
@@ -230,10 +236,16 @@ jobs:
       - name: Verify @murasakijs/ui (template dependency) is published
         run: |
           UI_VERSION=$(node -p "require('./packages/ui/package.json').version")
-          if [ "$(npm view "@murasakijs/ui@${UI_VERSION}" version 2>/dev/null)" != "$UI_VERSION" ]; then
-            echo "::error::@murasakijs/ui@${UI_VERSION} is not on npm yet. Publish it (manually for the first version, then configure its Trusted Publisher) before releasing create-murasaki, or scaffolded apps will fail to install."
-            exit 1
-          fi
+          for attempt in {1..12}; do
+            if [ "$(npm view "@murasakijs/ui@${UI_VERSION}" version 2>/dev/null)" = "$UI_VERSION" ]; then
+              break
+            fi
+            if [ "$attempt" = 12 ]; then
+              echo "::error::@murasakijs/ui@${UI_VERSION} is not on npm yet. Publish it (manually for the first version, then configure its Trusted Publisher) before releasing create-murasaki, or scaffolded apps will fail to install."
+              exit 1
+            fi
+            sleep 5
+          done
           echo "@murasakijs/ui@${UI_VERSION} is published — OK to release create-murasaki."
 
       - name: Publish packages/create-murasaki
@@ -251,11 +263,13 @@ jobs:
           RELEASE_COMMIT: ${{ github.sha }}
         run: |
           node <<'NODE'
-          const { execFileSync } = require('node:child_process')
+          const { execFileSync } = await import('node:child_process')
+          const { readFileSync } = await import('node:fs')
+          const packageVersion = (path) => JSON.parse(readFileSync(path, 'utf8')).version
           const packages = [
-            ['@murasakijs/ui', require('./packages/ui/package.json').version],
-            ['murasaki', require('./packages/murasaki/package.json').version],
-            ['create-murasaki', require('./packages/create-murasaki/package.json').version],
+            ['@murasakijs/ui', packageVersion('./packages/ui/package.json')],
+            ['murasaki', packageVersion('./packages/murasaki/package.json')],
+            ['create-murasaki', packageVersion('./packages/create-murasaki/package.json')],
           ]
           const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
           for (const [name, version] of packages) {
