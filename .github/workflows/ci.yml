@@ -68,7 +68,7 @@ jobs:
       - name: Build documentation site
         run: pnpm --filter murasaki-docs build
 
-      - name: Fresh scaffold install and type-check
+      - name: Fresh scaffold install, lint, type-check, and build
         shell: bash
         run: |
           set -euo pipefail
@@ -97,7 +97,7 @@ jobs:
           (
             cd "$RUNNER_TEMP"
             node "$CREATE_PACKAGE_DIR/package/index.mjs" fresh-murasaki \
-              --yes --linter none --skip-install --no-git
+              --yes --linter biome --skip-install --no-git
           )
 
           UI_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'murasakijs-ui-*.tgz' -print -quit)
@@ -130,6 +130,7 @@ jobs:
           NODE
 
           pnpm --dir "$APP_DIR" install --no-frozen-lockfile
+          pnpm --dir "$APP_DIR" lint
           pnpm --dir "$APP_DIR" typecheck
           pnpm --dir "$APP_DIR" build
 

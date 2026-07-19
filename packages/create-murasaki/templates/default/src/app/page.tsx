@@ -1,9 +1,9 @@
-import { Link } from 'murasaki'
+import { buttonVariants, Card } from '@murasakijs/ui'
+import { ArrowRight, BookOpen } from 'lucide-react'
 import type { Metadata } from 'murasaki'
-import { Card, buttonVariants } from '@murasakijs/ui'
-import { BookOpen, ArrowRight } from 'lucide-react'
-import XLogo from '@/assets/x-logo.svg?react'
+import { Link } from 'murasaki'
 import GithubLogo from '@/assets/github-logo.svg?react'
+import XLogo from '@/assets/x-logo.svg?react'
 
 export const metadata: Metadata = {
   title: 'Murasaki App',
@@ -26,8 +26,8 @@ export default function Page() {
         Hello, Murasaki <span aria-hidden>🦋</span>
       </h1>
       <p className="mt-3 text-muted-foreground">
-        The Next.js developer experience — file-based routing, server actions and
-        native menus — in a lightweight Rust shell.
+        The Next.js developer experience — file-based routing, server actions and native menus — in
+        a lightweight Rust shell.
       </p>
       <p className="mt-1 text-sm text-muted-foreground/60">
         Edit <code className="rounded bg-muted px-1.5 py-0.5">src/app/page.tsx</code> and save to

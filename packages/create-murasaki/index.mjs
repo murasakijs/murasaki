@@ -199,7 +199,7 @@ async function promptForLinter() {
 
 async function applyBiome(targetDir) {
   const biomeJson = `{
-  "$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": {
     "enabled": true,
     "clientKind": "git",
@@ -216,7 +216,7 @@ async function applyBiome(targetDir) {
   },
   "linter": {
     "enabled": true,
-    "rules": { "recommended": true }
+    "rules": { "preset": "recommended" }
   },
   "javascript": {
     "formatter": {
@@ -234,7 +234,7 @@ async function applyBiome(targetDir) {
   pkg.scripts.lint = 'biome check .'
   pkg.scripts.format = 'biome format --write .'
   pkg.devDependencies = pkg.devDependencies || {}
-  pkg.devDependencies['@biomejs/biome'] = '^2.5.1'
+  pkg.devDependencies['@biomejs/biome'] = '2.5.4'
   await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
   // @biomejs/biome ships a native binary via a postinstall; it's already in the
   // template's pnpm-workspace.yaml build allow-list, so nothing else is needed.

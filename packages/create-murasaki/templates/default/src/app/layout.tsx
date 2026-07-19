@@ -1,7 +1,7 @@
 import '@murasakijs/ui/styles.css'
 import './globals.css'
-import type { ReactNode } from 'react'
 import { App, useContextMenu } from 'murasaki'
+import type { ReactNode } from 'react'
 import { Action } from '@/lib/action'
 
 /**
@@ -22,8 +22,6 @@ export default function Layout({ children }: { children: ReactNode }) {
   ])
 
   return (
-    <App className="flex items-center justify-center bg-background text-foreground">
-      {children}
-    </App>
+    <App className="flex items-center justify-center bg-background text-foreground">{children}</App>
   )
 }

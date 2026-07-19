@@ -1,15 +1,8 @@
-import { useState } from 'react'
-import { Link, ContextMenuTrigger, useContextMenu } from 'murasaki'
-import type { Metadata } from 'murasaki'
-import {
-  Button,
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@murasakijs/ui'
+import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@murasakijs/ui'
 import { Plus, Zap } from 'lucide-react'
+import type { Metadata } from 'murasaki'
+import { ContextMenuTrigger, Link, useContextMenu } from 'murasaki'
+import { useState } from 'react'
 import { Action } from '@/lib/action'
 import { useCounter } from '@/lib/counter'
 
@@ -52,8 +45,8 @@ export default function DemoPage() {
     <main className="mx-auto max-w-md text-center">
       <h1 className="text-3xl font-semibold tracking-tight text-foreground">Demo</h1>
       <p className="mt-3 text-muted-foreground">
-        Right-click the card — with <code>inherit</code> its menu also shows the
-        app-wide items — or right-click anywhere else for just the app menu.
+        Right-click the card — with <code>inherit</code> its menu also shows the app-wide items — or
+        right-click anywhere else for just the app menu.
       </p>
 
       <ContextMenuTrigger id="card" inherit>
@@ -62,10 +55,7 @@ export default function DemoPage() {
             <CardTitle>Try it out</CardTitle>
             <CardDescription>
               Right-click this card, or edit{' '}
-              <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
-                src/app/demo/page.tsx
-              </code>
-              .
+              <code className="rounded bg-muted px-1.5 py-0.5 text-sm">src/app/demo/page.tsx</code>.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4 text-center">
@@ -82,8 +72,8 @@ export default function DemoPage() {
 
       <p className="mt-6 text-xs text-muted-foreground">
         The counter uses the store in{' '}
-        <code className="rounded bg-muted px-1.5 py-0.5">src/lib/counter.ts</code>; "Call API
-        route" posts to{' '}
+        <code className="rounded bg-muted px-1.5 py-0.5">src/lib/counter.ts</code>; "Call API route"
+        posts to{' '}
         <code className="rounded bg-muted px-1.5 py-0.5">src/api/action-demo/route.ts</code>.
       </p>
 

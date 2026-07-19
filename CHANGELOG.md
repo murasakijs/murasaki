@@ -4,6 +4,12 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
+## 0.55.2 — reliable fresh scaffolds
+
+- Makes the default Biome setup use its installed schema and the current recommended-rule preset.
+- Pins the scaffolded Biome CLI so a newly generated app remains lint-clean over time.
+- Verifies a fresh packed scaffold with lint, type-check, and production build in CI.
+
 ## 0.55.1 — release verification hardening
 
 - Makes npm payload inspection work from the pnpm workspace root.
