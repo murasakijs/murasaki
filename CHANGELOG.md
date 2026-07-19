@@ -4,6 +4,12 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
+## 0.55.3 — reusable dependency verification
+
+- Lets the release gate reuse an already-published workspace package only when its published git
+  commit is an ancestor and the package directory is unchanged through the current release.
+- Keeps strict integrity, provenance, and current-commit checks for packages published by the tag.
+
 ## 0.55.2 — reliable fresh scaffolds
 
 - Makes the default Biome setup use its installed schema and the current recommended-rule preset.

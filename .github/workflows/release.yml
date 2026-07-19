@@ -267,12 +267,12 @@ jobs:
           const { readFileSync } = await import('node:fs')
           const packageVersion = (path) => JSON.parse(readFileSync(path, 'utf8')).version
           const packages = [
-            ['@murasakijs/ui', packageVersion('./packages/ui/package.json')],
-            ['murasaki', packageVersion('./packages/murasaki/package.json')],
-            ['create-murasaki', packageVersion('./packages/create-murasaki/package.json')],
+            ['@murasakijs/ui', packageVersion('./packages/ui/package.json'), 'packages/ui'],
+            ['murasaki', packageVersion('./packages/murasaki/package.json'), 'packages/murasaki'],
+            ['create-murasaki', packageVersion('./packages/create-murasaki/package.json'), 'packages/create-murasaki'],
           ]
           const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-          for (const [name, version] of packages) {
+          for (const [name, version, packagePath] of packages) {
             let metadata
             for (let attempt = 1; attempt <= 12; attempt++) {
               try {
@@ -288,11 +288,28 @@ jobs:
               throw new Error(`${name}@${version} did not become verifiable on npm`)
             }
             if (metadata.gitHead !== process.env.RELEASE_COMMIT) {
-              throw new Error(`${name}@${version} gitHead does not match the release commit`)
+              if (!/^[0-9a-f]{40}$/.test(metadata.gitHead ?? '')) {
+                throw new Error(`${name}@${version} has no valid published gitHead`)
+              }
+              try {
+                execFileSync('git', [
+                  'merge-base', '--is-ancestor', metadata.gitHead, process.env.RELEASE_COMMIT,
+                ], { stdio: 'ignore' })
+                execFileSync('git', [
+                  'diff', '--quiet', metadata.gitHead, process.env.RELEASE_COMMIT, '--', packagePath,
+                ], { stdio: 'ignore' })
+              } catch {
+                throw new Error(
+                  `${name}@${version} was reused from ${metadata.gitHead}, but ${packagePath} changed`,
+                )
+              }
             }
             if (metadata?.['dist.attestations.provenance.predicateType'] !== 'https://slsa.dev/provenance/v1') {
               throw new Error(`${name}@${version} has no SLSA v1 npm provenance attestation`)
             }
-            console.log(`${name}@${version}: registry metadata and provenance verified`)
+            const source = metadata.gitHead === process.env.RELEASE_COMMIT
+              ? 'published from this release'
+              : `reused unchanged from ${metadata.gitHead}`
+            console.log(`${name}@${version}: registry metadata and provenance verified (${source})`)
           }
           NODE
