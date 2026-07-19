@@ -17,7 +17,7 @@
     "templates"
   ],
   "dependencies": {
-    "@inquirer/prompts": "^7.0.0",
+    "@inquirer/prompts": "^8.5.2",
     "nanospinner": "^1.0.0"
   }
 }
