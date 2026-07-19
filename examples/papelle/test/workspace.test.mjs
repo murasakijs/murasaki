@@ -6,6 +6,8 @@ test('sample workspace is explicitly marked and empty launch contains no pages',
   const sample = createSampleWorkspace('en')
   assert.equal(sample.sampleData, true)
   assert.ok(sample.pages.length >= 3)
+  const builtInImage = sample.pages.flatMap((page) => page.blocks).find((block) => block.attachment?.id === 'papelle-icon')
+  assert.equal(builtInImage?.attachment?.dataUrl, 'murasaki-asset:papelle-icon')
   assert.deepEqual(createEmptyWorkspace('ja').pages, [])
 })
 

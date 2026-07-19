@@ -20,6 +20,9 @@ test('sync validation accepts normalized data and rejects malformed nested paylo
   const orphaned = createSampleWorkspace('en')
   orphaned.pages.find((page) => page.id === 'research').parentId = 'missing-parent'
   assert.equal(validWorkspace(orphaned), false)
+  const unknownBuiltIn = createSampleWorkspace('en')
+  unknownBuiltIn.pages[0].blocks.find((block) => block.attachment).attachment.dataUrl = 'murasaki-asset:unknown'
+  assert.equal(validWorkspace(unknownBuiltIn), false)
   const cyclic = createSampleWorkspace('en')
   cyclic.pages.find((page) => page.id === 'work').parentId = 'research'
   assert.equal(validWorkspace(cyclic), false)

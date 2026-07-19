@@ -40,7 +40,10 @@ export function createSampleWorkspace(locale = 'en') {
           block('atlas-note', 'callout', 'All data stays on your device by default. Sync is optional and self-hosted.'),
           block('atlas-reference', 'heading', 'Reference'),
           block('atlas-paper', 'attachment', 'Papelle app icon', {
-            attachment: { id: 'papelle-icon', name: 'papelle-icon.png', mime: 'image/png', size: 1081344, dataUrl: '/src/assets/icon.png' },
+            // Built-in attachments use a logical URL. The editor resolves it
+            // to Vite's hashed production asset while keeping workspace data
+            // portable across dev, packaged, and synced environments.
+            attachment: { id: 'papelle-icon', name: 'papelle-icon.png', mime: 'image/png', size: 1077897, dataUrl: 'murasaki-asset:papelle-icon' },
           }),
           block('atlas-milestones', 'heading', 'Milestones'),
         ],

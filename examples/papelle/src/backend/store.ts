@@ -14,9 +14,14 @@ const id = (value: unknown) => text(value, 128) && /^[\w.-]+$/u.test(value)
 function validAttachment(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const attachment = value as Record<string, unknown>
+  const builtInPapelleIcon = attachment.id === 'papelle-icon'
+    && attachment.name === 'papelle-icon.png'
+    && attachment.mime === 'image/png'
+    && attachment.dataUrl === 'murasaki-asset:papelle-icon'
   return id(attachment.id) && text(attachment.name, 255) && text(attachment.mime, 128)
     && Number.isSafeInteger(attachment.size) && Number(attachment.size) >= 0 && Number(attachment.size) <= 5 * 1024 * 1024
-    && text(attachment.dataUrl, 7 * 1024 * 1024) && /^(data:(image\/|audio\/|application\/pdf)|\/)/.test(attachment.dataUrl)
+    && text(attachment.dataUrl, 7 * 1024 * 1024)
+    && (/^(data:(image\/|audio\/|application\/pdf)|\/)/.test(attachment.dataUrl) || builtInPapelleIcon)
 }
 
 function validBlock(value: unknown): boolean {

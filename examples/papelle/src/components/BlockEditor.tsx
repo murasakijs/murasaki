@@ -1,5 +1,6 @@
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Check, FileAudio, FileText, GripVertical, Image as ImageIcon, Link2, Paperclip, Plus, Trash2 } from 'lucide-react'
+import papelleIcon from '../assets/icon.png'
 import type { Block, BlockType, Locale, Page } from '../domain/types'
 import { t } from '../i18n'
 
@@ -15,7 +16,13 @@ interface BlockEditorProps {
 function AttachmentPreview({ block }: { block: Block }) {
   const attachment = block.attachment
   if (!attachment) return <div className="attachment-missing"><Paperclip size={18} />{block.text}</div>
-  if (attachment.mime.startsWith('image/')) return <figure className="attachment-card"><img src={attachment.dataUrl} alt={attachment.name} /><figcaption><ImageIcon size={15} />{attachment.name}<span>{Math.max(1, Math.round(attachment.size / 1024))} KB</span></figcaption></figure>
+  // `papelle-icon` used `/src/assets/icon.png` before packaged builds exposed
+  // the bug. Resolve by stable ID as well so existing saved workspaces repair
+  // themselves without a destructive reset.
+  const builtInPapelleIcon = attachment.id === 'papelle-icon'
+    && (attachment.dataUrl === 'murasaki-asset:papelle-icon' || attachment.dataUrl === '/src/assets/icon.png')
+  const source = builtInPapelleIcon ? papelleIcon : attachment.dataUrl
+  if (attachment.mime.startsWith('image/')) return <figure className="attachment-card"><img src={source} alt={attachment.name} /><figcaption><ImageIcon size={15} />{attachment.name}<span>{Math.max(1, Math.round(attachment.size / 1024))} KB</span></figcaption></figure>
   if (attachment.mime.startsWith('audio/')) return <div className="attachment-card audio"><FileAudio size={22} /><strong>{attachment.name}</strong><audio controls src={attachment.dataUrl} /></div>
   // Do not embed synced PDFs inside the privileged app WebView. A collaborator
   // may supply this record, and an inline PDF renderer unnecessarily widens

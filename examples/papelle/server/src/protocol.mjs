@@ -12,9 +12,14 @@ const stamp = (value) => text(value, 64) && Number.isFinite(Date.parse(value))
 const id = (value) => text(value, 128) && /^[\w.-]+$/u.test(value)
 
 function validAttachment(value) {
+  const builtInPapelleIcon = value?.id === 'papelle-icon'
+    && value.name === 'papelle-icon.png'
+    && value.mime === 'image/png'
+    && value.dataUrl === 'murasaki-asset:papelle-icon'
   return value && typeof value === 'object' && id(value.id) && text(value.name, 255) && text(value.mime, 128)
     && Number.isSafeInteger(value.size) && value.size >= 0 && value.size <= 5 * 1024 * 1024
-    && text(value.dataUrl, 7 * 1024 * 1024) && /^(data:(image\/|audio\/|application\/pdf)|\/)/.test(value.dataUrl)
+    && text(value.dataUrl, 7 * 1024 * 1024)
+    && (/^(data:(image\/|audio\/|application\/pdf)|\/)/.test(value.dataUrl) || builtInPapelleIcon)
 }
 
 function validBlock(value) {
