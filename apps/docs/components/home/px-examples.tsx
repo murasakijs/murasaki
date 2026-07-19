@@ -8,16 +8,30 @@ import { SampleDemoCommand } from "./sample-demo-command";
 
 const REPO_URL = "https://github.com/murasakijs/murasaki";
 const DEMO_RELEASE_URL = `${REPO_URL}/releases/tag/v0.47.3`;
+const SAMPLE_RELEASE_URL = `${REPO_URL}/releases/tag/samples-v0.55.5`;
 const EXAMPLES_URL = `${REPO_URL}/tree/main/examples`;
 
 const SAMPLE_META: {
   slug: string;
+  command: string;
   image: StaticImageData;
   imagePosition?: string;
 }[] = [
-  { slug: "papelle", image: papelleImage },
-  { slug: "oscilla", image: oscillaImage },
-  { slug: "orglia", image: orgliaImage },
+  {
+    slug: "papelle",
+    command: "pnpm dlx murasaki@latest demo papelle",
+    image: papelleImage,
+  },
+  {
+    slug: "oscilla",
+    command: "pnpm dlx murasaki@latest demo oscilla",
+    image: oscillaImage,
+  },
+  {
+    slug: "orglia",
+    command: "pnpm dlx murasaki@latest demo orglia",
+    image: orgliaImage,
+  },
 ];
 
 /**
@@ -118,6 +132,12 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                 <p className="lp-sans mt-3 text-sm leading-relaxed text-white/65">
                   {app.description}
                 </p>
+                <SampleDemoCommand
+                  command={meta.command}
+                  label={content.runner.label}
+                  copyLabel={content.runner.copy}
+                  copiedLabel={content.runner.copied}
+                />
                 <div className="lp-mono mt-5 flex flex-wrap gap-x-5 gap-y-3 border-b border-white/15 pb-5 text-xs">
                   <a
                     href={`${REPO_URL}/tree/main/examples/${meta.slug}`}
@@ -125,6 +145,13 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                   >
                     <Code2 aria-hidden="true" className="size-3.5" />
                     {content.sourceLabel}
+                  </a>
+                  <a
+                    href={SAMPLE_RELEASE_URL}
+                    className="inline-flex items-center gap-2 text-white/65 transition-colors hover:text-white"
+                  >
+                    {content.defaultDemo.releaseNotes}
+                    <ExternalLink aria-hidden="true" className="size-3.5" />
                   </a>
                 </div>
               </article>

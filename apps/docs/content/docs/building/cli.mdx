@@ -8,6 +8,7 @@ murasaki dev         Start the Vite dev server + native window (HMR, Fast Refres
 murasaki build       Production Vite build → dist/client
 murasaki bundle      Native app folder / .app for the current platform
 murasaki installer   Distributable installer for the current platform
+murasaki demo        Run a checksum-verified macOS developer preview
 murasaki init        Install the Rust toolchain (only if you're hacking on @murasakijs/native)
 murasaki icon        Generate .icns / .ico / .png from a single PNG
 murasaki release     Auto-update manifest helpers
@@ -86,6 +87,29 @@ murasaki installer --no-build          # reuse an existing dist/bundle
   Use `murasaki bundle` when a portable ZIP/AppImage is the intended output.
 - **`--notarize`** — macOS only; submits the signed `.dmg` to Apple's notary
   service and staples the ticket (`--notarize` requires `--sign`).
+
+## `murasaki demo`
+
+Downloads and launches a packaged macOS developer preview in one command. The
+runner selects Apple silicon or Intel automatically, verifies the release
+asset against its published SHA-256 and strict ad-hoc code signature, caches
+the verified app, and only then removes the quarantine attribute.
+
+```bash
+pnpm dlx murasaki@latest demo papelle
+pnpm dlx murasaki@latest demo oscilla
+pnpm dlx murasaki@latest demo orglia
+```
+
+- `murasaki demo --list` lists every available preview.
+- `--refresh` ignores the verified local cache and downloads the asset again.
+- `--no-open` prepares and verifies the app without launching it.
+- Running `murasaki demo` without a name launches the packaged default
+  create-murasaki scaffold.
+
+These are ad-hoc-signed developer previews for CLI users, not notarized
+consumer downloads. Production apps should be signed and notarized by their
+publisher.
 
 ## `murasaki init`
 

@@ -8,6 +8,7 @@ murasaki dev         Vite の開発サーバー + ネイティブウィンドウ
 murasaki build       本番用の Vite ビルド → dist/client
 murasaki bundle      現在のプラットフォーム向けのネイティブアプリフォルダ / .app
 murasaki installer   現在のプラットフォーム向けの配布用インストーラー
+murasaki demo        チェックサム検証済みmacOS開発者プレビューを起動する
 murasaki init        Rust ツールチェーンをインストールする(@murasakijs/native 自体をいじる場合のみ)
 murasaki icon        1つの PNG から .icns / .ico / .png を生成する
 murasaki release     自動更新マニフェストのヘルパー
@@ -85,6 +86,27 @@ murasaki installer --no-build          # 既存の dist/bundle を再利用す�
   portable ZIP / AppImageが目的なら`murasaki bundle`を使ってください。
 - **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary サービスに
   提出し、チケットをステープルします(`--notarize` は `--sign` が必須)。
+
+## `murasaki demo`
+
+パッケージ済みのmacOS開発者プレビューを1コマンドで取得して起動します。Apple silicon / Intel
+に合うビルドを自動選択し、公開済みSHA-256と厳密なad-hocコード署名を検証してキャッシュした
+後にだけ、隔離属性を解除します。
+
+```bash
+pnpm dlx murasaki@latest demo papelle
+pnpm dlx murasaki@latest demo oscilla
+pnpm dlx murasaki@latest demo orglia
+```
+
+- `murasaki demo --list` で利用可能なプレビューを一覧表示します。
+- `--refresh` で検証済みキャッシュを使わず、再ダウンロードします。
+- `--no-open` でアプリを起動せず、取得と検証だけを実行します。
+- 名前を省略した `murasaki demo` は、パッケージ済みの標準
+  create-murasakiスキャフォールドを起動します。
+
+これらはCLI利用者向けのad-hoc署名済み開発者プレビューであり、公証済みの一般利用者向け
+ダウンロードではありません。本番アプリは各公開者が署名・公証してください。
 
 ## `murasaki init`
 

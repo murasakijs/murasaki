@@ -18,7 +18,19 @@ test('builds immutable release asset names', () => {
     demoAssetName(DEMO_SPECS.default, 'darwin-x64'),
     'MurasakiDemo-0.47.3-darwin-x64.dmg',
   )
-  assert.deepEqual(Object.keys(DEMO_SPECS), ['default'])
+  assert.equal(
+    demoAssetName(DEMO_SPECS.papelle, 'darwin-arm64'),
+    'Papelle-0.55.5-darwin-arm64.dmg',
+  )
+  assert.equal(
+    demoAssetName(DEMO_SPECS.oscilla, 'darwin-x64'),
+    'Oscilla-0.55.5-darwin-x64.dmg',
+  )
+  assert.equal(
+    demoAssetName(DEMO_SPECS.orglia, 'darwin-arm64'),
+    'Orglia-0.55.5-darwin-arm64.dmg',
+  )
+  assert.deepEqual(Object.keys(DEMO_SPECS), ['default', 'papelle', 'oscilla', 'orglia'])
 })
 
 test('selects the checksum for the exact asset', () => {

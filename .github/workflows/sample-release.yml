@@ -1,0 +1,208 @@
+name: Publish macOS sample previews
+
+on:
+  push:
+    tags:
+      - 'samples-v*.*.*'
+
+permissions:
+  contents: write
+  checks: read
+
+concurrency:
+  group: sample-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate sample release commit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+      - name: Verify tag, main ancestry, and required checks
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/verify-release-commit.mjs --require-ci samples-v
+          packages/murasaki/package.json
+
+  build:
+    name: ${{ matrix.product }} / macOS ${{ matrix.arch }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: papelle
+            product: Papelle
+            arch: arm64
+            runner: macos-15
+          - app: papelle
+            product: Papelle
+            arch: x64
+            runner: macos-15-intel
+          - app: oscilla
+            product: Oscilla
+            arch: arm64
+            runner: macos-15
+          - app: oscilla
+            product: Oscilla
+            arch: x64
+            runner: macos-15-intel
+          - app: orglia
+            product: Orglia
+            arch: arm64
+            runner: macos-15
+          - app: orglia
+            product: Orglia
+            arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: crates/native
+          key: sample-${{ matrix.app }}-${{ matrix.arch }}
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build framework packages
+        run: |
+          pnpm --filter @murasakijs/ui build
+          pnpm --filter murasaki build
+
+      - name: Build native binding and launcher
+        working-directory: crates/native
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec napi build --platform --release
+          cargo build --locked --release --bin murasaki-launcher
+          NODE_FILE=$(find . -maxdepth 1 -name 'murasaki-native.*.node' -print -quit)
+          test -n "$NODE_FILE"
+          TRIPLE=${NODE_FILE#./murasaki-native.}
+          TRIPLE=${TRIPLE%.node}
+          cp target/release/murasaki-launcher "murasaki-launcher.$TRIPLE"
+          chmod +x "murasaki-launcher.$TRIPLE"
+
+      - name: Verify sample source
+        run: |
+          pnpm --dir "examples/${{ matrix.app }}" typecheck
+          pnpm --dir "examples/${{ matrix.app }}" test
+
+      - name: Build and package sample
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="examples/${{ matrix.app }}"
+          pnpm --dir "$APP_DIR" exec murasaki installer --target "darwin-${{ matrix.arch }}"
+
+          DMG_COUNT=$(find "$APP_DIR/dist" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
+          if [[ "$DMG_COUNT" != 1 ]]; then
+            printf 'Expected exactly one DMG, found %s\n' "$DMG_COUNT" >&2
+            find "$APP_DIR/dist" -maxdepth 1 -type f -name '*.dmg' -print >&2
+            exit 1
+          fi
+          DMG=$(find "$APP_DIR/dist" -maxdepth 1 -type f -name '*.dmg' -print)
+
+          VERSION=${GITHUB_REF_NAME#samples-v}
+          mkdir -p release-assets
+          cp "$DMG" "release-assets/${{ matrix.product }}-$VERSION-darwin-${{ matrix.arch }}.dmg"
+
+      - name: Verify DMG, signature, and first launch
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#samples-v}
+          DMG="release-assets/${{ matrix.product }}-$VERSION-darwin-${{ matrix.arch }}.dmg"
+          APP="examples/${{ matrix.app }}/dist/bundle/${{ matrix.product }}.app"
+          MOUNT="$RUNNER_TEMP/sample-mount"
+          mkdir -p "$MOUNT"
+          hdiutil attach "$DMG" -mountpoint "$MOUNT" -nobrowse -readonly >/dev/null
+          trap 'hdiutil detach "$MOUNT" -force >/dev/null 2>&1 || true' EXIT
+          test -d "$MOUNT/${{ matrix.product }}.app"
+          test -L "$MOUNT/Applications"
+          codesign --verify --deep --strict "$MOUNT/${{ matrix.product }}.app"
+          hdiutil detach "$MOUNT" >/dev/null
+          trap - EXIT
+          bash .github/scripts/mac-smoke-test.sh \
+            "$APP" "$RUNNER_TEMP/${{ matrix.app }}-first-launch" 60
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sample-${{ matrix.app }}-${{ matrix.arch }}
+          path: release-assets/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publish immutable sample assets
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: sample-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate and verify checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find release-assets -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')" = 6
+          (cd release-assets && sha256sum -- *.dmg > SHA256SUMS)
+          (cd release-assets && sha256sum --check SHA256SUMS)
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          VERSION=${GITHUB_REF_NAME#samples-v}
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          Papelle, Oscilla, and Orglia packaged as checksum-verified Murasaki macOS developer previews.
+
+          ### One-command launch
+
+              pnpm dlx murasaki@latest demo papelle
+              pnpm dlx murasaki@latest demo oscilla
+              pnpm dlx murasaki@latest demo orglia
+
+          The CLI selects Apple silicon or Intel, verifies the immutable DMG against the published SHA-256 and strict ad-hoc code signature, caches the app, removes quarantine, and launches it.
+
+          These are developer previews for CLI users, not notarized consumer downloads. Production applications should be signed and notarized by their publisher.
+
+          Source commit: $GITHUB_SHA
+          Framework version: $VERSION
+          EOF
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#samples-v}
+          gh release create "$GITHUB_REF_NAME" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Murasaki sample apps — v$VERSION" \
+            --notes-file "$RUNNER_TEMP/release-notes.md"

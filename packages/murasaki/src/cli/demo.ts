@@ -30,6 +30,30 @@ export const DEMO_SPECS: Record<string, DemoSpec> = {
     checksumAsset: 'SHA256SUMS.txt',
     description: 'the packaged create-murasaki scaffold',
   },
+  papelle: {
+    appName: 'Papelle',
+    assetStem: 'Papelle',
+    version: '0.55.5',
+    releaseTag: 'samples-v0.55.5',
+    checksumAsset: 'SHA256SUMS',
+    description: 'a local-first block knowledge workspace',
+  },
+  oscilla: {
+    appName: 'Oscilla',
+    assetStem: 'Oscilla',
+    version: '0.55.5',
+    releaseTag: 'samples-v0.55.5',
+    checksumAsset: 'SHA256SUMS',
+    description: 'an API testing and observability workbench',
+  },
+  orglia: {
+    appName: 'Orglia',
+    assetStem: 'Orglia',
+    version: '0.55.5',
+    releaseTag: 'samples-v0.55.5',
+    checksumAsset: 'SHA256SUMS',
+    description: 'a self-hosted operations workspace',
+  },
 }
 
 export function resolveDemoTarget(platform: NodeJS.Platform, arch: string): string {
@@ -82,7 +106,7 @@ async function runDemo(argv: string[]) {
   const target = resolveDemoTarget(process.platform, process.arch)
   const asset = demoAssetName(spec, target)
   const releaseRoot = `https://github.com/murasakijs/murasaki/releases/download/${spec.releaseTag}`
-  const cacheRoot = join(homedir(), '.murasaki', 'demos', `${spec.version}-${target}`)
+  const cacheRoot = join(homedir(), '.murasaki', 'demos', requested, `${spec.version}-${target}`)
   const appPath = join(cacheRoot, `${spec.appName}.app`)
   const metadataPath = join(cacheRoot, `${spec.assetStem}.json`)
   const refresh = argv.includes('--refresh')
@@ -227,11 +251,12 @@ function printList() {
 }
 
 function printHelp() {
+  const names = Object.keys(DEMO_SPECS).join(' | ')
   process.stdout.write(
     '\n  Usage: murasaki demo [name] [--refresh] [--no-open]\n\n' +
       '  Downloads the matching macOS demo, verifies its published SHA256 and\n' +
       '  ad-hoc code signature, removes quarantine, then opens it.\n\n' +
-      '  Names: default\n' +
+      `  Names: ${names}\n` +
       '  Flags: --list | --refresh | --no-open\n\n',
   )
 }

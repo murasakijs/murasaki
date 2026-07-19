@@ -833,7 +833,7 @@ const lpEn: LpExtra = {
     eyebrow: "Runnable apps",
     heading: "Try the result, not just the pitch.",
     intro:
-      "Run the packaged default scaffold, then inspect three independent products built from real application requirements.",
+      "Run the packaged default scaffold or launch any of three independent products built from real application requirements — each in one CLI command.",
     defaultDemo: {
       label: "Developer preview · CLI",
       heading: "The default scaffold, already packaged.",
@@ -847,7 +847,7 @@ const lpEn: LpExtra = {
     sourceLabel: "Source",
     downloadsLabel: "Browse all sources",
     runner: {
-      note: "The new examples are source-first while their install, launch, recovery, and cross-platform matrices are completed. No unsigned build is presented as a consumer download.",
+      note: "Each macOS developer preview selects the correct CPU build, verifies its published SHA-256 and ad-hoc signature, removes quarantine, and launches. Source remains available for inspection; these previews are not presented as notarized consumer downloads.",
       label: "macOS developer preview",
       copy: "Copy demo command",
       copied: "Copied",
@@ -959,7 +959,7 @@ const lpJa: LpExtra = {
     eyebrow: "実行できるサンプル",
     heading: "説明だけでなく、動作するアプリで確認する。",
     intro:
-      "標準スキャフォールドを実行し、実際の要件から設計した3つの独立したアプリをソースから確認できます。",
+      "標準スキャフォールドに加え、実際の要件から設計した3つの独立したアプリを、それぞれCLIの1コマンドで起動できます。",
     defaultDemo: {
       label: "開発者プレビュー · CLI",
       heading: "標準スキャフォールドを、そのまま実行。",
@@ -973,7 +973,7 @@ const lpJa: LpExtra = {
     sourceLabel: "ソース",
     downloadsLabel: "すべてのソースを見る",
     runner: {
-      note: "新しいサンプルは、インストール、初回起動、復旧、各 OS の検証が完了するまでソースを先に公開します。未署名のビルドを一般利用者向けダウンロードとして案内しません。",
+      note: "各macOS開発者プレビューは、CPUに合うビルドを選択し、公開済みSHA-256とad-hoc署名を検証してから隔離属性を解除し、起動します。ソースも確認できますが、公証済みの一般利用者向けダウンロードとしては案内しません。",
       label: "macOS 開発者プレビュー",
       copy: "デモ用コマンドをコピー",
       copied: "コピーしました",
