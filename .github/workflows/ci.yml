@@ -87,6 +87,13 @@ jobs:
           mkdir -p "$CREATE_PACKAGE_DIR"
           tar -xzf "$CREATE_TARBALL" -C "$CREATE_PACKAGE_DIR"
 
+          # Execute the packed CLI as consumers do: with its own production
+          # dependencies installed beside the tarball contents. Calling the
+          # extracted index.mjs directly without this install only tests an
+          # impossible package layout and fails before scaffolding starts.
+          pnpm --dir "$CREATE_PACKAGE_DIR/package" install \
+            --prod --ignore-workspace --no-frozen-lockfile
+
           (
             cd "$RUNNER_TEMP"
             node "$CREATE_PACKAGE_DIR/package/index.mjs" fresh-murasaki \

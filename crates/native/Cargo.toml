@@ -144,9 +144,10 @@ lto = true
 strip = "symbols"
 codegen-units = 1
 
-# wayland-scanner 0.31.10's published manifest still selects vulnerable
-# quick-xml 0.39.x. Upstream has already moved the same 0.31.10 package to
-# quick-xml 0.41; pin that reviewed commit until the corrected crate is
-# published. The exact revision keeps release builds reproducible.
+# wayland-scanner 0.31.10's published manifest selects vulnerable quick-xml
+# 0.39.x. The upstream fix landed after unreleased breaking Wayland API changes,
+# so pinning that repository revision makes released consumers such as ashpd
+# fail to compile. Keep the released scanner source/API in this small vendored
+# copy and change only its parser dependency to the fixed quick-xml 0.41 line.
 [patch.crates-io]
-wayland-scanner = { git = "https://github.com/Smithay/wayland-rs.git", rev = "a55c54b4e138e29181d63908ece06fd2a13550a0" }
+wayland-scanner = { path = "vendor/wayland-scanner" }
