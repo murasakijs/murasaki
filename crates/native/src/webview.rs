@@ -552,15 +552,7 @@ pub struct Webview {
 fn persistent_webview_data_dir(app_id: Option<&str>, label: &str) -> Option<std::path::PathBuf> {
     if cfg!(target_os = "windows") {
         let base = std::env::var_os("LOCALAPPDATA")?;
-        // Never share browser state between unrelated Murasaki apps. Besides
-        // surprising cookie/localStorage leakage, a shared WebView2 directory
-        // also prevents two different apps from opening it concurrently.
-        let profile = app_id
-            .filter(|value| !value.is_empty())
-            .map(sanitize_profile_name)
-            .unwrap_or_else(|| "default".to_string());
-        let dir =
-            scoped_webview_data_dir(std::path::PathBuf::from(base), &profile, "WebView2", label);
+        let dir = windows_webview_data_dir(std::path::PathBuf::from(base), app_id, label);
         let _ = std::fs::create_dir_all(&dir);
         Some(dir)
     } else if cfg!(target_os = "linux") {
@@ -576,6 +568,47 @@ fn persistent_webview_data_dir(app_id: Option<&str>, label: &str) -> Option<std:
     } else {
         None
     }
+}
+
+fn windows_webview_data_dir(
+    base: std::path::PathBuf,
+    app_id: Option<&str>,
+    label: &str,
+) -> std::path::PathBuf {
+    let app_identity = app_id
+        .filter(|value| !value.is_empty())
+        .unwrap_or("default");
+
+    if label == "main" {
+        // Preserve the profile path used by existing Windows applications so
+        // framework upgrades do not make durable browser storage disappear.
+        return scoped_webview_data_dir(
+            base,
+            &sanitize_profile_name(app_identity),
+            "WebView2",
+            label,
+        );
+    }
+
+    // WebView2 creates deeply nested cache, IndexedDB and Service Worker paths
+    // below the user-data folder. The diagnostic names used by the historical
+    // primary layout can push a secondary profile beyond Win32 MAX_PATH before
+    // WebView2 has opted every internal operation into long-path handling. Keep
+    // secondary profiles compact while retaining a 128-bit collision-resistant
+    // boundary for both the application and window identities.
+    base.join("murasaki")
+        .join("webview2-v1")
+        .join(compact_profile_id(app_identity))
+        .join(compact_profile_id(label))
+}
+
+fn compact_profile_id(value: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(value.as_bytes())[..16]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn linux_webview_data_dir(
@@ -3498,8 +3531,8 @@ mod tests {
         navigation_policy, parse_cookie_url, prepare_tray_menu_items, resolve_max_size_bound,
         sanitize_profile_name, scoped_webview_data_dir, should_dispatch_dragover, truncate_utf8,
         valid_proxy_host, validate_app_menu_payload, validate_context_menu_payload,
-        validate_cookie_domain, validate_webview_network, wry_proxy, AppMenuPayload,
-        ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol,
+        validate_cookie_domain, validate_webview_network, windows_webview_data_dir, wry_proxy,
+        AppMenuPayload, ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol,
         DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
         MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES, MAX_IPC_PREPARSE_BODY_BYTES, TRAY_MENU_ID_PREFIX,
     };
@@ -4071,6 +4104,37 @@ mod tests {
         assert!(settings.starts_with(&main));
         assert_ne!(settings, main);
         assert_ne!(other, main);
+    }
+
+    #[test]
+    fn windows_secondary_profiles_are_compact_and_isolated() {
+        let base = std::path::PathBuf::from(r"C:\Users\runneradmin\AppData\Local");
+        let app_id = "app.murasaki.ci.profile.windows-ci";
+        let main = windows_webview_data_dir(base.clone(), Some(app_id), "main");
+        let probe = windows_webview_data_dir(base.clone(), Some(app_id), "probe");
+        let settings = windows_webview_data_dir(base.clone(), Some(app_id), "settings");
+        let other = windows_webview_data_dir(base, Some("app.murasaki.other"), "probe");
+
+        assert_eq!(
+            main,
+            std::path::Path::new(r"C:\Users\runneradmin\AppData\Local")
+                .join("murasaki")
+                .join(sanitize_profile_name(app_id))
+                .join("WebView2")
+        );
+        assert_ne!(probe, settings);
+        assert_ne!(probe, other);
+        assert!(!probe.starts_with(&main));
+        assert_eq!(
+            probe
+                .file_name()
+                .and_then(std::ffi::OsStr::to_str)
+                .map(str::len),
+            Some(32)
+        );
+        // Leave ample room for WebView2's own nested Service Worker/IndexedDB
+        // files even when the Windows account name is longer than CI's.
+        assert!(probe.as_os_str().len() < 160, "{}", probe.display());
     }
 
     #[test]
