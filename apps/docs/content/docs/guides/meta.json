@@ -1,19 +1,24 @@
 {
   "title": "Guides",
   "pages": [
+    "---App Router---",
     "routing",
-    "node-main",
-    "deep-links",
-    "server-actions",
-    "api-routes",
     "metadata",
     "middleware",
+    "---Server---",
+    "server-actions",
+    "api-routes",
+    "---Native & Desktop---",
     "windows",
     "native-apis",
     "webview",
-    "auto-update",
     "context-menu",
     "app-menu",
+    "---System---",
+    "node-main",
+    "deep-links",
+    "auto-update",
+    "---Styling---",
     "styling"
   ]
 }

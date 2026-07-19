@@ -1,18 +1,24 @@
 {
   "title": "ガイド",
   "pages": [
+    "---App Router---",
     "routing",
-    "node-main",
-    "server-actions",
-    "api-routes",
     "metadata",
     "middleware",
+    "---サーバー---",
+    "server-actions",
+    "api-routes",
+    "---ネイティブ & デスクトップ---",
     "windows",
     "native-apis",
     "webview",
-    "auto-update",
     "context-menu",
     "app-menu",
+    "---システム---",
+    "node-main",
+    "deep-links",
+    "auto-update",
+    "---スタイリング---",
     "styling"
   ]
 }
