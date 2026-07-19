@@ -220,13 +220,14 @@ request: it runs `beforeQuit()`, can be cancelled there, and then runs bounded
 `shutdown()` before the native host exits. Murasaki does not currently expose
 a separate per-window close hook.
 
-## Session sharing
+## Session isolation
 
-Normal windows share the application WebContext, so cookies and Web Storage
-are shared across startup-created, dynamically created, and recreated windows.
-Every window still uses its own route and capability policy. With
-`webview.incognito: true`, Wry ignores the shared WebContext; session sharing
-between multiple incognito windows is platform-dependent and not guaranteed.
+Each window label has its own WebContext/profile, so cookies, Web Storage,
+Service Workers, and SharedWorkers are not shared between startup-created or
+dynamically created labels. Recreating the same label reuses its process
+context. On Windows, each persistent label is stored below the app-scoped
+WebView2 data directory. With `webview.incognito: true`, every label uses a
+non-persistent context.
 
 ## Per-window least privilege
 
@@ -246,10 +247,11 @@ export default defineConfig({
       { permission: 'window:open', allow: { windows: ['settings'] } },
       { permission: 'window:manage', allow: { windows: ['settings'] } },
     ],
+    backendCapabilities: ['api:GET:/api/account'],
   },
   windows: {
-    settings: { route: '/settings', capabilities: [] },
-    importer: { route: '/import', capabilities: ['dialog:openFile'] },
+    settings: { route: '/settings', capabilities: [], backendCapabilities: ['api:GET:/api/settings'] },
+    importer: { route: '/import', capabilities: ['dialog:openFile'], backendCapabilities: [] },
   },
 })
 ```
@@ -261,12 +263,21 @@ defaults and many other command arguments are not scopeable. Do not load remote
 or user-authored executable content into any privileged renderer, and validate
 app-level intent before broad operations.
 
-This is a native-command boundary, not a complete renderer sandbox. Declared
-windows currently share the same application origin and authenticated local
-Node session, so Server Actions, `'use main'`, API routes, and updater HTTP
-endpoints are not separated by these lists. Authenticate and authorize
-application operations inside those handlers; do not treat a deny-all window
-as safe for untrusted executable content.
+Native and backend allowlists protect separate boundaries. Every native window
+receives a label-bound HMAC identity, and `backendCapabilities` limits its
+Server Actions, `'use main'`, API routes, updater routes, events, and diagnostics.
+Secondary windows default to no backend grants. Although routes use one HTTP
+origin, each window receives an isolated browser profile so a Service Worker,
+SharedWorker, cookie, or storage entry from one window cannot inherit another
+window's backend authority. The primary keeps the historical application
+profile. Secondary profiles persist on Windows/Linux and macOS 14+; macOS
+11–13 uses a separate non-persistent store because custom persistent WebKit
+stores are unavailable there. This is still not a complete renderer sandbox:
+an XSS can use every resource granted to its own window. Authenticate and
+authorize user/session/object-level operations inside handlers; do not load
+untrusted executable content into an application window. Share durable state
+through Main/API handlers rather than browser storage when multiple windows
+need the same data.
 
 ## Next
 

@@ -146,6 +146,15 @@ pub(crate) fn validate_window_label(label: &str) -> std::result::Result<(), Stri
 }
 
 impl WindowRegistry {
+    pub(crate) fn next_generation(&self, label: &str) -> std::result::Result<u64, String> {
+        self.generations
+            .get(label)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or_else(|| format!("window {label} generation overflow"))
+    }
+
     pub(crate) fn validate_registration(
         &self,
         label: &str,
@@ -202,13 +211,7 @@ impl WindowRegistry {
             .ok()
             .and_then(|window| window.as_ref().map(Window::id))
             .ok_or_else(|| format!("window {label} is unavailable during registration"))?;
-        let generation = self
-            .generations
-            .get(&label)
-            .copied()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or_else(|| format!("window {label} generation overflow"))?;
+        let generation = self.next_generation(&label)?;
         let identity = WindowIdentity {
             label: label.clone(),
             generation,
@@ -705,6 +708,8 @@ pub(crate) struct RuntimeWindowManager {
     registry: SharedWindowRegistry,
     web_context: SharedWebContext,
     wake: Rc<dyn Fn()>,
+    is_packaged: bool,
+    window_authority: Option<(String, u16)>,
     configured: bool,
 }
 
@@ -713,6 +718,7 @@ impl RuntimeWindowManager {
         registry: SharedWindowRegistry,
         web_context: SharedWebContext,
         wake: Rc<dyn Fn()>,
+        is_packaged: bool,
     ) -> Self {
         Self {
             catalog: HashMap::new(),
@@ -720,8 +726,28 @@ impl RuntimeWindowManager {
             registry,
             web_context,
             wake,
+            is_packaged,
+            window_authority: None,
             configured: false,
         }
+    }
+
+    /// Configure packaged-renderer authority. Tokens are generated lazily for
+    /// each concrete window generation, so closing and recreating a secondary
+    /// invalidates every credential injected into the previous WebView.
+    pub(crate) fn set_window_authority(
+        &mut self,
+        runtime_token: String,
+        port: u16,
+    ) -> std::result::Result<(), String> {
+        if !self.is_packaged {
+            return Err("window authority is only valid for packaged windows".to_string());
+        }
+        // Validate the key/origin through the canonical generator before the
+        // event loop owns this manager.
+        crate::launcher::shared::window_auth_init_script(&runtime_token, "main", port, 1)?;
+        self.window_authority = Some((runtime_token, port));
+        Ok(())
     }
 
     pub(crate) fn configure(
@@ -958,6 +984,19 @@ impl RuntimeWindowManager {
         let shared_window: SharedWindow = Rc::new(RefCell::new(Some(window)));
         let wake = self.wake.clone();
         let mut webview_options = template.webview.clone();
+        if let Some((runtime_token, port)) = &self.window_authority {
+            let generation = self.registry.borrow().next_generation(label)?;
+            let auth_script = crate::launcher::shared::window_auth_init_script(
+                runtime_token,
+                label,
+                *port,
+                generation,
+            )?;
+            webview_options
+                .init_scripts
+                .get_or_insert_with(Vec::new)
+                .insert(0, auth_script);
+        }
         if transparent_webview {
             webview_options.transparent = Some(true);
         }
@@ -969,6 +1008,7 @@ impl RuntimeWindowManager {
             self.registry.clone(),
             self.web_context.clone(),
             Box::new(move || wake()),
+            self.is_packaged,
         ) {
             Ok(webview) => webview,
             Err(error) => {
@@ -1359,6 +1399,7 @@ mod tests {
             Rc::new(RefCell::new(WindowRegistry::default())),
             Rc::new(RefCell::new(ProcessWebContext::default())),
             Rc::new(|| {}),
+            false,
         )
     }
 

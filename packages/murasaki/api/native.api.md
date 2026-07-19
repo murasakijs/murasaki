@@ -38,6 +38,16 @@ export const appWindow: {
     }>;
 };
 
+// @public
+export const autostart: {
+    status(): Promise<AutostartStatus>;
+    enable(): Promise<void>;
+    disable(): Promise<void>;
+};
+
+// @public (undocumented)
+export type AutostartStatus = 'enabled' | 'disabled';
+
 // @public (undocumented)
 export const clipboard: {
     readText(): Promise<string>;

@@ -1,0 +1,24 @@
+---
+title: Hover Card
+description: リンクへのホバーまたはフォーカス時に、関連情報をプレビューします。
+---
+
+## 使い方
+
+```tsx
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@murasakijs/ui'
+
+<HoverCard>
+  <HoverCardTrigger href="/ja/docs">Murasaki Docs</HoverCardTrigger>
+  <HoverCardContent>ガイド、API リファレンス、サンプルを掲載しています。</HoverCardContent>
+</HoverCard>
+```
+
+カードは補助情報のためのものです。作業に必須の情報や操作をカード内だけに
+置かないでください。`HoverCardTrigger` は `asChild` でルーターのリンクを
+利用できます。`HoverCardContent` は `side`, `align`, `sideOffset` などの
+Radix の配置 props を受け取ります。
+
+## エクスポート
+
+`HoverCard`, `HoverCardTrigger`, `HoverCardContent`。

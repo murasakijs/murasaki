@@ -126,8 +126,7 @@ test('useAction: exposes a pending state while the action is in flight', async (
     // The 3rd `useActionState` tuple element flips true while in flight...
     assert.equal(readOut(container).isPending, true)
     // ...independent of the ActionState value's own `isPending` field, which
-    // this action (like the framework's own example, examples/local-signal's
-    // health-action.ts) always resolves as `false` — the real signal is the
+    // this fixture action always resolves as `false` — the real signal is the
     // hook's own `isPending`, not a field on the resolved state. Not a bug,
     // just worth pinning down: `ActionState.isPending` is never read by
     // `useAction` itself, only ever set by the action author.

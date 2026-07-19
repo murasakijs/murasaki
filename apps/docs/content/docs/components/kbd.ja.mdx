@@ -1,0 +1,18 @@
+---
+title: Kbd
+description: キーまたはキーボードショートカットを表示します。
+---
+
+## 使い方
+
+```tsx
+import { Kbd, KbdGroup } from '@murasakijs/ui'
+
+<KbdGroup aria-label="Command K">
+  <Kbd>⌘</Kbd><span aria-hidden="true">+</span><Kbd>K</Kbd>
+</KbdGroup>
+```
+
+`Kbd` は意味を持つ `<kbd>` 要素を生成します。この表示だけでショートカットが動作する
+わけではありません。操作内容を文章でも説明し、キー処理は別に実装してください。OS や
+支援技術が使うショートカットを上書きしないでください。

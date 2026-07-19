@@ -1,43 +1,44 @@
 ---
 title: トラブルシューティング
-description: 開発、packaging、signing、起動、update の障害を診断する。
+description: 開発、パッケージング、署名、起動、更新に関する問題を切り分けます。
 ---
 
-まず renderer、Node Main、native host のどこで失敗しているかを分けます。`murasaki dev`
-で再現した後、実 artifact を build / launch してください。Vite build の成功だけでは、
-packaging、code signing、runtime-discovered asset、別マシンの trust policy が動くことを
-証明できません。
+まず、レンダラー、Node Main、ネイティブホストのどこで失敗しているかを切り分けます。
+`murasaki dev` で再現を確認した後、実際の配布物をビルドして起動してください。Vite の
+ビルドが成功しても、パッケージング、コード署名、実行時に見つけるリソース、別のマシンの
+信頼設定まで正しく動作するとは限りません。
 
 ## 開発ウィンドウが開かない
 
-terminal から実行し、stack の最終行ではなく最初の error を確認します。
+ターミナルから実行し、スタックトレースの最終行ではなく、最初のエラーを確認します。
 
 ```bash
 pnpm exec murasaki dev
 ```
 
-Murasaki は `config.devPort`（既定 `5178`）を検査し、使用中なら次の port に進みます。
-それでも待ち続ける / 終了する場合:
+Murasaki は `config.devPort`（既定 `5178`）を確認し、使用中なら次のポートへ進みます。
+それでも待ち続ける、または終了する場合は、次を確認してください。
 
-1. `node --version` で Node 22.12+ を確認
-2. `murasaki.config.ts` が `appId` / `productName` を含む object を export しているか確認
-3. `src/main.ts` を一時 rename、または `main: false` で Main startup を切り分け
-4. 選択された port を保持する古い dev process を終了
-5. 現 OS / architecture 用に dependency を再 install
+1. `node --version` で Node.js 22.12 以上であることを確認する
+2. `murasaki.config.ts` が `appId` と `productName` を含むオブジェクトを export しているか確認する
+3. `src/main.ts` の名前を一時的に変えるか、`main: false` を指定して Node Main の起動処理を切り分ける
+4. 選択されたポートを使用している古い開発プロセスを終了する
+5. 現在の OS とアーキテクチャ向けに依存パッケージを入れ直す
 
-`main.ready()` が resolve しない間、renderer は意図的に開きません。network 初期化に
-timeout を付け、各 startup resource の前後を log してください。
+`main.ready()` が完了するまで、レンダラーは意図的に開きません。ネットワーク初期化には
+タイムアウトを設け、起動時に確保する各リソースの前後でログを記録してください。
 
 ## HMR は動くが Main の変更で再起動しない
 
-設定された Main **entry file** が lifecycle reload を開始します。resource ownership を
-entry に集め、`shutdown()` を idempotent にします。deep import した helper だけを変更し
-lifecycle restart が必要なら Main entry も保存してください。module-level socket / timer /
-child process は lifecycle から作成・close しないと残留することがあります。
+設定した Node Main の**エントリーファイル**を変更すると、ライフサイクルが再読み込みされます。
+リソースの所有処理をエントリーへ集め、`shutdown()` は複数回呼ばれても安全な実装にします。
+深く import したヘルパーだけを変更して再起動が必要な場合は、エントリーファイルも保存して
+ください。モジュール直下で作成したソケット、タイマー、子プロセスは、ライフサイクル内で
+作成・終了しないと残る場合があります。
 
 ## dev では動くが bundle 後に動かない
 
-installer を作る前に bundle をテストします。
+インストーラーを作る前に、アプリバンドルをテストします。
 
 ```bash
 pnpm exec murasaki bundle
@@ -53,9 +54,9 @@ open "dist/bundle/My App.app"                 # macOS
 - `process.cwd()` を project root と仮定する
 - dev にだけ secret / `.env` があり installed app に provision されていない
 
-resource path を明示し、clean VM / user account でテストしてください。現状の Node
-dependency packaging は、すべての native addon / runtime asset layout に対して Electron
-Forge や Tauri bundler と同等ではありません。
+リソースのパスを明示し、クリーンな仮想マシンまたはユーザーアカウントでテストしてください。
+現在の Node.js 依存パッケージの同梱処理は、あらゆるネイティブアドオンや実行時リソースの
+配置において Electron Forge や Tauri のバンドラーと同等というわけではありません。
 
 ## macOS で「壊れている」「検証できない」と表示される
 
@@ -123,13 +124,15 @@ shutdown 内で無制限 retry をしないでください。強制終了は `be
 
 ## Backend call が 403
 
-`/api/*` と `/__murasaki/*` は app-local protected endpoint です。通常の browser tab、
-curl、external client は HttpOnly runtime session を持たず `403` が正しい挙動です。
-API route は app renderer から呼びます。public/local integration server が必要なら Node
+`/api/*`と`/__murasaki/*`はapp-local protected endpointです。通常のbrowser tab、curl、
+external clientはnative windowのHMAC-derived identityを持たず、`403`が正しい挙動です。
+API routeは、そのexact resourceを`backendCapabilities`で許可したapp rendererから呼びます。
+public/local integration serverが必要ならNode
 Main で別 listener を作り、独自に保護してください。
 
-app renderer 自体が `403` になる場合、relative URL を使っているか、`Host` / `Origin` /
-cookie behavior を code が置換していないか確認します。
+app renderer自体が`403`になる場合、`backendCapabilities`とrelative URLを確認し、nativeの
+document-start scriptが提供する`fetch` / XHR / EventSource wrapperを置換しないでください。
+`Host` / `Origin`もapplication originのままである必要があります。
 
 ## Update check が失敗する
 

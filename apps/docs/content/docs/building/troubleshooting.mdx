@@ -133,13 +133,16 @@ Do not use an unbounded retry loop in shutdown. Forced paths ignore
 ## Backend call returns 403
 
 `/api/*` and `/__murasaki/*` are protected app-local endpoints. A browser tab,
-curl command, or external client does not have the HttpOnly runtime session and
-should receive `403`. Call API routes from the application renderer. If your
+curl command, or external client does not have a native window's HMAC-derived
+identity and should receive `403`. Call API routes from an application renderer
+whose `backendCapabilities` grants that exact resource. If your
 product needs a public/local integration server, create and secure a separate
 listener in Node Main.
 
-If the application renderer itself gets `403`, check that requests use relative
-URLs and that code did not replace the `Host`, `Origin`, or cookie behavior.
+If the application renderer itself gets `403`, check its `backendCapabilities`,
+use a relative URL, and do not replace the native document-start `fetch`, XHR,
+or EventSource wrappers. Also verify the `Host` and `Origin` headers remain the
+application origin.
 
 ## Update checks fail
 

@@ -142,6 +142,7 @@ export interface BundleConfig {
 export type BundleResource = string | {
     from: string;
     to?: string;
+    executable?: boolean;
 };
 
 // @public
@@ -360,6 +361,8 @@ export interface MurasakiConfig {
     // (undocumented)
     appId: string;
     authors?: string[];
+    // Warning: (ae-forgotten-export) The symbol "BackendCapability" needs to be exported by the entry point index.d.ts
+    backendCapabilities?: BackendCapability[];
     build?: {
         before?: string;
         envPrefix?: string[];
@@ -406,6 +409,7 @@ export interface MurasakiConfig {
     sign?: {
         identity?: string;
         entitlements?: string;
+        helperEntitlements?: string;
         appSandbox?: boolean;
         windows?: WindowsSigningConfig;
     };
@@ -476,6 +480,8 @@ export function quit(): Promise<void>;
 // @public
 export interface ResolvedWindowConfig extends WindowConfig {
     // (undocumented)
+    backendCapabilities: BackendCapability[];
+    // (undocumented)
     capabilities: NativeCapabilityGrant[];
     // (undocumented)
     createOnLaunch: boolean;
@@ -490,7 +496,7 @@ export interface ResolvedWindowConfig extends WindowConfig {
 }
 
 // @public
-export function resolveWindowDeclarations(config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'updater'>): ResolvedWindowConfig[];
+export function resolveWindowDeclarations(config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'backendCapabilities' | 'updater'>): ResolvedWindowConfig[];
 
 // @public
 export interface RouteEntry {
@@ -563,6 +569,7 @@ export type UpdaterConfig = boolean | {
     publicKey?: string;
     publicKeys?: string[];
     maxManifestAgeDays?: number;
+    allowLegacyManifestsWithoutGeneratedAt?: boolean;
 };
 
 // @public (undocumented)
@@ -661,6 +668,7 @@ export interface WebviewProxyConfig {
 
 // @public (undocumented)
 export interface WindowConfig {
+    backendCapabilities?: BackendCapability[];
     capabilities?: NativeCapabilityGrant[];
     console?: boolean;
     decorations?: boolean;

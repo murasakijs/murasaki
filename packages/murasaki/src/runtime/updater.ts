@@ -68,6 +68,8 @@ export interface UpdaterEngineOptions {
   resourcesDir?: string
   /** Where downloaded payloads are staged before install. Defaults to a directory under `os.tmpdir()`. */
   stagingDir?: string
+  /** Writable, persistent per-app directory for rollout identity. Packaged apps use Main's OS-standard data directory. */
+  stateDir?: string
   /** Network timeout for each manifest/signature request. Primarily exposed so embedders can tune unusually slow self-hosted endpoints. */
   requestTimeoutMs?: number
   /** End-to-end timeout for an update payload download. */
@@ -106,8 +108,10 @@ const DEFAULT_MAX_MANIFEST_AGE_DAYS = 90
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 /** A manifest's `generatedAt` up to this far in the future is tolerated as ordinary clock skew; beyond it is treated as a tampering/misconfiguration signal. */
 const CLOCK_SKEW_TOLERANCE_MS = 24 * 60 * 60 * 1000
-/** Persisted per-install random id used only to compute a stable staged-rollout bucket (contract-adjacent — see the auto-update guide's "Staged rollout" section). Colocated with `.murasaki-apply.json` (see `install()`). */
+/** Persisted per-install random id used only to compute a stable staged-rollout bucket (contract-adjacent — see the auto-update guide's "Staged rollout" section). */
 const CLIENT_ID_FILENAME = 'update-client-id'
+/** Highest authenticated manifest observed per update channel. */
+const MANIFEST_STATE_FILENAME = 'update-manifest-state.json'
 
 export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   const listeners = new Set<(state: UpdateState) => void>()
@@ -207,7 +211,13 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
     }
 
     try {
-      const { manifestUrl, publicKey, publicKeys, maxManifestAgeDays } = opts.resolvedUpdater
+      const {
+        manifestUrl,
+        publicKey,
+        publicKeys,
+        maxManifestAgeDays,
+        allowLegacyManifestsWithoutGeneratedAt,
+      } = opts.resolvedUpdater
 
       // Defense in depth: config.ts's validateUpdaterConfig already rejects a
       // non-https `updater.endpoint` (except loopback, for local testing) at
@@ -241,24 +251,72 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
       // Verify BEFORE parsing — the raw bytes are what was signed (contract
       // §1). A bad/missing signature is a hard error, never a silent pass:
       // this Ed25519 check is the only authenticity guarantee this project
-      // has (there is no Authenticode signing on Windows at all).
+      // has at the update-manifest layer. Platform code signing is a separate
+      // optional publisher-identity check and never replaces this signature.
       if (!verifyManifestSignature(manifestBytes, sigText, pinnedKeys, keyIdHint)) {
         throw new Error('manifest signature verification failed — refusing to trust this manifest')
       }
 
       const manifest = JSON.parse(manifestBytes.toString('utf8'))
-      if (typeof manifest?.version !== 'string' || typeof manifest?.assets !== 'object') {
+      if (typeof manifest?.version !== 'string'
+        || !manifest?.assets
+        || typeof manifest.assets !== 'object'
+        || Array.isArray(manifest.assets)) {
         throw new Error('manifest is malformed (missing "version" or "assets")')
       }
+
+      // Parse before any state can report the untrusted string as a usable
+      // version. This is strict SemVer rather than the old prefix match that
+      // accidentally treated `1.2.3garbage` as `1.2.3`.
+      parseSemver(manifest.version)
+      parseSemver(opts.currentVersion)
+      if (manifest.notes !== undefined && typeof manifest.notes !== 'string') {
+        throw new Error('manifest "notes" must be a string when present')
+      }
+      if (manifest.mandatory !== undefined && typeof manifest.mandatory !== 'boolean') {
+        throw new Error('manifest "mandatory" must be a boolean when present')
+      }
+      const rolloutPercent = resolveRolloutPercent(manifest.rollout)
 
       // Anti-freeze/replay guard: refuse a manifest whose declared
       // generation time is stale (an attacker who can only replay old,
       // still-validly-signed manifests can otherwise freeze a fleet on a
       // known-vulnerable version forever) or implausibly far in the future
       // (a tampering/misconfiguration signal beyond ordinary clock skew). A
-      // manifest with no `generatedAt` at all predates this field and is
-      // still accepted, but logs a warning.
-      assertManifestFreshness(manifest.generatedAt, maxManifestAgeDays ?? DEFAULT_MAX_MANIFEST_AGE_DAYS)
+      // Missing timestamps fail closed by default. Legacy compatibility is an
+      // explicit opt-in because a valid old signature alone cannot prevent a
+      // freeze/replay attack.
+      assertManifestFreshness(
+        manifest.generatedAt,
+        maxManifestAgeDays ?? DEFAULT_MAX_MANIFEST_AGE_DAYS,
+        allowLegacyManifestsWithoutGeneratedAt === true,
+      )
+
+      const targetKey = `${process.platform}-${process.arch}`
+      const asset = manifest.assets[targetKey]
+      if (asset !== undefined
+        && (!asset || typeof asset !== 'object' || Array.isArray(asset)
+          || typeof asset.url !== 'string' || typeof asset.sha256 !== 'string')) {
+        throw new Error(`manifest asset for ${targetKey} is malformed`)
+      }
+      if (asset) {
+        assertSecureUpdateUrl(asset.url, 'update asset URL')
+        if (!/^[a-f0-9]{64}$/i.test(asset.sha256)) {
+          throw new Error('manifest asset sha256 must be exactly 64 hexadecimal characters')
+        }
+      }
+
+      // Persist the highest authenticated timestamp/version only after the
+      // selected target entry has passed structural and transport validation.
+      // This turns a validly signed but older manifest into a detectable replay
+      // across app restarts. Legacy manifests cannot participate because they
+      // have no timestamp and require an explicit insecure compatibility opt-in.
+      await assertAndRememberManifestState(
+        opts.stateDir,
+        opts.resolvedUpdater.channel,
+        manifest.version,
+        manifest.generatedAt,
+      )
 
       if (compareVersions(manifest.version, opts.currentVersion) <= 0) {
         manifestInfo = undefined
@@ -266,9 +324,7 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
         return setState({ status: 'not-available', current: opts.currentVersion, latest: manifest.version })
       }
 
-      const targetKey = `${process.platform}-${process.arch}`
-      const asset = manifest.assets[targetKey]
-      if (!asset || typeof asset.url !== 'string' || typeof asset.sha256 !== 'string') {
+      if (!asset) {
         // No asset for the running platform+arch → "no update for you", not
         // an error (contract §1/§6).
         manifestInfo = undefined
@@ -280,7 +336,6 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
       // stable per-install bucket decides — this is a distribution knob, not
       // a security boundary, so an excluded client is reported the same as
       // "no update for you" (not-available), never `error`.
-      const rolloutPercent = resolveRolloutPercent(manifest.rollout)
       if (rolloutPercent < 100) {
         const clientId = await getClientId()
         const bucket = rolloutBucket(clientId)
@@ -325,7 +380,11 @@ export function createUpdaterEngine(opts: UpdaterEngineOptions): UpdaterEngine {
   }
 
   async function loadOrCreateClientId(): Promise<string> {
-    const dir = opts.resourcesDir ?? opts.stagingDir ?? join(tmpdir(), 'murasaki-update')
+    // Never write mutable state into packaged resources. That directory is
+    // read-only in normal installations and changing a signed macOS bundle
+    // invalidates its code signature. `resourcesDir` remains reserved for the
+    // one-shot launcher handoff written by install().
+    const dir = opts.stateDir ?? opts.stagingDir ?? join(tmpdir(), 'murasaki-update')
     const path = join(dir, CLIENT_ID_FILENAME)
     try {
       const existing = (await readFile(path, 'utf8')).trim()
@@ -581,18 +640,35 @@ function verifyWithSingleKey(manifestBytes: Buffer, sigBase64: string, publicKey
  * this file's top doc comment) — it can't reach into config.ts at runtime.
  */
 function assertSecureManifestUrl(manifestUrl: string): void {
+  assertSecureUpdateUrl(manifestUrl, 'manifestUrl')
+}
+
+function assertSecureUpdateUrl(value: string, label: string): void {
   let parsed: URL
   try {
-    parsed = new URL(manifestUrl)
+    parsed = new URL(value)
   } catch {
-    throw new Error('updater: manifestUrl is not a valid URL')
+    throw new Error(`updater: ${label} is not a valid URL`)
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`updater: ${label} must not contain embedded credentials`)
   }
   if (parsed.protocol === 'https:') return
   if (parsed.protocol === 'http:' && isLoopbackUpdaterHost(parsed.hostname)) return
   throw new Error(
-    'updater: manifestUrl must use https: (http: is only allowed for loopback hosts — ' +
+    `updater: ${label} must use https: (http: is only allowed for loopback hosts — ` +
       '127.0.0.1, localhost, [::1] — for local testing)',
   )
+}
+
+function assertSecureRedirect(requestUrl: string, responseUrl: string, label: string): void {
+  if (!responseUrl) return
+  assertSecureUpdateUrl(responseUrl, `${label} redirect target`)
+  const requested = new URL(requestUrl)
+  const final = new URL(responseUrl)
+  if (requested.protocol === 'https:' && final.protocol !== 'https:') {
+    throw new Error(`updater: ${label} redirected away from HTTPS`)
+  }
 }
 
 function isLoopbackUpdaterHost(hostname: string): boolean {
@@ -601,15 +677,24 @@ function isLoopbackUpdaterHost(hostname: string): boolean {
 }
 
 /**
- * Anti-freeze/replay guard for the manifest's optional `generatedAt`
- * (written by `murasaki release --manifest`). Absent: accepted for
- * back-compat with manifests published before this field existed, but logs a
- * structured warning. Present: must parse as a real timestamp, must not be
+ * Anti-freeze/replay guard for the manifest's `generatedAt`
+ * (written by `murasaki release --manifest`). Absent: rejected unless the
+ * developer explicitly enabled legacy compatibility. Present: must parse as a real timestamp, must not be
  * older than `maxAgeDays`, and must not be more than `CLOCK_SKEW_TOLERANCE_MS`
  * in the future — both throw, becoming this check()'s `error` state.
  */
-function assertManifestFreshness(generatedAt: unknown, maxAgeDays: number): void {
+function assertManifestFreshness(
+  generatedAt: unknown,
+  maxAgeDays: number,
+  allowLegacyWithoutTimestamp: boolean,
+): void {
   if (generatedAt === undefined) {
+    if (!allowLegacyWithoutTimestamp) {
+      throw new Error(
+        'manifest is missing required "generatedAt" anti-replay timestamp; '
+        + 'regenerate it or explicitly enable updater.allowLegacyManifestsWithoutGeneratedAt',
+      )
+    }
     logUpdaterEvent('warn', 'updater.manifest.generated_at_missing', {})
     return
   }
@@ -634,10 +719,88 @@ function assertManifestFreshness(generatedAt: unknown, maxAgeDays: number): void
   }
 }
 
-/** Clamps a manifest's optional `rollout` to 0-100; a missing/malformed value means "no restriction" (100). */
+type ManifestReplayState = {
+  version: 1
+  channels: Record<string, { version: string; generatedAt: string }>
+}
+
+/**
+ * Fail closed when an authenticated manifest moves backwards relative to the
+ * highest one this installation has already observed. The state lives in the
+ * OS-standard writable app-data directory supplied by the packaged runtime;
+ * dev/test callers without `stateDir` intentionally remain stateless.
+ */
+async function assertAndRememberManifestState(
+  stateDir: string | undefined,
+  channel: string,
+  version: string,
+  generatedAt: unknown,
+): Promise<void> {
+  if (!stateDir || typeof generatedAt !== 'string') return
+  const nextTime = Date.parse(generatedAt)
+  if (!Number.isFinite(nextTime)) throw new Error('manifest generatedAt must be a valid ISO timestamp')
+
+  const path = join(stateDir, MANIFEST_STATE_FILENAME)
+  let state: ManifestReplayState = { version: 1, channels: {} }
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8'))
+    if (!parsed || parsed.version !== 1 || !parsed.channels
+      || typeof parsed.channels !== 'object' || Array.isArray(parsed.channels)) {
+      throw new Error('persisted updater anti-replay state is malformed')
+    }
+    state = parsed as ManifestReplayState
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+
+  const previous = state.channels[channel]
+  if (previous) {
+    if (typeof previous.version !== 'string' || typeof previous.generatedAt !== 'string') {
+      throw new Error(`persisted updater anti-replay state for channel ${channel} is malformed`)
+    }
+    parseSemver(previous.version)
+    const previousTime = Date.parse(previous.generatedAt)
+    if (!Number.isFinite(previousTime)) {
+      throw new Error(`persisted updater anti-replay timestamp for channel ${channel} is malformed`)
+    }
+    if (nextTime < previousTime) {
+      throw new Error(
+        `manifest replay detected for channel ${channel}: generatedAt is older than the highest authenticated manifest`,
+      )
+    }
+    if (compareVersions(version, previous.version) < 0) {
+      throw new Error(
+        `manifest rollback detected for channel ${channel}: ${version} is older than authenticated ${previous.version}`,
+      )
+    }
+    if (nextTime === previousTime && version === previous.version) return
+  }
+
+  state.channels[channel] = { version, generatedAt }
+  await mkdir(stateDir, { recursive: true })
+  const tempPath = join(stateDir, `.${MANIFEST_STATE_FILENAME}.${process.pid}.${randomUUID()}.tmp`)
+  let handle
+  try {
+    handle = await open(tempPath, 'wx', 0o600)
+    await handle.writeFile(`${JSON.stringify(state)}\n`, 'utf8')
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    await rename(tempPath, path)
+    if (process.platform !== 'win32') await chmod(path, 0o600)
+  } finally {
+    await handle?.close().catch(() => {})
+    await rm(tempPath, { force: true }).catch(() => {})
+  }
+}
+
+/** Validates a manifest's optional rollout percentage; absence means 100%. */
 function resolveRolloutPercent(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return 100
-  return Math.min(100, Math.max(0, Math.trunc(value)))
+  if (value === undefined) return 100
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 100) {
+    throw new Error('manifest "rollout" must be an integer between 0 and 100')
+  }
+  return value as number
 }
 
 /** First byte of sha256(clientId) mod 100 — a stable, uniformly-distributed 0-99 bucket for staged rollout. */
@@ -691,8 +854,12 @@ function compareVersions(a: string, b: string): number {
 }
 
 function parseSemver(version: string): { core: [number, number, number]; pre: string[] } {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(version.trim())
-  if (!match) return { core: [0, 0, 0], pre: [] }
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version.trim())
+  if (!match
+    || [match[1], match[2], match[3]].some((part) => !Number.isSafeInteger(Number(part)))
+    || (match[4]?.split('.').some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0')) ?? false)) {
+    throw new Error(`invalid semantic version: ${version}`)
+  }
   return {
     core: [Number(match[1]), Number(match[2]), Number(match[3])],
     pre: match[4] ? match[4].split('.') : [],
@@ -707,6 +874,7 @@ async function fetchLimitedBytes(
 ): Promise<Buffer> {
   return withFetchTimeout(label, timeoutMs, async (signal) => {
     const res = await fetch(url, { signal })
+    assertSecureRedirect(url, res.url, label)
     if (!res.ok) {
       throw new Error(`failed to fetch ${label}: HTTP ${res.status}`)
     }
@@ -738,6 +906,7 @@ async function streamDownload(
 ): Promise<string> {
   return withFetchTimeout('update payload', timeoutMs, async (signal) => {
     const res = await fetch(url, { signal })
+    assertSecureRedirect(url, res.url, 'update payload')
     if (!res.ok || !res.body) {
       throw new Error(`failed to download update: HTTP ${res.status}`)
     }

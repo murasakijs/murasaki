@@ -13,9 +13,10 @@ their own deny-by-default `webview:*` capability.
 
 Grant `webview:download` and a native `with_download_started_handler` is
 installed; without it, every download is denied (unchanged default). The
-suggested filename is sanitized down to a safe basename (directory
-components, control characters, and leading dots stripped; empty becomes
-`download`), and the final path is confined inside the configured directory
+suggested filename is sanitized down to a portable basename (directory
+components, controls, leading dots, Windows-invalid characters/device names,
+and trailing dots/spaces are handled; UTF-8 names are capped at 240 bytes and
+an empty name becomes `download`), and the final path is confined inside the configured directory
 — a name collision gets ` (n)` appended before the extension, matching
 Wry's own behavior.
 
@@ -177,11 +178,23 @@ path — a cookie set with a non-default `path` is not addressable through
 `deleteCookie`.
 
 <Callout type="warning">
-  **Security:** Murasaki's own runtime session-auth cookie is invisible and
-  immutable through this API — it never appears in `getCookies()` results,
-  and `setCookie`/`deleteCookie` targeting it (case-insensitively) are
-  rejected with a structured error, regardless of granted capabilities.
+  **Security:** Runtime authentication no longer uses a cookie. The reserved
+  legacy `murasaki_runtime` name remains invisible and immutable through this
+  API as defense in depth: reads filter it and writes/deletes reject it,
+  regardless of granted capabilities.
 </Callout>
+
+Prefer a structured URL scope for cookie access. A scoped read must pass an
+explicit `url`; an unscoped `getCookies()` is available only to a legacy string
+grant. Writes are checked against the effective cookie path, and a renderer
+cannot set a parent or sibling domain through `domain`:
+
+```ts title="murasaki.config.ts"
+capabilities: [
+  { permission: 'webview:readCookies', allow: { urls: ['https://app.example.com/**'] } },
+  { permission: 'webview:writeCookies', allow: { urls: ['https://app.example.com/account/**'] } },
+]
+```
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({

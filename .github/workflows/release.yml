@@ -10,21 +10,28 @@ on:
 # token exchanged for a short-lived npm token at publish time.
 permissions:
   contents: read
+  checks: read
   id-token: write
+
+concurrency:
+  group: npm-framework-publish
+  cancel-in-progress: false
 
 jobs:
   publish:
     name: Build and publish murasaki
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
 
-      # No version pin here: pnpm/action-setup@v4 reads the version from the
+      # No version pin here: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 reads the version from the
       # root package.json "packageManager" field. Specifying both errors with
       # "Multiple versions of pnpm specified".
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
@@ -32,13 +39,22 @@ jobs:
       # OIDC Trusted Publishing requires npm 11.5+. Even though Node 24 ships a
       # recent npm, force-upgrading guarantees we get a CLI that supports it.
       - name: Upgrade npm to latest
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.2
+
+      - name: Verify tag is on main and all required checks passed
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/verify-release-commit.mjs --require-ci v
+          packages/murasaki/package.json packages/create-murasaki/package.json
 
       - name: Install dependencies
-        # Not --frozen-lockfile because the committed pnpm-lock.yaml was
-        # generated inside the workspace root and references sibling packages
-        # that don't exist here. Standard install is enough for CI.
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Reject changed packages without a version bump
+        run: >-
+          node scripts/verify-publishable-versions.mjs
+          packages/ui packages/murasaki packages/create-murasaki
 
       # @murasakijs/ui ships its own compiled dist (plus styles.css /
       # tailwind-preset.cjs at the package root). It versions independently of
@@ -48,8 +64,8 @@ jobs:
       # react/update-button.tsx), so its tsc run needs ui's emitted .d.ts to
       # already exist. With the old order the build failed on "Cannot find
       # module '@murasakijs/ui'" the first time a release carried the updater.
-      - name: Build @murasakijs/ui
-        run: pnpm --filter @murasakijs/ui build
+      - name: Build and test @murasakijs/ui
+        run: pnpm --filter @murasakijs/ui test
 
       - name: Build murasaki
         run: pnpm --filter murasaki build
@@ -84,6 +100,12 @@ jobs:
             fi
             echo "$pkg version OK: $PKG_VERSION"
           done
+
+      - name: Inspect every framework-release npm payload
+        run: |
+          npm pack --dry-run --json --workspace packages/ui
+          npm pack --dry-run --json --workspace packages/murasaki
+          npm pack --dry-run --json --workspace packages/create-murasaki
 
       # `npm publish` (unlike `pnpm publish`) ships `workspace:` specs verbatim,
       # and "workspace:^" is not a version anyone can install. Rewrite them to
@@ -131,6 +153,16 @@ jobs:
           "
           echo "Template @murasakijs/ui dep → $(node -p "require('./packages/create-murasaki/templates/default/package.json').dependencies['@murasakijs/ui']")"
 
+      - name: Inspect the exact rewritten npm payloads
+        run: |
+          npm pack --dry-run --json --workspace packages/ui
+          npm pack --dry-run --json --workspace packages/murasaki
+          npm pack --dry-run --json --workspace packages/create-murasaki
+          if grep -R '"workspace:' packages/ui/package.json packages/murasaki/package.json packages/create-murasaki/package.json packages/create-murasaki/templates/default/package.json; then
+            echo "::error::A workspace: dependency survived the release rewrite."
+            exit 1
+          fi
+
       # Ordering guard: murasaki depends on @murasakijs/native, which is
       # published separately by native-release.yml on its own native-v<x.y.z>
       # tag. If that tag wasn't pushed (or its run hasn't finished) before this
@@ -156,7 +188,7 @@ jobs:
       # neither may be published pointing at a ui version that isn't on npm yet.
       # The very first version had to be published manually and its Trusted
       # Publisher configured on npm before CI could OIDC-publish subsequent
-      # versions; until a new one is cut this step simply skips 0.1.0.
+      # versions. Published versions are skipped idempotently.
       - name: Publish packages/ui
         working-directory: packages/ui
         run: |
@@ -213,3 +245,40 @@ jobs:
           else
             npm publish --provenance --access public
           fi
+
+      - name: Verify published registry metadata
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process')
+          const packages = [
+            ['@murasakijs/ui', require('./packages/ui/package.json').version],
+            ['murasaki', require('./packages/murasaki/package.json').version],
+            ['create-murasaki', require('./packages/create-murasaki/package.json').version],
+          ]
+          const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+          for (const [name, version] of packages) {
+            let metadata
+            for (let attempt = 1; attempt <= 12; attempt++) {
+              try {
+                metadata = JSON.parse(execFileSync('npm', [
+                  'view', `${name}@${version}`, 'version', 'gitHead',
+                  'dist.integrity', 'dist.attestations.provenance.predicateType', '--json',
+                ], { encoding: 'utf8' }))
+                if (metadata?.version === version && metadata?.['dist.integrity']) break
+              } catch {}
+              await sleep(5_000)
+            }
+            if (metadata?.version !== version || !metadata?.['dist.integrity']) {
+              throw new Error(`${name}@${version} did not become verifiable on npm`)
+            }
+            if (metadata.gitHead !== process.env.RELEASE_COMMIT) {
+              throw new Error(`${name}@${version} gitHead does not match the release commit`)
+            }
+            if (metadata?.['dist.attestations.provenance.predicateType'] !== 'https://slsa.dev/provenance/v1') {
+              throw new Error(`${name}@${version} has no SLSA v1 npm provenance attestation`)
+            }
+            console.log(`${name}@${version}: registry metadata and provenance verified`)
+          }
+          NODE

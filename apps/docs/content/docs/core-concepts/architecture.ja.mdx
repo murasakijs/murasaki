@@ -34,8 +34,9 @@ Murasaki は 3 層のデスクトップランタイムです。React は OS の 
   </div>
 </div>
 
-これは Electron の Chromium + Node レンダラーモデルとは異なります。レンダラーに
-Node グローバルはありません。ファイル、DB、ソケット、Worker、シークレットを扱う
+これは、Chromium と Node.js を同じアプリへ組み込む Electron のレンダラーモデルとは異なります。
+レンダラーから Node.js のグローバル変数を直接利用することはできません。ファイル、データベース、
+ソケット、Worker、秘密情報を扱う
 コードは [`src/main.ts`](/ja/docs/guides/node-main)、`'use main'` モジュール、
 [`'use server'` アクション](/ja/docs/guides/server-actions)、または
 [`src/api/` ルート](/ja/docs/guides/api-routes)に置きます。
@@ -44,16 +45,16 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 
 | レイヤー | 担当 | 担当しないもの |
 | --- | --- | --- |
-| Rust ホスト | native event loop、設定済みwindow template catalog、window別navigation / capability policy、OS open request normalize、menu、Node子process監視、更新の最終適用 | business logic、React state |
-| ローカル Node | Main lifecycle、設定済みsecondary templateのcreate / destroy、登録済みURL / file処理、Action、API route、更新検証、app resource / data | native windowへの任意URLやruntime capability policyの指定 |
-| レンダラー | UI、routing、browser API、型付きbackend call、許可済み宣言windowの操作 | filesystem・Node・native moduleへの直接access |
+| Rust ホスト | ネイティブイベントループ、宣言済みウィンドウのテンプレート、ウィンドウごとのナビゲーション／権限ポリシー、OSから渡されたURL・ファイル要求の正規化、メニュー、Node.js子プロセスの監視、更新の最終適用 | アプリの業務ロジック、Reactの状態管理 |
+| ローカルNode.js | Node Mainのライフサイクル、宣言済みサブウィンドウの作成・破棄、登録済みURL／ファイルの処理、Action、API Routes、更新の検証、アプリのリソースとデータ | ネイティブウィンドウへ任意のURLや実行時権限ポリシーを指定すること |
+| レンダラー | UI、ルーティング、ブラウザーAPI、型付きバックエンド呼び出し、許可された宣言済みウィンドウの操作 | ファイルシステム、Node.js、ネイティブモジュールへの直接アクセス |
 
 <Callout type="warn">
-  Murasaki は 1.0 未満です。宣言windowには独立したdeny-by-default command allowlistが
-  あります。URL、filesystem path、target window、OS permissionはallow / deny scopeで
-  制限できますが、その他のcommand argumentはcommand単位です。packaged
-  macOS / Windows appはsingle instanceを強制し、URL scheme / file associationを登録して、
-  一致するactivationをNode Mainの`openRequested()`へ渡せます。本番設計を確定する前に
+  Murasaki は 1.0 未満です。宣言済みウィンドウごとに、既定では何も許可しないコマンド許可リストを
+  設定できます。URL、ファイルシステムのパス、対象ウィンドウ、OSの権限は許可・拒否する範囲を
+  制限できますが、その他の引数はコマンド単位で制御します。パッケージ済みのmacOS／Windows
+  アプリは単一起動を強制し、URLスキームとファイル関連付けから受け取った起動要求をNode Mainの
+  `openRequested()`へ渡せます。本番設計を確定する前に
   [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)を
   確認してください。
 </Callout>
@@ -64,36 +65,38 @@ Node グローバルはありません。ファイル、DB、ソケット、Work
 
 | | `murasaki dev` | パッケージ済みアプリ |
 | --- | --- | --- |
-| Web アセット | HMR 付き Vite dev server | 同梱 Node が `dist/client` を配信 |
-| Node バックエンド | Vite 子プロセス | アプリ内のポータブル Node |
-| ネイティブホスト | CLI が `@murasakijs/native` をロード | 単体の Rust launcher |
-| 宣言window | 全template catalogをnative hostへ渡し、`createOnLaunch`だけ即時作成 | bundle metadataから全catalogを読み、`createOnLaunch`だけ即時作成 |
-| Main entry | Vite SSR で読み込み、entry の変更で hot reload | `server/main.mjs` にコンパイル |
-| バックエンド呼び出し | Vite middleware | 同梱 loopback HTTP server |
-| URL / file 登録 | dev mode では OS に登録しない | macOS app metadata または Windows installer registry |
+| Webアセット | HMRを有効にしたVite開発サーバー | 同梱Node.jsが`dist/client`を配信 |
+| Node.jsバックエンド | Viteの子プロセス | アプリに同梱したポータブルNode.js |
+| ネイティブホスト | CLIが`@murasakijs/native`を読み込む | 単体で動作するRustランチャー |
+| 宣言済みウィンドウ | すべてのテンプレートをネイティブホストへ渡し、`createOnLaunch`のウィンドウだけを作成 | バンドルのメタデータからテンプレートを読み、`createOnLaunch`のウィンドウだけを作成 |
+| Node Mainのエントリー | Vite SSRで読み込み、変更時に再読み込み | `server/main.mjs`へコンパイル |
+| バックエンド呼び出し | Viteミドルウェア | 同梱したループバックHTTPサーバー |
+| URL／ファイル登録 | 開発モードではOSへ登録しない | macOSのアプリメタデータ、またはWindowsインストーラーのレジストリ設定 |
 
-本番では `appId` から決めた loopback port を使うため、起動をまたいでレンダラーの
-origin が安定します。Windows の WebView2 profile も `appId` ごとに分離されます。
-リリース後は `appId` を安易に変更しないでください。データパス、WebView profile、
-bundle identity、single-instance lock、ローカル origin が変わる可能性があります。
+本番では、まず`appId`から決めたループバックポートを試し、実際に確保できたポートを保存します。
+別アプリが最初の候補を使用中なら、同梱サーバーが上限付きで別のポートを選び、次回以降もそれを
+再利用します。これにより、hashが衝突した別アプリを排他せずにrendererのoriginを安定させます。
+リリース後は`appId`を安易に変更しないでください。データの保存先、WebViewプロファイル、
+バンドルID、単一起動ロック、ローカルoriginが変わる可能性があります。
 
-通常windowはapplication WebContextを共有するため、process内のdestroy / recreateをまたいで
-browser sessionを利用できます。routeとnative capability policyはtemplateごとに独立します。
-ただしincognito WebViewではWryがshared contextを無視するため、window間のincognito
-session共有はplatform依存であり保証されません。
+WebContextはwindow labelごとに分離します。secondary windowのService Worker、SharedWorker、
+cookie、Web Storageから、primary windowの認証済みbackend trafficを観測できません。同じlabelを
+process内で再作成した場合はcontextを再利用しますが、起動をまたぐprofileの永続性はplatformに
+依存します。macOS 11〜13ではcustom persistent storeを使えないため、secondary labelは分離した
+non-persistent storeを使用します。`webview.incognito: true`では全labelがnon-persistentになります。
 
 ## Next.js 風であり、Next.js そのものではない
 
-`src/app`、layout、route handler、directive、React 19 といった慣れた規約を採用して
-いますが、Next.js runtime ではありません。React Server Components や Edge runtime
-はなく、middleware はクライアントナビゲーションだけに参加します。対応範囲は各
+`src/app`、レイアウト、Route Handler、ディレクティブ、React 19といった慣れた規約を採用して
+いますが、Next.jsのランタイムではありません。React Server ComponentsとEdge Runtimeは
+提供せず、ミドルウェアが関与するのはクライアントナビゲーションだけです。対応範囲は各
 ガイドの記述を基準にし、Next.js にあるという理由だけで API の存在を仮定しないで
 ください。
 
 ## 次へ
 
 <Cards>
-  <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" description="起動、reload、graceful shutdown。" />
-  <Card title="Node Main" href="/ja/docs/guides/node-main" description="長寿命のバックエンドリソースを管理する。" />
-  <Card title="セキュリティ" href="/ja/docs/building/security" description="信頼境界と現在の保護。" />
+  <Card title="プロセスモデル" href="/docs/core-concepts/process-model" description="起動、再読み込み、安全な終了処理の流れを説明します。" />
+  <Card title="Node Main" href="/docs/guides/node-main" description="長時間動作するバックエンドリソースを管理します。" />
+  <Card title="セキュリティ" href="/docs/building/security" description="信頼境界と現在の保護機構を確認します。" />
 </Cards>

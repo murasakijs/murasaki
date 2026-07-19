@@ -1,0 +1,25 @@
+---
+title: Item
+description: 画像、本文、補足、操作を持つ再利用可能な行を構成します。
+---
+
+## 使い方
+
+```tsx
+import { Button, Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@murasakijs/ui'
+import { FileText } from 'lucide-react'
+
+<Item variant="outline">
+  <ItemMedia variant="icon"><FileText aria-hidden="true" /></ItemMedia>
+  <ItemContent>
+    <ItemTitle>リリースノート</ItemTitle>
+    <ItemDescription>5分前に更新</ItemDescription>
+  </ItemContent>
+  <ItemActions><Button variant="ghost">開く</Button></ItemActions>
+</Item>
+```
+
+`variant` は `default`、`outline`、`muted`、`size` は `default` または `sm` です。
+`asChild` を使うと Link や button をルート要素にできます。行全体を操作可能にする場合は、
+操作要素を一つのルートにまとめ、ボタンの中へ別のボタンを入れないでください。
+複数行の構成には `ItemGroup`、`ItemHeader`、`ItemFooter`、`ItemSeparator` を使えます。

@@ -92,18 +92,16 @@ pub(crate) fn shell_run_elevated(
     executable: &str,
     args: &[String],
 ) -> std::result::Result<(), String> {
-    crate::shell::validate_open_path_target(executable)?;
-    if !Path::new(executable).exists() {
-        return Err("shell.runElevated executable does not exist".to_string());
-    }
+    let executable = resolve_elevated_executable(executable)?;
     validate_args(args)?;
 
     #[cfg(target_os = "windows")]
     {
-        windows_run_elevated(executable, args)
+        windows_run_elevated(&executable, args)
     }
     #[cfg(not(target_os = "windows"))]
     {
+        drop(executable);
         Err(
             "shell.runElevated is unsupported on this platform: elevated launch has no \
              single native mechanism outside Windows (macOS SMJobBless/\
@@ -113,10 +111,18 @@ pub(crate) fn shell_run_elevated(
     }
 }
 
+pub(crate) fn resolve_elevated_executable(executable: &str) -> std::result::Result<String, String> {
+    if !Path::new(executable).exists() {
+        return Err("shell.runElevated executable does not exist".to_string());
+    }
+    crate::shell::resolve_open_path_target(executable)
+        .map_err(|error| error.replace("shell.openPath", "shell.runElevated"))
+}
+
 /// Bounds and content rules shared by every platform (so a Windows-only
 /// runtime failure never masks an otherwise-invalid request, and so the
 /// rules can be verified from this crate's cross-platform test run).
-fn validate_args(args: &[String]) -> std::result::Result<(), String> {
+pub(crate) fn validate_args(args: &[String]) -> std::result::Result<(), String> {
     if args.len() > MAX_ARGS {
         return Err(format!(
             "shell.runElevated accepts at most {MAX_ARGS} arguments"
@@ -337,6 +343,31 @@ mod tests {
     fn validate_args_rejects_control_characters() {
         assert!(validate_args(&["line\nbreak".to_string()]).is_err());
         assert!(validate_args(&["nul\0byte".to_string()]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn elevated_executable_resolution_follows_symlinks_before_authorization() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!(
+            "murasaki-elevation-symlink-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let target = root.join("real-tool");
+        let link = root.join("allowed-tool");
+        std::fs::write(&target, b"fixture").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert_eq!(
+            super::resolve_elevated_executable(link.to_str().unwrap()).unwrap(),
+            target.canonicalize().unwrap().to_str().unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// The exact wire string a caller matches on to detect a declined UAC

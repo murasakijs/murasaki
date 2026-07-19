@@ -1,9 +1,23 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { Connect, Plugin } from 'vite'
+import {
+  authenticateWindowRequest,
+  isBackendCapabilityAllowed,
+} from '../runtime/window-auth.js'
 
-const RUNTIME_COOKIE = 'murasaki_runtime'
 const PRIVILEGED_PREFIXES = ['/api/', '/__murasaki/']
+const NATIVE_ONLY_PATHS = new Set([
+  '/__murasaki/main/shutdown',
+  '/__murasaki/main/second-instance',
+  '/__murasaki/main/open-request',
+  '/__murasaki/main/windows/commands',
+  '/__murasaki/main/windows/result',
+  '/__murasaki/main/windows/event',
+])
+export const DEFAULT_PERMISSIONS_POLICY = 'camera=(), microphone=(), geolocation=()'
 let resolvedRuntimeToken: string | undefined
+
+type WindowAuthority = { label: string; backendCapabilities: readonly string[] }
 
 /** One private token shared by dev middleware and the native parent process. */
 export function runtimeToken(): string {
@@ -15,35 +29,50 @@ export function runtimeToken(): string {
   return resolvedRuntimeToken
 }
 
-/** Protects dev's loopback actions/API/updater endpoints with an app session. */
-export function runtimeSecurityPlugin(): Plugin {
+/** Protect dev loopback endpoints with native-issued, per-window authority. */
+export function runtimeSecurityPlugin(windows: readonly WindowAuthority[]): Plugin {
   const token = runtimeToken()
+  const grants = new Map(windows.map((window) => [window.label, window.backendCapabilities]))
   return {
     name: 'murasaki:runtime-security',
     apply: 'serve',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const pathname = (req.url ?? '/').split('?')[0]
-        const privileged = PRIVILEGED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+        const pathname = new URL(req.url ?? '/', 'http://murasaki.local').pathname
+        const privileged = pathname === '/api'
+          || PRIVILEGED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
 
-        if (privileged && !isAuthorizedRuntimeRequest(req, token)) {
-          res.statusCode = 403
-          res.setHeader('content-type', 'application/json')
-          res.setHeader('cache-control', 'no-store')
-          res.end(JSON.stringify({ error: 'forbidden runtime request' }))
-          return
+        if (privileged) {
+          const resource = backendResourceForRequest(req.method ?? 'GET', req.url ?? '/')
+          const native = isAuthorizedNativeRequest(req, token)
+          const allowQuery = req.method === 'GET'
+            && (req.headers.accept?.includes('text/event-stream') ?? false)
+          const label = native ? null : authorizedWindowLabel(req, token, allowQuery)
+          const allowed = native || (!!label
+            && !!resource
+            && !NATIVE_ONLY_PATHS.has(pathname)
+            && isBackendCapabilityAllowed(grants.get(label) ?? [], resource))
+          if (!allowed) {
+            res.statusCode = 403
+            res.setHeader('content-type', 'application/json')
+            res.setHeader('cache-control', 'no-store')
+            res.end(JSON.stringify({ error: 'forbidden runtime request' }))
+            return
+          }
         }
 
-        // The initial document response installs an HttpOnly same-site
-        // session before any renderer script can call a privileged endpoint.
+        // Static documents are intentionally public on loopback. Unlike the
+        // previous cookie bootstrap they reveal no bearer credential, so an
+        // arbitrary local HTTP client cannot escalate from GET / to Node RPC.
         const acceptsHtml = req.headers.accept?.includes('text/html') ?? false
         if (!privileged && req.method === 'GET' && acceptsHtml) {
-          res.setHeader(
-            'set-cookie',
-            `${RUNTIME_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/`,
-          )
           res.setHeader('x-content-type-options', 'nosniff')
           res.setHeader('referrer-policy', 'no-referrer')
+          // Wry delegates browser permission prompts to the platform and some
+          // backends grant media capture once the OS has consented. Until a
+          // per-window native permission callback is available, deny these
+          // high-impact Web APIs at the document boundary for every renderer.
+          res.setHeader('permissions-policy', DEFAULT_PERMISSIONS_POLICY)
         }
         next()
       })
@@ -55,28 +84,63 @@ export function isAuthorizedNativeRequest(
   req: Connect.IncomingMessage,
   expectedToken: string,
 ): boolean {
-  if (!isAuthorizedRuntimeRequest(req, expectedToken)) return false
+  if (!hasTrustedLoopbackMetadata(req)) return false
   const nativeToken = req.headers['x-murasaki-native-token']
   if (typeof nativeToken !== 'string') return false
-  const received = Buffer.from(nativeToken)
-  const expected = Buffer.from(expectedToken)
-  return received.length === expected.length && timingSafeEqual(received, expected)
+  return safeTokenEqual(nativeToken, expectedToken)
 }
 
-export function isAuthorizedRuntimeRequest(req: Connect.IncomingMessage, expectedToken: string): boolean {
+/** Authenticate only; authorization is performed against the returned label. */
+export function authorizedWindowLabel(
+  req: Connect.IncomingMessage,
+  expectedToken: string,
+  allowQuery = false,
+): string | null {
+  if (!hasTrustedLoopbackMetadata(req)) return null
+  return authenticateWindowRequest(req, expectedToken, allowQuery)
+}
+
+/** Stable backend resource ID for the window allowlist. */
+export function backendResourceForRequest(method: string, rawUrl: string): string | null {
+  const url = new URL(rawUrl, 'http://murasaki.local')
+  const pathname = url.pathname
+  const upperMethod = method.toUpperCase()
+  for (const [prefix, kind] of [
+    ['/__murasaki/main/call/', 'main'],
+    ['/__murasaki/action/', 'action'],
+  ] as const) {
+    if (!pathname.startsWith(prefix)) continue
+    const rest = pathname.slice(prefix.length)
+    const separator = rest.lastIndexOf('/')
+    if (separator < 1) return null
+    try {
+      return `${kind}:${decodeURIComponent(rest.slice(0, separator))}#${rest.slice(separator + 1)}`
+    } catch {
+      return null
+    }
+  }
+  if (pathname === '/api' || pathname.startsWith('/api/')) {
+    return `api:${upperMethod}:${pathname}`
+  }
+  if (pathname.startsWith('/__murasaki/update/')) return `updater:${pathname}`
+  if (pathname === '/__murasaki/main/events') {
+    return `events:${url.searchParams.get('channel') ?? '*'}`
+  }
+  if (pathname === '/__murasaki/diagnostics/renderer-error') return 'diagnostics:renderer-error'
+  if (NATIVE_ONLY_PATHS.has(pathname)) return `native:${pathname}`
+  return null
+}
+
+function hasTrustedLoopbackMetadata(req: Connect.IncomingMessage): boolean {
   const host = req.headers.host
   if (!host || !/^(?:localhost|127\.0\.0\.1|\[::1\]):\d+$/.test(host)) return false
   if (req.headers['sec-fetch-site'] === 'cross-site') return false
   const origin = req.headers.origin
-  if (origin !== undefined && origin !== `http://${host}`) return false
+  return origin === undefined || origin === `http://${host}`
+}
 
-  const token = (req.headers.cookie ?? '')
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${RUNTIME_COOKIE}=`))
-    ?.slice(RUNTIME_COOKIE.length + 1)
-  if (!token) return false
-  const received = Buffer.from(token)
+function safeTokenEqual(receivedToken: string, expectedToken: string): boolean {
+  const received = Buffer.from(receivedToken)
   const expected = Buffer.from(expectedToken)
   return received.length === expected.length && timingSafeEqual(received, expected)
 }

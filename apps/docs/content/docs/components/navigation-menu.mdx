@@ -1,0 +1,35 @@
+---
+title: Navigation Menu
+description: Provides accessible top-level navigation with optional flyout content.
+---
+
+## Usage
+
+```tsx
+import {
+  NavigationMenu, NavigationMenuContent, NavigationMenuItem,
+  NavigationMenuLink, NavigationMenuList, NavigationMenuTrigger,
+} from '@murasakijs/ui'
+
+<NavigationMenu>
+  <NavigationMenuList>
+    <NavigationMenuItem>
+      <NavigationMenuTrigger>Learn</NavigationMenuTrigger>
+      <NavigationMenuContent>
+        <NavigationMenuLink href="/docs">Documentation</NavigationMenuLink>
+      </NavigationMenuContent>
+    </NavigationMenuItem>
+  </NavigationMenuList>
+</NavigationMenu>
+```
+
+For a simple destination, render `NavigationMenuLink` without a trigger.
+`NavigationMenuViewport` is created by the root and animates flyout content;
+do not add a second viewport. Router links can own the element with `asChild`.
+
+## Exports
+
+`NavigationMenu`, `NavigationMenuList`, `NavigationMenuItem`,
+`NavigationMenuTrigger`, `NavigationMenuContent`, `NavigationMenuLink`,
+`NavigationMenuIndicator`, `NavigationMenuViewport`, and
+`navigationMenuTriggerStyle`.

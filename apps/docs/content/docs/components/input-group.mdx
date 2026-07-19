@@ -1,0 +1,22 @@
+---
+title: Input Group
+description: Combines an input with inline text, icons, or actions.
+---
+
+## Usage
+
+```tsx
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@murasakijs/ui'
+
+<InputGroup>
+  <InputGroupAddon aria-hidden="true">https://</InputGroupAddon>
+  <InputGroupInput aria-label="Domain" placeholder="example.com" />
+  <InputGroupButton type="button">Copy</InputGroupButton>
+</InputGroup>
+```
+
+`InputGroupAddon` accepts `align="inline-start" | "inline-end"`. Keep a single
+primary input per group, label it, and give icon-only `InputGroupButton` controls
+an `aria-label`. Use `InputGroupText` for short non-interactive values.
+
+The input accepts native `<input>` props; the button accepts `Button` props.

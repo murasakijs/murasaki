@@ -1,58 +1,51 @@
 ---
 title: イントロダクション
-description: デスクトップアプリのための Next.js DX — React 19 + Vite、Rust ネイティブ、Rust を書く必要はありません。
+description: Next.js に近い開発体験でデスクトップアプリを構築。React 19、Vite、軽量な Rust ホストを利用でき、Rust を書く必要はありません。
 ---
 
-**Murasaki** を使えば、Next.js アプリを作る感覚のままネイティブなデスクトップアプリを構築できます。ファイルベースルーティング、レイアウト、サーバーアクション、API ルート、そして React 19 — これらすべてが、Electron のバンドルされた Chromium ではなく、Rust ネイティブなウィンドウの上で動作します。
+**Murasaki** は、Next.js に近い開発体験でデスクトップアプリを構築するためのフレームワークです。ファイルベースルーティング、レイアウト、Server Actions、API Routes、React 19 を利用でき、Electron のように Chromium をアプリへ同梱せず、OS 標準の WebView で画面を表示します。
 
-あなたが書くのは React と TypeScript だけです。Murasaki は小さな Rust コア(`@murasakijs/native`、tao/wry/muda をベースに構築)を同梱しており、本物のネイティブウィンドウ、ネイティブメニュー、OS との統合を提供します — **Rust を一切書く必要はありません**。
+アプリ側で記述するのは React と TypeScript です。Murasaki は tao / wry / muda を基盤とする小さな Rust ホスト（`@murasakijs/native`）を同梱し、OS のウィンドウ、メニュー、各種システム機能との連携を提供します。**アプリ開発者が Rust を書く必要はありません**。
 
 ## Murasaki を選ぶ理由
 
 |                     | Murasaki                       | Electron            | Tauri                  |
 | ------------------- | ------------------------------- | ------------------- | ---------------------- |
-| UI ランタイム       | OS WebView (wry)                | bundled Chromium     | OS WebView              |
+| UI ランタイム       | OS WebView（wry）               | Chromium を同梱      | OS WebView              |
 | 言語                | TypeScript / React              | TypeScript / React    | TypeScript + **Rust**  |
-| DX                  | **Next.js 風**(Vite HMR）      | manual wiring         | manual wiring           |
-| メモリ(アイドル時） | Electron の約 1/5\*             | baseline              | small                   |
+| 開発体験            | **Next.js に近い構成**（Vite HMR） | 手動で構成          | 手動で構成              |
+| メモリ（アイドル時） | Electron の約 1/5\*            | 比較の基準            | 小さい傾向              |
 | インストーラーサイズ | **~43 MB `.dmg`** / **~120 MB `.app`**†  | ~80–150 MB\*  | ~3–10 MB\*             |
-| サーバーアクション  | `defineAction` / `useAction`    | manual IPC            | manual IPC / commands  |
+| Server Actions      | `defineAction` / `useAction`    | IPC を手動実装        | IPC / command を手動実装 |
 
 <small className="my-4 block text-xs leading-relaxed text-fd-muted-foreground">
   \* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。<br />
   † macOS で実測。`.app` はフル Node ランタイムを同梱しているため、サイズの大部分はそこから来ています。
 </small>
 
-**Murasaki を選ぶべきなのは**、React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたい人です。
+Murasaki は、React / Next.js の知識を活かしながら、Rust や IPC の実装を最小限にして軽量なデスクトップアプリを作りたい開発者に適しています。
 
 ## できること
 
 - **ファイルベースルーティング** — `src/app/**/page.tsx`、レイアウト、動的セグメント、
   `loading` / `error` / `not-found`、`middleware.ts`。詳しくは[ルーティング](/docs/guides/routing)を参照してください。
-- **Server Actions** — `'use server'` + `defineAction` / `useAction`、おなじみの React
-  19 の形そのままです。詳しくは[Server Actions](/docs/guides/server-actions)を参照してください。
-- **Node Main** — DB、socket、worker、background work のための長寿命 Node lifecycle と
-  型付き `'use main'` call。[Node Main](/ja/docs/guides/node-main)を参照してください。
+- **Server Actions** — `'use server'` と `defineAction` / `useAction` を使い、Node.js 側の処理を型付きで呼び出せます。詳しくは[Server Actions](/docs/guides/server-actions)を参照してください。
+- **Node Main** — データベース、ソケット、Worker、バックグラウンド処理に使える常駐 Node.js プロセスと、型付きの `'use main'` 呼び出しを提供します。詳しくは[Node Main](/docs/guides/node-main)を参照してください。
 - **API Routes** — Next.js 風の `src/api/**/route.ts` による HTTP エンドポイント。詳しくは
   [API Routes](/docs/guides/api-routes)を参照してください。
-- **ネイティブウィンドウ & メニュー** — 本物のネイティブウィンドウ、ネイティブメニューバー、
-  スコープ付きのネイティブコンテキストメニュー(`NSMenu` であり、HTML のポップアップでは
-  ありません)。詳しくは[Native APIs](/docs/guides/native-apis)を参照してください。
+- **ネイティブウィンドウ & メニュー** — OS のウィンドウ、アプリケーションメニュー、対象範囲を限定できるコンテキストメニュー（macOS では `NSMenu`）を利用できます。詳しくは[Native APIs](/docs/guides/native-apis)を参照してください。
 - **UI キット** — `@murasakijs/ui`、shadcn スタイルのコンポーネントライブラリです。詳しく
   は[スタイリング](/docs/guides/styling)とライブの[コンポーネント](/docs/components)を
   参照してください。
-- **本格的な配布** — ポータブルでクロスアーキテクチャ対応の `.app` バンドル、コード署名 +
-  公証にも対応。詳しくは[Distribution](/docs/building/distribution)を参照してください。
+- **配布パッケージ** — 複数アーキテクチャ向けのアプリバンドルを生成し、コード署名と公証にも対応します。詳しくは[配布](/docs/building/distribution)を参照してください。
 
 <Callout type="info">
   バンドルは macOS(`.app` / `.dmg`)と Windows(`.zip` / `.exe` / `.msi`)向けの
-  インストーラを出力します。Linux(`.AppImage`)はロードマップに含まれています。Rust
-  コア自体はすでに 5 つのターゲットすべてでビルド可能です。
+  インストーラーを出力します。Linux では `.AppImage` と `.deb` を生成できますが、一部の配布機能はまだ開発中です。対応状況は下記の機能一覧で確認してください。
 </Callout>
 
 <Callout type="warn">
-  Murasaki は 1.0 未満です。Linux packaging / signingやprocess-wide integrationの
-  OS smoke testなど、本番 blockerは
+  Murasaki は 1.0 未満です。Linux のパッケージ署名や、プロセス全体に関わる機能の OS スモークテストなど、本番採用前に確認すべき項目は
   [プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)で
   確認してください。
 </Callout>
@@ -60,9 +53,9 @@ description: デスクトップアプリのための Next.js DX — React 19 + V
 ## 次のステップ
 
 <Cards>
-  <Card title="クイックスタート" href="/docs/getting-started/quick-start" description="最初のアプリをスキャフォールドし、実行し、出荷しましょう。" />
-  <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="Murasaki アプリの中で何がどこにあるか。" />
-  <Card title="アーキテクチャ" href="/ja/docs/core-concepts/architecture" description="native host、Node Main、renderer、security boundary。" />
-  <Card title="コンポーネント" href="/docs/components" description="@murasakijs/ui のすべてのコンポーネントを、ライブプレビュー付きで。" />
+  <Card title="クイックスタート" href="/docs/getting-started/quick-start" description="最初のアプリを作成し、実行して、配布用にビルドします。" />
+  <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="Murasaki アプリを構成するファイルとディレクトリを確認します。" />
+  <Card title="アーキテクチャ" href="/docs/core-concepts/architecture" description="ネイティブホスト、Node Main、レンダラー、セキュリティ境界の関係を説明します。" />
+  <Card title="コンポーネント" href="/docs/components" description="@murasakijs/ui のコンポーネントをライブプレビュー付きで確認します。" />
   <Card title="ガイド" href="/docs/guides/routing" description="ルーティング、サーバーアクション、API ルート、メタデータなど。" />
 </Cards>

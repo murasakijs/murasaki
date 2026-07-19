@@ -1,0 +1,29 @@
+{
+  "name": "oscilla",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "^22.13.0 || >=24.0.0" },
+  "scripts": {
+    "dev": "murasaki dev",
+    "build": "murasaki build",
+    "bundle": "murasaki bundle",
+    "installer": "murasaki installer",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test src/lib/*.test.ts"
+  },
+  "dependencies": {
+    "murasaki": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.21.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.7.0",
+    "vite": "^7.3.6"
+  }
+}

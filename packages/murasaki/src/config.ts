@@ -8,14 +8,27 @@ export type MurasakiBuildTarget =
   | 'linux-x64'
   | 'linux-arm64'
 
-export type BundleResource = string | { from: string; to?: string }
+export type BundleResource = string | {
+  from: string
+  to?: string
+  /**
+   * Marks an app-owned executable sidecar for platform code signing. Required
+   * for executable files shipped through `bundle.resources`; ordinary data
+   * files must leave this false/undefined.
+   */
+  executable?: boolean
+}
 
 export interface BundleConfig {
   /** Packages staged in the packaged app instead of compiled into server code. */
   external?: string[]
   /** JavaScript packages forced into the compiled server bundle. */
   noExternal?: string[]
-  /** Non-code files/directories copied into packaged resources. */
+  /**
+   * Files/directories copied into packaged resources. Executable sidecars
+   * must use the object form with `executable: true` so macOS/Windows signing
+   * can seal them before the outer application artifact.
+   */
   resources?: BundleResource[]
 }
 
@@ -170,6 +183,15 @@ export interface WindowConfig {
    * top-level list; a secondary window with no list remains deny-all.
    */
   capabilities?: NativeCapabilityGrant[]
+
+  /**
+   * Node/backend operations exposed to this renderer. Default deny-all.
+   * Grants use stable resource IDs such as `main:src/backend.ts#read`,
+   * `action:src/actions.ts#save`, `api:GET:/api/items/*`, `updater:*`,
+   * `events:*`, or `diagnostics:renderer-error`. A single trailing `*` is a
+   * prefix wildcard; no other wildcard placement is accepted.
+   */
+  backendCapabilities?: BackendCapability[]
 }
 
 /** A declaratively-created non-primary application window. */
@@ -186,6 +208,7 @@ export interface ResolvedWindowConfig extends WindowConfig {
   visible: boolean
   createOnLaunch: boolean
   capabilities: NativeCapabilityGrant[]
+  backendCapabilities: BackendCapability[]
 }
 
 /** A custom URL scheme registered by packaged macOS/Windows applications. */
@@ -385,11 +408,15 @@ export type UpdaterConfig =
       /**
        * Maximum accepted age, in days, of a manifest's `generatedAt`
        * timestamp — an anti-freeze/replay guard: a manifest older than this
-       * is rejected outright. A manifest with no `generatedAt` at all is
-       * still accepted (older manifests didn't write one) but logs a
-       * warning. Default 90, minimum 1.
+       * is rejected outright. Default 90, minimum 1.
        */
       maxManifestAgeDays?: number
+      /**
+       * Compatibility escape hatch for manifests created before `generatedAt`
+       * existed. Default false: production rejects a missing timestamp because
+       * an old, still-validly-signed manifest can otherwise be replayed.
+       */
+      allowLegacyManifestsWithoutGeneratedAt?: boolean
     }
 
 /** The fully-resolved shape `resolveUpdater()` produces from a `UpdaterConfig`. */
@@ -406,6 +433,8 @@ export interface ResolvedUpdater {
   checkIntervalMs: number | false
   /** Maximum accepted age, in days, of a manifest's `generatedAt`. */
   maxManifestAgeDays: number
+  /** Whether a signed legacy manifest may omit `generatedAt`. */
+  allowLegacyManifestsWithoutGeneratedAt: boolean
 }
 
 /**
@@ -448,6 +477,9 @@ export interface MurasakiConfig {
    * Default is deny-all; grant only the capabilities the app uses.
    */
   capabilities?: NativeCapabilityGrant[]
+
+  /** Primary-window backend grants. Secondary windows remain deny-all unless declared. */
+  backendCapabilities?: BackendCapability[]
 
   /**
    * Host operating-system permissions. On macOS, camera/microphone usage
@@ -520,7 +552,13 @@ export interface MurasakiConfig {
   /** Build targets. Defaults to the host platform. */
   targets?: MurasakiBuildTarget[]
 
-  /** Icon source (PNG). `murasaki icon` fans this out to .icns/.ico/set. */
+  /**
+   * Square app-icon source (PNG; 1024px recommended). On macOS with full
+   * Xcode installed, Murasaki compiles an AppIcon asset catalog so the OS
+   * applies the current platform mask and appearances. A legacy `.icns` is
+   * retained for older macOS/tooling; Windows/Linux assets are generated from
+   * the same source.
+   */
   icon?: string
 
   /**
@@ -550,9 +588,9 @@ export interface MurasakiConfig {
        * `'perUser'` installs to `%LOCALAPPDATA%\Programs\<productName>` with
        * no admin prompt (the NSIS installer's default — the friendlier
        * choice for an unsigned app). `'perMachine'` installs to
-       * `Program Files` and requires admin. The MSI installer is always
-       * per-machine (WiX/Windows Installer convention) regardless of this
-       * setting. Default `'perUser'`.
+       * `Program Files` and requires admin. Built-in self-update is intentionally
+       * incompatible with `perMachine`, because a non-elevated running app cannot
+       * transactionally replace files under Program Files. Default `'perUser'`.
        */
       installMode?: 'perUser' | 'perMachine'
       /** Publisher name shown in the installer UI and Add/Remove Programs. Defaults to `authors.join(', ')`, then `copyright`, then `productName`. */
@@ -605,14 +643,19 @@ export interface MurasakiConfig {
     /** Signing identity, e.g. "Developer ID Application: Name (TEAMID)". Defaults to
      *  $MURASAKI_SIGN_IDENTITY, then the first "Developer ID Application" in your keychain. */
     identity?: string
-    /** Path to a custom entitlements .plist. Defaults to a Node-friendly hardened-runtime set. */
+    /** Path to a custom entitlements .plist for the main app executable.
+     * Defaults to the minimum host entitlements derived from `systemPermissions`.
+     * A configured path must exist; Murasaki never silently falls back. */
     entitlements?: string
+    /** Path to a custom entitlements .plist for the bundled Node helper.
+     * Defaults to the JIT/library-loading hardened-runtime permissions.
+     * App Sandbox/inherit rights are rejected by the current architecture. */
+    helperEntitlements?: string
     /**
-     * Opt into the macOS App Sandbox. Default `false` (Murasaki's default is
-     * hardened-runtime-only, no `com.apple.security.app-sandbox`
-     * entitlement). Only affects the generated default entitlements plist
-     * (ignored when `entitlements` points at a custom file) — see
-     * `entitlementsPlist` in cli/bundle.ts for the exact derivation.
+     * Reserved for a future macOS App Sandbox process architecture. `true` is
+     * currently rejected fail-closed: the bundled Node runtime requires
+     * hardened-runtime/JIT entitlements that Apple does not permit on an
+     * `app-sandbox` + `inherit` child. Default `false`.
      */
     appSandbox?: boolean
     /** Windows Authenticode signing for the application executable, portable ZIP payload,
@@ -625,6 +668,8 @@ export interface MurasakiConfig {
 export const NATIVE_CAPABILITIES = [
   'app:quit',
   'app:isElevated',
+  'autostart:read',
+  'autostart:write',
   'dialog:openFile',
   'dialog:openDirectory',
   'dialog:saveFile',
@@ -681,6 +726,13 @@ export const NATIVE_CAPABILITIES = [
 
 export type NativeCapability = (typeof NATIVE_CAPABILITIES)[number]
 
+export interface ElevatedExecutionScope {
+  /** Exact absolute path to the executable that may receive elevation. */
+  executable: string
+  /** Exact argv sequence. Omit for an executable that accepts no arguments. */
+  args?: string[]
+}
+
 /**
  * Optional value-level constraints for a renderer-native permission.
  *
@@ -693,10 +745,14 @@ export interface NativeCapabilityScope {
   urls?: string[]
   /** Exact absolute paths, or an absolute directory ending in `/**`. */
   paths?: string[]
+  /** Exact executable + argv pairs accepted by `shell:runElevated`. */
+  executions?: ElevatedExecutionScope[]
   /** Declarative native window labels. */
   windows?: string[]
   /** Host permissions that may be queried/requested. */
   permissions?: SystemPermissionName[]
+  /** Exact secure-storage keys, or a key prefix ending in `*`. */
+  keys?: string[]
 }
 
 export interface ScopedNativeCapability {
@@ -708,6 +764,9 @@ export interface ScopedNativeCapability {
 }
 
 export type NativeCapabilityGrant = NativeCapability | ScopedNativeCapability
+
+/** A renderer-to-Node/API authority resource ID. See `WindowConfig.backendCapabilities`. */
+export type BackendCapability = string
 
 const NATIVE_CAPABILITY_SET: ReadonlySet<string> = new Set(NATIVE_CAPABILITIES)
 
@@ -753,12 +812,14 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
       throw new TypeError(`${field} must be a non-empty string`)
     }
   }
+  validateAppId(candidate.appId)
   validateArtifactComponent(candidate.productName, 'productName')
   if (candidate.version !== undefined) {
     if (typeof candidate.version !== 'string' || candidate.version.trim().length === 0) {
       throw new TypeError('version must be a non-empty string')
     }
     validateArtifactComponent(candidate.version, 'version')
+    validateSemanticVersion(candidate.version, 'version')
   }
   validateMainConfig((config as { main?: unknown }).main)
   validateBundleConfig((config as { bundle?: unknown }).bundle, 'bundle')
@@ -770,8 +831,74 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   validateSystemPermissionsConfig(candidate.systemPermissions)
   validateDevPort(candidate.devPort)
   validateUpdaterConfig(candidate.updater)
+  validateInstallerConfig(candidate.installer, candidate.updater)
   validateSignConfig(candidate.sign)
   resolveWindowDeclarations(candidate)
+}
+
+function validateInstallerConfig(value: unknown, updater: MurasakiConfig['updater']): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('installer must be an object')
+  }
+  const installer = value as Record<string, unknown>
+  rejectUnknownFields(installer, ['background', 'window', 'iconSize', 'windows'], 'installer')
+  if (installer.background !== undefined
+    && (typeof installer.background !== 'string' || installer.background.trim().length === 0)) {
+    throw new TypeError('installer.background must be a non-empty string')
+  }
+  if (installer.iconSize !== undefined
+    && (!Number.isSafeInteger(installer.iconSize)
+      || (installer.iconSize as number) < 16
+      || (installer.iconSize as number) > 2_048)) {
+    throw new TypeError('installer.iconSize must be an integer between 16 and 2048')
+  }
+  if (installer.window !== undefined) {
+    if (!installer.window || typeof installer.window !== 'object' || Array.isArray(installer.window)) {
+      throw new TypeError('installer.window must be an object')
+    }
+    const window = installer.window as Record<string, unknown>
+    rejectUnknownFields(window, ['width', 'height'], 'installer.window')
+    for (const field of ['width', 'height'] as const) {
+      if (!Number.isSafeInteger(window[field])
+        || (window[field] as number) < 128
+        || (window[field] as number) > 8_192) {
+        throw new TypeError(`installer.window.${field} must be an integer between 128 and 8192`)
+      }
+    }
+  }
+  if (installer.windows === undefined) return
+  if (!installer.windows || typeof installer.windows !== 'object' || Array.isArray(installer.windows)) {
+    throw new TypeError('installer.windows must be an object')
+  }
+  const windows = installer.windows as Record<string, unknown>
+  rejectUnknownFields(
+    windows,
+    ['installMode', 'publisher', 'upgradeCode', 'icon', 'banner', 'sidebar', 'license'],
+    'installer.windows',
+  )
+  if (windows.installMode !== undefined
+    && windows.installMode !== 'perUser'
+    && windows.installMode !== 'perMachine') {
+    throw new TypeError('installer.windows.installMode must be perUser or perMachine')
+  }
+  for (const field of ['publisher', 'icon', 'banner', 'sidebar', 'license'] as const) {
+    if (windows[field] !== undefined
+      && (typeof windows[field] !== 'string' || (windows[field] as string).trim().length === 0)) {
+      throw new TypeError(`installer.windows.${field} must be a non-empty string`)
+    }
+  }
+  if (windows.upgradeCode !== undefined
+    && (typeof windows.upgradeCode !== 'string'
+      || !/^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/.test(windows.upgradeCode))) {
+    throw new TypeError('installer.windows.upgradeCode must be a GUID')
+  }
+  if (updater && windows.installMode === 'perMachine') {
+    throw new TypeError(
+      'updater is incompatible with installer.windows.installMode "perMachine"; '
+        + 'use perUser self-update or disable updater and ship managed MSI upgrades',
+    )
+  }
 }
 
 function validateBuildConfig(value: unknown): void {
@@ -1074,7 +1201,7 @@ function validateBundleConfig(value: unknown, path: string): void {
       return
     }
     if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
-      throw new TypeError(`${resourcePath} must be a path or { from, to? } object`)
+      throw new TypeError(`${resourcePath} must be a path or { from, to?, executable? } object`)
     }
     const item = resource as Record<string, unknown>
     if (typeof item.from !== 'string' || item.from.trim().length === 0) {
@@ -1083,6 +1210,9 @@ function validateBundleConfig(value: unknown, path: string): void {
     if (item.to !== undefined
       && (typeof item.to !== 'string' || item.to.trim().length === 0)) {
       throw new TypeError(`${resourcePath}.to must be a non-empty string`)
+    }
+    if (item.executable !== undefined && typeof item.executable !== 'boolean') {
+      throw new TypeError(`${resourcePath}.executable must be a boolean`)
     }
   })
 }
@@ -1238,10 +1368,40 @@ export function resolveStartupSystemPermissions(
 // destructive cleanup. Keep each value a portable single path component so a
 // typo cannot make `resolve(...); rm(...)` target a parent/sibling directory.
 const UNSAFE_ARTIFACT_COMPONENT_RE = /[<>:"/\\|?*\u0000-\u001F\u007F]/
+const WINDOWS_RESERVED_BASENAME_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
+
+function validateAppId(value: string): void {
+  const bytes = new TextEncoder().encode(value).byteLength
+  if (bytes > 255
+    || !/^[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9][A-Za-z0-9-]*)+$/.test(value)) {
+    throw new TypeError(
+      'appId must be a reverse-DNS identifier using letters, digits, dots, and hyphens (for example com.example.app)',
+    )
+  }
+}
 
 function validateArtifactComponent(value: string, field: string): void {
-  if (UNSAFE_ARTIFACT_COMPONENT_RE.test(value)) {
-    throw new TypeError(`${field} must be a portable file name without reserved path or control characters`)
+  if (UNSAFE_ARTIFACT_COMPONENT_RE.test(value)
+    || value !== value.trim()
+    || value === '.'
+    || value === '..'
+    || value.endsWith('.')
+    || WINDOWS_RESERVED_BASENAME_RE.test(value)
+    || Array.from(value).length > 120) {
+    throw new TypeError(
+      `${field} must be a portable file name (1–120 characters, no reserved path/control characters, device names, or trailing dot/space)`,
+    )
+  }
+}
+
+const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+
+function validateSemanticVersion(value: string, field: string): void {
+  const match = SEMVER_RE.exec(value)
+  if (!match
+    || [match[1], match[2], match[3]].some((part) => !Number.isSafeInteger(Number(part)))
+    || (match[4]?.split('.').some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0')) ?? false)) {
+    throw new TypeError(`${field} must be a valid semantic version (for example 1.2.3 or 1.2.3-beta.1)`)
   }
 }
 
@@ -1304,6 +1464,10 @@ function validateUpdaterConfig(value: unknown): void {
       throw new TypeError(`updater.${field} must be a non-empty string`)
     }
   }
+  if (typeof updater.channel === 'string'
+    && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(updater.channel)) {
+    throw new TypeError('updater.channel must be a safe 1-64 character release-channel name')
+  }
   if (updater.repo !== undefined && updater.endpoint !== undefined) {
     throw new TypeError('updater.repo and updater.endpoint are mutually exclusive')
   }
@@ -1316,6 +1480,9 @@ function validateUpdaterConfig(value: unknown): void {
     }
     if (endpoint.protocol !== 'https:' && endpoint.protocol !== 'http:') {
       throw new TypeError('updater.endpoint must be an absolute HTTP or HTTPS URL')
+    }
+    if (endpoint.username || endpoint.password) {
+      throw new TypeError('updater.endpoint must not contain embedded credentials')
     }
     if (endpoint.protocol === 'http:' && !isLoopbackUpdaterHost(endpoint.hostname)) {
       throw new TypeError(
@@ -1337,6 +1504,10 @@ function validateUpdaterConfig(value: unknown): void {
   if (updater.maxManifestAgeDays !== undefined
     && (!Number.isSafeInteger(updater.maxManifestAgeDays) || (updater.maxManifestAgeDays as number) < 1)) {
     throw new TypeError('updater.maxManifestAgeDays must be a positive safe integer (days), at least 1')
+  }
+  if (updater.allowLegacyManifestsWithoutGeneratedAt !== undefined
+    && typeof updater.allowLegacyManifestsWithoutGeneratedAt !== 'boolean') {
+    throw new TypeError('updater.allowLegacyManifestsWithoutGeneratedAt must be a boolean')
   }
   if (updater.checkOnStart !== undefined && typeof updater.checkOnStart !== 'boolean') {
     throw new TypeError('updater.checkOnStart must be a boolean')
@@ -1363,7 +1534,7 @@ function validateSignConfig(value: unknown): void {
     throw new TypeError('sign must be an object')
   }
   const sign = value as Record<string, unknown>
-  for (const field of ['identity', 'entitlements'] as const) {
+  for (const field of ['identity', 'entitlements', 'helperEntitlements'] as const) {
     if (sign[field] !== undefined
       && (typeof sign[field] !== 'string' || sign[field].trim().length === 0)) {
       throw new TypeError(`sign.${field} must be a non-empty string`)
@@ -1371,6 +1542,12 @@ function validateSignConfig(value: unknown): void {
   }
   if (sign.appSandbox !== undefined && typeof sign.appSandbox !== 'boolean') {
     throw new TypeError('sign.appSandbox must be a boolean')
+  }
+  if (sign.appSandbox === true) {
+    throw new TypeError(
+      'sign.appSandbox is not supported by the current bundled-Node architecture; '
+        + 'use the default hardened-runtime signing until a separately sandboxed helper is available',
+    )
   }
   if (sign.windows === undefined) return
   if (!sign.windows || typeof sign.windows !== 'object' || Array.isArray(sign.windows)) {
@@ -1475,7 +1652,7 @@ const WINDOW_ROUTE_BASE = 'http://murasaki.local'
 
 /** Validate and resolve primary and secondary declarative windows. */
 export function resolveWindowDeclarations(
-  config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'updater'>,
+  config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'backendCapabilities' | 'updater'>,
 ): ResolvedWindowConfig[] {
   if (config.window !== undefined
     && (!config.window || typeof config.window !== 'object' || Array.isArray(config.window))) {
@@ -1492,6 +1669,9 @@ export function resolveWindowDeclarations(
   const primaryCapabilities = config.window?.capabilities !== undefined
     ? resolveCapabilities(config.window.capabilities, 'window.capabilities')
     : fallbackCapabilities
+  const primaryBackendCapabilities = config.window?.backendCapabilities !== undefined
+    ? resolveBackendCapabilities(config.window.backendCapabilities, 'window.backendCapabilities')
+    : resolveBackendCapabilities(config.backendCapabilities, 'backendCapabilities')
   // The built-in updater must be able to complete its verified
   // install -> graceful quit -> apply handshake without making every existing
   // updater app add a new permission. This implicit grant is limited to main;
@@ -1504,6 +1684,7 @@ export function resolveWindowDeclarations(
     config.window ?? {},
     true,
     primaryCapabilities,
+    primaryBackendCapabilities,
   )
   const secondary = Object.entries(config.windows ?? {}).map(([label, declaration]) => {
     if (label.toLowerCase() === 'main') {
@@ -1518,7 +1699,13 @@ export function resolveWindowDeclarations(
     const capabilities = declaration.capabilities !== undefined
       ? resolveCapabilities(declaration.capabilities, `windows.${label}.capabilities`)
       : []
-    return resolveWindowDeclaration(label, declaration, false, capabilities)
+    const backendCapabilities = declaration.backendCapabilities !== undefined
+      ? resolveBackendCapabilities(
+        declaration.backendCapabilities,
+        `windows.${label}.backendCapabilities`,
+      )
+      : []
+    return resolveWindowDeclaration(label, declaration, false, capabilities, backendCapabilities)
   })
   return [primary, ...secondary]
 }
@@ -1528,6 +1715,7 @@ function resolveWindowDeclaration(
   declaration: WindowConfig & { createOnLaunch?: boolean },
   primary: boolean,
   capabilities: NativeCapabilityGrant[],
+  backendCapabilities: BackendCapability[],
 ): ResolvedWindowConfig {
   if (!WINDOW_LABEL_RE.test(label)) {
     throw new TypeError(
@@ -1552,7 +1740,32 @@ function resolveWindowDeclaration(
     visible: declaration.visible ?? primary,
     createOnLaunch: primary ? true : (declaration.createOnLaunch ?? true),
     capabilities: [...capabilities],
+    backendCapabilities: [...backendCapabilities],
   }
+}
+
+const BACKEND_CAPABILITY_RE = /^(?:(?:main|action):(?:\*|[^\s#*]+#[A-Za-z_$][\w$]*|[^\s*]+\*)|api:(?:\*|[A-Z]+:\/api(?:\/[^\s*]*)?\*?)|updater:(?:\*|[^\s*]+\*?)|events:(?:\*|[^\s*]+\*?)|diagnostics:(?:\*|renderer-error))$/
+
+/** Validate backend authority grants at the same trusted config boundary as native capabilities. */
+export function resolveBackendCapabilities(
+  value: BackendCapability[] | undefined,
+  field = 'backendCapabilities',
+): BackendCapability[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 256) {
+    throw new TypeError(`${field} must be an array of at most 256 backend capability strings`)
+  }
+  const resolved: string[] = []
+  for (const grant of value) {
+    if (typeof grant !== 'string'
+      || grant.length === 0
+      || grant.length > 512
+      || !BACKEND_CAPABILITY_RE.test(grant)) {
+      throw new TypeError(`invalid ${field} grant: ${JSON.stringify(grant)}`)
+    }
+    if (!resolved.includes(grant)) resolved.push(grant)
+  }
+  return resolved
 }
 
 function validateWindowDeclaration(
@@ -1682,15 +1895,48 @@ function resolveCapabilityScope(
       throw new TypeError(`${path}.${key} is not valid for ${permission}`)
     }
     const entries = scope[key]
-    if (!Array.isArray(entries) || entries.length === 0) {
-      throw new TypeError(`${path}.${key} must be a non-empty array`)
+    if (!Array.isArray(entries) || entries.length === 0 || entries.length > 256) {
+      throw new TypeError(`${path}.${key} must be an array of 1-256 entries`)
+    }
+    if (key === 'executions') {
+      const identities = new Set<string>()
+      resolved.executions = entries.map((entry, index) => {
+        const entryPath = `${path}.executions[${index}]`
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          throw new TypeError(`${entryPath} must be an object`)
+        }
+        const value = entry as Record<string, unknown>
+        if (Object.keys(value).some((field) => field !== 'executable' && field !== 'args')) {
+          throw new TypeError(`${entryPath} contains an unknown field`)
+        }
+        if (typeof value.executable !== 'string' || value.executable.endsWith('/**') || value.executable.endsWith('\\**')) {
+          throw new TypeError(`${entryPath}.executable must be one exact absolute path`)
+        }
+        validateCapabilityPathPattern(value.executable, `${entryPath}.executable`)
+        const args = value.args === undefined ? [] : value.args
+        if (!Array.isArray(args) || args.length > 64 || args.some((arg) => typeof arg !== 'string'
+          || new TextEncoder().encode(arg).byteLength > 4096
+          || /[\u0000-\u001f\u007f-\u009f]/u.test(arg))) {
+          throw new TypeError(`${entryPath}.args must contain at most 64 strings of at most 4096 UTF-8 bytes without control characters`)
+        }
+        const result = { executable: value.executable, args: args as string[] }
+        const identity = JSON.stringify(result)
+        if (identities.has(identity)) throw new TypeError(`${path}.executions must contain unique executable/args pairs`)
+        identities.add(identity)
+        return result
+      })
+      continue
     }
     const unique = [...new Set(entries)]
     if (unique.length !== entries.length || unique.some((item) => typeof item !== 'string')) {
       throw new TypeError(`${path}.${key} must contain unique strings`)
     }
     if (key === 'urls') {
-      unique.forEach((item) => validateCapabilityUrlPattern(item as string, `${path}.urls`))
+      unique.forEach((item) => validateCapabilityUrlPattern(
+        item as string,
+        `${path}.urls`,
+        permission === 'webview:readCookies' || permission === 'webview:writeCookies',
+      ))
       resolved.urls = unique as string[]
     } else if (key === 'paths') {
       unique.forEach((item) => validateCapabilityPathPattern(item as string, `${path}.paths`))
@@ -1722,6 +1968,9 @@ function resolveCapabilityScope(
         if (!known.has(item as SystemPermissionName)) throw new TypeError(`${path}.permissions contains unknown system permission ${JSON.stringify(item)}`)
       })
       resolved.permissions = unique as SystemPermissionName[]
+    } else if (key === 'keys') {
+      unique.forEach((item) => validateCapabilityKeyPattern(item as string, `${path}.keys`))
+      resolved.keys = unique as string[]
     }
   }
   if (Object.keys(resolved).length === 0) throw new TypeError(`${path} must not be empty`)
@@ -1729,19 +1978,28 @@ function resolveCapabilityScope(
 }
 
 function capabilityScopeKeys(permission: NativeCapability): Array<keyof NativeCapabilityScope> {
-  if (permission === 'shell:openExternal') return ['urls']
+  if (
+    permission === 'shell:openExternal'
+    || permission === 'webview:readCookies'
+    || permission === 'webview:writeCookies'
+  ) return ['urls']
   if (
     permission === 'shell:showItemInFolder'
     || permission === 'shell:trashItem'
     || permission === 'shell:openPath'
-    || permission === 'shell:runElevated'
   ) return ['paths']
+  if (permission === 'shell:runElevated') return ['executions']
   if (permission === 'window:open' || permission === 'window:manage') return ['windows']
   if (permission === 'systemPermission:status' || permission === 'systemPermission:request') return ['permissions']
+  if (
+    permission === 'secureStorage:get'
+    || permission === 'secureStorage:set'
+    || permission === 'secureStorage:delete'
+  ) return ['keys']
   return []
 }
 
-function validateCapabilityUrlPattern(pattern: string, path: string): void {
+function validateCapabilityUrlPattern(pattern: string, path: string, httpOnly = false): void {
   const wildcard = pattern.endsWith('/**')
   const candidate = wildcard ? pattern.slice(0, -2) : pattern
   if (candidate.includes('*')) {
@@ -1756,11 +2014,24 @@ function validateCapabilityUrlPattern(pattern: string, path: string): void {
   if (!['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol) || parsed.username || parsed.password) {
     throw new TypeError(`${path} supports only credential-free http, https, mailto, and tel URLs`)
   }
+  if (httpOnly && !['http:', 'https:'].includes(parsed.protocol)) {
+    throw new TypeError(`${path} supports only http and https URLs for WebView cookies`)
+  }
   if (wildcard && !['http:', 'https:'].includes(parsed.protocol)) {
     throw new TypeError(`${path} wildcards are supported only for http and https URLs`)
   }
   if (wildcard && (parsed.search || parsed.hash)) {
     throw new TypeError(`${path} URL wildcards cannot contain a query or fragment`)
+  }
+}
+
+function validateCapabilityKeyPattern(pattern: string, path: string): void {
+  if (pattern.length === 0 || pattern.includes('\0') || Buffer.byteLength(pattern, 'utf8') > 256) {
+    throw new TypeError(`${path} entries must be non-empty and at most 256 UTF-8 bytes without NUL`)
+  }
+  const candidate = pattern.endsWith('*') ? pattern.slice(0, -1) : pattern
+  if (candidate.includes('*')) {
+    throw new TypeError(`${path} only supports an exact key or one trailing * prefix wildcard`)
   }
 }
 

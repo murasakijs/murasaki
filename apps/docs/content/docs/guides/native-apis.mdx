@@ -34,7 +34,7 @@ by the Rust host:
 ```tsx
 'use client'
 
-import { app, appWindow, clipboard, dialog, globalShortcut, notification, secureStorage, shell, systemPermission, tray, windows } from 'murasaki/native'
+import { app, appWindow, autostart, clipboard, dialog, globalShortcut, notification, secureStorage, shell, systemPermission, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -51,6 +51,7 @@ await shell.showItemInFolder(files[0])
 | API | Operations |
 | --- | --- |
 | `app` | `quit` (graceful application shutdown), `isElevated` (read-only self-query) |
+| `autostart` | per-user login-startup `status`, `enable`, `disable` for packaged apps |
 | `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage` (native OS message box) |
 | `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
 | `notification` | `show` (resolves to a locally-generated id) |
@@ -87,7 +88,12 @@ absolute, non-traversing path that exists, and — like
 `shell.showItemInFolder` — their `shell:trashItem`/`shell:openPath`
 capabilities can be scoped to an allowed path subtree. `shell.openPath`
 additionally rejects anything that parses as a URL or a UNC network/device
-path; use `shell.openExternal` to open a URL instead.
+path; use `shell.openExternal` to open a URL instead. For a scoped grant,
+Murasaki resolves symlinks and requires both the requested path and its real
+target to remain inside the grant before opening it. `showItemInFolder` and
+`trashItem` resolve every parent directory and apply the same second scope
+check, while leaving a final symlink unresolved so the link itself remains the
+selected/deleted entry.
 
 <Callout type="warning">
   **0.50 migration:** `quit()` used to post an unpermissioned raw IPC message.
@@ -101,9 +107,10 @@ path; use `shell.openExternal` to open a URL instead.
   The bridge accepts messages only from the app's exact origin and exposes a
   fixed, default-deny command allowlist. Grant only the commands each renderer
   uses through `window.capabilities` / `windows[label].capabilities`. Structured
-  grants can scope shell URLs/paths, target window labels, and OS permission
-  names with allow/deny rules. Other arguments remain command-level, so do not
-  load untrusted remote content into a privileged app window.
+  grants can scope shell URLs/paths, exact elevated executable/argv pairs,
+  target window labels, OS permission names, secure-storage keys, and WebView
+  cookie URLs with allow/deny rules. Other arguments remain command-level, so
+  do not load untrusted remote content into a privileged app window.
 </Callout>
 
 ## Privilege elevation (Windows)
@@ -127,6 +134,20 @@ if (!(await app.isElevated())) {
 }
 ```
 
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  window: {
+    capabilities: [{
+      permission: 'shell:runElevated',
+      allow: { executions: [{
+        executable: 'C:/Program Files/Example/updater.exe',
+        args: ['--apply'],
+      }] },
+    }],
+  },
+})
+```
+
 `app.isElevated()` is a read-only, capability-gated (`app:isElevated`) query of
 whether the native host process is already running elevated. On Windows this
 reads the process token's elevation state; on macOS/Linux "elevated" means
@@ -141,9 +162,12 @@ fresh process through the Windows "Run as administrator" (UAC) consent
 prompt, and is Windows-only — every other platform rejects with an
 `unsupported` error, since macOS's `SMJobBless`/`AuthorizationExecuteWithPrivileges`
 are deprecated and Linux has no single equivalent mechanism. `executable` must
-be an absolute, non-traversing path to an existing file; like
-`shell.openPath`, its `shell:runElevated` capability can be scoped to an
-allowed path subtree. `args` (at most 64 entries, each at most 4096 UTF-8
+be an absolute, non-traversing path to an existing file. A structured
+`shell:runElevated` grant matches the executable and the complete, ordered
+argument list as one exact `executions` entry; it never grants a path subtree
+with arbitrary arguments. Murasaki resolves symlinks and requires that exact
+real executable/argument pair to be granted too, preventing an in-scope link
+from redirecting elevation outside the grant. `args` (at most 64 entries, each at most 4096 UTF-8
 bytes, and free of control characters) are passed directly to the elevated
 process — never through a shell — quoted using the same rules as
 `CommandLineToArgvW`. The call is fire-and-forget: it resolves once the
@@ -155,10 +179,49 @@ your app can handle a declined prompt differently from every other failure.
 
 <Callout type="warn">
   `shell:runElevated` is a powerful capability: granting it lets the renderer
-  trigger a UAC prompt to run any allowed executable elevated. Scope it to a
-  narrow path subtree (or a single exact path) and grant it only to the
-  windows that genuinely need to launch an elevated helper.
+  trigger a UAC prompt to run an executable elevated. Prefer a structured
+  exact executable/argv grant; the string form is intentionally unrestricted
+  for compatibility. Grant it only to windows that genuinely need a helper.
 </Callout>
+
+## Login autostart
+
+Packaged apps can let a user opt into launching the app at login without
+shipping a platform-specific helper:
+
+```ts
+import { autostart } from 'murasaki/native'
+
+if ((await autostart.status()) === 'disabled') {
+  await autostart.enable()
+}
+
+// Offer this from the same settings UI:
+await autostart.disable()
+```
+
+Grant `autostart:read` to inspect the current registration and
+`autostart:write` to enable or disable it. Murasaki rejects all three calls
+under `murasaki dev`, preventing the temporary development Node executable
+from becoming a persistent login item. Registration is per user: a macOS
+LaunchAgent, the Windows current-user Run key, or an XDG Autostart desktop
+entry on Linux. `status()` returns `'enabled'` only when the stored
+registration still matches the exact packaged executable; otherwise it
+returns `'disabled'`.
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  window: {
+    capabilities: ['autostart:read', 'autostart:write'],
+  },
+})
+```
+
+Call `enable()` only from an explicit user-facing setting. Users, endpoint
+management, and OS policy remain free to remove or disable the registration.
+The current macOS implementation uses a LaunchAgent and is not compatible
+with an App Sandbox build; sandboxed distribution needs a separately signed
+login-item helper and is not supported by this experimental API yet.
 
 ## Secure storage
 
@@ -179,7 +242,8 @@ const saved = await secureStorage.get('refresh-token') // string | null
 await secureStorage.delete('refresh-token')            // absent is also OK
 ```
 
-Grant each operation independently to only the windows that need it:
+Grant each operation independently to only the windows that need it, and
+prefer an exact key or trailing-prefix scope:
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -187,9 +251,9 @@ export default defineConfig({
   productName: 'Notes',
   window: {
     capabilities: [
-      'secureStorage:get',
-      'secureStorage:set',
-      'secureStorage:delete',
+      { permission: 'secureStorage:get', allow: { keys: ['account:*'] } },
+      { permission: 'secureStorage:set', allow: { keys: ['account:*'] } },
+      { permission: 'secureStorage:delete', allow: { keys: ['account:*'] } },
     ],
   },
 })
@@ -201,11 +265,11 @@ UTF-8 bytes; values are non-empty strings up to 2,048 UTF-8 bytes. NUL is
 rejected, the native IPC body remains capped at 256 KiB, and corrupt/non-UTF-8
 stored data is returned as an error rather than silently decoded.
 
-Capabilities are operation-level, not per-key: a renderer with
-`secureStorage:get` can read every key it knows or guesses inside that app's
-namespace. Keychain/Credential Manager protects data at rest from plaintext
-files; it does not protect a secret from XSS running in an already-authorized
-renderer. Keep secrets the renderer never needs in Node/server-only code.
+String capabilities remain key-unrestricted for compatibility. A structured
+`keys` list matches exactly unless an entry ends in one `*`, which matches a
+prefix. Keychain/Credential Manager protects data at rest from plaintext files;
+it does not protect a secret from XSS running inside an authorized scope. Keep
+secrets the renderer never needs in Node/server-only code.
 
 ## Tray icon
 
@@ -490,34 +554,32 @@ always-authorization instead of when-in-use.
 
 ### Entitlements and the App Sandbox
 
-`murasaki bundle --sign`'s generated default entitlements plist (used unless
-you supply `sign.entitlements`) automatically adds only what your declared
-`systemPermissions` genuinely need:
+`murasaki bundle --sign` generates separate entitlement plists for the main
+app and bundled Node helper unless you supply `sign.entitlements` and/or
+`sign.helperEntitlements`:
 
-- Under Murasaki's default hardened-runtime-only posture (no App Sandbox),
-  camera/microphone/photos/etc. all work from their Info.plist usage string
-  alone — no extra entitlement is added for them. The one exception is
-  `appleEvents`: declaring it adds `com.apple.security.automation.apple-events`,
-  the one TCC entitlement hardened runtime genuinely requires.
-- Setting `sign.appSandbox: true` additionally adds
-  `com.apple.security.app-sandbox` plus each declared kind's documented
-  per-kind Sandbox entitlement: `camera` → `com.apple.security.device.camera`,
-  `microphone` → `com.apple.security.device.audio-input`, `location` →
-  `com.apple.security.personal-information.location`, `contacts` →
-  `com.apple.security.personal-information.addressbook`, `calendar`/
-  `reminders` → `com.apple.security.personal-information.calendars` (Apple has
-  never split Reminders into its own Sandbox category), `bluetooth` →
-  `com.apple.security.device.bluetooth`. `photos` has no documented App
-  Sandbox entitlement and is never added.
-- A custom `sign.entitlements` file is always used verbatim — this derivation
-  only ever applies to the generated default plist.
-
-```ts title="murasaki.config.ts"
-export default defineConfig({
-  // ...
-  sign: { appSandbox: true },
-})
-```
+- Under Murasaki's default hardened-runtime-only posture (no App Sandbox), a
+  signed app needs both its Info.plist purpose string and the matching host
+  resource entitlement. Murasaki derives camera
+  (`com.apple.security.device.camera`), microphone
+  (`com.apple.security.device.audio-input`), location, photos, contacts,
+  calendar/reminders, and Apple Events entitlements from
+  `systemPermissions.macOS`. Bluetooth's device entitlement is App-Sandbox-
+  only, and speech recognition has no Hardened Runtime resource entitlement,
+  so those two use their purpose strings without an automatically generated
+  entitlement here.
+- Node alone receives the JIT, unsigned-executable-memory, and disabled-library-
+  validation hardened-runtime rights. `.node` add-ons are signed without
+  executable entitlements. App-owned executable `bundle.resources` must be
+  marked `executable: true` so they are signed before the outer app.
+- `sign.appSandbox: true` is currently rejected fail-closed. Apple's inherited
+  sandbox helper requires an `app-sandbox` + `inherit`-only entitlement set,
+  which is incompatible with the current embedded Node/JIT process. Murasaki
+  does not claim App Sandbox support until that process architecture has a
+  signed, notarized end-to-end path.
+- Custom main/helper files are used verbatim. A configured path that is
+  missing, not a file, or not a valid plist fails the release build instead of
+  silently falling back to generated privileges.
 
 ## Built-in menu actions
 
@@ -553,9 +615,10 @@ const { status, latest, check, download, install } = useUpdate()
 security model, and a GitHub Actions release workflow.
 
 <Callout type="warn">
-  Only shell URLs/paths, target window labels, and OS permission names have
-  structured capability scopes; global shortcut accelerators, dialog defaults,
-  and other arguments remain command-level. Check the
+  Structured scopes cover shell URLs/paths, exact elevated executable/argv
+  pairs, target window labels, OS permission names, secure-storage keys, and
+  WebView cookie URLs. Global shortcut accelerators, dialog defaults, and
+  other arguments remain command-level. Check the
   [platform feature status](/docs/core-concepts/platform-feature-status)
   before designing around them.
 </Callout>

@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { parseWire, stringifyWire, WIRE_CONTENT_TYPE } from '../dist/runtime/wire.js'
+import { deriveWindowToken } from '../dist/runtime/window-auth.js'
 
 const packageDir = resolve(import.meta.dirname, '..')
+const RUNTIME_TOKEN = 'a'.repeat(64)
 
 async function copyMainRuntimeFixture(root) {
   const runtimeRoot = join(root, '.murasaki-runtime')
@@ -18,6 +21,7 @@ async function copyMainRuntimeFixture(root) {
   await mkdir(mainDir, { recursive: true })
   await Promise.all([
     copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(runtimeDir, 'main-runtime.js')),
+    copyFile(join(packageDir, 'dist/runtime/launch.js'), join(runtimeDir, 'launch.js')),
     copyFile(join(packageDir, 'dist/main/logger.js'), join(mainDir, 'logger.js')),
     copyFile(join(packageDir, 'dist/main/sidecar.js'), join(mainDir, 'sidecar.js')),
     copyFile(join(packageDir, 'dist/main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
@@ -33,6 +37,12 @@ test('production API server streams requests/responses and preserves HTTP semant
   await mkdir(serverDir)
   await writeFile(join(clientDir, 'index.html'), '<!doctype html><title>test</title>')
   await writeFile(join(root, 'client-secret.txt'), 'must not be served')
+  let symlinkFixture = true
+  try { await symlink(join(root, 'client-secret.txt'), join(clientDir, 'leak.txt')) }
+  catch (error) {
+    if (process.platform === 'win32' && error?.code === 'EPERM') symlinkFixture = false
+    else throw error
+  }
   await writeFile(join(serverDir, 'actions.mjs'), 'export const registry = {}\n')
   await writeFile(join(serverDir, 'main-actions.mjs'), `
 export const registry = {
@@ -42,6 +52,7 @@ export const registry = {
     },
     async lastSecondInstance() { return globalThis.__secondInstance },
     async lastOpenRequest() { return globalThis.__openRequest },
+    async lastLaunch() { return globalThis.__launch },
     requestWindow(method, label) {
       const key = Symbol.for('murasaki.main.window-control.v1')
       const bus = globalThis[key] ??= {
@@ -74,7 +85,7 @@ export const registry = {
 `)
   await writeFile(join(serverDir, 'main.mjs'), `
 export default {
-  ready(context) { globalThis.__mainReady = context.isPackaged },
+  ready(context) { globalThis.__mainReady = context.isPackaged; globalThis.__launch = context.launch },
   secondInstance(_context, event) { globalThis.__secondInstance = event },
   openRequested(_context, event) { globalThis.__openRequest = event },
   beforeQuit({ reason }) { return reason === 'restart' ? false : undefined },
@@ -124,6 +135,28 @@ export const routes = [{
   await copyFile(join(packageDir, 'dist/runtime/updater.js'), join(root, 'updater-engine.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/wire.js'), join(root, 'wire.mjs'))
   await copyMainRuntimeFixture(root)
+  await writeFile(join(root, 'murasaki-meta.json'), JSON.stringify({
+    appId: 'dev.murasaki.prod-http-test',
+    productName: 'Production HTTP test',
+    windows: [{
+      label: 'main',
+      backendCapabilities: ['main:*', 'action:*', 'api:*', 'updater:*', 'events:*', 'diagnostics:*'],
+    }, {
+      label: 'preview',
+      backendCapabilities: [],
+    }],
+  }))
+  const launchFile = join(root, 'launch.json')
+  await writeFile(launchFile, JSON.stringify({ argv: ['--no-sample-data'], cwd: '/fixture-cwd' }))
+
+  // Hold the requested port to verify that packaged launches recover from an
+  // unrelated app choosing the same deterministic origin. The native launcher
+  // persists the reported fallback for subsequent stable-origin launches.
+  const occupied = createServer()
+  occupied.listen(0, '127.0.0.1')
+  await once(occupied, 'listening')
+  const occupiedPort = occupied.address().port
+  t.after(() => occupied.close())
 
   const child = spawn(
     process.execPath,
@@ -134,7 +167,9 @@ export const routes = [{
       '--main-registry', join(serverDir, 'main-actions.mjs'),
       '--routes', join(serverDir, 'routes.mjs'),
       '--main', join(serverDir, 'main.mjs'),
-      '--port', '0',
+      '--launch-file', launchFile,
+      '--port', String(occupiedPort),
+      '--port-attempts', '4',
     ],
     {
       cwd: root,
@@ -146,6 +181,7 @@ export const routes = [{
         XDG_DATA_HOME: join(root, 'xdg-data'),
         XDG_CACHE_HOME: join(root, 'xdg-cache'),
         XDG_STATE_HOME: join(root, 'xdg-state'),
+        MURASAKI_RUNTIME_TOKEN: RUNTIME_TOKEN,
       },
     },
   )
@@ -167,21 +203,54 @@ export const routes = [{
     child.once('exit', (code) => reject(new Error(`server exited early (${code})`)))
   })
   const url = `http://127.0.0.1:${port}/api/stream`
+  assert.notEqual(port, occupiedPort)
   const bootstrap = await fetch(`http://127.0.0.1:${port}/`)
-  const runtimeCookie = bootstrap.headers.getSetCookie()[0].split(';', 1)[0]
-  const runtimeHeaders = { cookie: runtimeCookie }
-  const nativeHeaders = {
-    ...runtimeHeaders,
-    'x-murasaki-native-token': runtimeCookie.slice(runtimeCookie.indexOf('=') + 1),
+  assert.deepEqual(bootstrap.headers.getSetCookie(), [])
+  assert.equal(
+    bootstrap.headers.get('permissions-policy'),
+    'camera=(), microphone=(), geolocation=()',
+  )
+  const runtimeHeaders = {
+    'x-murasaki-window-label': 'main',
+    'x-murasaki-window-generation': '1',
+    'x-murasaki-window-token': deriveWindowToken(RUNTIME_TOKEN, 'main'),
   }
+  const nativeHeaders = {
+    'x-murasaki-native-token': RUNTIME_TOKEN,
+  }
+  const previewHeaders = {
+    'x-murasaki-window-label': 'preview',
+    'x-murasaki-window-generation': '1',
+    'x-murasaki-window-token': deriveWindowToken(RUNTIME_TOKEN, 'preview'),
+  }
+  await assert.rejects(access(launchFile))
 
   const escapedStatic = await fetch(
     `http://127.0.0.1:${port}/%2e%2e%2fclient-secret.txt`,
   )
   assert.equal(escapedStatic.status, 403)
+  if (symlinkFixture) {
+    const symlinkEscape = await fetch(`http://127.0.0.1:${port}/leak.txt`)
+    assert.equal(symlinkEscape.status, 403)
+    assert.doesNotMatch(await symlinkEscape.text(), /must not be served/)
+  }
+  const malformedStatic = await fetch(`http://127.0.0.1:${port}/%E0%A4%A`)
+  assert.equal(malformedStatic.status, 400)
 
   const forbidden = await fetch(url)
   assert.equal(forbidden.status, 403)
+
+  const deniedPreview = await fetch(url, { headers: previewHeaders })
+  assert.equal(deniedPreview.status, 403)
+
+  const forgedMain = await fetch(url, {
+    headers: {
+      'x-murasaki-window-label': 'main',
+      'x-murasaki-window-generation': '1',
+      'x-murasaki-window-token': previewHeaders['x-murasaki-window-token'],
+    },
+  })
+  assert.equal(forgedMain.status, 403)
 
   const response = await fetch(url, { headers: runtimeHeaders })
   assert.equal(response.status, 200)
@@ -216,6 +285,19 @@ export const routes = [{
   assert.equal(mainPayload.value.value, 99n)
   assert.match(mainPayload.value.node, /^v/)
   assert.equal(mainPayload.value.nodeEnv, 'production')
+
+  const launchCall = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/call/${encodeURIComponent('src/services/main.ts')}/lastLaunch`,
+    {
+      method: 'POST',
+      headers: { ...runtimeHeaders, 'content-type': WIRE_CONTENT_TYPE },
+      body: await stringifyWire({ args: [] }),
+    },
+  )
+  assert.deepEqual(parseWire(await launchCall.text()).value, {
+    argv: ['--no-sample-data'],
+    cwd: '/fixture-cwd',
+  })
 
   const secondInstance = await fetch(`http://127.0.0.1:${port}/__murasaki/main/second-instance`, {
     method: 'POST',
@@ -403,6 +485,46 @@ export const routes = [{
   const eventEnvelope = JSON.parse(eventLine.slice('data: '.length))
   assert.deepEqual(parseWire(eventEnvelope.payload), { count: 99n })
   await eventReader.cancel()
+
+  // Window authority is live-generation scoped. A credential injected into a
+  // closed WebView stays invalid after the same label is recreated.
+  const closeMain = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/event`,
+    {
+      method: 'POST',
+      headers: { ...nativeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'closed', label: 'main', generation: 1, primary: true, state: null,
+      }),
+    },
+  )
+  assert.equal(closeMain.status, 204)
+  const staleWindowRequest = await fetch(url, { headers: runtimeHeaders })
+  assert.equal(staleWindowRequest.status, 403)
+
+  const recreatedMainState = {
+    label: 'main', generation: 2, primary: true, visible: true, focused: true,
+    minimized: false, maximized: false,
+  }
+  const recreateMain = await fetch(
+    `http://127.0.0.1:${port}/__murasaki/main/windows/event`,
+    {
+      method: 'POST',
+      headers: { ...nativeHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'created', label: 'main', generation: 2, primary: true, state: recreatedMainState,
+      }),
+    },
+  )
+  assert.equal(recreateMain.status, 204)
+  const generationTwoHeaders = {
+    'x-murasaki-window-label': 'main',
+    'x-murasaki-window-generation': '2',
+    'x-murasaki-window-token': deriveWindowToken(RUNTIME_TOKEN, 'main', 2),
+  }
+  const generationTwoRequest = await fetch(url, { headers: generationTwoHeaders })
+  assert.equal(generationTwoRequest.status, 200)
+  await generationTwoRequest.body.cancel()
 
   const shutdown = await fetch(`http://127.0.0.1:${port}/__murasaki/main/shutdown`, {
     method: 'POST',

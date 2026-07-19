@@ -18,6 +18,7 @@ export default defineConfig({
     title: 'Murasaki App',
     width: 1000,
     height: 700,
+    backendCapabilities: ['api:POST:/api/documents'],
   },
   capabilities: ['dialog:openFile', 'clipboard:writeText'],
 })
@@ -30,9 +31,9 @@ export default defineConfig({
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `appId` | `string` | **必須。** バンドル識別子(例: `com.example.my-app`）— macOS では `CFBundleIdentifier` になります。 |
-| `productName` | `string` | **必須。** 表示名 — `.app` のファイル名、Dock/メニューバーのラベル、DMG のボリューム名です。 |
-| `version` | `string?` | アプリのバージョン。ネイティブの About パネルに表示され、`.dmg` のファイル名にも使われます。デフォルトは `0.0.0`。 |
+| `appId` | `string` | **必須。** portableなreverse-DNS identifier(例: `com.example.my-app`、英数字・dot・hyphen)。macOSでは`CFBundleIdentifier`になります。 |
+| `productName` | `string` | **必須。** portableな1〜120文字の表示/file name。`.app` filename、Dock / menu bar label、DMG volume nameになります。path文字、Windows device name、前後空白、末尾dotは拒否します。 |
+| `version` | `string?` | 厳密なsemantic version(例: `1.2.3` / `1.2.3-beta.1`、`v` prefix不可)。native About panelとartifact filenameに使われます。defaultは`0.0.0`。 |
 | `description` | `string?` | ネイティブの「About `<app>`」パネルに表示される短い説明。 |
 | `copyright` | `string?` | About パネルに表示される著作権表示。 |
 | `homepage` | `string?` | About パネルに表示されるホームページ URL。 |
@@ -41,6 +42,7 @@ export default defineConfig({
 | `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したlabelをkeyにしたsecondary window — [下記](#windows)を参照。 |
 | `webview` | `WebviewConfig?` | app-wide User-Agent、private session、unauthenticated proxy設定 — [下記](#webview)を参照。 |
 | `capabilities` | `NativeCapabilityGrant[]?` | primary window向けnative grant。`window.capabilities`省略時だけ利用。既定deny-all。 |
+| `backendCapabilities` | `BackendCapability[]?` | primary window向けrenderer-to-Node/API grant。`window.backendCapabilities`省略時だけ利用。既定deny-all。 |
 | `systemPermissions` | `SystemPermissionsConfig?` | host OS同意とpackaged macOSの起動時prompt — [下記](#systempermissions)を参照。 |
 | `main` | `false \| object?` | 長寿命 Node Main entry と shutdown 上限 — [下記](#main)を参照。 |
 | `bundle` | `object?` | Node dependency と non-code resource packaging — [下記](#bundle)を参照。 |
@@ -51,7 +53,7 @@ export default defineConfig({
 | `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、Murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは Murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
 | `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
 | `targets` | `Target[]?` | ビルドターゲット。デフォルトはホストプラットフォーム。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` のうち1つ以上。 |
-| `icon` | `string?` | ソースとなる PNG(理想は 1024px)へのパス。`murasaki icon` / `murasaki bundle` がこれを `.icns` / `.ico` / PNG セットに展開します。 |
+| `icon` | `string?` | 正方形のsource PNG(1024px推奨)へのpath。full XcodeがあるmacOSでは`Assets.car`をcompileして現在のmaskをOSに任せ、`.icns`をlegacy fallbackとして残します。Windows / Linux resourceも同じsourceから生成します。 |
 | `protocols` | `ProtocolConfig[]?` | packaged macOS app / Windows installer が登録する custom URL scheme — [下記](#protocols)を参照。 |
 | `fileAssociations` | `FileAssociationConfig[]?` | packaged macOS app / Windows installer が登録する document extension — [下記](#fileassociations)を参照。 |
 | `installer` | `object?` | macOS DMG / Windows installer option — [下記](#installer)を参照。 |
@@ -71,6 +73,7 @@ export default defineConfig({
 | `route` | `string?` | windowに読み込むsame-origin path。既定`/`。完全URL / protocol-relative URLは拒否。 |
 | `visible` | `boolean?` | 初期表示。`main`は既定`true`、secondaryは既定`false`。 |
 | `capabilities` | `NativeCapabilityGrant[]?` | window別native grant。secondaryは既定deny-all。 |
+| `backendCapabilities` | `BackendCapability[]?` | window別Node Main、Server Action、API Route、updater、event、diagnostics grant。secondaryは既定deny-all。 |
 
 <Callout type="info">
   macOSでは`vibrancy`に対応するsemantic `NSVisualEffectView` materialを適用し、
@@ -88,6 +91,7 @@ primary専用の `console` を除く同じshapeでroute、初期表示、command
 window: {
   route: '/',
   capabilities: ['window:open', 'window:list', 'window:manage'],
+  backendCapabilities: ['api:POST:/api/settings'],
 },
 windows: {
   settings: {
@@ -96,6 +100,7 @@ windows: {
     height: 560,
     createOnLaunch: false,
     capabilities: [],
+    backendCapabilities: ['api:GET:/api/settings'],
   },
 },
 ```
@@ -149,14 +154,16 @@ platform制約:
 - Windows proxyはWebView2 browser argumentを使います。custom User-AgentはWebView2
   86.0.616.0以降、private modeは101.0.1210.39以降が必要で、古いruntimeではWebView2が
   設定を無視します。
-- Linux packagingは未対応です。development buildではWry / WebKitGTKへ渡しますが、
-  Linuxはまだsupported distribution targetではありません。
+- Linux では、開発時と AppDir / AppImage / `.deb` の配布ビルドのどちらでも、これらの設定を
+  Wry / WebKitGTK へ渡します。実際の挙動は、対象ディストリビューションに含まれる
+  WebKitGTK のバージョンでも確認してください。
 
 incognitoが制御するのはlocal WebView persistenceだけです。network anonymity、proxy / server
-からのclient秘匿、app-level Node dataのprivate化は提供しません。通常windowは1つの
-application WebContextを共有するためcookie / storageも共有します。incognito有効時は
-Wryがshared contextを無視するため、複数incognito window間のsession共有はplatform依存で
-保証されません。
+からのclient秘匿、app-level Node dataのprivate化は提供しません。Murasakiはnative windowごとに
+browser profileを分離し、cookie / storage / workerがwindow別backend authorityをまたがないように
+します。primaryは従来のapp profileを維持し、secondary profileはWindows / LinuxとmacOS 14+で
+永続化されます。macOS 11–13では分離されたnon-persistent storeを使用します。このためwindow間の
+session共有は意図的にサポートされません。共有stateはMain / APIを使って明示的に同期してください。
 [セキュリティ](/ja/docs/building/security#webview-network-and-private-sessions)も参照してください。
 
 ## `capabilities`
@@ -167,6 +174,8 @@ Wryがshared contextを無視するため、複数incognito window間のsession�
 ```ts
 capabilities: [
   'app:quit',
+  'autostart:read',
+  'autostart:write',
   'dialog:openFile',
   'clipboard:readText',
   'clipboard:writeText',
@@ -182,6 +191,9 @@ call元rendererごとに評価します。別originのページはnative bridge�
 window管理では `window:getLabel`、`window:open`、`window:list`、`window:manage` を使います。
 applicationのprogrammatic shutdownには `app:quit` が必要です。built-in updaterを有効に
 すると、検証済みrestart handshake用としてprimary windowへ自動付与されます。
+ログイン時自動起動はread / write権限を分離しています。`status()`だけを使うwindowには
+`autostart:read`を付与し、`enable()` / `disable()`を呼ぶ設定画面にだけ
+`autostart:write`を付与してください。
 
 target-bearing commandを限定する場合はstructured `NativeCapabilityGrant`を使います。
 `deny`は`allow`より優先し、wildcardは末尾`/**`だけです。
@@ -192,11 +204,36 @@ capabilities: [
   { permission: 'shell:showItemInFolder', allow: { paths: ['/Users/me/Documents/**'] } },
   { permission: 'window:manage', allow: { windows: ['settings', 'preview'] } },
   { permission: 'systemPermission:request', allow: { permissions: ['camera'] } },
+  { permission: 'secureStorage:get', allow: { keys: ['account:*'] } },
+  { permission: 'webview:writeCookies', allow: { urls: ['https://app.example.com/**'] } },
 ]
 ```
 
-互換性のためstring grantはtarget無制限です。URL/path scopeはconfig load時に検証し、
-Rust hostでも再度強制します。
+互換性のためstring grantはtarget無制限です。URL、path、key、window、OS permissionのscopeは
+config load時に検証し、Rust hostでも再度強制します。
+
+## `backendCapabilities`
+
+rendererからlocal Node resourceへのアクセスも別にdeny-by-defaultです。primaryは
+`window.backendCapabilities ?? backendCapabilities ?? []`、secondaryは何も継承せず、
+自身のlistまたは`[]`を使います。
+
+```ts
+backendCapabilities: [
+  'main:src/backend/account.ts#loadAccount',
+  'action:src/actions/save.ts#saveDocument',
+  'api:POST:/api/documents/*',
+  'updater:check',
+  'events:sync.*',
+  'diagnostics:renderer-error',
+]
+```
+
+末尾に1つの`*`があるgrantだけprefix wildcardとなり、それ以外は完全一致です。API resource
+には大文字のmethodを含めます。`main:*`、`action:*`、`api:*`、`updater:*`、`events:*`も
+有効ですが、本番ではexact resourceの方が安全です。native shutdown、activation、window
+control endpointはrendererへgrantできません。
+[セキュリティ](/ja/docs/building/security#backend-resourceを明示的に許可する)も参照してください。
 
 ## `systemPermissions`
 
@@ -261,14 +298,16 @@ appで確認してください。
 
 ### EntitlementsとApp Sandbox
 
-`sign.appSandbox`(default `false`)は、`murasaki bundle --sign`が生成するdefaultの
-entitlements plistが宣言済みの`systemPermissions`にどう反応するかを制御します。offの場合
-(Murasakiのdefaultであるhardened-runtime-onlyの姿勢)、`appleEvents`のみが何かを追加し
-(`com.apple.security.automation.apple-events`)、他のすべての種類はInfo.plistの用途説明
-だけで動作します。onにすると`com.apple.security.app-sandbox`に加え、宣言した各種類の
-文書化されたApp Sandbox entitlementも追加されます(`photos`には該当するものがなく、
-追加されません)。この自動導出は生成されるdefault plistにのみ適用されます — カスタムの
-`sign.entitlements`ファイルは常にそのまま使われます。種類ごとの完全な対応表は
+Murasakiが現在対応しているのはhardened runtime署名であり、macOS App Sandboxではありません。
+`sign.appSandbox`をdefaultの`false`にした場合、camera、microphone、location、photos、
+contacts、calendar/reminders、Apple Eventsに必要なHardened Runtimeのresource-access
+entitlementを`systemPermissions.macOS`から生成します。署名buildにはこれらのhost
+entitlementと対応するInfo.plist用途説明の両方が必要です。このnon-sandbox構成では
+Bluetoothとspeech recognitionは用途説明だけを使用します。同梱Node helperだけにJIT用のhardened-runtime権限を付与し、native
+addonにはexecutable entitlementを付与しません。`sign.appSandbox: true`は、Appleの
+inherit helper規則と現在のNode/JIT構成を同時に満たせないため、fail-closedで拒否します。
+カスタムの`sign.entitlements` / `sign.helperEntitlements`はそのまま使い、
+指定pathが存在しない、または`plutil`検証に失敗した場合はbuildを停止します。種類ごとの完全な対応表は
 [Native APIs → EntitlementsとApp Sandbox](/ja/docs/guides/native-apis#entitlementsとapp-sandbox)
 を参照してください。
 
@@ -308,9 +347,11 @@ protocols: [
 | `scheme` | `string` | **必須。** `violet://open/42` の `violet` のような RFC 3986-style scheme。trim 後 lowercase に正規化。1〜63文字の有効な scheme character が必要。`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki` などのbrowser/OS schemeは予約済み。 |
 | `name` | `string?` | package metadata に使う human-readable handler name。既定は `` `${productName} URL` ``。 |
 
-重複または不正な scheme は build error になります。macOS は packaged `.app` の
-`Info.plist` に登録情報を書き込みます。Windows は NSIS / MSI installer が OS へ登録し、
-portable Windows archive は登録しません。Linux registration は未実装です。
+重複したスキームや不正なスキームがあると、ビルドは失敗します。macOS では `.app` の
+`Info.plist` に、Windows では NSIS / MSI インストーラーに登録情報を書き込みます。
+Linux では `.desktop` ファイルへ対応する `MimeType` を記録し、`.deb` のインストール時に
+デスクトップデータベースへ登録します。展開しただけの AppDir / AppImage と、ポータブルな
+Windows アーカイブは、OS への登録処理を行いません。
 
 ## `fileAssociations`
 
@@ -338,9 +379,10 @@ fileAssociations: [
 
 extension は全 entry 間で一意である必要があり、不正な extension / MIME type は build
 error になります。一致した file は Node Main の `openRequested()` hook に届きます。
-artifact の制約は `protocols` と同じです。packaged macOS `.app` と install 済み Windows
-NSIS / MSI をサポートし、portable Windows archive、Linux、`murasaki dev` は
-association を install しません。
+配布形式ごとの制約は `protocols` と同じです。macOS の `.app`、インストール済みの
+Windows NSIS / MSI、Linux の `.deb` は関連付けを登録します。ポータブルな Windows
+アーカイブ、展開しただけの AppDir / AppImage、`murasaki dev` は OS への関連付けを
+登録しません。
 
 delivery semantics、testing、untrusted-input requirement は
 [Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
@@ -357,6 +399,7 @@ bundle: {
   resources: [
     'prisma/schema.prisma',
     { from: 'prisma/migrations', to: 'database/migrations' },
+    { from: 'bin/indexer', to: 'sidecars/indexer', executable: true },
   ],
 }
 ```
@@ -365,7 +408,7 @@ bundle: {
 | --- | --- | --- |
 | `external` | `string[]?` | app `node_modules` に stage。computed / dynamic package load を追加。native addon / runtime data を持つ package はこちらを優先。 |
 | `noExternal` | `string[]?` | compiled server bundle に強制的に含める。runtime asset のない JS-only package 向け。 |
-| `resources` | `Array<string \| { from: string; to?: string }>?` | packaged resources に file / directory を copy。string は source basename、object は相対 destination を指定。 |
+| `resources` | `Array<string \| { from: string; to?: string; executable?: boolean }>?` | packaged resources にfile / directoryをcopy。stringはsource basename、objectは相対destinationを指定。app所有の実行可能sidecarは必ず`executable: true`を付け、macOS/Windows署名でouter artifactより先にsealします。実行可能directoryは拒否します。 |
 
 `resources` に secret を置かないでください。app bundle 内は user が読めます。native addon
 は全 target architecture でテストしてください。
@@ -520,15 +563,18 @@ type UpdaterConfig =
       publicKey?: string               // base64 の Ed25519 公開鍵 — デフォルトは .murasaki/update-key.pub
       publicKeys?: string[]            // ローテーション用の追加pinned key(publicKeyと合わせて最大4つ)
       maxManifestAgeDays?: number      // この日数より古いmanifestを拒否、デフォルト90
+      allowLegacyManifestsWithoutGeneratedAt?: boolean // migration用escape hatch、default false
     }
 ```
 
 意図的に `provider` フィールドはありません — GitHub かセルフホストかは、`repo` と
 `endpoint` のどちらが設定されているかから推論されるため、設定の他の部分とずれることが
-ありません。また、署名検証を無効化する方法もなく、セルフホストの `endpoint` は
+ありません。また、署名検証を無効化する方法もなく、セルフホストの `endpoint` はcredentialを埋め込まない
 `https:` である必要があります(`http:` は loopback host — `127.0.0.1`、`localhost`、
 `[::1]` — に対してのみ、ローカルテスト用に許可されます)。この制約はここと、fetch時の
 両方で強制されます。
+replay保護のため`generatedAt`はdefaultで必須です。legacy escape hatchは古い署名manifestの
+migration期間だけ有効にしてください。
 
 `checkOnStart` と `checkInterval` は更新エンジン自身が処理するため、UI 側で
 `check()` を呼ばなくても機能します。`useUpdate().check()` を手動で呼ぶこともできます —
@@ -561,6 +607,12 @@ macOS DMG styling と Windows NSIS / MSI installer option です。省略時は 
 | `sidebar` | `string?` | welcome / finish BMP。NSIS は 164×314、MSI は 493×312 を期待。 |
 | `license` | `string?` | NSIS `.txt` / `.rtf` または MSI `.rtf` license file。 |
 
+built-in updaterを有効にしたWindows配布は、意図的にper-user NSISだけを使います。MSI生成は
+skipされ、`installMode: 'perMachine'`はconfig load時に拒否されます。MSIは`updater`を無効にし、
+MSI major upgradeで管理する配布に利用できます。必要なplatform packaging toolからinstallerが
+1つも生成されない場合、installer commandは失敗します。portable ZIPだけが必要なら
+`murasaki bundle`を使用してください。
+
 ## `sign`
 
 Murasaki は**あなた自身の**証明書または signing provider で署名し、独自の証明書は
@@ -574,13 +626,16 @@ Murasaki は**あなた自身の**証明書または signing provider で署名�
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
 | `identity` | `string?` | 署名 identity、例: `"Developer ID Application: Name (TEAMID)"`。デフォルトは `$MURASAKI_SIGN_IDENTITY`、次にキーチェーン内の最初の "Developer ID Application" identity。 |
-| `entitlements` | `string?` | カスタムの entitlements `.plist` へのパス。デフォルトは、Node に優しいハードンドランタイムのセット(JIT + 未署名実行可能メモリ + ライブラリ検証の無効化)です。 |
+| `entitlements` | `string?` | main app executable用のカスタム`.plist`。既定では`systemPermissions`から必要最小限のhost権限を生成します。fileが存在しない、または無効ならbuildを停止します。 |
+| `helperEntitlements` | `string?` | 同梱Node helper用のカスタム`.plist`。既定ではNodeのJIT/library-loading権限を生成します。fileが存在しない、または無効ならbuildを停止します。 |
+| `appSandbox` | `boolean?` | 予約済み。現在の同梱Node構成では`true`をfail-closedで拒否します。defaultのhardened runtime署名を使用してください。既定`false`。 |
 
 ### `sign.windows`
 
 `murasaki bundle --sign --target win32-x64` は portable ZIP 作成前に app executable を
-署名します。`murasaki installer --sign --target win32-x64` は生成した NSIS setup と
-MSI も署名し、すべてを Authenticode policy で検証します。Windows と SignTool が必要です。
+署名します。`murasaki installer --sign --target win32-x64`は生成されたinstaller（NSISと、
+updater無効時のMSI）も署名し、すべてをAuthenticode policyで検証します。Windowsと
+SignToolが必要です。
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |

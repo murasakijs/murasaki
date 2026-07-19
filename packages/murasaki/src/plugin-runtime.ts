@@ -96,7 +96,7 @@ function orderedUniqueResources(values: readonly BundleResource[]): BundleResour
   return values.filter((item) => {
     const key = typeof item === 'string'
       ? `string\0${item}`
-      : `object\0${item.from}\0${item.to ?? ''}`
+      : `object\0${item.from}\0${item.to ?? ''}\0${item.executable === true ? 'executable' : 'data'}`
     if (seen.has(key)) return false
     seen.add(key)
     return true

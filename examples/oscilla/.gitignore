@@ -1,0 +1,7 @@
+dist
+/node_modules
+.murasaki
+data
+*.db
+*.db-shm
+*.db-wal

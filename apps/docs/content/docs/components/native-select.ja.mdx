@@ -1,0 +1,22 @@
+---
+title: Native Select
+description: OS 標準の選択 UI を、Murasaki のスタイルで表示します。
+---
+
+## 使い方
+
+```tsx
+import { Field, FieldLabel, NativeSelect } from '@murasakijs/ui'
+
+<Field>
+  <FieldLabel htmlFor="language">言語</FieldLabel>
+  <NativeSelect id="language" defaultValue="ja">
+    <option value="en">English</option>
+    <option value="ja">日本語</option>
+  </NativeSelect>
+</Field>
+```
+
+OS 標準の操作感、自動入力、依存の少なさを優先する場合に使います。標準の `<select>` 属性を
+渡せ、ref は select 要素を参照します。選択肢に複雑な内容を置く場合や、ポップアップ位置を
+細かく制御する場合は [Select](/docs/components/select) を使ってください。

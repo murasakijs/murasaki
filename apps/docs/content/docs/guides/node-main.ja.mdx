@@ -33,7 +33,7 @@ export default defineMain({
   },
 
   async secondInstance(_context, { argv, cwd }) {
-    // packaged macOS / Windows: 別 launch が primary に転送された。
+    // packaged macOS / Windows / Linux: 別 launch が primary に転送された。
     console.log('second launch:', { argv, cwd })
   },
 
@@ -64,29 +64,61 @@ export default defineConfig({
 
 `src/main.ts` があっても無効化する場合は `main: false` にします。
 
-## Context reference
+## コンテキスト
 
 | Field | 意味 |
 | --- | --- |
-| `appId`, `productName`, `version` | 解決済みアプリ identity |
-| `isPackaged` | `murasaki dev` は `false`、bundle 内は `true` |
-| `platform`, `arch` | 実行 target (`process.platform` / `process.arch`) |
-| `projectRoot` | dev は project root、本番は package resource の working directory |
-| `resourcesPath` | read-only のアプリ resource location |
+| `appId`, `productName`, `version` | 解決済みのアプリ情報 |
+| `isPackaged` | `murasaki dev` では `false`、bundle では `true` |
+| `platform`, `arch` | 実行環境 (`process.platform` / `process.arch`) |
+| `projectRoot` | 開発時はプロジェクトルート、本番では同梱リソースの作業ディレクトリ |
+| `resourcesPath` | 読み取り専用のアプリリソース |
+| `launch.argv`, `launch.cwd` | 最初の起動で渡された上限付きの未加工引数と作業ディレクトリ |
 | `paths.data` | 永続アプリデータ |
-| `paths.cache` | 再生成可能な cache |
-| `paths.logs` | log file |
-| `paths.temp` | 一時 staging data |
-| `log` | 構造化rotation logと診断report生成 |
-| `diagnostics` | crash reportのlocal capture — [Crash report](#crash-report)参照 |
-| `sidecars` | app同梱executable resource向け上限付きsupervisor |
-| `signal` | `beforeQuit` 後、`shutdown` 前に abort |
+| `paths.cache` | 再生成できるキャッシュ |
+| `paths.logs` | ログファイル |
+| `paths.temp` | 一時ファイルの保存先 |
+| `log` | ローテーション対応の構造化ログと診断レポート生成 |
+| `diagnostics` | ローカルのクラッシュレポート — [クラッシュレポート](#crash-report)参照 |
+| `sidecars` | アプリ同梱の実行ファイルを管理する上限付き supervisor |
+| `signal` | `beforeQuit` の後、`shutdown` の前に abort |
 
 終了理由は `window-close`、`app-quit`、`signal`、`restart`、`dev-reload`、
 `startup-failure` です。順序とキャンセルは
 [プロセスモデル](/ja/docs/core-concepts/process-model)を参照してください。
 
-## Logと診断report
+## 最初の起動引数を読む
+
+最初のアプリプロセスに渡された未加工の引数は `context.launch` から取得できます。
+登録済みの deep link やファイル形式ではない、アプリ独自のフラグにも使えます。
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ launch, paths }) {
+    if (launch.argv.includes('--no-sample-data')) {
+      console.log('サンプルデータなしで起動', { dataDirectory: paths.data })
+    }
+  },
+})
+```
+
+bundle では実行ファイルへ直接フラグを渡します。開発時は、Murasaki 自身の CLI
+オプションと混同しないよう、単独の `--` より後ろにアプリ用引数を書きます。
+
+```bash
+murasaki dev -- --no-sample-data
+```
+
+`launch.argv` が保持するのは最大64個の完全な引数です。8 KiBを超える引数、JSON配列として
+16 KiBを超えた部分、件数上限を超えた入力は、開発時とbundle後で同じ規則により破棄されます。
+すべての値と `launch.cwd` を、信頼できないローカル入力として
+検証してください。登録済みの URL とファイルは正規化後に `openRequested()` へも届くため、
+同じ対象を両方で処理しないでください。2つ目のプロセスの引数は、最初の `launch`
+スナップショットを置き換えず `secondInstance()` へ渡されます。
+
+## ログと診断レポート
 
 アプリ独自のfile loggerを作る代わりに`context.log`を使用します。recordはJSON Linesとして
 `paths.logs/murasaki-main.jsonl`へ書かれ、既定では5 MiBでrotateし、過去5fileを保持します。
@@ -197,7 +229,13 @@ restart回数を上限化し、shutdown時にlive helperをすべて停止しま
 export default defineConfig({
   appId: 'com.example.notes',
   productName: 'Notes',
-  bundle: { resources: ['sidecars/search-indexer'] },
+  bundle: {
+    resources: [{
+      from: 'sidecars/search-indexer',
+      to: 'sidecars/search-indexer',
+      executable: true,
+    }],
+  },
 })
 ```
 
@@ -224,14 +262,20 @@ export default defineMain({
 `resource`はrelative pathだけを受け付け、解決後の実体がpackaged resource root内に残る
 必要があります。symlink escapeとtraversalは拒否し、POSIXではexecutable bitも要求します。
 必要ならtarget別buildで`search-indexer.exe`のようなplatform固有filenameを使います。
+helper binaryには`executable: true`が必須です。これによりapp/installerをsealする前にnested
+Mach-O / PEを署名します。未指定の`bundle.resources`が実行可能fileに見える場合、署名
+packagingはfail-closedで停止します。
 working directoryは`resources`、`data`、`cache`、`temp`だけです。sidecarはNode Mainの
-environmentと明示`env`を継承するため、信頼できないexecutableを起動せず、renderer由来の
-argumentは検証してください。Windowsの子孫processはlauncher Job Objectにも含まれ、通常
+environmentと明示`env`を継承しますが、Murasakiのruntime authorityと署名secretは除外します。
+`MURASAKI_RUNTIME_TOKEN`、`MURASAKI_DEV_LAUNCH`、`MURASAKI_UPDATE_KEY`、
+`MURASAKI_WINDOWS_CERTIFICATE_PASSWORD`、`APPLE_APP_PASSWORD`は明示`env`にも指定できません。
+信頼できないexecutableを起動せず、renderer由来のargumentは検証してください。Windowsの
+子孫processはlauncher Job Objectにも含まれ、通常
 stopはterminationを送り、上限時間後に強制終了へ進みます。
 
 ### `secondInstance(context, event)`
 
-packaged macOS / Windows app は per-user / per-`appId` lock を使います。別 launch が
+packaged macOS / Windows / Linux app は per-user / per-`appId` lock を使います。別 launch が
 primary app に転送されると、Murasaki は window を focus して次の値で
 `secondInstance()` を呼びます。
 
@@ -242,8 +286,7 @@ primary app に転送されると、Murasaki は window を focus して次の�
 
 使用前にすべての argument を検証してください。`secondInstance()` は low-level の
 process activation hook です。登録済み URL scheme / file type と一致するかに関係なく、
-raw launch argument を受け取ります。`murasaki dev` と Linux では現状この hook は
-配信されません。
+raw launch argument を受け取ります。`murasaki dev` ではこの hook は配信されません。
 
 ### `openRequested(context, event)`
 
@@ -423,20 +466,23 @@ version 付き wire codec は primitive、`undefined`、`bigint`、`Date`、`Map
 | `'use server'` | `ActionState` を使う React action / form 形式の mutation |
 | `src/api/**/route.ts` | Request/Response、streaming body、HTTP method routing |
 
-いずれも app-local Node runtime で実行されます。API route は public network server では
-なく、内部 RPC と同じ app runtime session で保護されます。
+いずれもapp-local Node runtimeで実行され、public network serverではありません。Murasakiは
+exact native windowを認証し、そのwindowの`main:*`、`action:*`、または
+`api:METHOD:/path` backend grantを確認してからdispatchします。
 
 ## 現在の制限
 
 Node Mainは`murasaki.config.*`に宣言したsecondary window templateだけをcreate / destroy
 できます。runtimeでad-hoc URL、capability policy、未宣言native windowを構築することは
 できません。宣言windowはNode Mainの`windows` manager、またはtrusted rendererから
-`murasaki/native`で操作します。tray menuは
-そのrenderer APIから利用できますが、
-Node Main自体に直接のtray menu / global shortcut APIはまだありません。
-packaged macOS / Windows の single-instance delivery は `secondInstance()`、設定済み
-URL scheme / file association は `openRequested()` で利用できます。Windows portable
-archive、Linux、`murasaki dev` は system association metadata を install しません。
+`murasaki/native` で操作します。tray menu はその renderer API から利用できますが、
+Node Main 自体に直接の tray menu / global shortcut API はまだありません。
+packaged macOS / Windows / Linux の single-instance delivery は
+`secondInstance()`、設定済み URL scheme / file association は
+`openRequested()` で利用できます。macOS bundle と Windows installer は宣言済みの
+association を登録し、Linux `.deb` は生成された desktop metadata をインストール
+します。手動展開した Windows portable archive、AppDir / AppImage、`murasaki dev`
+は OS への登録処理を行いません。
 renderer-safe な dialog、clipboard、notification、shell、
 基本 window command は `capabilities` allowlist の下で別途 `murasaki/native` から利用
 できます。computed import、dynamic native addon、runtime-discovered asset を使う Node

@@ -1,0 +1,32 @@
+---
+title: Pagination
+description: Navigates among pages in a long collection.
+---
+
+## Usage
+
+```tsx
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationNext, PaginationPrevious,
+} from '@murasakijs/ui'
+
+<Pagination>
+  <PaginationContent>
+    <PaginationItem><PaginationPrevious href="?page=1" /></PaginationItem>
+    <PaginationItem><PaginationLink href="?page=2" isActive>2</PaginationLink></PaginationItem>
+    <PaginationItem><PaginationNext href="?page=3" /></PaginationItem>
+  </PaginationContent>
+</Pagination>
+```
+
+Set `isActive` on the current page to emit `aria-current="page"`. Supply real
+links so navigation still works without client-side JavaScript. Localize the
+previous/next accessible labels and visible text when the application language
+is not English.
+
+## Exports
+
+`Pagination`, `PaginationContent`, `PaginationItem`, `PaginationLink`,
+`PaginationPrevious`, `PaginationNext`, `PaginationEllipsis`, and the
+`PaginationLinkProps` type.

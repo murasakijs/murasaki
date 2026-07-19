@@ -1,6 +1,6 @@
-import { build as viteBuild } from 'vite'
+import { build as viteBuild, loadConfigFromFile, mergeAlias, normalizePath, type Plugin, type PluginOption, type UserConfig } from 'vite'
 import { builtinModules } from 'node:module'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { extname, join, resolve } from 'node:path'
@@ -44,6 +44,12 @@ export default async function buildServer(
   const outDir = resolve(cwd, 'dist/server')
   const actionModules = await scanServerActionModules(srcDir)
   const mainModules = await scanDirectiveModules(srcDir, USE_MAIN_RE)
+  // Vite canonicalizes symlinked roots (macOS /var -> /private/var), while
+  // the source scanner retains the caller's spelling. Track both so the
+  // directive transform recognizes the same physical module in either form.
+  const mainModuleSet = new Set(
+    mainModules.flatMap((path) => [path, realpathSync(path)]).map(canonicalModulePath),
+  )
   const apiRoutes = await scanApiRoutes(join(srcDir, 'api'))
   const mainEntry = config.main === false
     ? null
@@ -53,6 +59,14 @@ export default async function buildServer(
     ...FRAMEWORK_PACKAGES,
     ...(config.bundle?.noExternal ?? []),
   ])
+  const appViteConfig = await loadServerViteConfig(cwd)
+  appViteConfig.resolve = {
+    ...appViteConfig.resolve,
+    // `murasaki:core` normally contributes this alias through its config()
+    // hook. The private server build excludes Murasaki's client/dev plugins,
+    // so reproduce the framework-owned alias explicitly.
+    alias: mergeAlias(appViteConfig.resolve?.alias, { '@': srcDir }),
+  }
 
   await rm(outDir, { recursive: true, force: true })
   await mkdir(outDir, { recursive: true })
@@ -100,7 +114,20 @@ export default async function buildServer(
 
     if (Object.keys(input).length > 0) {
       await viteBuild({
+        // This is an internal SSR registry build, not the application's client
+        // build. Loading vite.config.* here merges client-only plugins and
+        // rollup output (for example manualChunks) into the server build and
+        // can make an otherwise valid app impossible to bundle.
+        configFile: false,
         root: cwd,
+        // Preserve resolution and transforms the application's server code
+        // relies on, while deliberately excluding client output/chunking and
+        // Murasaki's own client/dev plugins from this private registry build.
+        ...appViteConfig,
+        plugins: [
+          ...(appViteConfig.plugins ?? []),
+          stripMainModuleDirectivesPlugin(mainModuleSet),
+        ],
         build: {
           ssr: true,
           outDir,
@@ -110,6 +137,10 @@ export default async function buildServer(
             output: { entryFileNames: '[name].mjs', format: 'es' },
             external: (id) => {
               if (BUILTINS.has(id) || id.startsWith('node:')) return true
+              // Rollup asks `external` before Vite's alias plugin resolves the
+              // id. Never classify a configured alias (or a conventional
+              // virtual module) as an npm runtime dependency at this stage.
+              if (matchesConfiguredAlias(id, appViteConfig.resolve?.alias) || id.startsWith('virtual:') || id.startsWith('\0')) return false
               const packageName = packageNameFromImport(id)
               if (!packageName || bundledDependencies.has(packageName)) return false
               runtimeDependencies.add(packageName)
@@ -139,6 +170,112 @@ export default async function buildServer(
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
+}
+
+function matchesConfiguredAlias(id: string, aliases: unknown): boolean {
+  if (!aliases) return false
+  if (Array.isArray(aliases)) {
+    return aliases.some((alias) => {
+      if (!alias || typeof alias !== 'object' || !('find' in alias)) return false
+      const find = alias.find
+      return typeof find === 'string'
+        ? id === find || id.startsWith(`${find}/`)
+        : find instanceof RegExp && find.test(id)
+    })
+  }
+  if (typeof aliases !== 'object') return false
+  return Object.keys(aliases).some((find) => id === find || id.startsWith(`${find}/`))
+}
+
+/**
+ * Load only the Vite settings that can affect source resolution/transforms in
+ * application-owned server code. Importing the whole config would also merge
+ * client-only Rollup output (notably `manualChunks`) into this multi-entry SSR
+ * registry build. Murasaki's own plugins are excluded because this build
+ * supplies its framework transforms explicitly; third-party/user plugins are
+ * retained so aliases and server-safe virtual/transform modules still work.
+ */
+async function loadServerViteConfig(cwd: string): Promise<UserConfig> {
+  const loaded = await loadConfigFromFile(
+    { command: 'build', mode: 'production', isSsrBuild: true, isPreview: false },
+    undefined,
+    cwd,
+    'silent',
+    viteLogger(),
+  )
+  if (!loaded) return {}
+
+  const user = loaded.config
+  const plugins = (await flattenPlugins(user.plugins ?? []))
+    .filter((plugin) => !plugin.name.startsWith('murasaki:'))
+
+  return {
+    plugins,
+    resolve: user.resolve,
+    define: user.define,
+    esbuild: user.esbuild,
+    json: user.json,
+    assetsInclude: user.assetsInclude,
+  }
+}
+
+async function flattenPlugins(options: PluginOption[]): Promise<Plugin[]> {
+  const plugins: Plugin[] = []
+  for (const option of options) {
+    const resolved = await option
+    if (!resolved) continue
+    if (Array.isArray(resolved)) {
+      plugins.push(...await flattenPlugins(resolved))
+    } else {
+      plugins.push(resolved)
+    }
+  }
+  return plugins
+}
+
+function stripMainModuleDirectivesPlugin(mainModules: ReadonlySet<string>) {
+  return {
+    name: 'murasaki:strip-main-module-directives',
+    enforce: 'pre' as const,
+    transform(code: string, id: string) {
+      const file = canonicalModulePath(id.split('?', 1)[0])
+      if (!mainModules.has(file)) return null
+      const stripped = stripLeadingDirective(code, USE_MAIN_RE)
+      return stripped === code ? null : { code: stripped, map: null }
+    },
+  }
+}
+
+/** Vite module ids always use forward slashes, including on Windows. */
+function canonicalModulePath(path: string): string {
+  const normalized = normalizePath(path)
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+/**
+ * Remove only the framework-owned directive after the scanner has classified
+ * the module. Replacing it with spaces preserves line/column positions for
+ * diagnostics and sourcemaps while preventing Rollup from treating it as an
+ * unsupported module-level runtime directive.
+ */
+export function stripLeadingMainDirective(code: string): string {
+  return stripLeadingDirective(code, USE_MAIN_RE)
+}
+
+function stripLeadingDirective(code: string, directive: RegExp): string {
+  let offset = 0
+  for (const line of code.split(/(?<=\n)/)) {
+    const withoutNewline = line.endsWith('\n') ? line.slice(0, -1) : line
+    const trimmed = withoutNewline.trim()
+    if (trimmed.length === 0) {
+      offset += line.length
+      continue
+    }
+    if (!directive.test(trimmed)) return code
+    const start = offset + withoutNewline.indexOf(trimmed)
+    return code.slice(0, start) + ' '.repeat(trimmed.length) + code.slice(start + trimmed.length)
+  }
+  return code
 }
 
 function buildActionsEntrySource(modules: string[], projectRoot = process.cwd()): string {

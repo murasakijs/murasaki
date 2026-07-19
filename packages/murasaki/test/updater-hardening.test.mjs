@@ -3,7 +3,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { createUpdaterEngine } from '../dist/runtime/updater.js'
 
@@ -37,6 +37,7 @@ function updaterConfig(manifestUrl, publicKey, overrides = {}) {
     publicKey,
     publicKeys: [publicKey],
     maxManifestAgeDays: 90,
+    allowLegacyManifestsWithoutGeneratedAt: false,
     channel: 'stable',
     checkOnStart: false,
     checkIntervalMs: false,
@@ -135,6 +136,7 @@ test('check and download are single-flight and install writes a private atomic h
   })
   ;({ bytes: manifestBytes, signature } = signedManifest(privateKey, {
     version: '2.0.0',
+    generatedAt: new Date().toISOString(),
     assets: {
       [`${process.platform}-${process.arch}`]: {
         url: `${origin}/payload.zip`,
@@ -201,7 +203,11 @@ test('rejects oversized manifest and signature responses', async (t) => {
     }
     res.writeHead(404).end()
   })
-  validManifest = signedManifest(privateKey, { version: '2.0.0', assets: {} }).bytes
+  validManifest = signedManifest(privateKey, {
+    version: '2.0.0',
+    generatedAt: new Date().toISOString(),
+    assets: {},
+  }).bytes
 
   const manifestEngine = createUpdaterEngine({
     resolvedUpdater: updaterConfig(`${origin}/large.json`, publicKey),
@@ -241,6 +247,7 @@ test('rejects oversized payloads and removes the failed staging session', async 
   })
   ;({ bytes: manifestBytes, signature } = signedManifest(privateKey, {
     version: '2.0.0',
+    generatedAt: new Date().toISOString(),
     assets: {
       [`${process.platform}-${process.arch}`]: {
         url: `${origin}/payload.zip`,
@@ -282,6 +289,7 @@ test('aborts stalled metadata and payload fetches at their configured deadlines'
   })
   ;({ bytes: manifestBytes, signature } = signedManifest(privateKey, {
     version: '2.0.0',
+    generatedAt: new Date().toISOString(),
     assets: {
       [`${process.platform}-${process.arch}`]: {
         url: `${origin}/slow-payload.zip`,
@@ -326,7 +334,11 @@ test('TLS: rejects a non-loopback http manifestUrl but allows loopback http', as
 
   // Loopback http (127.0.0.1) is exercised by every other test in this file
   // via `listen()`. Confirm `localhost` is accepted too.
-  const { bytes, signature } = signedManifest(privateKey, { version: '0.1.0', assets: {} })
+  const { bytes, signature } = signedManifest(privateKey, {
+    version: '0.1.0',
+    generatedAt: new Date().toISOString(),
+    assets: {},
+  })
   const origin = await listen(t, (req, res) => {
     if (req.url === '/latest.json') return res.end(bytes)
     if (req.url === '/latest.json.sig') return res.end(signature)
@@ -342,10 +354,67 @@ test('TLS: rejects a non-loopback http manifestUrl but allows loopback http', as
   assert.equal(loopbackState.status, 'not-available') // 0.1.0 <= currentVersion 1.0.0 — not a TLS error
 })
 
+test('signed manifests still fail closed on malformed versions, hashes, and asset URLs', async (t) => {
+  const { privateKey, publicKey } = signingKey()
+  const target = `${process.platform}-${process.arch}`
+  const generatedAt = new Date().toISOString()
+
+  const badVersion = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0garbage', generatedAt, assets: {} },
+    publicKey,
+  )
+  assert.equal(badVersion.status, 'error')
+  assert.match(badVersion.error, /invalid semantic version/)
+
+  const insecureAsset = await checkManifest(
+    t,
+    privateKey,
+    {
+      version: '2.0.0',
+      generatedAt,
+      assets: { [target]: { url: 'http://updates.example.com/payload', sha256: 'a'.repeat(64) } },
+    },
+    publicKey,
+  )
+  assert.equal(insecureAsset.status, 'error')
+  assert.match(insecureAsset.error, /update asset URL must use https/)
+
+  const malformedHash = await checkManifest(
+    t,
+    privateKey,
+    {
+      version: '2.0.0',
+      generatedAt,
+      assets: { [target]: { url: 'https://updates.example.com/payload', sha256: '../not-a-hash' } },
+    },
+    publicKey,
+  )
+  assert.equal(malformedHash.status, 'error')
+  assert.match(malformedHash.error, /sha256 must be exactly 64 hexadecimal/)
+
+  for (const malformed of [
+    { notes: { html: 'not text' } },
+    { mandatory: 'yes' },
+    { rollout: 12.5 },
+    { rollout: 101 },
+  ]) {
+    const state = await checkManifest(
+      t,
+      privateKey,
+      { version: '2.0.0', generatedAt, assets: {}, ...malformed },
+      publicKey,
+    )
+    assert.equal(state.status, 'error')
+    assert.match(state.error, /notes|mandatory|rollout/)
+  }
+})
+
 test('manifest freshness rejects a stale manifest and one too far in the future, warns when generatedAt is absent', async (t) => {
   const { privateKey, publicKey } = signingKey()
   const asset = {
-    [`${process.platform}-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+    [`${process.platform}-${process.arch}`]: { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) },
   }
 
   const stale = new Date(Date.now() - 91 * 24 * 60 * 60 * 1000).toISOString()
@@ -373,13 +442,29 @@ test('manifest freshness rejects a stale manifest and one too far in the future,
   )
   assert.equal(skewState.status, 'available')
 
-  // absent generatedAt -> still accepted (back-compat), but logs a structured warning
+  // absent generatedAt -> rejected by default
+  const absentRejected = await checkManifest(
+    t,
+    privateKey,
+    { version: '2.0.0', assets: asset },
+    publicKey,
+  )
+  assert.equal(absentRejected.status, 'error')
+  assert.match(absentRejected.error, /missing required "generatedAt"/)
+
+  // Explicit legacy compatibility accepts it but logs a structured warning.
   const originalWarn = console.warn
   const warnLines = []
   console.warn = (line) => warnLines.push(line)
   let absentState
   try {
-    absentState = await checkManifest(t, privateKey, { version: '2.0.0', assets: asset }, publicKey)
+    absentState = await checkManifest(
+      t,
+      privateKey,
+      { version: '2.0.0', assets: asset },
+      publicKey,
+      { configOverrides: { allowLegacyManifestsWithoutGeneratedAt: true } },
+    )
   } finally {
     console.warn = originalWarn
   }
@@ -387,12 +472,61 @@ test('manifest freshness rejects a stale manifest and one too far in the future,
   assert.ok(warnLines.some((line) => line.includes('updater.manifest.generated_at_missing')))
 })
 
+test('persists the highest authenticated manifest and rejects replay or version rollback across engines', async (t) => {
+  const { privateKey, publicKey } = signingKey()
+  const { resourcesDir } = await temporaryDirectories(t)
+  const stateDir = join(dirname(resourcesDir), 'replay-state')
+  const asset = {
+    [`${process.platform}-${process.arch}`]: {
+      url: 'https://updates.example.com/payload',
+      sha256: 'a'.repeat(64),
+    },
+  }
+  const latestTime = new Date().toISOString()
+  const latest = await checkManifest(
+    t,
+    privateKey,
+    { version: '3.0.0', generatedAt: latestTime, assets: asset },
+    publicKey,
+    { engineOverrides: { stateDir } },
+  )
+  assert.equal(latest.status, 'available')
+
+  const replay = await checkManifest(
+    t,
+    privateKey,
+    {
+      version: '2.0.0',
+      generatedAt: new Date(Date.parse(latestTime) - 1_000).toISOString(),
+      assets: asset,
+    },
+    publicKey,
+    { engineOverrides: { stateDir } },
+  )
+  assert.equal(replay.status, 'error')
+  assert.match(replay.error, /manifest replay detected/)
+
+  const rollback = await checkManifest(
+    t,
+    privateKey,
+    {
+      version: '2.5.0',
+      generatedAt: new Date(Date.parse(latestTime) + 1_000).toISOString(),
+      assets: asset,
+    },
+    publicKey,
+    { engineOverrides: { stateDir } },
+  )
+  assert.equal(rollback.status, 'error')
+  assert.match(rollback.error, /manifest rollback detected/)
+})
+
 test('multi-key verification tries every pinned key; a keyId hint is only ever an optimization', async (t) => {
   const keyA = signingKey()
   const keyB = signingKey()
   const keyC = signingKey() // never pinned
   const asset = {
-    [`${process.platform}-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+    [`${process.platform}-${process.arch}`]: { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) },
   }
   const pinned = { publicKeys: [keyA.publicKey, keyB.publicKey] }
   const generatedAt = new Date().toISOString()
@@ -443,15 +577,17 @@ test('multi-key verification tries every pinned key; a keyId hint is only ever a
 test('staged rollout buckets deterministically from a persisted client id and gates without erroring', async (t) => {
   const { privateKey, publicKey } = signingKey()
   const { stagingDir, resourcesDir } = await temporaryDirectories(t)
+  const stateDir = join(dirname(resourcesDir), 'state')
+  await mkdir(stateDir)
   const clientId = '11111111-1111-4111-8111-111111111111'
-  await writeFile(join(resourcesDir, 'update-client-id'), clientId)
+  await writeFile(join(stateDir, 'update-client-id'), clientId)
   const bucket = createHash('sha256').update(clientId).digest()[0] % 100
 
   const asset = {
-    [`${process.platform}-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+    [`${process.platform}-${process.arch}`]: { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) },
   }
   const generatedAt = new Date().toISOString()
-  const engineOverrides = { resourcesDir, stagingDir }
+  const engineOverrides = { resourcesDir, stagingDir, stateDir }
 
   // rollout strictly above this client's bucket -> available
   const includedState = await checkManifest(
@@ -475,7 +611,8 @@ test('staged rollout buckets deterministically from a persisted client id and ga
   assert.equal(excludedState.error, undefined)
 
   // the persisted client id is reused across checks, not regenerated
-  assert.equal((await readFile(join(resourcesDir, 'update-client-id'), 'utf8')).trim(), clientId)
+  assert.equal((await readFile(join(stateDir, 'update-client-id'), 'utf8')).trim(), clientId)
+  await assert.rejects(readFile(join(resourcesDir, 'update-client-id')), /ENOENT/)
 
   // absent rollout (100%) -> always available regardless of bucket
   const noRolloutState = await checkManifest(
@@ -491,7 +628,7 @@ test('staged rollout buckets deterministically from a persisted client id and ga
 test('win32-arm64 resolves as a platform key like any other platform-arch combination', async (t) => {
   const { privateKey, publicKey } = signingKey()
   const asset = {
-    'win32-arm64': { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) },
+    'win32-arm64': { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) },
   }
   const generatedAt = new Date().toISOString()
 
@@ -538,7 +675,7 @@ test('prod check() on Linux without $APPIMAGE reports system-package-manager, ne
   assert.equal(unconfiguredState.error, undefined)
 
   const { privateKey, publicKey } = signingKey()
-  const asset = { [`linux-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) } }
+  const asset = { [`linux-${process.arch}`]: { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) } }
   const configuredState = await checkManifest(
     t,
     privateKey,
@@ -555,7 +692,7 @@ test('prod check() on Linux proceeds normally once $APPIMAGE is set', async (t) 
   withAppImageEnv(t, join(tmpdir(), 'murasaki-appimage-check-test.AppImage'))
 
   const { privateKey, publicKey } = signingKey()
-  const asset = { [`linux-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) } }
+  const asset = { [`linux-${process.arch}`]: { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) } }
   const state = await checkManifest(
     t,
     privateKey,
@@ -571,7 +708,7 @@ test('dev mode check() on Linux is unaffected by the AppImage guard (there is no
   withAppImageEnv(t, undefined)
 
   const { privateKey, publicKey } = signingKey()
-  const asset = { [`linux-${process.arch}`]: { url: 'http://unused.invalid/payload', sha256: 'a'.repeat(64) } }
+  const asset = { [`linux-${process.arch}`]: { url: 'https://unused.invalid/payload', sha256: 'a'.repeat(64) } }
   const { bytes, signature } = signedManifest(privateKey, {
     version: '2.0.0',
     generatedAt: new Date().toISOString(),

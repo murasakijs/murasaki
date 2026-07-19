@@ -1,0 +1,19 @@
+---
+title: Scroll Area
+description: OS 標準のスクロール操作を保ったまま、スクロールバーの見た目を揃えます。
+---
+
+## 使い方
+
+```tsx
+import { ScrollArea } from '@murasakijs/ui'
+
+<ScrollArea className="h-72 w-80 rounded-md border">
+  <div className="p-4">長いコンテンツ…</div>
+</ScrollArea>
+```
+
+オーバーフローが発生するよう、高さまたは最大の高さを明示します。ホイール、トラックパッド、
+タッチ、キーボードによる標準のスクロール操作は維持されます。縦スクロールバーは自動で付き
+ます。横方向も必要な場合は `<ScrollBar orientation="horizontal" />` を子要素として追加
+してください。レスポンシブレイアウトで解消できる場合は、縦横の二方向スクロールを避けます。

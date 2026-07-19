@@ -1,0 +1,25 @@
+---
+title: Item
+description: Composes a reusable row with media, content, metadata, and actions.
+---
+
+## Usage
+
+```tsx
+import { Button, Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from '@murasakijs/ui'
+import { FileText } from 'lucide-react'
+
+<Item variant="outline">
+  <ItemMedia variant="icon"><FileText aria-hidden="true" /></ItemMedia>
+  <ItemContent>
+    <ItemTitle>Release notes</ItemTitle>
+    <ItemDescription>Updated five minutes ago</ItemDescription>
+  </ItemContent>
+  <ItemActions><Button variant="ghost">Open</Button></ItemActions>
+</Item>
+```
+
+`variant` is `default`, `outline`, or `muted`; `size` is `default` or `sm`.
+`asChild` lets a link or button own the rendered root. If the whole item is
+interactive, use one interactive root and avoid nesting buttons inside it.
+`ItemGroup`, `ItemHeader`, `ItemFooter`, and `ItemSeparator` support larger lists.

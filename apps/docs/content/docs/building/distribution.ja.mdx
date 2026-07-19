@@ -26,11 +26,16 @@ FUSE に関する注意点は、下記の「Linux: AppImage と .deb」セクシ
 
 ## クロスアーキテクチャビルド
 
-バンドルには、ポータブルでターゲット固有の Node ランタイム(nodejs.org からのチェック
-サム検証済みダウンロードで、`~/.murasaki/node/` にキャッシュされます)と、コンパイル
-済みのネイティブランチャーバイナリが同梱されます — CLI をたまたま実行している
-`node` ではありません。つまり、Apple Silicon の開発マシンから Intel 向けビルドを生成
+バンドルには、ポータブルでターゲット固有の Node ランタイム(nodejs.org から取得し、
+`~/.murasaki/node/` にキャッシュ)と、コンパイル済みのネイティブランチャーバイナリが
+同梱されます — CLI をたまたま実行している`node`ではありません。Murasakiは公式Node
+release keyのfingerprintを固定し、clear-signed `SHASUMS256.txt.asc`の署名を検証してから
+対象archiveのchecksumを信頼します。つまり、Apple Silicon の開発マシンから Intel 向けビルドを生成
 することも、その逆もできます:
+
+ランタイムのダウンロードはHTTPS限定で、timeoutとsize上限を設け、privateな一時fileへ
+streamingし、署名とchecksumの検証後にだけcacheします。cache済みのNode / AppImage runtimeも使用するたびに
+再hashし、途中までしかない、または改変されたcache entryはpackageせず破棄します。
 
 ```bash
 murasaki bundle --arch x64             # Apple Silicon Mac 上で x64 の .app をビルド
@@ -113,10 +118,13 @@ murasaki installer --sign --notarize   # + .dmg を Apple に提出し、チケ�
 - **`--sign`** は、`.app` をハードンドランタイムで署名します(Apple のドキュメント
   化されたフローどおり: まず内側のコード、その後外側のバンドル)。署名 identity は
   `$MURASAKI_SIGN_IDENTITY`、次に `config.sign.identity`、次にキーチェーン内の最初の
-  "Developer ID Application" identity の順で解決されます。Entitlements は、設定され
-  ていれば `config.sign.entitlements` から、そうでなければハードンドランタイムの下で
-  Node が必要とする JIT / 未署名実行可能メモリ / ライブラリ検証なしの entitlements を
-  付与するデフォルトの plist から取得されます。
+  "Developer ID Application" identity の順で解決されます。main appと同梱Node helperは
+  別のentitlementsで署名されます。host/system権限はappに残し、JIT / 未署名実行可能
+  memory / library validation無効化はNodeだけに付与します。App Sandboxは現在未対応で、
+  `sign.appSandbox: true`は無効なinherit helper署名を生成せずfail-closedで拒否します。
+  hardened runtime用の権限は`config.sign.entitlements`と
+  `config.sign.helperEntitlements`で個別に上書きでき、指定fileが存在しない、または無効な
+  場合はfail-closedで停止します。
 - **`--notarize`** には `--sign` が必須です(公証は Developer ID 署名済みのコードしか
   受け付けません)。認証情報は `APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD`
   (アプリ専用パスワード)から読み取られます — **設定やファイルからは決して読み取りま
@@ -148,6 +156,11 @@ policy、`stapler validate` はその notarization ticket を検査します。p
 - NSIS `.exe`: `makensis`。macOS / Windows で実行可能
 - `.msi`: WiX v4。Windows 上で実行
 
+再現可能な CI toolchain では `MURASAKI_NSIS_PATH` / `MURASAKI_WIX_PATH` に
+実行ファイルの正確な path を指定できます。明示した path は authoritative です。存在しない、
+または実行できない場合はその installer 形式を skip し、他の installer も作れなければ
+command は失敗します。
+
 NSIS は `perUser`（既定、elevation なし）または `perMachine`、MSI は常に
 per-machine です。branding と upgrade identity は
 [設定](/ja/docs/building/configuration#installer)を参照してください。
@@ -164,6 +177,10 @@ bundle command は portable ZIP を作る前に `<productName>.exe` を署名し
 command はその署名済み payload を NSIS / MSI に格納し、生成した setup executable と
 MSI 自体も署名します。すべて SHA-256 と既定の RFC 3161 timestamp を使用し、別の
 `signtool verify /pa /v /tw` pass で検証します。署名または検証の失敗は release を停止します。
+
+未署名 installer は local packaging 検証には使えますが、形式が正常でも現在の Windows の
+application-control policy に遮断される場合があります。Murasaki はこの場合に警告します。
+public artifact は署名し、利用者に SmartScreen / Smart App Control の無効化を求めないでください。
 
 signer は次の1つを選びます。CI では config を編集せず環境変数で override できます。
 
@@ -354,7 +371,8 @@ FUSE 不要になりますが、起動は遅くなります。Murasaki 自身の
 ### まだ実装されていないこと
 
 - `.rpm` や repository metadata(apt/dnf repo index)はありません。
-- Linux code signing(`debsign` / AppImage signing)はありません。
+- built-in Linux code signing(`debsign` / AppImage signing)はありません。`--sign`を
+  渡すと、未署名artifactを成功扱いで出力せずpackaging前にfail-closedで停止します。
 - `.deb` や手動展開した bare AppDir の self-update はありません —
   swap できるファイルを持つのは `.AppImage` だけです(上記参照)。
 

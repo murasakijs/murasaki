@@ -83,7 +83,7 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
         "@id": `${pageUrl}#webpage`,
         name:
           lang === "ja"
-            ? "Murasaki — デスクトップアプリのための Next.js DX"
+            ? "Murasaki — Next.js の開発体験をデスクトップへ"
             : "Murasaki — Next.js DX for desktop apps",
         description: t.subhead,
         url: pageUrl,

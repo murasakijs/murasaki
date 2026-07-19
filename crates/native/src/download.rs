@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+const MAX_DOWNLOAD_FILENAME_BYTES: usize = 240;
+
 /// Hand-rolled per-OS default Downloads folder. Wry itself resolves one
 /// internally on macOS (via a vendored `dirs` dependency, not exposed to
 /// callers), but there is no public helper for it and no other per-OS
@@ -34,13 +36,55 @@ pub(crate) fn default_downloads_dir() -> Option<PathBuf> {
 /// let a `..\..\evil` suggestion slip through unsanitized on macOS/Linux.
 pub(crate) fn sanitize_filename(suggested: &str) -> String {
     let basename = suggested.rsplit(['/', '\\']).next().unwrap_or("");
-    let cleaned: String = basename.chars().filter(|ch| !ch.is_control()).collect();
-    let trimmed = cleaned.trim().trim_start_matches('.');
+    let cleaned: String = basename
+        .chars()
+        .filter(|ch| !ch.is_control())
+        .map(|ch| {
+            if matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect();
+    let trimmed = cleaned
+        .trim()
+        .trim_start_matches('.')
+        .trim_end_matches(['.', ' ']);
     if trimmed.is_empty() {
         "download".to_string()
     } else {
-        trimmed.to_string()
+        let mut portable = if is_windows_reserved_filename(trimmed) {
+            format!("_{trimmed}")
+        } else {
+            trimmed.to_string()
+        };
+        if portable.len() > MAX_DOWNLOAD_FILENAME_BYTES {
+            let mut end = MAX_DOWNLOAD_FILENAME_BYTES;
+            while end > 0 && !portable.is_char_boundary(end) {
+                end -= 1;
+            }
+            portable.truncate(end);
+            while portable.ends_with(['.', ' ']) {
+                portable.pop();
+            }
+        }
+        if portable.is_empty() {
+            "download".to_string()
+        } else {
+            portable
+        }
     }
+}
+
+fn is_windows_reserved_filename(filename: &str) -> bool {
+    let stem = filename.split('.').next().unwrap_or(filename);
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || upper
+            .strip_prefix("COM")
+            .or_else(|| upper.strip_prefix("LPT"))
+            .is_some_and(|suffix| suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9'))
 }
 
 /// Confines `filename` (already sanitized — no separators) inside `dir`,
@@ -99,7 +143,9 @@ pub(crate) fn generate_download_id() -> std::result::Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{confine_download_path, sanitize_filename, split_extension};
+    use super::{
+        confine_download_path, sanitize_filename, split_extension, MAX_DOWNLOAD_FILENAME_BYTES,
+    };
 
     #[test]
     fn sanitizes_traversal_control_and_hidden_names() {
@@ -113,6 +159,12 @@ mod tests {
         assert_eq!(sanitize_filename("...hidden"), "hidden");
         assert_eq!(sanitize_filename("na\u{0}me.txt"), "name.txt");
         assert_eq!(sanitize_filename("  spaced.txt  "), "spaced.txt");
+        assert_eq!(sanitize_filename("CON.txt"), "_CON.txt");
+        assert_eq!(sanitize_filename("lpt9"), "_lpt9");
+        assert_eq!(sanitize_filename("report?.txt. "), "report_.txt");
+        let bounded = sanitize_filename(&format!("{}.txt", "紫".repeat(200)));
+        assert!(bounded.len() <= MAX_DOWNLOAD_FILENAME_BYTES);
+        assert!(bounded.is_char_boundary(bounded.len()));
     }
 
     #[test]

@@ -35,6 +35,8 @@ export interface MessageDialogOptions {
 
 export type MessageDialogResult = 'ok' | 'cancel' | 'yes' | 'no'
 
+export type AutostartStatus = 'enabled' | 'disabled'
+
 export interface ClipboardImageData {
   width: number
   height: number
@@ -150,6 +152,23 @@ export const app = {
    */
   isElevated(): Promise<boolean> {
     return invokeNative('app.isElevated')
+  },
+}
+
+/** Per-user login autostart for packaged applications. Development calls are
+ * rejected so `murasaki dev` can never persist the Node executable. */
+export const autostart = {
+  /** Returns whether the exact current packaged executable is registered. */
+  status(): Promise<AutostartStatus> {
+    return invokeNative('autostart.status')
+  },
+  /** Registers the current packaged application for login startup. */
+  enable(): Promise<void> {
+    return invokeNative('autostart.enable')
+  },
+  /** Removes this application's per-user login startup registration. */
+  disable(): Promise<void> {
+    return invokeNative('autostart.disable')
   },
 }
 
@@ -319,8 +338,8 @@ export const shell = {
    * Launches `executable` elevated through the Windows UAC "runas" verb —
    * Windows only, every other platform rejects with an `unsupported` error.
    * `executable` must be an absolute, non-traversing path to an existing
-   * file and is checked against the `shell:runElevated` capability scope,
-   * exactly like `shell.openPath`. `args` are passed directly (never
+   * file. A structured `shell:runElevated` capability scope matches the
+   * executable and exact argument list together. `args` are passed directly (never
    * through a shell) and are bounded to 64 entries of at most 4096 UTF-8
    * bytes each. Fire-and-forget: resolves once the elevated process has
    * launched, not when it exits.
@@ -525,8 +544,8 @@ export const tray = {
   },
 }
 
-/** A cookie as returned by `webview.getCookies()`. The murasaki runtime's own
- * session auth cookie is always filtered out and never appears here. */
+/** A cookie as returned by `webview.getCookies()`. The legacy reserved
+ * `murasaki_runtime` name is always filtered out and never appears here. */
 export interface WebviewCookie {
   name: string
   value: string
@@ -543,9 +562,11 @@ export interface WebviewSetCookieOptions {
   url: string
   name: string
   value: string
-  /** Defaults to the URL's host. */
+  /** Defaults to the URL's host. When provided it must match that host exactly
+   * (a leading dot is ignored); parent-domain cookies are intentionally rejected. */
   domain?: string
-  /** Defaults to `/`. */
+  /** Defaults to `/`. Must start with `/`, contain no controls or semicolon,
+   * and remain within any structured `webview:writeCookies` URL scope. */
   path?: string
   secure?: boolean
   httpOnly?: boolean
@@ -557,18 +578,19 @@ export interface WebviewSetCookieOptions {
 export const webview = {
   /** Reads the WebView's cookies, optionally scoped to `url`. Capped at 1000
    * entries with each value truncated at 4 KiB. The murasaki runtime's own
-   * session cookie is never included. Requires `webview:readCookies`. */
+   * reserved runtime cookie name is never included. Requires
+   * `webview:readCookies`. */
   getCookies(options: { url?: string } = {}): Promise<{ cookies: WebviewCookie[] }> {
     return invokeNative('webview.getCookies', options)
   },
   /** Creates or replaces a cookie. Requires `webview:writeCookies`. Rejects
-   * the murasaki runtime's own reserved session cookie name. */
+   * the legacy reserved murasaki runtime cookie name. */
   setCookie(options: WebviewSetCookieOptions): Promise<void> {
     return invokeNative('webview.setCookie', options)
   },
   /** Deletes a cookie (matched by name, the URL's host as domain, and the
    * default `/` path). Requires `webview:writeCookies`. Rejects the murasaki
-   * runtime's own reserved session cookie name. */
+   * legacy reserved runtime cookie name. */
   deleteCookie(options: { url: string; name: string }): Promise<void> {
     return invokeNative('webview.deleteCookie', options)
   },

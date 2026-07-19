@@ -1,0 +1,91 @@
+---
+title: Migrate from 0.54 to 0.55
+description: Breaking changes and a verification checklist for upgrading a production Murasaki app.
+---
+
+Murasaki 0.55 hardens runtime authority, updates, packaging, and browser-data
+identity. Most applications compile without structural changes, but the items
+below are deliberate fail-closed changes. Apply them before publishing an
+updated desktop build.
+
+## 1. Rename renderer environment variables
+
+Use `MURASAKI_PUBLIC_*` for values that may be embedded in renderer JavaScript:
+
+```dotenv
+MURASAKI_PUBLIC_API_ORIGIN=https://api.example.com
+DATABASE_URL=postgresql://localhost/private
+```
+
+Only the first value is renderer-visible. Keep credentials unprefixed. If an
+existing application owns another public prefix, add it explicitly with
+`build.envPrefix`; do not expose the empty prefix.
+
+## 2. Add `generatedAt` to update manifests
+
+Fresh manifests created by `murasaki release --manifest` already include
+`generatedAt`. A legacy manifest without it is rejected in production by
+default. During a bounded migration only, you may set:
+
+```ts
+updater: {
+  allowLegacyManifestsWithoutGeneratedAt: true,
+}
+```
+
+Remove the flag after every supported installed version can consume a current
+manifest. 0.55 also persists the highest authenticated timestamp and version;
+publishing an older signed manifest is treated as replay/rollback.
+
+## 3. Declare executable resources
+
+Sidecars and helper binaries need the structured resource form:
+
+```ts
+bundle: {
+  resources: [
+    { from: 'bin/helper', to: 'sidecars/helper', executable: true },
+  ],
+}
+```
+
+This makes Murasaki sign the helper before sealing the app/installer. An
+undeclared Mach-O, PE, ELF, or shebang resource now stops packaging instead of
+producing an artifact that Gatekeeper or Windows policy rejects later.
+
+## 4. Keep the persisted app origin available
+
+0.55 selects and stores one loopback port on first packaged launch. Later
+launches fail if that port is occupied rather than moving to another origin and
+making localStorage/IndexedDB appear empty. Avoid binding unrelated local
+services to the application's persisted port. If startup reports a collision,
+stop the conflicting process; deleting the origin state intentionally creates
+a new browser-data identity and is not a normal recovery step.
+
+## 5. Review capability boundaries
+
+- Native APIs and Node Main/API routes are separate default-deny surfaces.
+- Declare renderer native grants in `capabilities` and Node/API grants in
+  `backendCapabilities`, preferably per window.
+- Camera, microphone, and geolocation browser APIs are denied by the framework
+  response policy. Use an app-owned native flow when those features are added;
+  do not weaken the header globally without defining an equivalent boundary.
+- `sign.appSandbox: true` is rejected. Use Hardened Runtime + notarization on
+  macOS until Murasaki documents a sandbox-compatible Node helper model.
+
+## 6. Verify the release on real targets
+
+Run at least:
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm exec murasaki build
+pnpm exec murasaki bundle --target <platform-arch>
+pnpm exec murasaki installer --target <platform-arch> --sign
+```
+
+On macOS, verify codesign, Gatekeeper, and the stapled notarization ticket. On
+Windows, verify Authenticode and launch the installed application with security
+controls enabled. Never make disabling Gatekeeper, SmartScreen, or Smart App
+Control part of the user installation path.

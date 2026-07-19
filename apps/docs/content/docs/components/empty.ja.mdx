@@ -1,0 +1,29 @@
+---
+title: Empty
+description: データがない理由と、次に行える操作を示す空状態です。
+---
+
+## 使い方
+
+```tsx
+import {
+  Button, Empty, EmptyContent, EmptyDescription, EmptyHeader,
+  EmptyMedia, EmptyTitle,
+} from '@murasakijs/ui'
+import { FilePlus } from 'lucide-react'
+
+<Empty>
+  <EmptyHeader>
+    <EmptyMedia variant="icon"><FilePlus aria-hidden="true" /></EmptyMedia>
+    <EmptyTitle>ドキュメントはまだありません</EmptyTitle>
+    <EmptyDescription>新規作成するか、Markdown を読み込めます。</EmptyDescription>
+  </EmptyHeader>
+  <EmptyContent><Button>ドキュメントを作成</Button></EmptyContent>
+</Empty>
+```
+
+空状態では、何がないのかを説明し、利用者が次に行う可能性の高い操作を提示します。装飾用の
+アイコンには `aria-hidden="true"` を指定してください。意味を持つ画像やアイコンには、
+その要素自身でアクセシブル名を付けます。
+
+`EmptyMedia` の `variant` は `"default"` と `"icon"` です。

@@ -34,7 +34,7 @@ Edit、Window)が自動的に生成され、`config.locales` からローカラ�
 ```tsx
 'use client'
 
-import { app, appWindow, clipboard, dialog, globalShortcut, notification, secureStorage, shell, systemPermission, tray, windows } from 'murasaki/native'
+import { app, appWindow, autostart, clipboard, dialog, globalShortcut, notification, secureStorage, shell, systemPermission, tray, windows } from 'murasaki/native'
 
 const files = await dialog.openFile({
   multiple: true,
@@ -51,6 +51,7 @@ await shell.showItemInFolder(files[0])
 | API | 操作 |
 | --- | --- |
 | `app` | `quit`（gracefulなapplication shutdown）、`isElevated`（read-onlyな自己query） |
+| `autostart` | packaged app向けのユーザー単位ログイン起動 `status`, `enable`, `disable` |
 | `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage`(ネイティブOSメッセージボックス) |
 | `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
 | `notification` | `show`(ローカル生成idを返す) |
@@ -85,7 +86,10 @@ handlerで開きます(ダブルクリックと同様)。どちらもabsoluteで
 実在するpathが必要です。`shell.showItemInFolder`と同様、`shell:trashItem` /
 `shell:openPath` capabilityは許可するpath subtreeへscopeできます。
 `shell.openPath` はURLとしてparseできるものやUNCのnetwork / device pathも
-拒否します。URLを開く場合は`shell.openExternal`を使ってください。
+拒否します。URLを開く場合は`shell.openExternal`を使ってください。scoped grantでは
+symlinkを解決し、要求pathと実targetの両方がgrant内に残る場合だけ開きます。
+`showItemInFolder`と`trashItem`も親directoryをすべて実体解決して再度scopeを検査します。
+末尾自体がsymlinkの場合は解決せず、link自身を選択・削除対象にします。
 
 <Callout type="warning">
   **0.50 migration:** 以前の`quit()`はpermissionなしのraw IPCを送っていました。
@@ -99,7 +103,8 @@ handlerで開きます(ダブルクリックと同様)。どちらもabsoluteで
   ブリッジはアプリと完全一致するoriginだけを受け付け、固定allowlistのコマンドだけを
   公開します。各rendererが使うcommandだけを `window.capabilities` /
   `windows[label].capabilities` で許可してください。structured grantではshell URL/path、
-  target window label、OS permission名をallow/denyでscopeできます。他のargumentは
+  elevation対象の正確なexecutable/argv組、target window label、OS permission名、
+  secure-storage key、WebView cookie URLをallow/denyでscopeできます。他のargumentは
   command単位なので、権限を持つwindowに信頼できないremote contentを読み込まないでください。
 </Callout>
 
@@ -124,6 +129,20 @@ if (!(await app.isElevated())) {
 }
 ```
 
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  window: {
+    capabilities: [{
+      permission: 'shell:runElevated',
+      allow: { executions: [{
+        executable: 'C:/Program Files/Example/updater.exe',
+        args: ['--apply'],
+      }] },
+    }],
+  },
+})
+```
+
 `app.isElevated()` は、native hostプロセスがすでにelevatedで実行されているかを
 問い合わせる、read-onlyでcapability-gatedな(`app:isElevated`)queryです。
 Windowsではprocess tokenのelevation状態を読み取り、macOS/Linuxでは「elevated」
@@ -138,8 +157,11 @@ capabilityが必要で、失敗することはありません。基盤となるq
 Windows限定です — macOSの`SMJobBless`/`AuthorizationExecuteWithPrivileges`は
 非推奨で、Linuxには単一の同等機構が存在しないため、他のplatformはすべて
 `unsupported` errorを返します。`executable`はabsoluteでtraversalしない、
-実在するfileへのpathである必要があります。`shell.openPath`と同様、
-`shell:runElevated` capabilityは許可するpath subtreeへscopeできます。
+実在するfileへのpathである必要があります。structured `shell:runElevated` grantは、
+executableと順序を含む完全なargument listを1つの正確な`executions` entryとして照合します。
+任意argument付きのpath subtreeを許可するものではありません。symlinkを解決した実
+executable / argument組もgrantされている必要があり、scope内linkによるelevation先の
+すり替えを防ぎます。
 `args`(最大64件、各要素は最大4096 UTF-8 byte、制御文字は不可)はshellを
 経由せず直接elevatedプロセスへ渡され、`CommandLineToArgvW`と同じルールで
 quoteされます。呼び出しはfire-and-forgetです — elevatedプロセスが起動した
@@ -152,9 +174,46 @@ quoteされます。呼び出しはfire-and-forgetです — elevatedプロセ�
 <Callout type="warn">
   `shell:runElevated`は強力なcapabilityです — 付与すると、rendererが許可された
   実行ファイルをelevatedで実行するUACプロンプトをtriggerできるようになります。
-  狭いpath subtree(または単一の正確なpath)へscopeし、elevatedなhelperの起動が
-  本当に必要なwindowにのみ付与してください。
+  structuredな正確なexecutable/argv grantを推奨します。互換性のためstring形式は
+  unrestrictedです。elevated helperが本当に必要なwindowにのみ付与してください。
 </Callout>
+
+## ログイン時の自動起動
+
+packaged appではplatform固有のhelperを用意せず、ユーザーがログイン時の自動起動を
+選べるようにできます。
+
+```ts
+import { autostart } from 'murasaki/native'
+
+if ((await autostart.status()) === 'disabled') {
+  await autostart.enable()
+}
+
+// 同じ設定画面から無効化できるようにする
+await autostart.disable()
+```
+
+現在の登録状態を確認するには`autostart:read`、有効化・無効化には
+`autostart:write`をgrantします。`murasaki dev`では3つの操作をすべて拒否するため、
+一時的な開発用Node executableが永続的なログイン項目として登録されることはありません。
+登録先はユーザー単位で、macOSはLaunchAgent、Windowsはcurrent-user Run key、Linuxは
+XDG Autostart desktop entryです。`status()`は保存された登録が現在のpackaged executableと
+完全に一致する場合だけ`'enabled'`を返し、それ以外は`'disabled'`を返します。
+
+```ts title="murasaki.config.ts"
+export default defineConfig({
+  window: {
+    capabilities: ['autostart:read', 'autostart:write'],
+  },
+})
+```
+
+`enable()`は明示的なユーザー向け設定からのみ呼び出してください。ユーザー、端末管理、
+OS policyは登録を削除・無効化できます。
+現在のmacOS実装はLaunchAgentを使うため、App Sandbox buildとは互換性がありません。
+sandboxed distributionには別途署名したlogin-item helperが必要で、このexperimental APIでは
+まだ対応していません。
 
 ## セキュアストレージ
 
@@ -174,7 +233,7 @@ const saved = await secureStorage.get('refresh-token') // string | null
 await secureStorage.delete('refresh-token')            // 未登録でも成功
 ```
 
-必要なwindowだけへ操作ごとに独立してgrantします。
+必要なwindowだけへ操作ごとに独立してgrantし、exact keyまたは末尾prefix scopeを推奨します。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -182,9 +241,9 @@ export default defineConfig({
   productName: 'Notes',
   window: {
     capabilities: [
-      'secureStorage:get',
-      'secureStorage:set',
-      'secureStorage:delete',
+      { permission: 'secureStorage:get', allow: { keys: ['account:*'] } },
+      { permission: 'secureStorage:set', allow: { keys: ['account:*'] } },
+      { permission: 'secureStorage:delete', allow: { keys: ['account:*'] } },
     ],
   },
 })
@@ -195,9 +254,9 @@ entryは`appId`とkeyからSHA-256で導出したidentifierでnamespace分離さ
 UTF-8 byte以下です。NULは拒否され、native IPC bodyにも256 KiB上限があります。保存済み
 dataが破損、非UTF-8、上限超過なら暗黙変換せずerrorを返します。
 
-capabilityはkey別ではなく操作単位です。`secureStorage:get`を持つrendererは、そのapp
-namespace内で既知または推測可能なすべてのkeyを読めます。Keychain / Credential Managerは
-at-restのplaintext fileを避ける仕組みで、認可済みrenderer内のXSSからsecretを守るものでは
+互換性のためstring capabilityはkey無制限です。structured `keys` listは通常exact matchで、
+末尾が1つの`*`で終わるentryだけprefix matchになります。Keychain / Credential Managerは
+at-restのplaintext fileを避ける仕組みですが、認可済みscope内のXSSからsecretを守るものでは
 ありません。rendererが必要としないsecretはNode / server-only codeに置いてください。
 
 ## トレイアイコン
@@ -467,34 +526,25 @@ when-in-useキーの存在を要求します)、when-in-useではなくalways-au
 
 ### EntitlementsとApp Sandbox
 
-`murasaki bundle --sign`が生成するdefaultのentitlements plist(`sign.entitlements`を
-指定しない限り使われます)は、宣言した`systemPermissions`が実際に必要とするものだけを
-自動的に追加します。
+`murasaki bundle --sign`は、`sign.entitlements` / `sign.helperEntitlements`を指定
+しない限り、main appと同梱Node helperに別々のentitlements plistを生成します。
 
-- Murasakiのdefaultであるhardened-runtime-only(App Sandboxなし)の姿勢では、
-  camera / microphone / photosなどはInfo.plistの用途説明だけで動作し、追加の
-  entitlementは不要です。唯一の例外が`appleEvents`です — 宣言すると
-  `com.apple.security.automation.apple-events`が追加されます。これはhardened
-  runtimeが実際に必要とする唯一のTCC entitlementです。
-- `sign.appSandbox: true`を設定すると、`com.apple.security.app-sandbox`に加えて、
-  宣言した各種類のApple公式Sandbox entitlementが追加されます:
-  `camera` → `com.apple.security.device.camera`、
-  `microphone` → `com.apple.security.device.audio-input`、
-  `location` → `com.apple.security.personal-information.location`、
-  `contacts` → `com.apple.security.personal-information.addressbook`、
-  `calendar` / `reminders` → `com.apple.security.personal-information.calendars`
-  (AppleはReminders用に独自のSandbox categoryを分けたことがありません)、
-  `bluetooth` → `com.apple.security.device.bluetooth`。`photos`には文書化された
-  App Sandbox entitlementが存在しないため、追加されません。
-- カスタムの`sign.entitlements`ファイルは常にそのまま使われます — この自動導出は
-  生成されるdefault plistにのみ適用されます。
-
-```ts title="murasaki.config.ts"
-export default defineConfig({
-  // ...
-  sign: { appSandbox: true },
-})
-```
+- Murasakiのdefaultであるhardened-runtime-only(App Sandboxなし)の姿勢では、署名appに
+  Info.plist用途説明と対応するhost resource entitlementの両方が必要です。camera
+  (`com.apple.security.device.camera`)、microphone
+  (`com.apple.security.device.audio-input`)、location、photos、contacts、
+  calendar/reminders、Apple Eventsのentitlementを`systemPermissions.macOS`から生成します。
+  Bluetoothのdevice entitlementはApp Sandbox専用で、speech recognitionにはHardened
+  Runtime用resource entitlementがないため、この2種類には用途説明だけを使用します。
+- NodeだけにJIT、unsigned executable memory、library validation無効化を付与します。
+  `.node` addonはexecutable entitlementなしで署名します。app所有の実行可能な
+  `bundle.resources`は`executable: true`を指定すると、outer appより先に署名されます。
+- `sign.appSandbox: true`は現在fail-closedで拒否します。Appleのsandbox継承helperは
+  `app-sandbox` + `inherit`だけのentitlementを要求し、現在の同梱Node/JIT processとは
+  両立しません。署名・公証を含むend-to-end経路が成立するまで、App Sandbox対応とは
+  表記しません。
+- カスタムmain/helper plistはそのまま使います。指定pathが存在しない、fileでない、または
+  plistとして無効な場合、生成権限へ黙ってfallbackせずrelease buildを停止します。
 
 ## 組み込みのメニューアクション
 
@@ -531,7 +581,8 @@ const { status, latest, check, download, install } = useUpdate()
 用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
-  structured capability scopeはshell URL/path、target window label、OS permission名だけで、
+  structured capability scopeはshell URL/path、正確なelevated executable/argv組、
+  target window label、OS permission名、secure-storage key、WebView cookie URLを扱います。
   global shortcut accelerator、dialog defaultなど他のargumentはcommand単位です。
   設計前に
   [プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。

@@ -212,10 +212,19 @@ test('useRouter/usePathname: push/replace/back update the shared window.history 
     assert.equal(window.location.pathname, '/swapped')
     assert.equal(container.querySelector('span').textContent, '/swapped')
 
-    // back() → jsdom's history navigation settles asynchronously via 'popstate'.
+    // back() settles asynchronously. Wait for the actual history event rather
+    // than a fixed delay: a busy Windows CI host can legitimately deliver
+    // jsdom's popstate later without indicating a router failure.
+    const popped = new Promise((resolvePop, rejectPop) => {
+      const timeout = setTimeout(() => rejectPop(new Error('popstate was not delivered')), 1_000)
+      window.addEventListener('popstate', () => {
+        clearTimeout(timeout)
+        resolvePop()
+      }, { once: true })
+    })
     await React.act(async () => {
       click(window, container.querySelector('#back'))
-      await tick(20)
+      await popped
     })
     assert.equal(window.location.pathname, '/start')
     assert.equal(container.querySelector('span').textContent, '/start')

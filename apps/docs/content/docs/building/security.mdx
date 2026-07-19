@@ -5,13 +5,14 @@ description: Murasaki's trust boundaries, built-in runtime protections, and appl
 
 Desktop security starts with process boundaries. Murasaki keeps Node out of the
 renderer, restricts the application WebView to its own origin, and protects
-privileged loopback endpoints with an app-session token. These controls reduce
+privileged loopback endpoints with native-issued per-window authority. These controls reduce
 the impact of ordinary renderer bugs, but they are not a complete permission
 system.
 
 <Callout type="warn">
   Native renderer commands are deny-by-default and granted with the typed
-  `capabilities` list. Every declared window has its own allowlist. URL, path,
+  `capabilities` list. Renderer-to-Node/API access is separately deny-by-default
+  through `backendCapabilities`. Every declared window has its own allowlists. URL, path,
   target-window, and OS-permission scopes are available for the commands that
   accept those resources. Treat every
   renderer-to-Node function as privileged application code and keep its
@@ -24,15 +25,23 @@ system.
 | --- | --- | --- |
 | Remote URL → app WebView | Exact app-origin navigation stays in-window; off-origin HTTP(S) opens in the system browser; `file:`, `data:`, and `javascript:` navigations are denied | Do not weaken navigation behavior or inject remote scripts into the renderer |
 | Renderer → Rust native commands | Exact-origin IPC check and a typed, deny-by-default allowlist evaluated for the calling window | Grant only the commands that renderer uses; validate app-level intent before broad operations such as `window:manage` |
-| Renderer → local Node | Privileged `/api/*` and `/__murasaki/*` endpoints require a random 256-bit HttpOnly, SameSite=Strict runtime cookie and validate Host/Origin; wire payloads are bounded | Validate arguments and authorize the requested operation inside every action/route/Main function |
+| Renderer → local Node | Privileged `/api/*` and `/__murasaki/*` endpoints require an HMAC-derived identity for the exact native window plus its `backendCapabilities`; Host/Origin/Fetch Metadata and wire bounds are validated | Grant only the exact module export, method/path, updater, event, or diagnostics resource needed; still validate object-level authorization inside handlers |
 | OS URL/file activation → Node Main | Only configured schemes/extensions are normalized into `openRequested()` targets; delivery uses the authenticated app-local channel | Treat every URL and path as attacker-controlled; validate intent, identifiers, hosts, and file contents before acting |
 | App → update host | Ed25519 signature over raw manifest bytes, then SHA-256 verification of the selected payload | Protect the private update key and publish hashes/signatures together |
 | OS → installed app | macOS Developer ID/notarization and Windows Authenticode orchestration sign and verify final app-owned artifacts | Supply and protect your platform certificate/provider; test trust policy and installed artifacts on clean machines |
 
 Production listens on `127.0.0.1`, not all interfaces. Development accepts
 loopback `localhost`, `127.0.0.1`, or `[::1]` hosts and rejects cross-site Fetch
-Metadata. Static document responses install the session cookie; it is not
-readable from JavaScript.
+Metadata. Static document responses contain no runtime bearer credential. At
+document start the native host injects only that window's derived identity.
+Packaged identities bind the label and native generation; closing a window
+revokes it in Node, and recreating the same label receives a different HMAC.
+Changing either field invalidates the token, and secondary windows inherit no
+backend grants. The identity bootstrap exits before defining any credential in
+subframes or when the document origin differs from the exact app loopback
+origin; this is enforced even on Windows, where WebView2 injects document-start
+scripts into frames despite a main-frame-only request. Native lifecycle
+endpoints use a separate token that is never given to renderer JavaScript.
 
 ## WebView network and private sessions
 
@@ -44,10 +53,12 @@ checks.
 - A private/incognito session prevents the WebView from using the app's
   persistent browser profile. It does not hide the user's IP address, erase
   files written by Node Main, or provide anonymity from the app's server.
-- Normal windows share one application WebContext, including cookies and Web
-  Storage after destroy/recreate. Wry ignores the shared context when
-  incognito mode is enabled, so multiple incognito windows are not guaranteed
-  to share one private session; behavior is platform-dependent.
+- Every window label has a separate WebContext/profile. This prevents a
+  secondary window's Service Worker, SharedWorker, cookies, or Web Storage from
+  observing the primary window's authenticated backend requests. Recreating
+  the same label reuses its process context. Incognito labels are
+  non-persistent; on macOS 11–13 secondary labels are also non-persistent
+  because custom persistent stores require macOS 14.
 - A custom User-Agent is sent to origins the application requests and can add
   fingerprinting information. Replacing the platform User-Agent may also
   break server compatibility or authentication flows.
@@ -100,16 +111,46 @@ structured policy supports these resource fields:
 
 | Permission | Scope field |
 | --- | --- |
-| `shell:openExternal` | `urls` with exact URLs or an HTTP(S) trailing `/**` subtree |
+| `shell:openExternal`, `webview:readCookies`, `webview:writeCookies` | `urls` with exact URLs or an HTTP(S) trailing `/**` subtree |
 | `shell:showItemInFolder` | absolute, non-traversing `paths`, exact or with trailing `/**` |
 | `window:open`, `window:manage` | exact declared `windows` labels |
 | `systemPermission:status`, `systemPermission:request` | exact `permissions` names |
+| `secureStorage:get`, `secureStorage:set`, `secureStorage:delete` | exact `keys`, or a key prefix ending in one `*` |
 
 An explicit `deny` wins over `allow`. A structured grant with only `deny`
 allows other values, while a legacy string grant remains unrestricted for its
 command. Other commands, including dialogs, remain command-level. Keep broad
 grants on trusted renderers and enforce narrower application intent in Node.
 Application-wide programmatic shutdown is separately gated by `app:quit`.
+
+## Grant backend resources explicitly
+
+Native capabilities and backend capabilities protect different boundaries.
+Use `backendCapabilities` for renderer requests to Node Main, Server Actions,
+API Routes, updater routes, event streams, and renderer diagnostics:
+
+```ts title="murasaki.config.ts"
+window: {
+  backendCapabilities: [
+    'main:src/backend/account.ts#loadAccount',
+    'action:src/actions/save.ts#saveDocument',
+    'api:POST:/api/documents/*',
+    'events:sync.*',
+    'diagnostics:renderer-error',
+  ],
+},
+windows: {
+  preview: { route: '/preview', backendCapabilities: [] },
+},
+```
+
+Grants match exactly unless they end in one trailing `*`, which is a prefix
+wildcard. API grants include the uppercase HTTP method. The primary uses
+`window.backendCapabilities ?? backendCapabilities ?? []`; every secondary
+window defaults to `[]`. `main:*`, `action:*`, `api:*`, `updater:*`, and
+`events:*` are convenient but broad—prefer exact resources in production.
+Native-only shutdown, activation, and window-control endpoints cannot be
+granted to a renderer.
 
 Runtime window creation is available only to trusted Node Main and only for
 labels declared in configuration. The private native transport carries a
@@ -135,10 +176,16 @@ has no plaintext fallback. Missing values return `null`; deletion is
 idempotent. Linux returns `unsupported`.
 
 Grant `secureStorage:get`, `secureStorage:set`, and `secureStorage:delete`
-separately. These capabilities are not key-scoped. A renderer with read access
-can query every key in its app namespace, so do not grant it to a window that
-loads untrusted code. OS credential storage protects data at rest, not against
-XSS executing with the renderer's granted capability.
+separately. Prefer a structured key scope so a renderer can reach only the
+entries it owns:
+
+```ts
+{ permission: 'secureStorage:get', allow: { keys: ['account:*', 'theme'] } }
+```
+
+A string grant remains key-unrestricted for compatibility. OS credential
+storage protects data at rest, not against XSS executing with a granted key
+scope.
 
 Keys are limited to 256 UTF-8 bytes and values to 2,048 UTF-8 bytes; both must
 be non-empty and contain no NUL. The overall native IPC body is capped at 256
@@ -173,9 +220,10 @@ export async function loadAccount(accountId: string) {
 ```
 
 <Callout type="info">
-  The runtime session proves that a request came through the app's renderer
-  origin. It does not prove that the renderer is uncompromised. XSS can still
-  invoke any function that your client bundle can invoke.
+  Window authority proves which native-created renderer sent a request. It
+  does not prove that renderer is uncompromised. XSS can still invoke every
+  backend resource granted to that window, so keep grants and handler-level
+  object authorization narrow.
 </Callout>
 
 ## Validate paths and URLs
@@ -276,7 +324,7 @@ user-authored HTML, and pin third-party code.
 
 Murasaki API routes are app-local by design and are not reachable as a public
 service. A Main process can create TCP, WebSocket, or HTTP listeners using Node,
-but doing so creates a new security boundary outside Murasaki's runtime-session
+but doing so creates a new security boundary outside Murasaki's window-authority
 protection.
 
 - Bind to `127.0.0.1` unless remote clients are an explicit product feature.
@@ -288,24 +336,21 @@ protection.
 
 ## In-page permission requests (getUserMedia, geolocation)
 
-Murasaki does not intercept in-page permission requests today — calling
-`navigator.mediaDevices.getUserMedia()`, `navigator.geolocation`, or similar
-web APIs from renderer JavaScript falls through to the platform WebView's own
-default behavior, not a Murasaki-mediated prompt or capability. Wry 0.55 has
-no permission-request handler to hook; the underlying API exists only in an
-unreleased upstream version. Interception (routing these requests through
-Murasaki's own capability/consent model) is planned once Wry ships
-`with_permission_handler`.
+Renderer documents receive this response header in development and packaged
+apps:
 
-Until then, behavior is whatever the host OS WebView does by default per
-platform (for example, WebKit's own permission UI on macOS, WebView2's on
-Windows). On macOS, camera/microphone capture is still governed by the OS's
-TCC privacy database — the `systemPermissions.macOS.camera`/`microphone` usage
-strings and launch-time prompts described above apply to native capture
-through `AVFoundation`, not to a page's own `getUserMedia()` call, which
-prompts (or is silently denied) independently at the WebKit layer. Do not load
-untrusted remote content into a window that might unexpectedly grant it camera,
-microphone, or location access through the OS's default WebView prompt.
+```http
+Permissions-Policy: camera=(), microphone=(), geolocation=()
+```
+
+Those high-impact browser APIs therefore fail closed instead of falling
+through to WebKit/WebView2's platform-specific prompt behavior. This is
+separate from `systemPermission:*`, which manages host OS consent for native
+features. Wry 0.55 does not expose a cross-platform, per-window permission
+callback, so Murasaki does not currently offer a config escape hatch for
+renderer camera, microphone, or geolocation. Use a capability-checked native
+feature or a separately secured service until that boundary can be enforced
+consistently.
 
 ## Signing and update keys are different
 
@@ -317,20 +362,25 @@ the OS artifact, plus Murasaki's manifest signature and payload hash.
 
 ## Known security gaps
 
-- Native capabilities are per-window, and selected target-bearing commands
-  support inline allow/deny scopes. Dialog defaults, clipboard content, tray
-  menu contents, secure-storage keys, and other command arguments are not
-  scopeable yet; policies are config-owned rather than separately signed
-  policy files.
-- Declared windows share one application origin and authenticated local Node
-  session. Native allowlists do not isolate Server Actions, `'use main'`, API
-  routes, or updater endpoints; authorize those operations in application code.
+- Native capabilities are per-window, with URL, filesystem-path,
+  secure-storage-key, target-window, and OS-permission scopes. Dialog defaults,
+  clipboard content, tray-menu content, elevated-process arguments, and other
+  command arguments remain command-level; policies are config-owned rather
+  than separately signed policy files.
+- Backend capabilities isolate Server Actions, `'use main'`, API/updater routes,
+  events, and diagnostics per native window. Browser profiles are also isolated
+  per window so same-origin Service Workers and shared browser state cannot
+  cross that authority boundary. The primary retains the legacy profile;
+  secondary persistence requires macOS 14+ (macOS 11–13 fails closed to a
+  separate non-persistent store). XSS can still use every resource granted to
+  its own window; handlers must enforce user/session/object authorization.
 - Incognito prevents persistent profile use but does not guarantee that
   multiple incognito windows share the same in-memory session.
 - Linux package signing is not implemented. Windows Authenticode requires a
   developer-supplied certificate/Artifact Signing provider and Windows SDK SignTool.
-- Linux protocol/file-association registration is not implemented. Windows
-  portable archives intentionally do not self-register.
+- Linux `.deb` packages install protocol/file-association `MimeType` entries
+  through their `.desktop` file. Manually extracted AppDir/AppImage artifacts
+  and Windows portable archives intentionally do not self-register.
 - Renderer native APIs are not callable directly from `src/main.ts`.
 
 Track exact status on [Platform & feature

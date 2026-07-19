@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.54.0",
+  "frameworkVersion": "0.55.0",
   "features": [
     {
       "id": "file-routing",
@@ -269,6 +269,31 @@
       "docsSlug": "/docs/guides/native-apis"
     },
     {
+      "id": "login-autostart",
+      "category": "native-integration",
+      "status": "experimental",
+      "platforms": {
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "supported"
+      },
+      "limitations": [
+        "Per-user login startup is exposed as autostart.status/enable/disable behind separate read/write renderer capabilities and is rejected under murasaki dev so the Node development executable can never be registered accidentally.",
+        "macOS uses a user LaunchAgent, Windows uses the current-user Run registry key, and Linux uses XDG Autostart. status reports enabled only when the stored registration exactly matches the current packaged executable; users and OS policy may still disable or remove a registration outside the app.",
+        "The macOS LaunchAgent implementation is incompatible with App Sandbox builds; a separately signed login-item helper is not implemented yet."
+      ],
+      "apiSymbols": [
+        "murasaki/native.autostart",
+        "AutostartStatus"
+      ],
+      "testEvidence": [
+        "crates/native/src/autostart.rs",
+        "packages/murasaki/test/native-api.test.mjs",
+        ".github/workflows/ci.yml"
+      ],
+      "docsSlug": "/docs/guides/native-apis"
+    },
+    {
       "id": "secure-storage",
       "category": "security",
       "status": "experimental",
@@ -304,6 +329,7 @@
       },
       "limitations": [
         "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS, Windows (x64 and arm64), and Linux AppImage apps.",
+        "Windows self-update requires a per-user NSIS install; updater-enabled builds reject installMode=perMachine and skip MSI. MSI is available with the built-in updater disabled for system-managed major upgrades.",
         "A custom self-hosted endpoint must be https (loopback http is allowed for local testing only); delta/differential updates are not implemented. Linux self-update only works for the AppImage packaging format (the running .AppImage file is journal-swapped in place, relaunched with --appimage-extract-and-run); a .deb install or a manually-extracted AppDir has no file to swap, so check() reports a structured not-available reason (updates are managed by the system package manager) instead of an error."
       ],
       "apiSymbols": [
@@ -330,7 +356,7 @@
         "linux": "partial"
       },
       "limitations": [
-        "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today.",
+        "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today. Installer creation fails closed when no platform installer is produced. Windows updater builds require per-user NSIS and skip MSI; MSI is generated only with the built-in updater disabled.",
         "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging, repository metadata, and code signing are not implemented. WiX is required for MSI and only runs on Windows."
       ],
       "apiSymbols": [
@@ -378,14 +404,23 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
-        "Development privileged endpoints require an HttpOnly same-site runtime session and validate loopback Host, Origin, and Fetch Metadata.",
-        "Renderer native commands have a deny-by-default per-window allowlist and selected value-scoped allow/deny rules, but multi-origin policy and scopes for every command argument are not implemented."
+        "Development and packaged privileged endpoints validate loopback Host, Origin, and Fetch Metadata, then require an HMAC-derived identity bound to the exact native window label and its deny-by-default backendCapabilities. Packaged identities also bind the native window generation: close revokes the live generation and recreate rotates the HMAC. The document-start bootstrap exits before defining credentials in subframes or documents outside the exact app loopback origin, including on Windows where WebView2 injects main-only scripts into frames. Static document responses expose no bearer credential; native-only lifecycle endpoints use a separate token unavailable to renderer JavaScript.",
+        "The app server still binds a predictable loopback port range, so a local process can cause startup denial of service. On first launch Murasaki selects and persists one free private-range port; later collisions fail closed instead of moving the HTTP origin and stranding localStorage, IndexedDB, or cookies. Browser profiles are isolated by native window so same-origin Service Workers and shared storage cannot cross the label-bound backend authority boundary; XSS retains every grant belonging to its own window."
       ],
-      "apiSymbols": [],
-      "testEvidence": [],
+      "apiSymbols": [
+        "MurasakiConfig.backendCapabilities",
+        "WindowConfig.backendCapabilities",
+        "BackendCapability"
+      ],
+      "testEvidence": [
+        "packages/murasaki/src/runtime/window-auth.ts",
+        "packages/murasaki/test/runtime-security.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs",
+        "crates/native/src/launcher.rs"
+      ],
       "docsSlug": "/docs/building/security"
     },
     {
@@ -422,7 +457,8 @@
       },
       "limitations": [
         "Windows must be declared in configuration. Secondary templates may opt out of launch-time creation and trusted Node Main can create, destroy, and recreate them; arbitrary runtime URLs, native policies, and undeclared labels are rejected.",
-        "Secondary OS/self close hides for later reopening, while Node Main destroy releases native resources and increments the generation when recreated; the application menu remains process-global and primary-owned."
+        "Secondary OS/self close hides for later reopening, while Node Main destroy releases native resources and increments the generation when recreated; the application menu remains process-global and primary-owned.",
+        "Each native window has an isolated browser profile so Service Workers, SharedWorkers, cookies, and storage cannot inherit another window's backend authority. Secondary profiles persist on Windows/Linux and macOS 14+; macOS 11-13 uses a separate non-persistent WebKit store."
       ],
       "apiSymbols": [
         "MurasakiConfig.windows",
@@ -488,7 +524,7 @@
         "bluetooth has no explicit request call: CoreBluetooth determines consent implicitly the first time a central manager is instantiated. `status()` reads `CBManager.authorization`, a class property that needs no live manager instance; `request()` instantiates one (delegate-less, like `location`) purely to trigger that OS-side determination.",
         "calendar/reminders' launch-time and runtime `request()` use the macOS 14+ full-access EventKit API when the running system supports it, falling back to the deprecated pre-14 entity-type API otherwise (checked with NSProcessInfo at call time, not at build time), and Info.plist always carries both the legacy and 14+ full-access usage-description keys so one packaged build stays correct on both.",
         "location's `mode: 'always'` writes both `NSLocationWhenInUseUsageDescription` and `NSLocationAlwaysAndWhenInUseUsageDescription` to Info.plist and is read back from that same Info.plist key at request time, so it applies identically to `requestOnLaunch` and a runtime `systemPermission.request('location')` call without separate plumbing.",
-        "Hardened-runtime signing (murasaki's default, no App Sandbox) automatically adds only the com.apple.security.automation.apple-events entitlement, and only when appleEvents is declared — every other declared kind works from its Info.plist usage string alone. Opting into `sign.appSandbox` additionally adds `com.apple.security.app-sandbox` plus each declared kind's documented per-kind Sandbox entitlement (camera, microphone, location, contacts, calendar/reminders sharing one `.calendars` key, bluetooth); photos has no documented Sandbox entitlement and is never added. A custom `sign.entitlements` file is used verbatim and never merged with this derivation.",
+        "Hardened-runtime signing separates main-app and bundled-Node entitlements. The main app derives the declared camera, microphone, location, photos, contacts, calendar/reminders, and Apple Events resource-access rights from `systemPermissions.macOS`; signed builds need these rights in addition to their Info.plist purpose strings. Bluetooth's device entitlement is App-Sandbox-only and speech recognition has no Hardened Runtime resource entitlement. Node alone gets JIT/unsigned-executable-memory/disabled-library-validation. Native add-ons get no executable entitlements, and app-owned executable bundle resources must be marked `executable: true` for inner-to-outer macOS/Windows signing. `sign.appSandbox: true` is rejected fail-closed because Apple's inherit-only helper rules are incompatible with the current bundled Node/JIT architecture. Custom `sign.entitlements` and `sign.helperEntitlements` files are used verbatim; missing or invalid configured files fail closed.",
         "Windows unpackaged desktop privacy consent is usage-driven rather than an app-scoped launch prompt, so these generic calls report unsupported there; Linux is not implemented. Development requests use the terminal/Node host identity and should be tested with a packaged app."
       ],
       "apiSymbols": [
@@ -498,6 +534,8 @@
         "MacOSLocationPermissionConfig",
         "MacOSDeclarationOnlyPermissionConfig",
         "MurasakiConfig.sign.appSandbox",
+        "MurasakiConfig.sign.entitlements",
+        "MurasakiConfig.sign.helperEntitlements",
         "murasaki/native.systemPermission"
       ],
       "testEvidence": [
@@ -547,18 +585,23 @@
         "linux": "development-only"
       },
       "limitations": [
-        "Renderer native commands are deny-by-default and granted through a runtime-validated per-window capability allowlist; sender origin and command names are validated in Rust.",
-        "URL, path, target-window, and OS-permission scopes support explicit allow/deny rules; other arguments remain command-level, secondary windows intentionally inherit no top-level grants, and privileged menu roles require their corresponding capability."
+        "Renderer native commands are deny-by-default and granted through a runtime-validated per-window capability allowlist; sender origin and command names are validated in Rust. Renderer-to-Node resources are separately deny-by-default through label-bound backendCapabilities.",
+        "URL (including cookie origin/path), filesystem path, secure-storage key, target-window, and OS-permission scopes support explicit allow/deny rules; other native arguments remain command-level. Cookie domain overrides cannot escape the URL host. Backend resources support exact and trailing-prefix grants for Main exports, Server Actions, API methods/paths, updater routes, events, and diagnostics. Secondary windows intentionally inherit neither list, and privileged menu roles require their corresponding native capability."
       ],
       "apiSymbols": [
         "MurasakiConfig.capabilities",
         "WindowConfig.capabilities",
-        "NativeCapability"
+        "NativeCapability",
+        "MurasakiConfig.backendCapabilities",
+        "WindowConfig.backendCapabilities",
+        "BackendCapability"
       ],
       "testEvidence": [
         "crates/native/src/webview.rs",
         "packages/murasaki/test/native-api.test.mjs",
-        "packages/murasaki/test/windows.test.mjs"
+        "packages/murasaki/test/windows.test.mjs",
+        "packages/murasaki/test/runtime-security.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs"
       ],
       "docsSlug": "/docs/building/security"
     },
@@ -609,12 +652,13 @@
       },
       "limitations": [
         "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
+        "Browser profiles are isolated by native window. The primary retains the historical app profile; secondary profiles persist on Windows/Linux and macOS 14+, while macOS 11-13 uses isolated non-persistent stores. Cross-window cookie/storage/worker sharing is intentionally unsupported; apps should share durable state through Main/API handlers.",
         "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported.",
         "webview:download confines sanitized, collision-resolved downloads to a configured (or OS default) directory and reports start/completion events; there is no reliable id correlating a completed event with the started event it followed, and macOS never reports a completed download's path (an upstream WebKit limitation).",
         "webview:dragDrop reports file drag-and-drop events (dragover throttled to 20/sec) without ever blocking the OS default, so file inputs keep working regardless of the grant. webview.initScripts injects trusted, config-owned JavaScript before page load and is not capability-gated.",
         "webview:zoom bounds page zoom to 0.25-5.0 and is available on macOS 11+/iOS 14+ only; webview.hotkeysZoom (config, not a capability) enables OS zoom hotkeys/gestures on Windows only. webview:print opens the platform print dialog; there is no find-in-page API because Wry exposes none.",
-        "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete; the murasaki runtime's own session-auth cookie is filtered out of reads and rejected from writes/deletes regardless of granted capabilities. deleteCookie matches by name, the URL host as domain, and the default / path only.",
-        "In-page permission requests (getUserMedia, geolocation) are not intercepted: Wry 0.55 has no permission handler, so these fall through to the platform WebView's own default behavior; interception is planned once Wry ships one."
+        "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete and support structured URL scopes. Scoped reads require an explicit URL; writes are checked against the effective cookie path, and domain overrides must exactly match the URL host. The reserved legacy murasaki_runtime name is filtered out of reads and rejected from writes/deletes as defense in depth, although runtime authentication no longer relies on a cookie. deleteCookie matches by name, the URL host as domain, and the default / path only.",
+        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead."
       ],
       "apiSymbols": [
         "MurasakiConfig.webview",

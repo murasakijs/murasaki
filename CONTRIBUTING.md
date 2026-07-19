@@ -44,12 +44,12 @@ git clone https://github.com/murasakijs/murasaki.git
 cd murasaki
 pnpm install
 pnpm --filter murasaki build
-cd examples/violet-notes
+cd examples/papelle
 pnpm dev
 ```
 
 The dev server opens a WebView window and reloads on file changes. Edit
-files under `packages/murasaki/src/` or under `examples/violet-notes/src/`
+files under `packages/murasaki/src/` or under `examples/papelle/src/`
 — both hot-reload.
 
 ### Optional tooling for cross-compile
@@ -82,7 +82,7 @@ workflow:
 | `packages/ui` | `@murasakijs/ui` — the optional component library. |
 | `packages/mcp` | `@murasakijs/mcp` — the MCP server that gives AI coding tools grounded Murasaki knowledge. |
 | `apps/docs` | The docs site ([murasaki.ichi10.com](https://murasaki.ichi10.com)), English and Japanese. |
-| `examples/` | Full example apps — [Violet Notes](https://github.com/murasakijs/murasaki/tree/main/examples/violet-notes), [Murasaki Focus](https://github.com/murasakijs/murasaki/tree/main/examples/murasaki-focus), [Local Signal](https://github.com/murasakijs/murasaki/tree/main/examples/local-signal) — used for manual verification and screenshots. |
+| `examples/` | Full example apps — [Papelle](https://github.com/murasakijs/murasaki/tree/main/examples/papelle), [Oscilla](https://github.com/murasakijs/murasaki/tree/main/examples/oscilla), and [Orglia](https://github.com/murasakijs/murasaki/tree/main/examples/orglia) — used for manual verification and screenshots. See the [example verification ladder](examples/README.md); a client build alone is not completion. |
 
 ---
 
@@ -98,7 +98,8 @@ workflow:
 4. **Make the change** with focused commits.
 5. **Run `pnpm --filter murasaki build`** to confirm it compiles, then
    **`pnpm --filter murasaki test`** to run the test suite.
-6. **Verify by hand** with `examples/violet-notes`.
+6. **Verify by hand** with the affected app in `examples/` and record the
+   relevant [verification level](examples/README.md#verification-ladder).
 7. **Open a PR** referencing the issue.
 
 ---
@@ -212,7 +213,7 @@ touch runtime/CLI behavior should also go through the smoke checklist below
 before opening a PR:
 
 1. `pnpm --filter murasaki build` — clean compile — then `pnpm --filter murasaki test` — automated tests pass.
-2. `cd examples/violet-notes && pnpm dev` — window opens, HMR works.
+2. `cd examples/papelle && pnpm dev` — window opens, HMR works, and a real edit survives restart.
 3. `pnpm bundle` — `.app` (or the OS-native folder) is produced and launches;
    launching it also verifies the packaged Node prod server boots (the native
    launcher spawns it — there is no standalone server entry point to run).

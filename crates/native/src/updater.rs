@@ -367,6 +367,7 @@ impl InstallTransaction {
         Ok(transaction)
     }
 
+    #[cfg(any(target_os = "macos", target_os = "linux", test))]
     fn install_from(&mut self, replacement: &Path) -> Result<(), String> {
         if let Err(error) = fs::rename(replacement, &self.target) {
             let install_error = format!(

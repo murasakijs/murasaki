@@ -13,8 +13,9 @@ init script 以外は、それぞれ専用の deny-by-default な `webview:*` ca
 
 `webview:download` を許可すると、native の `with_download_started_handler` が
 インストールされます。許可しない場合、すべてのダウンロードは拒否されます(既定挙動は
-変わりません)。提案されたファイル名は安全な basename へサニタイズされ(ディレクトリ
-部分・制御文字・先頭のドットは除去、空になった場合は `download`)、最終的な path は
+変わりません)。提案されたファイル名はportableなbasenameへサニタイズされます(directory
+部分・制御文字・先頭dot・Windows禁止文字/予約device名・末尾dot/spaceを処理し、UTF-8で
+240 byteまで。空になった場合は`download`)。最終的なpathは
 設定した directory の内側に閉じ込められます — 名前が衝突した場合は Wry 自身の挙動と
 同様、拡張子の前に ` (n)` が付与されます。
 
@@ -175,11 +176,21 @@ await webview.deleteCookie({ url: 'https://example.com/', name: 'theme' })
 できません。
 
 <Callout type="warning">
-  **セキュリティ:** Murasaki 自身の runtime session 認証 cookie は、この API からは
-  見えず、変更もできません — `getCookies()` の結果には決して現れず、
-  `setCookie` / `deleteCookie` でこの cookie を(大文字小文字を区別せず)対象にすると、
-  許可された capability に関わらず構造化されたエラーで拒否されます。
+  **セキュリティ:** runtime認証はcookieを使用しません。defense in depthとして、legacyの
+  予約名`murasaki_runtime`はこのAPIから引き続き不可視・変更不可です。read結果から除外し、
+  write / deleteはgrantされたcapabilityに関係なく構造化errorで拒否します。
 </Callout>
+
+cookie accessにはstructured URL scopeを推奨します。scopeされたreadでは明示的な`url`が必須で、
+URLなしの`getCookies()`はlegacy string grantでだけ利用できます。writeは実際のcookie pathで
+照合され、rendererは`domain`で親domainやsibling domainへcookieを設定できません。
+
+```ts title="murasaki.config.ts"
+capabilities: [
+  { permission: 'webview:readCookies', allow: { urls: ['https://app.example.com/**'] } },
+  { permission: 'webview:writeCookies', allow: { urls: ['https://app.example.com/account/**'] } },
+]
+```
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({

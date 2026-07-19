@@ -5,6 +5,7 @@ import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node
 import { createInterface } from 'node:readline'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import test from 'node:test'
 
 import {
@@ -14,8 +15,10 @@ import {
 } from '../dist/main/crash-reports.js'
 import { defineConfig, resolveDiagnosticsConfig, validateConfig } from '../dist/config.js'
 import { metaJson } from '../dist/cli/bundle.js'
+import { deriveWindowToken } from '../dist/runtime/window-auth.js'
 
 const packageDir = resolve(import.meta.dirname, '..')
+const RUNTIME_TOKEN = 'a'.repeat(64)
 
 async function fixtureDir(t) {
   const dir = await mkdtemp(join(tmpdir(), 'murasaki-crash-reports-'))
@@ -212,6 +215,7 @@ async function copyMainRuntimeFixture(root) {
   await mkdir(mainDir, { recursive: true })
   await Promise.all([
     copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(runtimeDir, 'main-runtime.js')),
+    copyFile(join(packageDir, 'dist/runtime/launch.js'), join(runtimeDir, 'launch.js')),
     copyFile(join(packageDir, 'dist/main/logger.js'), join(mainDir, 'logger.js')),
     copyFile(join(packageDir, 'dist/main/sidecar.js'), join(mainDir, 'sidecar.js')),
     copyFile(join(packageDir, 'dist/main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
@@ -236,6 +240,7 @@ async function startProdServer(t, { diagnostics } = {}) {
     version: '2.0.0',
     frameworkVersion: '9.9.9',
     diagnostics: diagnostics ?? { crashReports: true, keepReports: 5 },
+    windows: [{ label: 'main', backendCapabilities: ['diagnostics:renderer-error'] }],
   }))
   await copyFile(join(packageDir, 'assets/prod-server.mjs'), join(root, 'prod-server.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/updater.js'), join(root, 'updater-engine.mjs'))
@@ -265,6 +270,7 @@ async function startProdServer(t, { diagnostics } = {}) {
         XDG_DATA_HOME: join(root, 'xdg-data'),
         XDG_CACHE_HOME: join(root, 'xdg-cache'),
         XDG_STATE_HOME: join(root, 'xdg-state'),
+        MURASAKI_RUNTIME_TOKEN: RUNTIME_TOKEN,
       },
     },
   )
@@ -286,8 +292,6 @@ async function startProdServer(t, { diagnostics } = {}) {
     child.once('exit', (code) => reject(new Error(`server exited early (${code})`)))
   })
 
-  const bootstrap = await fetch(`http://127.0.0.1:${port}/`)
-  const runtimeCookie = bootstrap.headers.getSetCookie()[0].split(';', 1)[0]
   return {
     root,
     port,
@@ -300,11 +304,16 @@ async function startProdServer(t, { diagnostics } = {}) {
         : process.platform === 'win32'
           ? join(root, 'appdata-roaming', 'com.example.crash-diagnostics-test', 'crash-reports')
           : join(root, 'xdg-data', 'com.example.crash-diagnostics-test', 'crash-reports'),
-    runtimeHeaders: { cookie: runtimeCookie, 'content-type': 'application/json' },
+    runtimeHeaders: {
+      'x-murasaki-window-label': 'main',
+      'x-murasaki-window-generation': '1',
+      'x-murasaki-window-token': deriveWindowToken(RUNTIME_TOKEN, 'main'),
+      'content-type': 'application/json',
+    },
   }
 }
 
-test('renderer diagnostics endpoint requires the session cookie but not the native token', async (t) => {
+test('renderer diagnostics endpoint requires its window authority but not the native token', async (t) => {
   const { port, crashReportsDir, runtimeHeaders } = await startProdServer(t)
   const url = `http://127.0.0.1:${port}/__murasaki/diagnostics/renderer-error`
 
@@ -375,7 +384,7 @@ test('an uncaught exception writes a node crash report before the process exits 
   const dataDir = join(root, 'data')
   const script = join(root, 'crash.mjs')
   await writeFile(script, `
-import { MainRuntime } from ${JSON.stringify(join(packageDir, 'dist/runtime/main-runtime.js'))}
+import { MainRuntime } from ${JSON.stringify(pathToFileURL(join(packageDir, 'dist/runtime/main-runtime.js')).href)}
 
 const runtime = new MainRuntime({
   appId: 'com.example.node-crash-test',
@@ -417,7 +426,7 @@ test('diagnostics.crashReports: false leaves Node\'s default uncaughtException b
   const dataDir = join(root, 'data')
   const script = join(root, 'crash.mjs')
   await writeFile(script, `
-import { MainRuntime } from ${JSON.stringify(join(packageDir, 'dist/runtime/main-runtime.js'))}
+import { MainRuntime } from ${JSON.stringify(pathToFileURL(join(packageDir, 'dist/runtime/main-runtime.js')).href)}
 
 const runtime = new MainRuntime({
   appId: 'com.example.node-crash-disabled-test',

@@ -85,7 +85,15 @@ export function error(msg: string): string {
  * Store. Shared by `bundle` and `installer` (see cli/bundle.ts's and
  * cli/installer.ts's `--sign`/`--notarize` handling).
  */
-export function unsignedNote(path: string): string {
+export function unsignedNote(path: string, platform: 'darwin' | 'win32' = 'darwin'): string {
+  if (platform === 'win32') {
+    return (
+      `\n${warn('This Windows build is unsigned. SmartScreen or application-control policy may block it.')}\n` +
+      `${dim(`  Artifact:  "${path}"`)}\n` +
+      `${dim('  For distribution, configure sign.windows and run with --sign to Authenticode-sign the app and installers.')}\n` +
+      `${dim('  Do not tell end users to disable Windows security controls.')}\n`
+    )
+  }
   return (
     `\n${warn('This build is unsigned (ad-hoc). macOS may block browser-downloaded copies.')}\n` +
     `${dim(`  Allow it in System Settings → Privacy & Security, or:  xattr -dr com.apple.quarantine "${path}"`)}\n` +

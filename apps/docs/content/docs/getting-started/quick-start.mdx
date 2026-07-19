@@ -8,7 +8,8 @@ description: Scaffold a Murasaki app, run it with HMR, and build a distributable
 - **Node.js 22.12+** (Node 20 is end-of-life and is not supported)
 - `murasaki dev` runs on **macOS, Windows, and Linux**. A macOS `.app` / `.dmg`
   must be built on macOS; a portable Windows folder / `.zip` can be cross-built
-  from any host. Linux app packaging is on the roadmap.
+  from any host. Linux x64 and arm64 targets produce an AppDir, `.AppImage`, and
+  `.deb`; creating the AppImage requires `mksquashfs`.
 
 ## Scaffold
 
@@ -42,18 +43,22 @@ pnpm installer
 
 The bundle ships a portable Node runtime and a native launcher, so it runs on
 other machines — not just your build machine. On macOS, the first two commands
-produce an `.app` and `.dmg`. A portable Windows folder / `.zip` can be built
-from any host by selecting a Windows target:
+produce an `.app` and `.dmg`. Select a target explicitly to build portable
+Windows or Linux artifacts:
 
 ```bash
 pnpm bundle --arch x64            # choose the target architecture
 pnpm bundle --target win32-x64    # portable Windows folder + .zip
+pnpm bundle --target linux-x64    # AppDir + AppImage
+pnpm installer --target linux-x64 # Debian package (.deb)
 ```
 
-`pnpm installer --target win32-x64` additionally creates an NSIS `.exe` when
-`makensis` is installed, and an MSI `.msi` when WiX v4 is installed on Windows.
-If neither optional tool is available, no Windows installer is produced; the
-portable `.zip` still works. See [Distribution](/docs/building/distribution)
+`pnpm installer --target win32-x64` creates an NSIS `.exe` when `makensis` is
+installed. With the built-in updater disabled, it also creates an MSI `.msi`
+when WiX v4 is available on Windows. An updater-enabled build is intentionally
+per-user NSIS only. The command fails when no installer can be produced; use
+`pnpm bundle --target win32-x64` when the portable `.zip` is the intended
+artifact. See [Distribution](/docs/building/distribution)
 for tool setup and all targets.
 
 <Callout type="warn">

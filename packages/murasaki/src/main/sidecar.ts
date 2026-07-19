@@ -12,6 +12,14 @@ const MAX_ENV_VALUE_BYTES = 32 * 1024
 const MAX_RESTARTS = 10
 const MAX_STOP_TIMEOUT_MS = 30_000
 const DEFAULT_STOP_TIMEOUT_MS = 5_000
+/** Framework authority/build secrets that must never cross into app helpers. */
+const RESERVED_SIDECAR_ENV_KEYS = new Set([
+  'MURASAKI_RUNTIME_TOKEN',
+  'MURASAKI_DEV_LAUNCH',
+  'MURASAKI_UPDATE_KEY',
+  'MURASAKI_WINDOWS_CERTIFICATE_PASSWORD',
+  'APPLE_APP_PASSWORD',
+])
 
 export type SidecarWorkingDirectory = 'resources' | 'data' | 'cache' | 'temp'
 
@@ -184,7 +192,7 @@ class SidecarController {
     if (this.#stopRequested) return
     const child = spawn(this.controller.executable, this.controller.options.args ?? [], {
       cwd: this.controller.cwd,
-      env: { ...process.env, ...this.controller.options.env },
+      env: sidecarEnvironment(this.controller.options.env),
       shell: false,
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -320,6 +328,9 @@ function validateSpawnOptions(options: SidecarSpawnOptions): void {
   if (env.length > MAX_ENV_ENTRIES) throw new TypeError(`sidecar env exceeds ${MAX_ENV_ENTRIES} entries`)
   for (const [key, value] of env) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new TypeError(`invalid sidecar env name ${key}`)
+    if (RESERVED_SIDECAR_ENV_KEYS.has(key)) {
+      throw new TypeError(`sidecar env ${key} is reserved by Murasaki and cannot be forwarded`)
+    }
     validateBoundedString(value, MAX_ENV_VALUE_BYTES, `sidecar env ${key}`)
   }
   if (options.restart) {
@@ -333,6 +344,17 @@ function validateSpawnOptions(options: SidecarSpawnOptions): void {
       throw new TypeError('sidecar restart delayMs must be an integer from 0 to 60000')
     }
   }
+}
+
+/**
+ * Preserve the host environment for normal executable discovery and locale
+ * behaviour, but remove framework bearer/signing credentials before merging
+ * the developer's explicitly validated sidecar environment.
+ */
+function sidecarEnvironment(overrides: Record<string, string> | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  for (const key of RESERVED_SIDECAR_ENV_KEYS) delete env[key]
+  return { ...env, ...overrides }
 }
 
 function validateBoundedString(value: unknown, maxBytes: number, label: string): void {

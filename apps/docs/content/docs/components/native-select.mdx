@@ -1,0 +1,23 @@
+---
+title: Native Select
+description: Uses the operating system's native select control with Murasaki styling.
+---
+
+## Usage
+
+```tsx
+import { Field, FieldLabel, NativeSelect } from '@murasakijs/ui'
+
+<Field>
+  <FieldLabel htmlFor="language">Language</FieldLabel>
+  <NativeSelect id="language" defaultValue="en">
+    <option value="en">English</option>
+    <option value="ja">日本語</option>
+  </NativeSelect>
+</Field>
+```
+
+Use `NativeSelect` when platform behavior, autofill, and a small dependency
+surface matter more than a fully custom popup. It forwards native `<select>`
+attributes and a ref to the select element. For rich option content or custom
+positioning, use [Select](/docs/components/select).

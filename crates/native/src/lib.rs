@@ -15,6 +15,8 @@ mod types;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod application;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
+mod autostart;
+#[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod capability_policy;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod clipboard;

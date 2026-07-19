@@ -33,7 +33,7 @@ export default defineMain({
   },
 
   async secondInstance(_context, { argv, cwd }) {
-    // Packaged macOS/Windows: another launch was redirected here.
+    // Packaged macOS/Windows/Linux: another launch was redirected here.
     console.log('second launch:', { argv, cwd })
   },
 
@@ -74,6 +74,7 @@ Set `main: false` to disable discovery even when `src/main.ts` exists.
 | `platform`, `arch` | Runtime target (`process.platform` / `process.arch`) |
 | `projectRoot` | Project root in dev; packaged resource working directory in production |
 | `resourcesPath` | Read-only application resources location |
+| `launch.argv`, `launch.cwd` | Bounded raw arguments and working directory from the primary cold start |
 | `paths.data` | Durable app data |
 | `paths.cache` | Re-creatable cache data |
 | `paths.logs` | Log files |
@@ -86,6 +87,40 @@ Set `main: false` to disable discovery even when `src/main.ts` exists.
 Quit reasons are `window-close`, `app-quit`, `signal`, `restart`, `dev-reload`,
 and `startup-failure`. See the [process model](/docs/core-concepts/process-model)
 for ordering and cancellation behavior.
+
+## Read primary launch arguments
+
+The first application process receives its raw launch arguments in
+`context.launch`. This includes arbitrary app flags that are not registered
+deep links or file types:
+
+```ts title="src/main.ts"
+import { defineMain } from 'murasaki/main'
+
+export default defineMain({
+  async ready({ launch, paths }) {
+    if (launch.argv.includes('--no-sample-data')) {
+      console.log('start without seeded data', { dataDirectory: paths.data })
+    }
+  },
+})
+```
+
+In a packaged app, launch the executable with the flag. During development,
+put application arguments after a standalone `--` so Murasaki's own CLI flags
+cannot be mistaken for app input:
+
+```bash
+murasaki dev -- --no-sample-data
+```
+
+`launch.argv` contains at most 64 intact arguments; an argument larger than
+8 KiB, input beyond the 16 KiB encoded-array limit, and excess input are
+discarded consistently in development and packaged builds. Treat every value and `launch.cwd` as
+untrusted local input. Registered URLs and files are also delivered in a
+normalized form through `openRequested()`; do not process the same target in
+both paths. A second process uses `secondInstance()` instead of replacing the
+primary `launch` snapshot.
 
 ## Logs and diagnostic reports
 
@@ -203,7 +238,13 @@ and stops every live helper during shutdown.
 export default defineConfig({
   appId: 'com.example.notes',
   productName: 'Notes',
-  bundle: { resources: ['sidecars/search-indexer'] },
+  bundle: {
+    resources: [{
+      from: 'sidecars/search-indexer',
+      to: 'sidecars/search-indexer',
+      executable: true,
+    }],
+  },
 })
 ```
 
@@ -230,17 +271,24 @@ export default defineMain({
 `resource` must be a relative path whose resolved target stays below the
 packaged resource root; symlink escapes and traversal are rejected. On POSIX
 the resource must be executable. Use a platform-specific filename such as
-`search-indexer.exe` in a target-specific build when necessary. Working
+`search-indexer.exe` in a target-specific build when necessary.
+`executable: true` is mandatory for helper binaries: it makes Murasaki sign
+the nested Mach-O/PE before sealing the app or installer. Signed packaging
+fails closed if an unmarked `bundle.resources` file looks executable.
+Working
 directories are restricted to `resources`, `data`, `cache`, or `temp`.
-Sidecars inherit Node Main's environment plus the explicit `env` entries, so
-do not start an untrusted executable or forward renderer-controlled arguments
-without validation. Windows descendants remain covered by the launcher's Job
+Sidecars inherit Node Main's environment plus the explicit `env` entries, except
+that Murasaki strips its runtime authority and signing secrets. Reserved keys
+(`MURASAKI_RUNTIME_TOKEN`, `MURASAKI_DEV_LAUNCH`, `MURASAKI_UPDATE_KEY`,
+`MURASAKI_WINDOWS_CERTIFICATE_PASSWORD`, and `APPLE_APP_PASSWORD`) cannot be
+forwarded explicitly either. Do not start an untrusted executable or forward
+renderer-controlled arguments without validation. Windows descendants remain covered by the launcher's Job
 Object; normal stop sends termination first and escalates after a bounded
 deadline.
 
 ### `secondInstance(context, event)`
 
-Packaged macOS and Windows apps use a per-user, per-`appId` lock. When another
+Packaged macOS, Windows, and Linux apps use a per-user, per-`appId` lock. When another
 launch is redirected to the primary app, Murasaki focuses its window and calls
 `secondInstance()` with:
 
@@ -251,8 +299,7 @@ launch is redirected to the primary app, Murasaki focuses its window and calls
 
 Validate every argument before use. `secondInstance()` is the low-level process
 activation hook: it receives raw launch arguments whether or not they match a
-registered URL scheme or file type. It is not currently delivered by
-`murasaki dev` or Linux.
+registered URL scheme or file type. It is not delivered by `murasaki dev`.
 
 ### `openRequested(context, event)`
 
@@ -438,21 +485,24 @@ identifier or path and stream the data entirely within Node.
 | `'use server'` | React action/form-shaped mutations using `ActionState` |
 | `src/api/**/route.ts` | Request/Response semantics, streaming bodies, HTTP method routing |
 
-All three execute in the app-local Node runtime. API routes are not a public
-network server; Murasaki protects them with the same app runtime session as
-the internal RPC endpoints.
+All three execute in the app-local Node runtime. They are not a public network
+server: Murasaki authenticates the exact native window and checks its separate
+`main:*`, `action:*`, or `api:METHOD:/path` backend grant before dispatch.
 
 ## Current limits
 
 Node Main can create and destroy only secondary window templates declared in
 `murasaki.config.*`; it cannot construct an ad-hoc URL, capability policy, or
 undeclared native window at runtime. Declared windows are managed through the
-Node Main `windows` manager or from trusted renderers through `murasaki/native`. Tray
-menus are available through that renderer API, while Node Main itself still
-has no direct tray-menu or global-shortcut API. Packaged macOS/Windows single-instance delivery is available
+Node Main `windows` manager or from trusted renderers through `murasaki/native`.
+Tray menus are available through that renderer API, while Node Main itself
+still has no direct tray-menu or global-shortcut API. Packaged macOS, Windows,
+and Linux single-instance delivery is available
 through `secondInstance()`; configured URL schemes and file associations are
-delivered through `openRequested()`. Windows portable archives, Linux, and
-`murasaki dev` do not install system association metadata.
+delivered through `openRequested()`. macOS bundles and Windows installers
+register declared associations; Linux `.deb` packages install the generated
+desktop metadata. Manually extracted Windows portable archives, AppDir/AppImage
+artifacts, and `murasaki dev` do not perform that OS-level registration step.
 Renderer-safe dialogs, clipboard, notifications, shell, and basic window commands are separately available from
 `murasaki/native` behind the `capabilities` allowlist. Node packages may also
 require explicit `bundle.external` / `bundle.resources` entries when they use

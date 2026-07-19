@@ -19,7 +19,7 @@ export interface HomeContent {
     caption: string;
     /** Status-pill label for the macOS (available today) card. */
     availableLabel: string;
-    /** Status-pill label for the Windows/Linux (roadmap) cards. */
+    /** Status-pill label for an artifact whose support is not yet complete. */
     soonLabel: string;
   };
   /** Copy for the tabbed code showcase section. */
@@ -384,33 +384,33 @@ const en: HomeContent = {
 };
 
 const ja: HomeContent = {
-  eyebrow: "React 19 · Vite · Rust-native",
+  eyebrow: "React 19 · Vite · Rust ホスト",
   headline: {
     prefix: "",
-    highlight: "デスクトップアプリ",
-    suffix: "のための Next.js DX。",
+    highlight: "Next.js の開発体験",
+    suffix: "を、デスクトップへ。",
   },
   subhead:
-    "ファイルベースルーティング、サーバーアクション、React 19 でネイティブなデスクトップアプリを構築 — Electron の Chromium ではなく、Rust ネイティブなウィンドウで動作します。Rust を書く必要はありません。",
-  getStarted: "はじめる",
+    "ファイルベースルーティング、Server Actions、React 19。Web 開発で慣れ親しんだ体験のまま、OS 標準の WebView で動くデスクトップアプリを構築できます。Rust を書く必要はありません。",
+  getStarted: "今すぐ始める",
   github: "GitHub",
-  bandLabel: "オープンソース・MIT ライセンス・React 19・Vite・Rust ネイティブ",
+  bandLabel: "オープンソース · MIT ライセンス · React 19 · Vite · Rust ホスト",
   mockup: {
-    heading: "実際に届けるのは、これです。",
+    heading: "開発画面ではなく、配布できるアプリへ。",
     caption:
-      "1コマンドで、本物のネイティブインストーラへ。macOS・Windows・Linux(AppImage / .deb)。",
-    availableLabel: "今すぐ",
-    soonLabel: "近日",
+      "1つのコマンドで配布用パッケージを生成。macOS、Windows、Linux（AppImage / .deb）に対応します。",
+    availableLabel: "利用可能",
+    soonLabel: "近日対応",
   },
   codeShowcase: {
-    eyebrow: "ドキュメントそのまま",
+    eyebrow: "コードからデスクトップアプリへ",
     heading: {
-      prefix: "React を書く。",
-      highlight: "ネイティブ",
-      suffix: "として届く。",
+      prefix: "React で書いて、",
+      highlight: "デスクトップアプリ",
+      suffix: "として届ける。",
     },
     description:
-      "ファイルルート、サーバーアクション、API ルート、そして1つの設定ファイル。Next.js でおなじみの形のまま、ネイティブアプリとしてビルドされます。",
+      "ファイルベースルーティング、Server Actions、API Routes、そして1つの設定ファイル。Next.js に近い構成のまま、デスクトップアプリとしてビルドできます。",
     tabs: [
       { id: "actions", label: "src/actions.ts" },
       { id: "page", label: "src/app/page.tsx" },
@@ -419,45 +419,46 @@ const ja: HomeContent = {
     ],
   },
   featuresEyebrow: "今すぐ使える機能",
-  featuresHeading: "デスクトップアプリをリリースするために必要なすべて",
+  featuresHeading: "開発から配布まで、ひとつのフレームワークで",
   featuresIntro:
-    "ネイティブコードを書く必要も、IPC を手動配線する必要もありません — そのまま動く6つの機能です。",
+    "ネイティブコードや IPC の配線をアプリごとに書かずに、デスクトップ固有の機能を React から利用できます。",
   features: [
     {
       title: "ファイルベースルーティング",
       description:
-        "src/app/**/page.tsx、レイアウト、動的セグメント — Next.js でおなじみのルーティングです。",
+        "src/app/**/page.tsx、レイアウト、動的セグメント。Next.js に近いファイル構成で画面を追加できます。",
     },
     {
       title: "Server Actions",
       description:
-        "'use server' + defineAction / useAction — おなじみの React 19 の形そのままに、ネイティブで動作します。",
+        "'use server' と defineAction / useAction を使い、Node.js 側の処理を型付きで呼び出せます。",
     },
     {
       title: "API Routes",
       description:
-        "Next.js 風の src/api/**/route.ts による HTTP エンドポイント。別途サーバーを用意する必要はありません。",
+        "src/api/**/route.ts にローカル HTTP エンドポイントを定義できます。別のローカルサーバーを用意する必要はありません。",
     },
     {
       title: "ネイティブウィンドウ & メニュー",
       description:
-        "本物のネイティブウィンドウ、ネイティブメニューバー、スコープ付きのネイティブコンテキストメニュー — HTML のポップアップではありません。",
+        "OS のウィンドウ、アプリケーションメニュー、コンテキストメニューを宣言的に構成できます。",
     },
     {
       title: "UI キット",
       description:
-        "@murasakijs/ui — Murasaki アプリのために作られた shadcn スタイルのコンポーネントライブラリです。",
+        "@murasakijs/ui は、Murasaki アプリ向けのアクセシブルなコンポーネントライブラリです。",
     },
     {
       title: "署名済み配布",
-      description: "コード署名・公証にも対応した、ポータブルな .app バンドル。",
+      description:
+        "macOS のコード署名・公証、Windows と Linux の配布パッケージ生成に対応します。",
     },
   ],
   whyMurasaki: {
     eyebrow: "Murasaki を選ぶ理由",
     heading: "Murasaki を選ぶ理由",
     paragraph:
-      "React/Next.js を知っていて、Rust を学んだり IPC を手動で配線したりすることなく、軽量なデスクトップアプリを作りたいなら Murasaki を選んでください。",
+      "React / Next.js の知識を活かしながら、Rust や IPC の実装を最小限にして軽量なデスクトップアプリを作りたい開発者に適しています。",
     tableHeadings: {
       feature: "項目",
       murasaki: "Murasaki",
@@ -465,7 +466,7 @@ const ja: HomeContent = {
       tauri: "Tauri",
     },
     statValue: "約1/5",
-    statLabel: "Electron のアイドル時メモリ使用量。",
+    statLabel: "Electron に対するアイドル時メモリ使用量の目安",
   },
   comparisonRows: [
     {
@@ -482,7 +483,7 @@ const ja: HomeContent = {
     },
     {
       label: "DX",
-      murasaki: "Next.js 風(Vite HMR)",
+      murasaki: "Next.js に近い構成（Vite HMR）",
       electron: "手動配線",
       tauri: "手動配線",
     },
@@ -502,35 +503,35 @@ const ja: HomeContent = {
   comparisonFootnote:
     "* Electron/Tauri でよく引用されるおおよその目安であり、実測ベンチマークではありません。",
   nativeDeepDive: {
-    eyebrow: "本物の OS、ブラウザのタブではない",
-    heading: "ブラウザのタブではない。本物の OS ウィンドウ。",
+    eyebrow: "ブラウザタブではなく、OS のウィンドウ",
+    heading: "Web の開発体験を、OS のウィンドウで。",
     paragraph:
-      "Murasaki のウィンドウはネイティブです — 本物のタイトルバー、本物のメニューバー、本物の OS クロームを備えています。どこを右クリックしても、HTML のポップアップではない、本物のネイティブメニューが開きます。",
+      "Murasaki は OS 標準の WebView をネイティブウィンドウに組み込みます。タイトルバーやアプリケーションメニュー、コンテキストメニューは OS の機能として動作します。",
     bullets: [
       {
         title: "ネイティブウィンドウ",
         description:
-          "本物の OS ウィンドウ(wry)— ブラウザのタブでも iframe でもありません。",
+          "wry を通じて OS の WebView を表示します。ブラウザのタブや iframe ではありません。",
       },
       {
         title: "ネイティブメニューバー",
         description:
-          "アプリと同じ設定から組み立てられる、本物のアプリケーションメニューバー。",
+          "React 側の宣言から OS のアプリケーションメニューを構築します。",
       },
       {
         title: "スコープ付きコンテキストメニュー",
         description:
-          "useContextMenu(items) は本物の NSMenu / HMENU / GtkMenu を宣言します — ウィンドウ全体にも、要素にスコープを絞った形にも。",
+          "useContextMenu(items) で NSMenu / HMENU / GtkMenu を宣言し、対象をウィンドウ全体または特定の要素に限定できます。",
       },
     ],
     codeLabel: "src/app/layout.tsx",
     menuMockLabel: "本物の NSMenu / HMENU / GtkMenu — HTML ではありません。",
   },
   distribution: {
-    eyebrow: "本物の .app を届ける",
-    heading: "開発から、署名済み .app へ。",
+    eyebrow: "配布パッケージを生成",
+    heading: "開発から配布まで、同じ CLI で。",
     paragraph:
-      "同じ CLI だけで、起動中の開発ウィンドウから、ポータブルでクロスアーキテクチャな、署名・公証済みの .app まで届きます — 別のパッケージングツールは不要です。",
+      "開発用ウィンドウの起動から、複数アーキテクチャ向けのバンドル、署名・公証、インストーラー生成までを Murasaki CLI で実行できます。",
     steps: [
       {
         label: "足場を作る",
@@ -545,41 +546,40 @@ const ja: HomeContent = {
       {
         label: "署名・公証する",
         command: "murasaki bundle --sign",
-        note: "任意 — 自分の Apple Developer ID を使用。Murasaki は証明書を提供しません",
+        note: "任意 — ご自身の Apple Developer ID 証明書を使用します",
       },
       {
         label: "インストーラーを作る",
         command: "murasaki installer --sign --notarize",
-        note: "→ dist/<App>-<version>.dmg(公証済み)",
+        note: "→ dist/<App>-<version>.dmg（公証済み）",
       },
     ],
     platforms: [
       {
         name: "macOS",
-        status: "本日から利用可能",
+        status: "利用可能",
         available: true,
-        description:
-          ".app / .dmg、クロスアーキテクチャ(arm64 / x64)、コード署名・公証にも対応。",
+        description: ".app / .dmg、arm64 / x64、コード署名・公証に対応。",
       },
       {
         name: "Windows",
-        status: "本日から利用可能",
+        status: "利用可能",
         available: true,
         description:
-          ".zip ポータブル版に加え、NSIS .exe / MSI .msi インストーラ、クロスアーキテクチャ(arm64 / x64)。",
+          ".zip ポータブル版、NSIS .exe / MSI .msi インストーラー、arm64 / x64 に対応。",
       },
       {
         name: "Linux",
         status: "部分対応",
         available: true,
         description:
-          "AppImage と .deb パッケージ(x64 / arm64)。AppImage は自己更新にも対応。rpm パッケージングとコード署名は未対応です。",
+          "AppImage と .deb パッケージ（x64 / arm64）に対応。AppImage は自己更新にも対応します。rpm とコード署名は未対応です。",
       },
     ],
   },
   quickStart: {
-    eyebrow: "たった3つのコマンド",
-    heading: "3つのコマンドで届ける。",
+    eyebrow: "3つのコマンドで開始",
+    heading: "作成して、動かして、バンドルする。",
     steps: [
       {
         label: "作成",
@@ -590,9 +590,9 @@ const ja: HomeContent = {
     ],
   },
   ctaBand: {
-    heading: "はじめての、ネイティブアプリを。",
+    heading: "最初のデスクトップアプリを作りましょう。",
     paragraph:
-      "React 19、ファイルベースルーティング、サーバーアクション — 本物のネイティブウィンドウの中で動きます。Rust を書く必要はありません。",
+      "React 19、ファイルベースルーティング、Server Actions を OS のウィンドウで。Rust を書く必要はありません。",
   },
   footer: {
     columns: [
@@ -622,9 +622,9 @@ const ja: HomeContent = {
       {
         heading: "ビルド",
         links: [
-          { label: "Configuration", href: "/docs/building/configuration" },
+          { label: "設定", href: "/docs/building/configuration" },
           { label: "CLI", href: "/docs/building/cli" },
-          { label: "Distribution", href: "/docs/building/distribution" },
+          { label: "配布", href: "/docs/building/distribution" },
         ],
       },
     ],
@@ -833,7 +833,7 @@ const lpEn: LpExtra = {
     eyebrow: "Runnable apps",
     heading: "Try the result, not just the pitch.",
     intro:
-      "Run the packaged default scaffold or three independent apps through the developer CLI—without presenting an unsigned build as a consumer download.",
+      "Run the packaged default scaffold, then inspect three independent products built from real application requirements.",
     defaultDemo: {
       label: "Developer preview · CLI",
       heading: "The default scaffold, already packaged.",
@@ -845,28 +845,28 @@ const lpEn: LpExtra = {
     },
     sampleLabel: "Three apps. Three directions.",
     sourceLabel: "Source",
-    downloadsLabel: "Build details",
+    downloadsLabel: "Browse all sources",
     runner: {
-      note: "These macOS developer previews run through Murasaki's CLI—no consumer download is presented as a signed app. Each command verifies the published SHA256 and ad-hoc code signature before removing quarantine and launching.",
+      note: "The new examples are source-first while their install, launch, recovery, and cross-platform matrices are completed. No unsigned build is presented as a consumer download.",
       label: "macOS developer preview",
       copy: "Copy demo command",
       copied: "Copied",
     },
     apps: [
       {
-        name: "Violet Notes",
+        name: "Papelle",
         description:
-          "Local-first Markdown editing, live preview, import/export, and native menus.",
+          "A local-first block workspace with Markdown, attachments, linked pages, database views, and optional self-hosted collaboration.",
       },
       {
-        name: "Murasaki Focus",
+        name: "Oscilla",
         description:
-          "Persistent timer state, keyboard controls, and a focused consumer desktop UI.",
+          "An API workbench for REST, GraphQL, WebSocket, scenarios, mock responses, and an integrated traffic timeline.",
       },
       {
-        name: "Local Signal",
+        name: "Orglia",
         description:
-          "API Routes, Server Actions, the bundled Node runtime, and live request monitoring.",
+          "A self-hosted operations suite connecting CRM, projects, orders, inventory, approvals, shifts, incidents, and analytics.",
       },
     ],
   },
@@ -888,13 +888,13 @@ const lpEn: LpExtra = {
 
 const lpJa: LpExtra = {
   marquee: [
-    "デスクトップのための Next.js DX",
+    "Next.js の開発体験をデスクトップへ",
     "ネイティブウィンドウ",
     "ネイティブメニュー",
     "メモリは Electron の約1/5",
     "React 19",
     "Vite HMR",
-    "Rust ネイティブ",
+    "軽量な Rust ホスト",
     "Rust 不要",
     "MIT ライセンス",
   ],
@@ -935,80 +935,80 @@ const lpJa: LpExtra = {
     demoCta: "Try the interactive demo",
     codeCaption:
       "このコードが、このメニューになります。macOS では NSMenu、Windows では HMENU。",
-    tryHint: "メニューを触ってみてください — 表示 → 再読み込みは動きます。",
+    tryHint: "メニューを操作できます。View → Reload も試してみてください。",
   },
-  converge: { left: "ネイティブアプリ。", right: "Web の DX。" },
+  converge: { left: "ネイティブアプリ。", right: "Web の開発体験。" },
   manifesto:
-    "ファイルベースルーティング、サーバーアクション、React 19 でネイティブなデスクトップアプリを構築 — Electron の Chromium ではなく、Rust ネイティブなウィンドウで。Rust を書く必要はありません。",
-  manifestoCounterLabel: "Lit",
-  scrollCue: "Scroll",
+    "ファイルベースルーティング、Server Actions、React 19 を使ってデスクトップアプリを構築。Electron の Chromium ではなく OS 標準の WebView を使い、Rust を書かずに開発できます。",
+  manifestoCounterLabel: "表示",
+  scrollCue: "スクロール",
   playground: {
     eyebrow: "試してみる",
     heading: "右クリックしてみて。",
-    hint: "こっそり右クリック。お絵かきもできます",
+    hint: "右クリック、またはドラッグして描いてみてください",
     items: {
       stamp: "蝶をスタンプ 🦋",
-      shuffle: "配色をシャッフル 🎨",
-      clear: "キャンバスを消す 🧹",
-      confession: "(このメニューだけは、ただの HTML です)",
+      shuffle: "配色を変更 🎨",
+      clear: "キャンバスを消去 🧹",
+      confession: "（このメニューだけは HTML でできています）",
     },
     caption:
-      "本物の Murasaki アプリなら、ここでネイティブの NSMenu / HMENU が開きます。Web サイト上では……やっぱりただの HTML です。どこかで正直でいないと、ですね。",
+      "Murasaki アプリでは NSMenu / HMENU が開きます。この Web ページ上のメニューはデモ用の HTML です。",
   },
   examples: {
-    eyebrow: "実際に動くアプリ",
-    heading: "説明より先に、完成品を試す。",
+    eyebrow: "実行できるサンプル",
+    heading: "説明だけでなく、動作するアプリで確認する。",
     intro:
-      "未公証ビルドを一般向けダウンロードとして見せず、標準スキャフォールドと3つの独立アプリをDeveloper CLIから試せます。",
+      "標準スキャフォールドを実行し、実際の要件から設計した3つの独立したアプリをソースから確認できます。",
     defaultDemo: {
-      label: "Developer Preview · CLI",
-      heading: "標準スキャフォールドを、そのままアプリに。",
+      label: "開発者プレビュー · CLI",
+      heading: "標準スキャフォールドを、そのまま実行。",
       description:
-        "create-murasakiが生成するアプリそのものです。ネイティブメニュー、ファイルベースルーティング、Server Actions、API Routes、同梱Nodeを確認できます。",
+        "create-murasaki が生成するアプリです。ネイティブメニュー、ファイルベースルーティング、Server Actions、API Routes、同梱された Node.js ランタイムを確認できます。",
       releaseNotes: "ビルド詳細とチェックサム",
       firstLaunch:
-        "macOS CLIがCPUに合うビルドを選択し、公開SHA256とad-hocコード署名を検証してから、隔離属性を明示的に解除して起動します。",
+        "macOS CLI が CPU に合うビルドを選び、公開済みの SHA-256 と ad-hoc コード署名を検証した後、隔離属性を解除して起動します。",
     },
     sampleLabel: "3つのアプリ。3つの方向性。",
     sourceLabel: "ソース",
-    downloadsLabel: "ビルド詳細",
+    downloadsLabel: "すべてのソースを見る",
     runner: {
-      note: "macOS向けDeveloper PreviewはMurasaki CLIから起動します。未公証アプリを一般向けダウンロードとして見せず、各コマンドが公開SHA256とad-hocコード署名を検証してから隔離属性を解除します。",
-      label: "macOS Developer Preview",
-      copy: "Demoコマンドをコピー",
+      note: "新しいサンプルは、インストール、初回起動、復旧、各 OS の検証が完了するまでソースを先に公開します。未署名のビルドを一般利用者向けダウンロードとして案内しません。",
+      label: "macOS 開発者プレビュー",
+      copy: "デモ用コマンドをコピー",
       copied: "コピーしました",
     },
     apps: [
       {
-        name: "Violet Notes",
+        name: "Papelle",
         description:
-          "ローカルファーストなMarkdown編集、ライブプレビュー、入出力、ネイティブメニュー。",
+          "ブロック編集、Markdown、添付ファイル、ページ間リンク、データベース表示、任意のセルフホスト同期を備えたローカルファーストのワークスペース。",
       },
       {
-        name: "Murasaki Focus",
+        name: "Oscilla",
         description:
-          "永続化するタイマー、キーボード操作、コンシューマー向けデスクトップUI。",
+          "REST、GraphQL、WebSocket、シナリオテスト、モック応答、通信タイムラインをまとめた API ワークベンチ。",
       },
       {
-        name: "Local Signal",
+        name: "Orglia",
         description:
-          "API Routes、Server Actions、同梱Node、リアルタイムなリクエスト監視。",
+          "CRM、プロジェクト、受発注、在庫、申請、シフト、インシデント、分析をつなぐセルフホスト型の業務アプリ。",
       },
     ],
   },
   asciiButterfly: {
     eyebrow: "ごあいさつ",
-    heading: "オオムラサキ。",
-    hint: "ドラッグで回せます · すべて文字",
+    heading: "オオムラサキに会いましょう。",
+    hint: "ドラッグで回転 · すべてテキスト",
     caption:
-      "国蝶オオムラサキ(Sasakia charonda)— murasaki の名前の由来です。create-murasaki がターミナルに描く起動バナーと同じように、すべてテキストで描画しています。",
+      "国蝶オオムラサキ（Sasakia charonda）は Murasaki の名前の由来です。create-murasaki がターミナルに描くバナーと同じように、すべてテキストで描画しています。",
   },
   dmgDemo: {
     folderLabel: "アプリケーション",
-    hint: "Murasaki を「アプリケーション」へドラッグしてインストール。",
+    hint: "Murasaki を「アプリケーション」へドラッグしてインストールします。",
     installedTitle: "インストール完了。",
     installedCaption:
-      "(実際にはインストールしていません。でも本物も、こんな感触です。)",
+      "（これは操作デモです。実際のアプリは同じ手順でインストールできます。）",
   },
 };
 

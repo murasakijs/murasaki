@@ -1,0 +1,41 @@
+{
+  "name": "@murasaki-examples/orglia",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "murasaki dev",
+    "dev:web": "vite --host 0.0.0.0",
+    "build": "murasaki build",
+    "bundle": "murasaki bundle",
+    "bundle:linux": "murasaki bundle --target linux-x64",
+    "installer": "murasaki installer",
+    "installer:linux": "murasaki installer --target linux-x64",
+    "serve": "node server/server.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run src && node --test server/*.test.mjs",
+    "test:postgres": "node --test server/postgres.integration.test.mjs",
+    "data:reset": "node server/reset.mjs"
+  },
+  "dependencies": {
+    "@murasakijs/ui": "workspace:*",
+    "lucide-react": "1.25.0",
+    "murasaki": "workspace:*",
+    "pg": "8.16.3",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^3.2.6"
+  }
+}

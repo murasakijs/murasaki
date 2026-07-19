@@ -87,6 +87,7 @@ export function resolveUpdater(
     checkOnStart: opts.checkOnStart ?? true,
     checkIntervalMs: parseCheckInterval(opts.checkInterval),
     maxManifestAgeDays: opts.maxManifestAgeDays ?? 90,
+    allowLegacyManifestsWithoutGeneratedAt: opts.allowLegacyManifestsWithoutGeneratedAt ?? false,
   }
 }
 

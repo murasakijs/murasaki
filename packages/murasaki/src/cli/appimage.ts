@@ -1,10 +1,11 @@
-import { createHash } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream, existsSync } from 'node:fs'
+import { chmod, copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { pipeline } from 'node:stream/promises'
 import { dim } from './brand.js'
+import { downloadHttpsFile, sha256File } from './secure-fetch.js'
 
 /**
  * `.AppImage` packaging — squashfs-compresses a just-assembled AppDir (see
@@ -67,26 +68,35 @@ export async function ensureAppImageRuntime(arch: LinuxArch): Promise<string> {
   const expectedSha256 = APPIMAGE_RUNTIME_SHA256[arch]
   const cacheDir = join(homedir(), '.murasaki', 'appimage-runtime', APPIMAGE_RUNTIME_RELEASE, archName)
   const cachedRuntime = join(cacheDir, 'runtime')
-  if (existsSync(cachedRuntime)) return cachedRuntime
+  if (existsSync(cachedRuntime)) {
+    const cachedSha256 = await sha256File(cachedRuntime)
+    if (cachedSha256 === expectedSha256) return cachedRuntime
+    await rm(cachedRuntime, { force: true })
+  }
 
   const url = `https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_RELEASE}/runtime-${archName}`
   process.stdout.write(`${dim(`downloading AppImage runtime (${archName})…`)}\n`)
 
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`murasaki: failed to download ${url} (${res.status} ${res.statusText})`)
-  }
-  const buf = Buffer.from(await res.arrayBuffer())
-  const actualSha256 = createHash('sha256').update(buf).digest('hex')
-  if (actualSha256 !== expectedSha256) {
-    throw new Error(
-      `murasaki: checksum mismatch for AppImage runtime-${archName} — expected ${expectedSha256}, got ${actualSha256}`,
-    )
-  }
+  const workDir = await mkdtemp(join(tmpdir(), 'murasaki-appimage-runtime-'))
+  try {
+    const downloaded = join(workDir, 'runtime')
+    const actualSha256 = await downloadHttpsFile(url, downloaded, {
+      label: `AppImage runtime-${archName}`,
+      maxBytes: 16 * 1024 * 1024,
+      timeoutMs: 2 * 60_000,
+    })
+    if (actualSha256 !== expectedSha256) {
+      throw new Error(
+        `murasaki: checksum mismatch for AppImage runtime-${archName} — expected ${expectedSha256}, got ${actualSha256}`,
+      )
+    }
 
-  await mkdir(cacheDir, { recursive: true })
-  await writeFile(cachedRuntime, buf)
-  await chmod(cachedRuntime, 0o755)
+    await mkdir(cacheDir, { recursive: true })
+    await copyFile(downloaded, cachedRuntime)
+    await chmod(cachedRuntime, 0o755)
+  } finally {
+    await rm(workDir, { recursive: true, force: true })
+  }
   return cachedRuntime
 }
 
@@ -134,9 +144,20 @@ export async function buildAppImage(
     }
 
     await rm(appImagePath, { force: true })
-    await writeFile(appImagePath, await readFile(runtimePath))
-    await appendFile(appImagePath, await readFile(squashfsPath))
-    await chmod(appImagePath, 0o755)
+    try {
+      await pipeline(
+        createReadStream(runtimePath),
+        createWriteStream(appImagePath, { flags: 'wx', mode: 0o600 }),
+      )
+      await pipeline(
+        createReadStream(squashfsPath),
+        createWriteStream(appImagePath, { flags: 'a' }),
+      )
+      await chmod(appImagePath, 0o755)
+    } catch (error) {
+      await rm(appImagePath, { force: true }).catch(() => {})
+      throw error
+    }
   } finally {
     await rm(workDir, { recursive: true, force: true })
   }

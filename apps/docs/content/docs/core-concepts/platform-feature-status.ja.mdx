@@ -1,41 +1,39 @@
 ---
 title: プラットフォームと機能の対応状況
-description: macOS、Windows、LinuxにおけるMurasaki機能の、検証根拠に基づく正式な対応状況です。
+description: macOS、Windows、Linux における各機能の対応状況と、その検証根拠を確認できます。
 ---
 
 import { CapabilityStatusTable } from "@/components/capability-status-table";
 
-Murasakiは1.0以前のソフトウェアです。現在利用できる部分、重要なplatform差が
-残る部分、まだ設計段階の部分があります。このページはrepository内の正式な
-capability manifestである
+Murasaki はまだ 1.0 に達していません。現在利用できる機能、OS による重要な差が残る機能、
+まだ設計段階の機能があります。このページは、リポジトリ内の正式な機能マニフェストである
 [`packages/murasaki/capabilities.json`](https://github.com/murasakijs/murasaki/blob/main/packages/murasaki/capabilities.json)
 から生成しています。
 
 <Callout type="warn">
-  **「計画中」は「利用可能」という意味ではありません。** dependency、Rust
-  module、型、roadmapが存在するだけではshipping featureとしません。Murasakiが
-  正式な利用経路を公開し、その制限をここへ記録した時点で初めて対応扱いにします。
+  **「計画中」は「利用可能」という意味ではありません。** 依存パッケージ、Rust の
+  モジュール、型、ロードマップが存在するだけでは、提供済みの機能とはみなしません。
+  Murasaki が正式な利用方法を公開し、その制限をここへ記録した時点で対応扱いにします。
 </Callout>
 
 ## 状態の定義
 
-- **Stable** — 現在のrelease lineでcompatibilityを維持するshipping public API。
-- **実験的** — 実装と検証はありますが、1.0までにAPIやwire contractが変わる可能性があります。
-- **部分対応** — 現在利用できますが、表に記載した重要なAPIまたはplatform差があります。
+- **安定** — 現在のリリース系列で互換性を維持する公開 API です。
+- **実験的** — 実装と検証はありますが、1.0 までに API や通信形式が変わる可能性があります。
+- **部分対応** — 現在利用できますが、表に記載した重要な API または OS ごとの差があります。
 - **計画中** — 正式に利用できる実装はありません。
 
-機能の成熟度とplatform対応は別々に表示します。**開発のみ**は、そのplatformで
-development runtimeを利用できてもproduction packagingを保証しないことを示します。
-**未対応**は、そのplatformに実装がない、またはその機能が適用されないことを示します。
+機能の成熟度と OS 対応は別々に表示します。**開発のみ**は、その OS で開発用ランタイムを
+利用できても、本番用パッケージの動作までは保証しないことを示します。**未対応**は、その
+OS に実装がないか、機能自体が適用されないことを示します。
 
 <CapabilityStatusTable locale="ja" />
 
 ## 検証根拠の読み方
 
-各行の**APIと検証根拠**を開くと、正式なpublic symbolと、根拠となる自動testまたは
-workflowを確認できます。build workflowが示すのはそのplatformでcompileできること
-までです。公開されていないnative helperを正式なframework APIとして扱う根拠には
-なりません。
+各行の**API と検証根拠**を開くと、正式な公開シンボルと、根拠となる自動テストまたは
+ワークフローを確認できます。ビルドのワークフローが示すのは、その OS でコンパイルできる
+ことまでです。未公開のネイティブヘルパーを正式な Framework API とみなす根拠にはなりません。
 
-実装とmanifestに差がある場合は、より低い対応状況を安全側の前提として扱い、
+実装とマニフェストに差がある場合は、より低い対応状況を安全側の前提として扱い、
 [不一致を報告してください](https://github.com/murasakijs/murasaki/issues)。

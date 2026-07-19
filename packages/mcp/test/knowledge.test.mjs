@@ -10,7 +10,9 @@ import {
   getConfigSchema,
   getRecipe,
   isSupportedMurasakiNodeVersion,
+  listCapabilities,
   listRecipes,
+  listUiComponents,
   searchDocs,
 } from '../src/knowledge.mjs'
 
@@ -60,8 +62,15 @@ test('configuration schema top-level properties track MurasakiConfig', async () 
   assert.notEqual(capabilityStart, -1)
   const capabilitySource = source.slice(capabilityStart, source.indexOf('] as const', capabilityStart))
   const capabilities = [...capabilitySource.matchAll(/^  '([^']+)',?$/gm)].map((match) => match[1])
-  assert.deepEqual(schema.properties.capabilities.items.enum, capabilities)
+  assert.equal(schema.properties.capabilities.items.$ref, '#/$defs/nativeCapabilityGrant')
   assert.deepEqual(schema.$defs.nativeCapability.enum, capabilities)
+  assert.equal(schema.$defs.nativeCapabilityGrant.oneOf[0].$ref, '#/$defs/nativeCapability')
+
+  const backendPattern = new RegExp(schema.$defs.backendCapability.pattern)
+  assert.equal(backendPattern.test('api:POST:/api/documents/*'), true)
+  assert.equal(backendPattern.test('main:src/backend/account.ts#loadAccount'), true)
+  assert.equal(backendPattern.test('api:get:/private'), false)
+  assert.equal(schema.properties.backendCapabilities.items.$ref, '#/$defs/backendCapability')
 
   const cspPattern = new RegExp(schema.properties.security.properties.csp.oneOf[0].pattern)
   assert.equal(cspPattern.test('   '), false)
@@ -74,6 +83,16 @@ test('configuration schema top-level properties track MurasakiConfig', async () 
   assert.deepEqual(schema.properties.fileAssociations.items.properties.role.enum, ['viewer', 'editor', 'shell', 'none'])
   assert.equal(schema.$defs.windowConfig.properties.createOnLaunch.type, 'boolean')
   assert.equal(schema.$defs.windowConfig.properties.createOnLaunch.default, true)
+
+  const updater = schema.properties.updater.oneOf[1].properties
+  assert.equal(updater.publicKeys.maxItems, 4)
+  assert.equal(updater.maxManifestAgeDays.minimum, 1)
+  assert.equal(new RegExp(updater.checkInterval.oneOf[0].pattern).test('6h'), true)
+  assert.equal(new RegExp(updater.checkInterval.oneOf[0].pattern).test('0m'), false)
+  assert.equal(new RegExp(schema.properties.appId.pattern).test('com.example.app'), true)
+  assert.equal(new RegExp(schema.properties.appId.pattern).test('not-portable'), false)
+  assert.equal(new RegExp(schema.properties.version.pattern).test('1.2.3-beta.1'), true)
+  assert.equal(new RegExp(schema.properties.version.pattern).test('v1.2.3'), false)
 })
 
 test('search_docs returns canonical localized documentation', async () => {
@@ -94,6 +113,13 @@ test('API reference preserves canonical maturity and limitations', async () => {
   assert.equal(openRequest.features.length, 1)
   assert.equal(openRequest.features[0].id, 'single-instance-and-deep-links')
   assert.equal(openRequest.features[0].maturity, 'partial')
+})
+
+test('capabilities can be discovered before compatibility checks', async () => {
+  const result = await listCapabilities({ platform: 'macos' })
+  assert.ok(result.featureIds.includes('tray-and-global-shortcuts'))
+  assert.ok(result.features.some((feature) => feature.id === 'auto-update'))
+  assert.ok(result.features.every((feature) => feature.platforms.macos))
 })
 
 test('config schema supports dot paths and rejects unknown paths', async () => {
@@ -132,6 +158,11 @@ test('compatibility never upgrades planned features to supported', async () => {
   const linux = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'linux' })
   assert.equal(linux.overall, 'limited')
   assert.equal(linux.results[0].platformStatus, 'partial')
+
+  const unknown = await checkCompatibility({ features: ['tray'], platform: 'macos' })
+  assert.equal(unknown.overall, 'unknown')
+  assert.ok(unknown.availableFeatureIds.includes('tray-and-global-shortcuts'))
+  assert.ok(unknown.results[0].suggestions.includes('tray-and-global-shortcuts'))
 })
 
 test('recipes are sourced from localized documentation with English fallback', async () => {
@@ -164,6 +195,19 @@ test('recipes are sourced from localized documentation with English fallback', a
   assert.equal(securityRecipe.slug, 'building/security')
 })
 
+test('UI components are discoverable from the localized generated documentation', async () => {
+  const listed = await listUiComponents({ locale: 'en' })
+  assert.equal(listed.package, '@murasakijs/ui')
+  assert.ok(listed.count >= 35)
+  assert.ok(listed.componentIds.includes('button'))
+  assert.ok(listed.componentIds.includes('command'))
+  assert.ok(listed.componentIds.includes('toast'))
+
+  const filtered = await listUiComponents({ locale: 'ja', query: 'キーボード' })
+  assert.ok(filtered.componentIds.includes('kbd'))
+  assert.ok(filtered.components.every((component) => component.url.includes('/ja/docs/components/')))
+})
+
 test('doctor inspects known project files without executing project code', async () => {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-mcp-doctor-'))
   try {
@@ -176,6 +220,9 @@ test('doctor inspects known project files without executing project code', async
     ])
     const result = await doctor({ projectPath: root })
     assert.equal(result.overall, 'pass')
+    assert.equal(result.assessment, 'structure-only')
+    assert.equal(result.runtimeVerified, false)
+    assert.ok(result.nextSteps.some((step) => /Launch murasaki dev/.test(step)))
     assert.ok(result.checks.every((check) => check.status === 'pass'))
   } finally {
     await rm(root, { recursive: true, force: true })

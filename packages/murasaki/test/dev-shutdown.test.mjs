@@ -60,7 +60,6 @@ test('dev native shutdown is authenticated, cancellable, and retryable', async (
   const shutdown = (force) => fetch(url, {
     method: 'POST',
     headers: {
-      cookie: `murasaki_runtime=${token}`,
       'content-type': 'application/json',
       'x-murasaki-native-token': token,
     },
@@ -138,7 +137,6 @@ test('native shutdown freezes an in-flight HMR transition instead of starting an
     {
       method: 'POST',
       headers: {
-        cookie: `murasaki_runtime=${token}`,
         'content-type': 'application/json',
         'x-murasaki-native-token': token,
       },
@@ -200,7 +198,6 @@ test('a cancelled native shutdown resumes main-module HMR', async (t) => {
     {
       method: 'POST',
       headers: {
-        cookie: `murasaki_runtime=${token}`,
         'content-type': 'application/json',
         'x-murasaki-native-token': token,
       },
@@ -262,7 +259,6 @@ test('a rejected beforeQuit also resumes main-module HMR', async (t) => {
     {
       method: 'POST',
       headers: {
-        cookie: `murasaki_runtime=${token}`,
         'content-type': 'application/json',
         'x-murasaki-native-token': token,
       },

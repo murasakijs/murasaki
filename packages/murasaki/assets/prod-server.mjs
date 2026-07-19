@@ -24,16 +24,18 @@
 // Run standalone for testing (`node prod-server.mjs --client <dir> --registry
 // <path> --routes <path> --port <n>`) or spawned by assets/prod-launcher.mjs,
 // which reads the assigned port off a `MURASAKI_PORT=<n>` line printed to
-// stdout once the server is listening (see prod-launcher.mjs's waitForPort).
+// stdout once the server is listening. Packaged launchers may also provide a
+// bounded `--port-attempts` value so a deterministic app-origin collision can
+// move to another private port and report the selected fallback.
 import http from 'node:http'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { readFile, stat } from 'node:fs/promises'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFile, realpath, rm, stat } from 'node:fs/promises'
 import { extname, join, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
 import { createUpdateRequestHandler, createUpdaterEngine } from './updater-engine.mjs'
-import { MainRuntime } from './.murasaki-runtime/runtime/main-runtime.js'
+import { MainRuntime, resolveAppPaths } from './.murasaki-runtime/runtime/main-runtime.js'
 import { writeCrashReportSync } from './.murasaki-runtime/main/crash-reports.js'
 import {
   MAX_WIRE_PAYLOAD_BYTES,
@@ -60,8 +62,14 @@ const MAIN_WINDOW_COMMANDS_PATH = '/__murasaki/main/windows/commands'
 const MAIN_WINDOW_RESULT_PATH = '/__murasaki/main/windows/result'
 const MAIN_WINDOW_EVENT_PATH = '/__murasaki/main/windows/event'
 const DIAGNOSTICS_RENDERER_ERROR_PATH = '/__murasaki/diagnostics/renderer-error'
-const RUNTIME_COOKIE = 'murasaki_runtime'
 const MAX_RENDERER_ERROR_BYTES = 16 * 1024
+const WINDOW_LABEL_HEADER = 'x-murasaki-window-label'
+const WINDOW_GENERATION_HEADER = 'x-murasaki-window-generation'
+const WINDOW_TOKEN_HEADER = 'x-murasaki-window-token'
+const WINDOW_LABEL_QUERY = '__murasaki_window'
+const WINDOW_GENERATION_QUERY = '__murasaki_window_generation'
+const WINDOW_TOKEN_QUERY = '__murasaki_window_token'
+const WINDOW_TOKEN_DOMAIN = 'murasaki-window-authority-v2\0'
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -83,7 +91,17 @@ const MIME_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 }
 
-const { clientDir, registryPath, mainRegistryPath, routesPath, mainPath, port } = parseArgs()
+const {
+  clientDir,
+  registryPath,
+  mainRegistryPath,
+  routesPath,
+  mainPath,
+  launchFile,
+  port,
+  portAttempts,
+} = parseArgs()
+const canonicalClientDir = await realpath(clientDir)
 let listeningPort = port
 const runtimeToken = process.env.MURASAKI_RUNTIME_TOKEN ?? randomBytes(32).toString('hex')
 
@@ -122,6 +140,18 @@ let meta = {}
 try {
   meta = JSON.parse(await readFile(resolve(process.cwd(), 'murasaki-meta.json'), 'utf8'))
 } catch {}
+const windowBackendGrants = new Map(
+  (meta.windows ?? []).map((window) => [window.label, window.backendCapabilities ?? []]),
+)
+// Native generations are monotonic per label. Launch-created windows begin at
+// generation 1; authenticated lifecycle events advance or revoke them.
+const liveWindowGenerations = new Map(
+  (meta.windows ?? [])
+    .filter((window) => window.createOnLaunch !== false)
+    .map((window) => [window.label, 1]),
+)
+const appId = meta.appId ?? meta.productName ?? 'murasaki-app'
+const appPaths = resolveAppPaths(appId)
 
 // `meta.updater`, when present, is already the fully-resolved shape
 // (`ResolvedUpdater` — manifestUrl/publicKey/channel/checkOnStart/
@@ -135,6 +165,8 @@ const updateEngine = createUpdaterEngine({
   currentVersion: meta.version ?? '0.0.0',
   mode: 'prod',
   resourcesDir: process.cwd(),
+  stateDir: appPaths.data,
+  stagingDir: join(appPaths.temp, 'updates'),
 })
 const handleUpdateRequest = createUpdateRequestHandler(updateEngine)
 
@@ -144,12 +176,14 @@ const handleUpdateRequest = createUpdateRequestHandler(updateEngine)
 const diagnosticsConfig = meta.diagnostics ?? { crashReports: true, keepReports: 20 }
 
 const mainRuntime = new MainRuntime({
-  appId: meta.appId ?? meta.productName ?? 'murasaki-app',
+  appId,
   productName: meta.productName ?? 'Murasaki',
   version: meta.version ?? '0.0.0',
   projectRoot: process.cwd(),
   resourcesPath: process.cwd(),
+  paths: appPaths,
   isPackaged: true,
+  launch: await parseLaunchFile(launchFile),
   shutdownTimeoutMs: meta.mainShutdownTimeoutMs,
 })
 await mainRuntime.start(() => import(pathToFileURL(mainPath).href))
@@ -176,25 +210,34 @@ async function handleRequest(req, res) {
     || pathname === MAIN_WINDOW_RESULT_PATH
     || pathname === MAIN_WINDOW_EVENT_PATH
     || pathname === DIAGNOSTICS_RENDERER_ERROR_PATH
-  if (isPrivileged && !isAuthorizedRuntimeRequest(req)) {
-    res.statusCode = 403
-    res.setHeader('content-type', 'application/json')
-    res.setHeader('cache-control', 'no-store')
-    res.end(JSON.stringify({ error: 'forbidden runtime request' }))
-    return
-  }
   const isNativeOnly = pathname === MAIN_SHUTDOWN_PATH
     || pathname === MAIN_SECOND_INSTANCE_PATH
     || pathname === MAIN_OPEN_REQUEST_PATH
     || pathname === MAIN_WINDOW_COMMANDS_PATH
     || pathname === MAIN_WINDOW_RESULT_PATH
     || pathname === MAIN_WINDOW_EVENT_PATH
-  if (isNativeOnly && !isAuthorizedNativeRequest(req)) {
+  const nativeRequest = isAuthorizedNativeRequest(req)
+  if (isNativeOnly && !nativeRequest) {
     res.statusCode = 403
     res.setHeader('content-type', 'application/json')
     res.setHeader('cache-control', 'no-store')
     res.end(JSON.stringify({ error: 'forbidden native request' }))
     return
+  }
+  if (isPrivileged && !nativeRequest) {
+    const allowQuery = req.method === 'GET'
+      && String(req.headers.accept ?? '').includes('text/event-stream')
+    const label = authorizedWindowLabel(req, allowQuery)
+    const resource = backendResourceForRequest(req.method ?? 'GET', req.url ?? '/')
+    if (!label
+      || !resource
+      || !isBackendCapabilityAllowed(windowBackendGrants.get(label) ?? [], resource)) {
+      res.statusCode = 403
+      res.setHeader('content-type', 'application/json')
+      res.setHeader('cache-control', 'no-store')
+      res.end(JSON.stringify({ error: 'forbidden runtime request' }))
+      return
+    }
   }
   if (req.method === 'POST' && req.url?.startsWith(ACTION_PATH_PREFIX)) {
     return handleAction(req, res)
@@ -304,6 +347,19 @@ async function handleMainWindowEvent(req, res) {
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify({ error: 'invalid native window lifecycle event' }))
     return
+  }
+  if (event.type === 'created') {
+    const previous = liveWindowGenerations.get(event.label) ?? 0
+    if (event.generation < previous) {
+      res.statusCode = 409
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ error: 'stale native window generation' }))
+      return
+    }
+    liveWindowGenerations.set(event.label, event.generation)
+  } else if (event.type === 'closed'
+    && liveWindowGenerations.get(event.label) === event.generation) {
+    liveWindowGenerations.delete(event.label)
   }
   const bus = mainWindowControlBus()
   if (bus?.listeners) {
@@ -540,31 +596,90 @@ async function handleMainShutdown(req, res) {
   res.end(JSON.stringify(result))
 }
 
-function isAuthorizedRuntimeRequest(req) {
+function hasTrustedLoopbackMetadata(req) {
   const expectedHost = `127.0.0.1:${listeningPort}`
   if (req.headers.host !== expectedHost) return false
   const origin = req.headers.origin
-  if (origin !== undefined && origin !== `http://${expectedHost}`) return false
-
-  const cookieHeader = req.headers.cookie ?? ''
-  const token = cookieHeader
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${RUNTIME_COOKIE}=`))
-    ?.slice(RUNTIME_COOKIE.length + 1)
-  if (!token) return false
-
-  const received = Buffer.from(token)
-  const expected = Buffer.from(runtimeToken)
-  return received.length === expected.length && timingSafeEqual(received, expected)
+  return origin === undefined || origin === `http://${expectedHost}`
 }
 
 function isAuthorizedNativeRequest(req) {
+  if (!hasTrustedLoopbackMetadata(req)) return false
   const token = req.headers['x-murasaki-native-token']
   if (typeof token !== 'string') return false
   const received = Buffer.from(token)
   const expected = Buffer.from(runtimeToken)
   return received.length === expected.length && timingSafeEqual(received, expected)
+}
+
+function authorizedWindowLabel(req, allowQuery) {
+  if (!hasTrustedLoopbackMetadata(req)) return null
+  let label = typeof req.headers[WINDOW_LABEL_HEADER] === 'string'
+    ? req.headers[WINDOW_LABEL_HEADER]
+    : null
+  let generation = typeof req.headers[WINDOW_GENERATION_HEADER] === 'string'
+    ? req.headers[WINDOW_GENERATION_HEADER]
+    : null
+  let token = typeof req.headers[WINDOW_TOKEN_HEADER] === 'string'
+    ? req.headers[WINDOW_TOKEN_HEADER]
+    : null
+  if ((!label || !generation || !token) && allowQuery) {
+    const url = new URL(req.url ?? '/', 'http://murasaki.local')
+    label = url.searchParams.get(WINDOW_LABEL_QUERY)
+    generation = url.searchParams.get(WINDOW_GENERATION_QUERY)
+    token = url.searchParams.get(WINDOW_TOKEN_QUERY)
+  }
+  const generationNumber = generation && /^\d{1,20}$/.test(generation) ? Number(generation) : 0
+  if (!label
+    || !Number.isSafeInteger(generationNumber)
+    || generationNumber < 1
+    || liveWindowGenerations.get(label) !== generationNumber
+    || !token
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(label)
+    || !/^[0-9a-fA-F]{64}$/.test(token)) return null
+  const received = Buffer.from(token, 'hex')
+  const expected = Buffer.from(deriveWindowToken(label, generationNumber), 'hex')
+  return received.length === expected.length && timingSafeEqual(received, expected) ? label : null
+}
+
+function deriveWindowToken(label, generation) {
+  return createHmac('sha256', Buffer.from(runtimeToken, 'hex'))
+    .update(WINDOW_TOKEN_DOMAIN)
+    .update(label)
+    .update('\0')
+    .update(String(generation))
+    .digest('hex')
+}
+
+function isBackendCapabilityAllowed(grants, resource) {
+  return grants.some((grant) => grant === resource
+    || (grant.endsWith('*') && resource.startsWith(grant.slice(0, -1))))
+}
+
+function backendResourceForRequest(method, rawUrl) {
+  const url = new URL(rawUrl, 'http://murasaki.local')
+  const pathname = url.pathname
+  for (const [prefix, kind] of [
+    [MAIN_CALL_PREFIX, 'main'],
+    [ACTION_PATH_PREFIX, 'action'],
+  ]) {
+    if (!pathname.startsWith(prefix)) continue
+    const rest = pathname.slice(prefix.length)
+    const separator = rest.lastIndexOf('/')
+    if (separator < 1) return null
+    try {
+      return `${kind}:${decodeURIComponent(rest.slice(0, separator))}#${rest.slice(separator + 1)}`
+    } catch {
+      return null
+    }
+  }
+  if (pathname === '/api' || pathname.startsWith(API_PATH_PREFIX)) {
+    return `api:${String(method).toUpperCase()}:${pathname}`
+  }
+  if (pathname.startsWith(UPDATE_PATH_PREFIX)) return `updater:${pathname}`
+  if (pathname === MAIN_EVENTS_PATH) return `events:${url.searchParams.get('channel') ?? '*'}`
+  if (pathname === DIAGNOSTICS_RENDERER_ERROR_PATH) return 'diagnostics:renderer-error'
+  return null
 }
 
 /** Mirrors the dev middleware's contract exactly (src/vite-plugin/server-actions.ts). */
@@ -789,22 +904,37 @@ async function serveStatic(req, res) {
     return
   }
 
-  const urlPath = decodeURIComponent((req.url ?? '/').split('?')[0])
-  const requested = resolve(clientDir, `.${urlPath}`)
+  let urlPath
+  try { urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]) }
+  catch {
+    res.statusCode = 400
+    res.end('invalid path')
+    return
+  }
+  const requested = resolve(canonicalClientDir, `.${urlPath}`)
   // A plain startsWith(clientDir) also accepts siblings such as
   // `<clientDir>-secrets`. Require a real path boundary after the configured
   // client directory so encoded `../` segments cannot escape static assets.
-  if (requested !== clientDir && !requested.startsWith(`${clientDir}${sep}`)) {
+  if (requested !== canonicalClientDir && !requested.startsWith(`${canonicalClientDir}${sep}`)) {
     res.statusCode = 403
     res.end()
     return
   }
 
   let target = requested
-  if (!(await isFile(target))) target = join(clientDir, 'index.html')
+  if (!(await isFile(target))) target = join(canonicalClientDir, 'index.html')
   if (!(await isFile(target))) {
     res.statusCode = 404
     res.end('not found')
+    return
+  }
+
+  // Lexical confinement rejects `..`; canonical confinement also rejects a
+  // symlink placed inside the packaged client tree that points at host data.
+  target = await realpath(target)
+  if (target !== canonicalClientDir && !target.startsWith(`${canonicalClientDir}${sep}`)) {
+    res.statusCode = 403
+    res.end()
     return
   }
 
@@ -812,11 +942,12 @@ async function serveStatic(req, res) {
   res.statusCode = 200
   res.setHeader('x-content-type-options', 'nosniff')
   res.setHeader('referrer-policy', 'no-referrer')
-  if (target === join(clientDir, 'index.html')) {
-    res.setHeader(
-      'set-cookie',
-      `${RUNTIME_COOKIE}=${runtimeToken}; HttpOnly; SameSite=Strict; Path=/`,
-    )
+  // Fail closed: systemPermission:* controls OS consent prompts, but is not a
+  // browser media/geolocation capability. Wry has no cross-platform
+  // per-window permission callback today, so renderer documents may not use
+  // these Web APIs until Murasaki can enforce that boundary natively.
+  res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()')
+  if (target === join(canonicalClientDir, 'index.html')) {
     res.setHeader('cache-control', 'no-store')
   }
   res.setHeader('content-type', MIME_TYPES[extname(target)] ?? 'application/octet-stream')
@@ -843,14 +974,72 @@ function parseArgs() {
     mainRegistryPath: resolve(get('--main-registry', 'server/main-actions.mjs')),
     routesPath: resolve(get('--routes', 'server/routes.mjs')),
     mainPath: resolve(get('--main', 'server/main.mjs')),
+    launchFile: get('--launch-file', ''),
     port: Number(get('--port', '0')),
+    portAttempts: Math.max(1, Math.min(256, Number(get('--port-attempts', '1')) || 1)),
   }
 }
 
-server.listen(port, '127.0.0.1', () => {
-  listeningPort = server.address().port
-  process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
-})
+// Primary cold-start launch args/cwd handed over by the native launcher in a
+// one-shot owner-only file. The short file path avoids Windows' environment
+// block and command-line limits; deletion happens before application main code
+// or sidecars run. Invalid/missing → undefined and MainRuntime falls back to
+// empty argv + projectRoot.
+async function parseLaunchFile(path) {
+  if (!path) return undefined
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8'))
+    if (!parsed || typeof parsed !== 'object') return undefined
+    const argv = Array.isArray(parsed.argv)
+      ? parsed.argv.filter((value) => typeof value === 'string')
+      : []
+    const cwd = typeof parsed.cwd === 'string' ? parsed.cwd : undefined
+    return { argv, cwd }
+  } catch {
+    return undefined
+  } finally {
+    await rm(path, { force: true }).catch(() => {})
+  }
+}
+
+listenWithFallback(port, portAttempts)
+
+function listenWithFallback(initialPort, maxAttempts) {
+  let candidate = initialPort
+  let attempts = 0
+
+  const attempt = () => {
+    attempts += 1
+    const onError = (error) => {
+      if (error?.code === 'EADDRINUSE' && candidate !== 0 && attempts < maxAttempts) {
+        candidate = nextPrivatePort(candidate)
+        setImmediate(attempt)
+        return
+      }
+      process.stderr.write(
+        `murasaki production server failed to listen on 127.0.0.1:${candidate}: ${error?.message ?? error}\n`,
+      )
+      void mainRuntime.shutdown({ reason: 'listen-error', force: true })
+        .finally(() => process.exit(1))
+    }
+
+    server.once('error', onError)
+    server.listen(candidate, '127.0.0.1', () => {
+      server.off('error', onError)
+      listeningPort = server.address().port
+      process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
+    })
+  }
+
+  attempt()
+}
+
+function nextPrivatePort(current) {
+  const first = 49_152
+  const count = 16_384
+  const offset = current >= first && current < first + count ? current - first : 0
+  return first + ((offset + 1) % count)
+}
 
 let processShutdown
 function shutdownProcess() {

@@ -1,6 +1,7 @@
 # cargo-deny configuration for the murasaki-native crate.
 #
-# Run locally with `cargo install cargo-deny --locked && cargo deny check`
+# Install with `cargo install cargo-deny --locked`, then run locally with
+# `cargo deny check --warn unmaintained`.
 # (from crates/native). CI runs this via EmbarkStudios/cargo-deny-action in
 # .github/workflows/security.yml.
 #
@@ -16,8 +17,7 @@ feature-depth = 1
 # https://embarkstudios.github.io/cargo-deny/checks/advisories/cfg.html
 #
 # Vulnerabilities are always denied by cargo-deny 0.20 (no config toggle);
-# `ignore` below is the only way to accept a specific one, and each entry
-# must justify why it isn't reachable at runtime.
+# `ignore` is intentionally empty: known vulnerabilities must fail CI.
 #
 # `unmaintained` no longer has an in-config lint level in this cargo-deny
 # version (the old `unmaintained = "warn"` key was removed upstream) — it is
@@ -27,24 +27,7 @@ feature-depth = 1
 [advisories]
 db-urls = ["https://github.com/rustsec/advisory-db"]
 unmaintained = "all"
-ignore = [
-    # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quadratic-time attribute checks
-    # and unbounded namespace-declaration allocation in quick-xml's *parsing*
-    # path (`Reader`/`NsReader`/`BytesStart::attributes()`) when fed
-    # attacker-controlled XML. Neither reaches murasaki-native at runtime:
-    #   - quick-xml 0.39.4 is pulled in only by `wayland-scanner`, a
-    #     proc-macro build-dependency that parses vendored, trusted Wayland
-    #     protocol XML at compile time on Linux — never runtime input.
-    #   - quick-xml 0.37.5 is pulled in by `tauri-winrt-notification` (via
-    #     `notify-rust`, Windows toast notifications), which only calls
-    #     `quick_xml::escape::escape` to escape text into a template it
-    #     writes; it never parses XML, so the vulnerable reader code is
-    #     never exercised.
-    # Re-evaluate if either dependency starts parsing untrusted XML, or when
-    # an upstream release satisfies both crates' `quick-xml >=0.41` fix.
-    { id = "RUSTSEC-2026-0194", reason = "parsing-only bug in a build-time codegen dep (wayland-scanner) and a write-only quick-xml user (tauri-winrt-notification); not reachable at runtime" },
-    { id = "RUSTSEC-2026-0195", reason = "parsing-only bug in a build-time codegen dep (wayland-scanner) and a write-only quick-xml user (tauri-winrt-notification); not reachable at runtime" },
-]
+ignore = []
 
 # https://embarkstudios.github.io/cargo-deny/checks/licenses/cfg.html
 [licenses]
@@ -86,7 +69,10 @@ allow-workspace = false
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# Temporary, exact-revision wayland-scanner security patch. Cargo.toml pins
+# the commit; remove this exception once crates.io publishes the quick-xml
+# 0.41 manifest update.
+allow-git = ["https://github.com/Smithay/wayland-rs.git"]
 
 [sources.allow-org]
 github = []

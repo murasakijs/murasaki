@@ -81,6 +81,10 @@ export interface MainContext {
     diagnostics: CrashDiagnosticsApi;
     // (undocumented)
     isPackaged: boolean;
+    launch: {
+        argv: string[];
+        cwd: string;
+    };
     log: MainLogger;
     // (undocumented)
     paths: {

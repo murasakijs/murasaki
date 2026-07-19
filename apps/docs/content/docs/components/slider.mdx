@@ -1,0 +1,22 @@
+---
+title: Slider
+description: Lets the user select one or more numeric values within a range.
+---
+
+## Usage
+
+```tsx
+import { Slider } from '@murasakijs/ui'
+
+<Slider aria-label="Volume" defaultValue={[40]} max={100} step={1} />
+```
+
+`Slider` accepts the Radix Slider root props, including `value`, `defaultValue`,
+`min`, `max`, `step`, `orientation`, and `onValueChange`. One thumb is rendered
+for each value. Always provide an accessible name with a visible label or
+`aria-label`; use `minStepsBetweenThumbs` for range controls that need a minimum
+gap.
+
+## Exports
+
+`Slider`.

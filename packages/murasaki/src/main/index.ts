@@ -38,6 +38,27 @@ export interface MainContext {
   arch: string
   projectRoot: string
   resourcesPath: string
+  /**
+   * Primary cold-start launch arguments and working directory, captured by the
+   * native launcher when the application process started.
+   *
+   * In packaged builds `argv` is the bounded argument list passed to the app
+   * executable (everything after `argv[0]`) and `cwd` is the
+   * launcher's working directory — use it for arbitrary flags such as
+   * `--no-sample-data`. Registered deep-link URLs and file paths are ALSO
+   * delivered, normalized and validated, through `openRequested`; this field
+   * is the raw list and must be treated as untrusted input.
+   *
+   * In development `argv` is empty for a plain `murasaki dev`; running
+   * `murasaki dev -- <app args>` forwards the bounded arguments after the
+   * standalone `--` delimiter (dev's own CLI flags before it never leak), and
+   * `cwd` is the project root. Both modes retain at most 64 intact arguments,
+   * 8 KiB per argument and 16 KiB for the encoded argv array.
+   */
+  launch: {
+    argv: string[]
+    cwd: string
+  }
   paths: {
     data: string
     cache: string

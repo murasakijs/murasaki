@@ -21,10 +21,15 @@ Tools:
 
 - `search_docs`
 - `get_api_reference`
+- `list_capabilities`
 - `get_config_schema`
 - `doctor`
 - `list_recipes` / `get_recipe`
+- `list_ui_components`
 - `check_compatibility`
+
+Call `list_capabilities` before `check_compatibility`; the compatibility tool accepts the canonical
+feature IDs returned by that list and reports suggestions for unknown IDs.
 
 Every tool is annotated read-only. There are intentionally no build, publish, shell, release, or
 file-writing tools.

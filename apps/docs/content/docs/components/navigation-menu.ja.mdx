@@ -1,0 +1,35 @@
+---
+title: Navigation Menu
+description: フライアウト表示にも対応した、アクセシブルな主要ナビゲーションです。
+---
+
+## 使い方
+
+```tsx
+import {
+  NavigationMenu, NavigationMenuContent, NavigationMenuItem,
+  NavigationMenuLink, NavigationMenuList, NavigationMenuTrigger,
+} from '@murasakijs/ui'
+
+<NavigationMenu>
+  <NavigationMenuList>
+    <NavigationMenuItem>
+      <NavigationMenuTrigger>学ぶ</NavigationMenuTrigger>
+      <NavigationMenuContent>
+        <NavigationMenuLink href="/ja/docs">ドキュメント</NavigationMenuLink>
+      </NavigationMenuContent>
+    </NavigationMenuItem>
+  </NavigationMenuList>
+</NavigationMenu>
+```
+
+単純な移動先には、トリガーを使わず `NavigationMenuLink` を配置します。
+`NavigationMenuViewport` はルートが生成するため、2つ目を追加しないでください。
+ルーターのリンクは `asChild` で実要素として利用できます。
+
+## エクスポート
+
+`NavigationMenu`, `NavigationMenuList`, `NavigationMenuItem`,
+`NavigationMenuTrigger`, `NavigationMenuContent`, `NavigationMenuLink`,
+`NavigationMenuIndicator`, `NavigationMenuViewport`,
+`navigationMenuTriggerStyle`。

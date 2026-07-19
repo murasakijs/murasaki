@@ -54,6 +54,43 @@ test('runs a contained executable without a shell and stops it cleanly', async (
   assert.deepEqual(supervisor.list(), [])
 })
 
+test('does not leak framework authority or signing secrets to sidecars', async (t) => {
+  const { supervisor } = await fixture(t)
+  const secretNames = [
+    'MURASAKI_RUNTIME_TOKEN',
+    'MURASAKI_DEV_LAUNCH',
+    'MURASAKI_UPDATE_KEY',
+    'MURASAKI_WINDOWS_CERTIFICATE_PASSWORD',
+    'APPLE_APP_PASSWORD',
+  ]
+  const previous = new Map(secretNames.map((name) => [name, process.env[name]]))
+  for (const name of secretNames) process.env[name] = `secret-${name}`
+  t.after(() => {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name]
+      else process.env[name] = value
+    }
+  })
+
+  const handle = await supervisor.spawn({
+    name: 'env-probe',
+    resource: basename(process.execPath),
+    args: ['-e', `process.stdout.write(JSON.stringify(${JSON.stringify(secretNames)}.map((name) => process.env[name] ?? null)))`],
+  })
+  const output = await waitForEvent(handle, (event) => event.type === 'stdout')
+  assert.deepEqual(JSON.parse(output.data), secretNames.map(() => null))
+  await handle.finished
+
+  await assert.rejects(
+    supervisor.spawn({
+      name: 'override-probe',
+      resource: basename(process.execPath),
+      env: { MURASAKI_RUNTIME_TOKEN: 'caller-controlled' },
+    }),
+    /reserved by Murasaki/,
+  )
+})
+
 test('rejects traversal, symlink escapes, unsafe names, and unbounded input', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-sidecar-root-'))
   t.after(() => rm(root, { recursive: true, force: true }))

@@ -14,11 +14,11 @@ murasaki release     自動更新マニフェストのヘルパー
 murasaki help        このヘルプを表示する
 ```
 
-<Callout type="warn">
-  `murasaki bundle` と `murasaki installer` は、**macOS** と **Windows** で本物の
-  インストーラを生成します。Linux のパッケージングはロードマップに含まれています(現在は
-  「まだサポートされていません」というメッセージが表示されます)。`murasaki dev` 自体は
-  macOS、Windows、Linux で動作します。
+<Callout type="info">
+  開発とパッケージングは macOS、Windows、Linux に対応しています。Linux の `bundle` は
+  AppDir と `.AppImage` を、`installer` は `.deb` も生成します。Linux のパッケージ署名、
+  RPM、パッケージリポジトリ用メタデータは未対応です。Linuxで明示的に`--sign`を渡すと
+  出力前にfail-closedで停止し、未署名artifactを成功扱いにはしません。
 </Callout>
 
 ## `murasaki dev`
@@ -37,21 +37,24 @@ murasaki help        このヘルプを表示する
 `dist/client` + コンパイル済みのサーバーアクションレジストリ + ポータブルな Node ラン
 タイム + ネイティブランチャーバイナリを `dist/bundle/` にパッケージングします —
 macOS では `<productName>.app`、Windows では `<productName>.exe` を含む
-`<productName>/` フォルダになります。
+`<productName>/` フォルダー、Linux では AppDir と `.AppImage` になります。
 
 ```bash
 murasaki bundle                       # ホストのプラットフォーム + アーキテクチャ、未署名
 murasaki bundle --arch x64            # クロスアーキテクチャ(macOS): Apple Silicon 上で x64 の .app
 murasaki bundle --target win32-arm64  # クロスターゲット: arm64 の Windows バンドル
+murasaki bundle --target linux-x64    # Linux AppDir + AppImage
 murasaki bundle --sign                # macOS Developer ID / Windows Authenticode 署名
 murasaki bundle --no-build            # 既存の dist/client を再利用する
 ```
 
 - **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — 対象アーキテクチャ /
-  プラットフォーム(デフォルトはホスト)。Windows は `win32-x64` / `win32-arm64`。
+  プラットフォーム（デフォルトはホスト）。`darwin-arm64`、`darwin-x64`、
+  `win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` を指定できます。
 - **`--sign`** — macOS では `.app` を Developer ID 署名し、Windows では
   portable ZIP 作成前に app executable を Authenticode 署名します。Windows 署名は
-  SignTool がある Windows 上で実行します。詳しくは
+  SignTool がある Windows 上で実行します。Linuxではbuilt-in署名が実装されるまでこの
+  flagを拒否します。詳しくは
   [Distribution](/ja/docs/building/distribution#signing--notarization)を参照してください。
 - **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップする。
 
@@ -60,19 +63,26 @@ murasaki bundle --no-build            # 既存の dist/client を再利用する
 `bundle` の出力を、対象プラットフォーム向けの配布可能なインストーラに変換します:
 macOS ではドラッグインストール用のスタイル付き `.dmg`
 (`dist/<productName>-<version>.dmg`、Finder のスタイリングに失敗した場合はプレーンな
-DMG にフォールバック)、Windows ではポータブル `.zip`、NSIS `.exe`、MSI `.msi`。
+DMGにフォールバック）、WindowsではNSIS `.exe`と、built-in updater無効時だけMSI `.msi`、
+Linuxでは`.deb`を生成します。portable Windows ZIPはbundle stepの出力です。LinuxのAppDirと
+`.AppImage`もバンドル出力に残ります。
 
 ```bash
 murasaki installer                     # ホストプラットフォーム向けインストーラ(最初に再バンドル)
 murasaki installer --target win32-x64  # Windows x64 のインストーラ
+murasaki installer --target linux-x64  # Linux amd64 の .deb とバンドル
 murasaki installer --sign --notarize   # macOS: Developer ID 署名 + 公証 + ステープル
-murasaki installer --target win32-x64 --sign # Windows: app + NSIS + MSI を署名
+murasaki installer --target win32-x64 --sign # Windows: app + 生成されたinstallerを署名
 murasaki installer --no-build          # 既存の dist/bundle を再利用する
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — `bundle` に転送されます。
 - **`--sign`** — macOS の Developer ID または Windows の Authenticode 署名。
-  Windows では app executable、NSIS setup、MSI を署名して検証します。
+  Windowsではapp executableと生成されたすべてのinstallerを署名・検証します。updater有効時は
+  per-user NSISを必須とし、MSIをskipします。Linuxではbuilt-in署名が実装されるまで
+  このflagを拒否します。
+- platform packaging toolからinstallerを1つも生成できなければcommandは失敗します。
+  portable ZIP / AppImageが目的なら`murasaki bundle`を使ってください。
 - **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary サービスに
   提出し、チケットをステープルします(`--notarize` は `--sign` が必須)。
 
@@ -88,10 +98,16 @@ murasaki installer --no-build          # 既存の dist/bundle を再利用す�
 murasaki icon assets/logo.png
 ```
 
-1つの 1024px の PNG から、`dist/icons/icon.icns`(macOS、`sips` + `iconutil` 経由)を
-生成します。このスタンドアロンコマンドは現時点では macOS 以外で PNG のみです。ただし
-通常は不要です — `murasaki bundle` が `config.icon` からプラットフォームのアイコンを
-自動生成・埋め込みします: macOS では `.icns`、Windows では `.ico`(`.exe` に埋め込み)。
+1つの正方形の 1024px PNGからplatform icon resourceを生成します。full Xcodeがある
+macOSでは、`AppIcon` assetを収めた`Assets.car`と`icon.icns`を出力します。現在の
+macOSはasset catalog側にOSのmaskとappearance renderingを適用し、`.icns`は古い
+macOS / tooling向けfallbackとして残ります。Command Line Toolsのみの場合は警告を
+表示し、`.icns` fallbackを生成します。macOS以外では現時点でPNGのみです。
+
+通常、このcommandを直接実行する必要はありません。`murasaki bundle`が`config.icon`
+から同じresourceを自動生成・埋め込みします。canonical source imageへmacOSの角丸maskを
+焼き込まず、正方形のdesignを渡してasset catalog版のmaskをOSに任せてください。
+Windowsでは`.ico`を生成して`.exe`へ埋め込みます。
 
 ## `murasaki release`
 
@@ -106,13 +122,14 @@ murasaki release --sign
 
 - **`--keygen`** — 更新マニフェストの署名に使う Ed25519 の鍵ペアを生成します。
   `.murasaki/update-key.pub`(コミットしてください)と `.murasaki/update-key`
-  (自動的に gitignore されます)を書き出し、秘密鍵を一度だけ表示して
-  `MURASAKI_UPDATE_KEY` という GitHub シークレットとして保存する手順を案内します。
+  (mode `0600`、自動的にgitignore)を書き出します。秘密鍵は表示せず、stdin経由で
+  `MURASAKI_UPDATE_KEY`というGitHub secretへ登録する手順を案内します。
   `--force` を指定しない限り、既存の鍵を上書きすることはありません。
 - **`--manifest`** — `dist/` 配下からこのバージョンの成果物(macOS の `.app.zip`、
-  Windows の `-setup-<arch>.exe` — win32-x64 については、suffixなしの旧
-  `-setup.exe` という名前も引き続き認識します)を探してハッシュ化し、`generatedAt`
-  タイムスタンプ付きで `dist/latest.json` を書き出します。見つからないターゲットは
+  Windows の `-setup-<arch>.exe`（win32-x64 では接尾辞のない旧 `-setup.exe` も認識）と、
+  Linux の `-linux-<arch>.AppImage` を探してハッシュ化し、`generatedAt` タイムスタンプ付きで
+  `dist/latest.json` を書き出します。Linux の `.deb` はシステムのパッケージマネージャーが
+  更新を管理するため、更新ペイロードには含めません。見つからないターゲットは
   エラーではなくスキップされます。`--rollout <0-100>` は、任意の段階的
   ロールアウト率(%)を書き込みます。
 - **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成します。

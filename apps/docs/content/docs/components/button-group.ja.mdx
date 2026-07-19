@@ -1,0 +1,29 @@
+---
+title: Button Group
+description: 関連するボタンや操作を、ひとまとまりの UI として表示します。
+---
+
+## 使い方
+
+```tsx
+import { Button, ButtonGroup } from '@murasakijs/ui'
+
+<ButtonGroup aria-label="文字揃え">
+  <Button variant="outline">左</Button>
+  <Button variant="outline">中央</Button>
+  <Button variant="outline">右</Button>
+</ButtonGroup>
+```
+
+縦に並べる場合は `orientation="vertical"` を指定します。`ButtonGroupText` は操作できない
+ラベルや値を、`ButtonGroupSeparator` は明示的な区切りを追加します。周囲の見出しだけでは
+用途が分からない場合、`aria-label` または `aria-labelledby` でグループ名を付けてください。
+
+## API
+
+| Prop | 型 | 既定値 |
+| --- | --- | --- |
+| `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` |
+
+エクスポート: `ButtonGroup`、`ButtonGroupText`、`ButtonGroupSeparator`、
+`buttonGroupVariants`。

@@ -1,0 +1,23 @@
+---
+title: Toggle Group
+description: Groups related two-state buttons into a single- or multiple-selection control.
+---
+
+## Usage
+
+```tsx
+import { ToggleGroup, ToggleGroupItem } from '@murasakijs/ui'
+
+<ToggleGroup type="single" aria-label="Text alignment" defaultValue="left">
+  <ToggleGroupItem value="left" aria-label="Align left">Left</ToggleGroupItem>
+  <ToggleGroupItem value="center" aria-label="Align center">Center</ToggleGroupItem>
+</ToggleGroup>
+```
+
+Choose `type="single"` for one selected value or `type="multiple"` for an
+array of selected values. The group supplies `variant` and `size` styling to
+its items. Give icon-only items individual accessible names.
+
+## Exports
+
+`ToggleGroup` and `ToggleGroupItem`.

@@ -1,6 +1,6 @@
-import { resolve, dirname, join, relative, sep } from 'node:path'
+import { resolve, dirname, join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile, symlink, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -20,13 +20,17 @@ import {
   validateMainShutdownTimeoutMs,
   type MurasakiConfig,
   type MurasakiBuildTarget,
-  type SystemPermissionName,
 } from '../config.js'
 import { serializeWindowTemplates } from './window-metadata.js'
 import { resolveInitScripts } from './init-scripts.js'
 import { resolveUpdater } from '../resolve-updater.js'
 import { DEFAULT_LOCALES } from '../menu-i18n.js'
-import { stageBundleResources, stageServerDependencies } from './server-dependencies.js'
+import {
+  assertExecutableBundleResourcesDeclared,
+  executableBundleResourcePaths,
+  stageBundleResources,
+  stageServerDependencies,
+} from './server-dependencies.js'
 import { resolveAssociations } from '../associations.js'
 import { loadUserConfig } from './load-config.js'
 import { signWindowsArtifact } from './windows-signing.js'
@@ -88,6 +92,13 @@ export default async function bundle(argv: string[]) {
         'Cross-bundle without --sign, then run the signed release job on Windows.',
     )
   }
+  if (target.platform === 'linux' && shouldSign) {
+    throw new Error(
+      'murasaki: Linux AppDir/AppImage signing is not implemented. Refusing to emit an '
+        + 'unsigned artifact for an explicit --sign request; bundle without --sign or sign it '
+        + 'in a documented downstream Linux release pipeline.',
+    )
+  }
   await runPluginHooks(prepared, 'before', hookOptions)
   if (!skipBuild || !existsSync(resolve(cwd, 'dist/client'))) await buildProject(cwd, config)
   // Always (re)built — cheap relative to the client build, and must exist
@@ -109,11 +120,6 @@ export default async function bundle(argv: string[]) {
   // any host — the only extra tool it needs is `mksquashfs` (see
   // appimage.ts), required only for the final AppImage-packing step.
   if (target.platform === 'linux') {
-    if (shouldSign) {
-      process.stdout.write(
-        `\n${warn('bundle: --sign is not implemented for Linux yet — producing an unsigned AppDir/AppImage.')}\n\n`,
-      )
-    }
     await bundleLinux(cwd, config, target.arch)
     await runPluginHooks(prepared, 'after', hookOptions)
     return
@@ -137,9 +143,9 @@ export default async function bundle(argv: string[]) {
   await mkdir(macosDir, { recursive: true })
   await mkdir(resourcesDir, { recursive: true })
 
-  // Contents/Resources/node_modules/@murasakijs/native — resolved once, used
-  // both to locate the compiled launcher binary below and to vendor the
-  // native binding itself (see the node_modules copy further down).
+  // Resolve @murasakijs/native only to locate the compiled launcher binary.
+  // Its legacy N-API binding is not used by the production Rust-launcher +
+  // loopback-HTTP architecture and is deliberately not vendored.
   const nativeDir = resolveNativeModuleDir(cwd)
 
   // Contents/MacOS/<productName> — the compiled `murasaki-launcher` Rust
@@ -203,17 +209,21 @@ export default async function bundle(argv: string[]) {
   const menuLocalesSrc = resolve(__dirname, '../menu-locales.json')
   await copyFile(menuLocalesSrc, join(resourcesDir, 'menu-locales.json'))
 
-  // Contents/Resources/icon.icns + icon.png — the .icns backs the .app's
-  // Finder/DMG appearance (via CFBundleIconFile below); the plain PNG is
-  // read at runtime by the launcher binary to set NSApp.applicationIconImage,
-  // which covers the About panel (CFBundleIconFile doesn't reliably reach it
-  // — see crates/native/src/launcher.rs's set_app_icon).
-  const iconResource = config.icon ? await buildIcon(cwd, config.icon, resourcesDir) : null
+  // Contents/Resources/Assets.car + icon.icns + icon.png. On current macOS,
+  // the asset-catalog icon is the primary source: the OS owns the final mask,
+  // appearances, and rendering. The .icns remains a compatibility fallback
+  // for older releases and tooling that cannot read Assets.car. The PNG is a
+  // runtime-readable source for tray/window APIs; the packaged macOS launcher
+  // deliberately does not push it into NSApp.applicationIconImage because
+  // doing so bypasses the system-rendered app icon.
+  const iconResources = config.icon
+    ? await buildMacIconResources(cwd, config.icon, resourcesDir)
+    : null
 
   // Contents/Resources/murasaki-meta.json
   await writeFile(
     join(resourcesDir, 'murasaki-meta.json'),
-    metaJson(config, productName, iconResource, cwd),
+    metaJson(config, productName, iconResources?.runtimePath ?? null, cwd),
   )
 
   // Contents/Resources/client — the Vite build output.
@@ -235,21 +245,12 @@ export default async function bundle(argv: string[]) {
   // symlinks), then copy developer-declared non-code resources.
   await stageServerDependencies(cwd, resolve(cwd, 'dist/server'), resourcesDir, config, target)
   await stageBundleResources(cwd, resourcesDir, config)
-
-  // Contents/Resources/node_modules/@murasakijs/native — external native
-  // binding, copied as-is since its .node binary is arch-specific and
-  // can't go through esbuild/tsc.
-  // TODO: no longer needed at runtime once verified — prod-server.mjs is pure
-  // HTTP and the launcher binary is native Rust, so nothing at runtime
-  // currently requires this package. Kept for now to minimize risk.
-  const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
-  await mkdir(dirname(nativeDest), { recursive: true })
-  await copyNativeModule(nativeDir, nativeDest, target)
+  await assertExecutableBundleResourcesDeclared(resourcesDir, config)
 
   // Contents/Info.plist
   await writeFile(
     join(appDir, 'Contents/Info.plist'),
-    infoPlist(config, productName, iconResource !== null),
+    infoPlist(config, productName, iconResources !== null, iconResources?.usesSystemMask ?? false),
   )
 
   // Sign only after every resource and Info.plist entry is in place. Signing
@@ -261,6 +262,9 @@ export default async function bundle(argv: string[]) {
   if (shouldSign) {
     await signApp(appDir, config)
   } else {
+    for (const executable of executableBundleResourcePaths(resourcesDir, config)) {
+      adHocSignMacTarget(executable)
+    }
     const signResult = spawnSync('codesign', ['--force', '--sign', '-', appDir], { encoding: 'utf8' })
     if (signResult.status !== 0) {
       throw new Error(`murasaki: ad-hoc codesign failed for ${appDir}:\n${signResult.stderr.trim()}`)
@@ -310,9 +314,8 @@ async function bundleWin32(
   await mkdir(outDir, { recursive: true })
   await mkdir(resourcesDir, { recursive: true })
 
-  // resources/node_modules/@murasakijs/native — resolved once, used both to
-  // locate the compiled launcher binary below and to vendor the native
-  // binding itself, same as the macOS path.
+  // Resolve @murasakijs/native only to locate the compiled launcher binary;
+  // the unused legacy N-API binding is not part of the packaged runtime.
   const nativeDir = resolveNativeModuleDir(cwd)
 
   // <productName>.exe — the compiled `murasaki-launcher` Rust binary for
@@ -391,20 +394,19 @@ async function bundleWin32(
     { platform: 'win32', arch },
   )
   await stageBundleResources(cwd, resourcesDir, config)
-
-  // resources/node_modules/@murasakijs/native — external native binding,
-  // copied as-is since its .node binary is arch-specific and can't go
-  // through esbuild/tsc (dev-only Rust artifacts filtered out).
-  const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
-  await mkdir(dirname(nativeDest), { recursive: true })
-  await copyNativeModule(nativeDir, nativeDest, { platform: 'win32', arch })
+  await assertExecutableBundleResourcesDeclared(resourcesDir, config)
 
   // Authenticode-sign the application-owned launcher only after PE resources
   // and every bundle payload are final, but before the portable ZIP and
   // installers consume it. The downloaded Node runtime carries its upstream
   // signature and must not be re-signed as if it were app-owned code.
   const appExecutable = join(outDir, `${productName}.exe`)
-  if (shouldSign) signWindowsArtifact(appExecutable, config, cwd)
+  if (shouldSign) {
+    for (const executable of executableBundleResourcePaths(resourcesDir, config)) {
+      signWindowsArtifact(executable, config, cwd)
+    }
+    signWindowsArtifact(appExecutable, config, cwd)
+  }
 
   process.stdout.write(`\n${success(`bundle written  ${dim(outDir)}`)}\n\n`)
 
@@ -413,7 +415,7 @@ async function bundleWin32(
   // win32-*, cli/installer.ts): unzip anywhere and run <productName>.exe.
   const zipPath = await zipWin32Bundle(resolve(cwd, 'dist/bundle'), productName, arch)
   process.stdout.write(`\n${success(`zip written  ${dim(zipPath)}`)}\n\n`)
-  if (!shouldSign) process.stdout.write(unsignedNote(zipPath))
+  if (!shouldSign) process.stdout.write(unsignedNote(zipPath, 'win32'))
 }
 
 /**
@@ -446,9 +448,8 @@ async function bundleLinux(cwd: string, config: MurasakiConfig, arch: Arch): Pro
   await mkdir(resourcesDir, { recursive: true })
   await mkdir(applicationsDir, { recursive: true })
 
-  // usr/lib/<appId>/resources/node_modules/@murasakijs/native — resolved
-  // once, used both to locate the compiled launcher binary below and to
-  // vendor the native binding itself, same as the macOS/win32 paths.
+  // Resolve @murasakijs/native only to locate the compiled launcher binary;
+  // the unused legacy N-API binding is not part of the packaged runtime.
   const nativeDir = resolveNativeModuleDir(cwd)
 
   // usr/bin/<execName> — the compiled `murasaki-launcher` Rust binary for
@@ -526,12 +527,6 @@ async function bundleLinux(cwd: string, config: MurasakiConfig, arch: Arch): Pro
     arch,
   })
   await stageBundleResources(cwd, resourcesDir, config)
-
-  // resources/node_modules/@murasakijs/native — external native binding,
-  // copied as-is since its .node binary is arch-specific.
-  const nativeDest = join(resourcesDir, 'node_modules/@murasakijs/native')
-  await mkdir(dirname(nativeDest), { recursive: true })
-  await copyNativeModule(nativeDir, nativeDest, { platform: 'linux', arch })
 
   // AppRun — the entry point the AppImage runtime execs at launch.
   await writeFile(join(appDir, 'AppRun'), linuxAppRunScript(execName))
@@ -682,9 +677,8 @@ async function buildLinuxIcons(
     process.stdout.write(`\n${warn(`icon: ${iconPath} not found, skipping`)}\n\n`)
     return null
   }
+  const source = await readSquareIconPng(src, iconPath)
   await copyFile(src, join(resourcesDir, 'icon.png'))
-
-  const source = PNG.sync.read(await readFile(src))
   await writeFile(join(appDir, `${appId}.png`), resizePng(source, 256))
 
   for (const size of LINUX_ICON_SIZES) {
@@ -777,14 +771,15 @@ async function zipDarwinApp(
 
 /**
  * Copy the Node Main lifecycle runtime without flattening its compiled module
- * graph. `main-runtime.js` imports `../main/logger.js`, `../main/sidecar.js`,
- * and `../main/crash-reports.js`; preserving that layout prevents packaged
+ * graph. `main-runtime.js` imports sibling `launch.js` plus
+ * `../main/logger.js`, `../main/sidecar.js`, and `../main/crash-reports.js`;
+ * preserving that layout prevents packaged
  * apps from starting with an ERR_MODULE_NOT_FOUND after those production
  * services are enabled. `prod-server.mjs` also imports `crash-reports.js`
  * directly for its renderer crash-report endpoint. A private package
  * boundary marks the copied `.js` files as ESM.
  */
-async function copyMainRuntime(resourcesDir: string): Promise<void> {
+export async function copyMainRuntime(resourcesDir: string): Promise<void> {
   const root = join(resourcesDir, '.murasaki-runtime')
   const runtimeDir = join(root, 'runtime')
   const mainDir = join(root, 'main')
@@ -795,6 +790,7 @@ async function copyMainRuntime(resourcesDir: string): Promise<void> {
       resolve(__dirname, '../runtime/main-runtime.js'),
       join(runtimeDir, 'main-runtime.js'),
     ),
+    copyFile(resolve(__dirname, '../runtime/launch.js'), join(runtimeDir, 'launch.js')),
     copyFile(resolve(__dirname, '../main/logger.js'), join(mainDir, 'logger.js')),
     copyFile(resolve(__dirname, '../main/sidecar.js'), join(mainDir, 'sidecar.js')),
     copyFile(resolve(__dirname, '../main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
@@ -887,52 +883,74 @@ async function signApp(appDir: string, config: MurasakiConfig): Promise<void> {
   const identity = resolveSignIdentity(config)
   const entitlements = await resolveEntitlements(config)
 
-  // Sign inner code first, then the outer bundle — codesign requires nested
-  // code to already carry a valid signature before the containing bundle is
-  // sealed. `--deep` is deliberately not used: it's an Apple-documented
-  // anti-pattern that hides which nested binaries actually got signed.
-  const resourcesDir = join(appDir, 'Contents/Resources')
-  const targets: string[] = []
-  const nodeBin = join(resourcesDir, 'node')
-  if (existsSync(nodeBin)) targets.push(nodeBin)
-  targets.push(...(await findNodeAddons(resourcesDir)))
-  targets.push(join(appDir, 'Contents/MacOS', config.productName))
-  targets.push(appDir)
+  try {
+    // Sign inner code first, then the outer bundle. Every executable gets an
+    // explicit target-appropriate entitlement set; `--deep` is never used to
+    // sign and accidentally propagate the main app's privileges.
+    const resourcesDir = join(appDir, 'Contents/Resources')
+    const nodeBin = join(resourcesDir, 'node')
+    if (existsSync(nodeBin)) signMacTarget(nodeBin, identity, entitlements.helper)
+    for (const executable of executableBundleResourcePaths(resourcesDir, config)) {
+      signMacTarget(executable, identity)
+    }
+    for (const addon of await findNodeAddons(resourcesDir)) {
+      // A native library inherits its loading process's sandbox. Executable
+      // entitlements on a `.node` add-on are unnecessary and confusing.
+      signMacTarget(addon, identity)
+    }
+    // Signing the outer bundle signs its main executable. Signing that binary
+    // once separately and then again through the bundle is redundant.
+    signMacTarget(appDir, identity, entitlements.app)
 
-  for (const target of targets) {
-    const result = spawnSync(
+    // `--deep` is appropriate for verification (not signing): validate every
+    // nested binary sealed above before the bundle is distributed.
+    const verify = spawnSync(
       'codesign',
-      [
-        '--force',
-        '--options',
-        'runtime',
-        '--timestamp',
-        '--entitlements',
-        entitlements,
-        '--sign',
-        identity,
-        target,
-      ],
+      ['--verify', '--deep', '--strict', '--verbose=2', appDir],
       { encoding: 'utf8' },
     )
-    if (result.status !== 0) {
-      throw new Error(`murasaki: codesign failed for ${target}:\n${result.stderr.trim()}`)
+    if (verify.status !== 0) {
+      throw new Error(`murasaki: codesign --verify --deep --strict failed:\n${verify.stderr.trim()}`)
     }
+
+    // Gatekeeper legitimately rejects a signed but not-yet-notarized build.
+    const spctl = spawnSync('spctl', ['-a', '-vv', appDir], { encoding: 'utf8' })
+    process.stdout.write(`\n${dim((spctl.stderr || spctl.stdout).trim())}\n`)
+
+    process.stdout.write(`\n${success(`signed with ${dim(identity)}`)}\n`)
+  } finally {
+    await entitlements.cleanup()
   }
+}
 
-  const verify = spawnSync('codesign', ['--verify', '--strict', appDir], { encoding: 'utf8' })
-  if (verify.status !== 0) {
-    throw new Error(`murasaki: codesign --verify --strict failed:\n${verify.stderr.trim()}`)
+function signMacTarget(target: string, identity: string, entitlements?: string): void {
+  const entitlementArgs = entitlements ? ['--entitlements', entitlements] : []
+  const result = spawnSync(
+    'codesign',
+    [
+      '--force',
+      '--options',
+      'runtime',
+      '--timestamp',
+      ...entitlementArgs,
+      '--sign',
+      identity,
+      target,
+    ],
+    { encoding: 'utf8' },
+  )
+  if (result.status !== 0) {
+    throw new Error(`murasaki: codesign failed for ${target}:\n${result.stderr.trim()}`)
   }
+}
 
-  // Gatekeeper (spctl) legitimately says "rejected" for a signed-but-not-yet-
-  // notarized build — that's expected here, so it's logged for visibility
-  // rather than treated as a failure. `murasaki installer --notarize` is what
-  // actually clears it.
-  const spctl = spawnSync('spctl', ['-a', '-vv', appDir], { encoding: 'utf8' })
-  process.stdout.write(`\n${dim((spctl.stderr || spctl.stdout).trim())}\n`)
-
-  process.stdout.write(`\n${success(`signed with ${dim(identity)}`)}\n`)
+function adHocSignMacTarget(target: string): void {
+  const result = spawnSync('codesign', ['--force', '--sign', '-', target], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error(
+      `murasaki: ad-hoc codesign failed for executable bundle resource ${target}:\n${result.stderr.trim()}`,
+    )
+  }
 }
 
 /**
@@ -960,85 +978,183 @@ function resolveSignIdentity(config: MurasakiConfig): string {
   )
 }
 
-/**
- * Entitlements for the hardened-runtime signing above. Uses
- * `config.sign.entitlements` VERBATIM if it's set and exists — a
- * user-supplied entitlements file is never merged with the derivation below,
- * only the generated default plist is. Otherwise writes `entitlementsPlist`'s
- * generated default to a temp file.
- */
-async function resolveEntitlements(config: MurasakiConfig): Promise<string> {
-  const custom = config.sign?.entitlements ? resolve(process.cwd(), config.sign.entitlements) : null
-  if (custom && existsSync(custom)) return custom
+type ResolvedEntitlements = {
+  app: string
+  helper: string
+  cleanup: () => Promise<void>
+}
 
-  const dir = await mkdtemp(join(tmpdir(), 'murasaki-entitlements-'))
-  const path = join(dir, 'entitlements.plist')
-  await writeFile(path, entitlementsPlist(config))
-  return path
+type CustomEntitlements = {
+  path: string
+  values: Record<string, unknown>
+}
+
+/** Resolve independent entitlement files for the main app and Node helper. */
+async function resolveEntitlements(config: MurasakiConfig): Promise<ResolvedEntitlements> {
+  const customApp = await resolveCustomEntitlements(config.sign?.entitlements, 'sign.entitlements')
+  const customHelper = await resolveCustomEntitlements(
+    config.sign?.helperEntitlements,
+    'sign.helperEntitlements',
+  )
+  if (customApp) {
+    const fileIsSandboxed = customApp.values['com.apple.security.app-sandbox'] === true
+    if (fileIsSandboxed) {
+      throw new Error(
+        'murasaki: sign.entitlements may not enable App Sandbox; the current bundled-Node architecture does not support it',
+      )
+    }
+  }
+  if (customHelper) validateCustomHelperEntitlements(customHelper.values)
+  let tempDir: string | undefined
+  const generatedPath = async (name: string, contents: string): Promise<string> => {
+    tempDir ??= await mkdtemp(join(tmpdir(), 'murasaki-entitlements-'))
+    const path = join(tempDir, name)
+    await writeFile(path, contents, { mode: 0o600 })
+    return path
+  }
+
+  try {
+    const app = customApp?.path ?? await generatedPath('app.entitlements', entitlementsPlist(config))
+    const helper = customHelper?.path
+      ?? await generatedPath('node-helper.entitlements', helperEntitlementsPlist(config))
+    return {
+      app,
+      helper,
+      cleanup: async () => {
+        if (tempDir) await rm(tempDir, { recursive: true, force: true })
+      },
+    }
+  } catch (error) {
+    if (tempDir) await rm(tempDir, { recursive: true, force: true })
+    throw error
+  }
+}
+
+/** A configured entitlement path must be a real, valid plist. */
+async function resolveCustomEntitlements(
+  configuredPath: string | undefined,
+  field: string,
+): Promise<CustomEntitlements | undefined> {
+  if (!configuredPath) return undefined
+  const path = resolve(process.cwd(), configuredPath)
+  let details
+  try {
+    details = await stat(path)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`murasaki: ${field} does not exist: ${path}`)
+    }
+    throw error
+  }
+  if (!details.isFile()) throw new Error(`murasaki: ${field} must point to a file: ${path}`)
+
+  const lint = spawnSync('plutil', ['-lint', '--', path], { encoding: 'utf8' })
+  if (lint.status !== 0) {
+    throw new Error(`murasaki: ${field} is not a valid plist: ${path}\n${lint.stderr.trim()}`)
+  }
+  const converted = spawnSync('plutil', ['-convert', 'json', '-o', '-', '--', path], {
+    encoding: 'utf8',
+  })
+  if (converted.status !== 0) {
+    throw new Error(`murasaki: ${field} could not be read: ${path}\n${converted.stderr.trim()}`)
+  }
+  let values: unknown
+  try {
+    values = JSON.parse(converted.stdout)
+  } catch {
+    throw new Error(`murasaki: ${field} did not convert to a plist dictionary: ${path}`)
+  }
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    throw new Error(`murasaki: ${field} must contain a plist dictionary: ${path}`)
+  }
+  return { path, values: values as Record<string, unknown> }
+}
+
+const NODE_HELPER_ENTITLEMENTS = new Set([
+  'com.apple.security.cs.allow-jit',
+  'com.apple.security.cs.allow-unsigned-executable-memory',
+  'com.apple.security.cs.disable-library-validation',
+])
+
+function validateCustomHelperEntitlements(values: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (!NODE_HELPER_ENTITLEMENTS.has(key)) {
+      throw new Error(
+        `murasaki: sign.helperEntitlements may not grant host right ${JSON.stringify(key)}; `
+          + 'only Node JIT/library-loading hardened-runtime rights are supported',
+      )
+    }
+    if (value !== true) {
+      throw new Error(`murasaki: sign.helperEntitlements ${JSON.stringify(key)} must be true`)
+    }
+  }
 }
 
 /**
- * Per-kind macOS App Sandbox entitlement keys (Apple's documented
- * `com.apple.security.device.*`/`com.apple.security.personal-information.*`
- * categories), used only when `sign.appSandbox` is on (see `entitlementsPlist`
- * below). `calendar` and `reminders` share the same `.calendars` key — Apple
- * has never split Reminders into its own sandbox category, unlike TCC's
- * separate `NSRemindersUsageDescription`. `photos` is deliberately absent:
- * unlike Contacts/Calendars/Reminders (which predate TCC and kept their
- * original Sandbox categories), Photos library access has always been
- * mediated purely by TCC — there is no documented Photos App Sandbox
- * entitlement to add, sandboxed or not.
- */
-const APP_SANDBOX_ENTITLEMENT_KEYS: Partial<Record<SystemPermissionName, string>> = {
-  camera: 'com.apple.security.device.camera',
-  microphone: 'com.apple.security.device.audio-input',
-  location: 'com.apple.security.personal-information.location',
-  contacts: 'com.apple.security.personal-information.addressbook',
-  calendar: 'com.apple.security.personal-information.calendars',
-  reminders: 'com.apple.security.personal-information.calendars',
-  bluetooth: 'com.apple.security.device.bluetooth',
-}
-
-/**
- * Builds the default hardened-runtime entitlements plist — pure string
- * derivation from config, with no filesystem I/O, so it can be exercised
- * directly by tests. Node always needs the JIT + unsigned-executable-memory +
- * no-library-validation trio to keep launching once the hardened runtime is
- * on (it JITs and loads unsigned `.node` add-ons); on top of that:
+ * Builds the main app executable's entitlement plist. This deliberately does
+ * not include Node's JIT/library-loading rights; those belong only to the
+ * bundled helper returned by `helperEntitlementsPlist`.
  *
- * - `com.apple.security.automation.apple-events` is added whenever
- *   `appleEvents` is declared — the one TCC entitlement genuinely required
- *   under Murasaki's default (hardened-runtime-only, no App Sandbox) posture.
- *   Camera/microphone/photos/etc. all work with just their Info.plist usage
- *   string under hardened runtime alone; adding their sandbox-only
- *   entitlements here would be both unnecessary and (per Apple's notarization
- *   review) actively unwise.
- * - If `sign.appSandbox` is on, `com.apple.security.app-sandbox` plus every
- *   declared kind's `APP_SANDBOX_ENTITLEMENT_KEYS` entry are added too — the
- *   automation entitlement above still applies independently of sandboxing.
+ * Hardened Runtime blocks protected resources unless the main executable has
+ * the matching resource-access entitlement. These are independent from the
+ * Info.plist purpose strings that cause the TCC consent prompt: signed builds
+ * need both. Bluetooth and speech recognition have purpose strings but no
+ * Hardened Runtime resource-access entitlement; the Bluetooth entitlement is
+ * App-Sandbox-only.
+ * App Sandbox is deliberately not generated here. The current bundled Node
+ * process needs JIT rights that are incompatible with Apple's inherit-only
+ * sandbox helper model; configuration validation and this lower-level helper
+ * both reject attempts to enable it.
  */
 export function entitlementsPlist(config: MurasakiConfig): string {
+  if (config.sign?.appSandbox === true) {
+    throw new Error('murasaki: App Sandbox is unsupported by the bundled-Node architecture')
+  }
   const declared = new Set(Object.keys(config.systemPermissions?.macOS ?? {}))
-  const appSandbox = config.sign?.appSandbox === true
 
+  const resourceEntitlements = new Map<string, string>([
+    ['camera', 'com.apple.security.device.camera'],
+    ['microphone', 'com.apple.security.device.audio-input'],
+    ['location', 'com.apple.security.personal-information.location'],
+    ['photos', 'com.apple.security.personal-information.photos-library'],
+    ['contacts', 'com.apple.security.personal-information.addressbook'],
+    ['calendar', 'com.apple.security.personal-information.calendars'],
+    // EventKit uses the same protected store/entitlement for reminders.
+    ['reminders', 'com.apple.security.personal-information.calendars'],
+    ['appleEvents', 'com.apple.security.automation.apple-events'],
+  ])
+  const entries: string[] = []
+  const emitted = new Set<string>()
+  for (const [permission, entitlement] of resourceEntitlements) {
+    if (declared.has(permission) && !emitted.has(entitlement)) {
+      entries.push(`<key>${entitlement}</key><true/>`)
+      emitted.add(entitlement)
+    }
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+${entries.map((entry) => `  ${entry}`).join('\n')}
+</dict>
+</plist>
+`
+}
+
+/**
+ * Builds the bundled Node helper's hardened-runtime entitlement plist. JIT
+ * rights remain confined to Node; App Sandbox/inherit is rejected fail-closed.
+ */
+export function helperEntitlementsPlist(config: MurasakiConfig): string {
+  if (config.sign?.appSandbox === true) {
+    throw new Error('murasaki: App Sandbox is unsupported by the bundled-Node architecture')
+  }
   const entries = [
     '<key>com.apple.security.cs.allow-jit</key><true/>',
     '<key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>',
     '<key>com.apple.security.cs.disable-library-validation</key><true/>',
   ]
-  if (declared.has('appleEvents')) {
-    entries.push('<key>com.apple.security.automation.apple-events</key><true/>')
-  }
-  if (appSandbox) {
-    entries.push('<key>com.apple.security.app-sandbox</key><true/>')
-    const sandboxKeys = new Set<string>()
-    for (const name of declared) {
-      const key = APP_SANDBOX_ENTITLEMENT_KEYS[name as SystemPermissionName]
-      if (key) sandboxKeys.add(key)
-    }
-    for (const key of sandboxKeys) entries.push(`<key>${key}</key><true/>`)
-  }
-
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -1120,85 +1236,6 @@ function parseTargetId(id: string | undefined): BundleTarget {
  * `node_modules/murasaki/node_modules/` (e.g. `file:`/link installs) rather
  * than hoisting it to the project root.
  */
-/**
- * Vendor `@murasakijs/native` into the bundle, EXCLUDING dev-only artifacts
- * AND every native artifact (`.node` addon, `murasaki-launcher` binary) that
- * isn't built for `target`.
- *
- * A published `@murasakijs/native` tarball ships every platform/arch's
- * prebuilt binaries in the SAME package (see `resolveLauncherBinary`'s doc
- * comment) — left unfiltered, a naive recursive copy vendors all of them
- * into every bundle, e.g. a win32-x64 installer shipping a macOS
- * `murasaki-native.darwin-arm64.node`. `nativeArtifactTargetSuffix` reuses
- * `launcherFilename`'s napi-triple naming convention (rather than inventing
- * a second one) to recognize these target-suffixed filenames and skip any
- * that don't match `target`. It's fine — expected, even — for no matching
- * `.node` addon to exist for `target` (e.g. this workspace-linked dev tree
- * has no win32 addon compiled); that file is just omitted, nothing is
- * substituted in its place.
- *
- * Also strips dev-only artifacts: when the package is workspace-linked to
- * `crates/native` (dev tree, or CI that scaffolds the app inside the
- * workspace) a naive recursive copy drags in the Rust `target/` dir
- * (multi-GB) and the crate source — which would then get zipped/wrapped into
- * every installer. This filter keeps the bundle small in both cases (the
- * excluded dirs simply don't exist in a real npm install).
- */
-async function copyNativeModule(
-  nativeDir: string,
-  dest: string,
-  target: BundleTarget,
-): Promise<void> {
-  const EXCLUDE_DIRS = new Set(['target', 'src', 'npm', 'node_modules', '.git'])
-  const triple = napiTargetTriple(target.platform, target.arch)
-  await cp(nativeDir, dest, {
-    recursive: true,
-    filter: (src) => {
-      const rel = relative(nativeDir, src)
-      if (rel === '') return true
-      const top = rel.split(sep)[0]
-      if (EXCLUDE_DIRS.has(top)) return false
-      // dev-only files at the package root (Rust/build config, not shipped)
-      if (!rel.includes(sep) && /^(Cargo\.(toml|lock)|build\.rs|\.gitignore)$/.test(rel)) {
-        return false
-      }
-      const base = rel.split(sep).pop() ?? rel
-      const artifactSuffix = nativeArtifactTargetSuffix(base)
-      if (artifactSuffix !== null) return artifactSuffix === triple
-      return true
-    },
-  })
-}
-
-/**
- * The napi-rs target triple embedded in both `@murasakijs/native`'s compiled
- * `.node` addon filenames and the `murasaki-launcher` binary filenames (e.g.
- * `darwin-arm64`, `win32-x64-msvc`) — derived from `launcherFilename` itself
- * (stripping its `murasaki-launcher.` prefix and any `.exe` suffix) so
- * there's exactly one place that knows this naming convention, not two.
- */
-function napiTargetTriple(platform: Platform, arch: Arch): string {
-  return launcherFilename(platform, arch).replace(/^murasaki-launcher\./, '').replace(/\.exe$/, '')
-}
-
-/**
- * If `basename` is a target-suffixed native artifact — `murasaki-native.
- * <triple>.node` or `murasaki-launcher.<triple>[.exe]` — returns its triple
- * suffix (e.g. `"darwin-arm64"`, `"win32-x64-msvc"`); otherwise `null` for
- * every other file (JS, `package.json`, `.d.ts`, …), which `copyNativeModule`
- * copies unfiltered regardless of `target`.
- */
-function nativeArtifactTargetSuffix(basename: string): string | null {
-  if (basename.startsWith('murasaki-native.') && basename.endsWith('.node')) {
-    return basename.slice('murasaki-native.'.length, -'.node'.length)
-  }
-  if (basename.startsWith('murasaki-launcher.')) {
-    const suffix = basename.slice('murasaki-launcher.'.length)
-    return suffix.endsWith('.exe') ? suffix.slice(0, -'.exe'.length) : suffix
-  }
-  return null
-}
-
 function resolveNativeModuleDir(cwd: string): string {
   const bases = [resolve(cwd, 'package.json'), fileURLToPath(import.meta.url)]
   for (const base of bases) {
@@ -1220,35 +1257,95 @@ function resolveNativeModuleDir(cwd: string): string {
  * .github/workflows/native-release.yml and crates/native/package.json's
  * `files`), matching the `.node` bindings' `murasaki-native.<napi-triple>.node`
  * naming — this resolves correctly for cross-platform/cross-arch builds too,
- * since every triple ships in the package (confirmed against the published
- * @murasakijs/native@0.31.0 tarball, which includes
- * murasaki-launcher.win32-x64-msvc.exe alongside the darwin/linux ones).
- * Falls back to a local `cargo build --release --bin murasaki-launcher`
- * output for development, where `@murasakijs/native` resolves to a workspace
- * link to crates/native itself rather than a published package — but only
- * when platform+arch matches the host, since that output is never
- * cross-compiled.
+ * since the published package carries every supported launcher triple.
+ * In workspace development, where `@murasakijs/native` resolves to the Rust
+ * crate itself, refreshes the local release launcher when its Rust sources
+ * are newer than the binary. This prevents a freshly-added framework
+ * capability from being accepted by TypeScript/config generation but
+ * rejected by a stale bundled host. Published packages contain no Cargo
+ * source tree and always use their immutable target-specific prebuild.
  */
-async function resolveLauncherBinary(
+export async function resolveLauncherBinary(
   nativeDir: string,
   platform: Platform,
   arch: Arch,
 ): Promise<string> {
+  nativeDir = resolve(nativeDir)
   const filename = launcherFilename(platform, arch)
-  const candidates = [join(nativeDir, filename)]
+  const packagedLauncher = join(nativeDir, filename)
+  const candidates: string[] = []
   if (platform === process.platform && arch === process.arch) {
     const hostExe = platform === 'win32' ? '.exe' : ''
-    candidates.push(
-      join(nativeDir, `target/release/murasaki-launcher${hostExe}`),
-      resolve(__dirname, `../../../../crates/native/target/release/murasaki-launcher${hostExe}`),
+    const workspaceLauncher = join(nativeDir, `target/release/murasaki-launcher${hostExe}`)
+    if (await workspaceLauncherNeedsRebuild(nativeDir, workspaceLauncher)) {
+      rebuildWorkspaceLauncher(nativeDir, workspaceLauncher)
+    }
+    // A workspace build is derived from the current source and must take
+    // precedence over any checked-in prebuild at the crate root.
+    if (existsSync(workspaceLauncher)) candidates.push(workspaceLauncher)
+    candidates.push(resolve(__dirname, `../../../../crates/native/target/release/murasaki-launcher${hostExe}`))
+  } else if (
+    existsSync(packagedLauncher)
+    && await workspaceLauncherNeedsRebuild(nativeDir, packagedLauncher)
+  ) {
+    throw new Error(
+      `murasaki: ${filename} is older than the workspace Rust sources. ` +
+      `Rebuild the ${platform}-${arch} native prebuild before cross-bundling; ` +
+      'Murasaki will not package a capability-incompatible launcher.',
     )
   }
+  candidates.push(packagedLauncher)
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate
   }
   throw new Error(
     `murasaki: launcher binary not found — @murasakijs/native must ship ${filename}; rebuild native or update @murasakijs/native.`,
   )
+}
+
+/** True only for a workspace-linked native crate whose launcher is missing or stale. */
+export async function workspaceLauncherNeedsRebuild(
+  nativeDir: string,
+  launcherPath: string,
+): Promise<boolean> {
+  const manifest = join(nativeDir, 'Cargo.toml')
+  const srcDir = join(nativeDir, 'src')
+  if (!existsSync(manifest) || !existsSync(srcDir)) return false
+  if (!existsSync(launcherPath)) return true
+
+  const launcherMtime = (await stat(launcherPath)).mtimeMs
+  return (await newestSourceMtime([manifest, join(nativeDir, 'build.rs'), srcDir])) > launcherMtime
+}
+
+function rebuildWorkspaceLauncher(nativeDir: string, launcherPath: string): void {
+  process.stdout.write(`  ${dim('native host')}  rebuilding stale workspace launcher\n`)
+  const result = spawnSync(
+    'cargo',
+    ['build', '--release', '--bin', 'murasaki-launcher', '--manifest-path', join(nativeDir, 'Cargo.toml')],
+    { cwd: nativeDir, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
+  )
+  if (result.error || result.status !== 0 || !existsSync(launcherPath)) {
+    const detail = [result.error?.message, result.stderr?.trim(), result.stdout?.trim()]
+      .filter(Boolean)
+      .join('\n')
+    throw new Error(
+      'murasaki: the workspace native launcher is older than its Rust sources and could not be rebuilt.' +
+      (detail ? `\n${detail}` : ''),
+    )
+  }
+}
+
+async function newestSourceMtime(paths: string[]): Promise<number> {
+  let newest = 0
+  for (const path of paths) {
+    if (!existsSync(path)) continue
+    const info = await stat(path)
+    newest = Math.max(newest, info.mtimeMs)
+    if (!info.isDirectory()) continue
+    const children = await readdir(path)
+    newest = Math.max(newest, await newestSourceMtime(children.map((child) => join(path, child))))
+  }
+  return newest
 }
 
 /**
@@ -1270,57 +1367,211 @@ function launcherFilename(platform: Platform, arch: Arch): string {
 }
 
 /**
- * `config.icon` (a 1024px PNG) → `<resourcesDir>/icon.icns` + `icon.png`.
- * Same sips/iconutil technique as `murasaki icon` (cli/icon.ts), fanned out
- * to the full standard iconset (base + @2x) so iconutil doesn't silently
- * drop entries. Returns the meta.json-relative icon path ("icon.png"), or
- * `null` if `iconPath` doesn't resolve to a file.
+ * `config.icon` (a 1024px PNG) → a current macOS AppIcon asset catalog plus
+ * `<resourcesDir>/icon.icns` + `icon.png` compatibility resources.
+ *
+ * Xcode's `actool` is the only supported writer for Assets.car. When a full
+ * Xcode installation is available we compile AppIcon into Assets.car and let
+ * macOS apply its platform mask. Command Line Tools alone only provide
+ * `sips`/`iconutil`, so that environment receives a clear warning and the
+ * legacy `.icns` fallback instead of silently pretending system masking is
+ * active.
  */
-async function buildIcon(
+type MacIconResources = {
+  runtimePath: 'icon.png'
+  usesSystemMask: boolean
+}
+
+export async function buildMacIconResources(
   cwd: string,
   iconPath: string,
   resourcesDir: string,
-): Promise<string | null> {
+): Promise<MacIconResources | null> {
   const src = resolve(cwd, iconPath)
   if (!existsSync(src)) {
     process.stdout.write(`\n${warn(`icon: ${iconPath} not found, skipping`)}\n\n`)
     return null
   }
+  await readSquareIconPng(src, iconPath)
 
   // iconutil requires the source directory itself to end in `.iconset`.
   const tmpRoot = await mkdtemp(join(tmpdir(), 'murasaki-icon-'))
   const iset = join(tmpRoot, 'icon.iconset')
+  const assetCatalog = join(tmpRoot, 'MurasakiAssets.xcassets')
+  const appIconSet = join(assetCatalog, 'AppIcon.appiconset')
   await mkdir(iset)
+  await mkdir(appIconSet, { recursive: true })
+  let usesSystemMask = false
   try {
-    const entries: Array<[name: string, size: number]> = [
-      ['icon_16x16.png', 16],
-      ['icon_16x16@2x.png', 32],
-      ['icon_32x32.png', 32],
-      ['icon_32x32@2x.png', 64],
-      ['icon_128x128.png', 128],
-      ['icon_128x128@2x.png', 256],
-      ['icon_256x256.png', 256],
-      ['icon_256x256@2x.png', 512],
-      ['icon_512x512.png', 512],
-      ['icon_512x512@2x.png', 1024],
+    const entries: Array<{ name: string; pixels: number; size: string; scale: '1x' | '2x' }> = [
+      { name: 'icon_16x16.png', pixels: 16, size: '16x16', scale: '1x' },
+      { name: 'icon_16x16@2x.png', pixels: 32, size: '16x16', scale: '2x' },
+      { name: 'icon_32x32.png', pixels: 32, size: '32x32', scale: '1x' },
+      { name: 'icon_32x32@2x.png', pixels: 64, size: '32x32', scale: '2x' },
+      { name: 'icon_128x128.png', pixels: 128, size: '128x128', scale: '1x' },
+      { name: 'icon_128x128@2x.png', pixels: 256, size: '128x128', scale: '2x' },
+      { name: 'icon_256x256.png', pixels: 256, size: '256x256', scale: '1x' },
+      { name: 'icon_256x256@2x.png', pixels: 512, size: '256x256', scale: '2x' },
+      { name: 'icon_512x512.png', pixels: 512, size: '512x512', scale: '1x' },
+      { name: 'icon_512x512@2x.png', pixels: 1024, size: '512x512', scale: '2x' },
     ]
-    for (const [name, size] of entries) {
-      spawnSync('sips', ['-z', String(size), String(size), src, '--out', join(iset, name)], {
-        stdio: 'inherit',
-      })
+    for (const entry of entries) {
+      const generated = join(iset, entry.name)
+      const resize = spawnSync(
+        'sips',
+        ['-z', String(entry.pixels), String(entry.pixels), src, '--out', generated],
+        { encoding: 'utf8' },
+      )
+      if (resize.status !== 0) {
+        throw new Error(`murasaki: sips failed while generating ${entry.name}:\n${resize.stderr.trim()}`)
+      }
+      await copyFile(generated, join(appIconSet, entry.name))
     }
-    spawnSync('iconutil', ['-c', 'icns', iset, '-o', join(resourcesDir, 'icon.icns')], {
-      stdio: 'inherit',
-    })
+    const iconutil = spawnSync(
+      'iconutil',
+      ['-c', 'icns', iset, '-o', join(resourcesDir, 'icon.icns')],
+      { encoding: 'utf8' },
+    )
+    if (iconutil.status !== 0) {
+      throw new Error(`murasaki: iconutil failed:\n${iconutil.stderr.trim()}`)
+    }
+
+    await writeFile(
+      join(appIconSet, 'Contents.json'),
+      `${JSON.stringify({
+        images: entries.map((entry) => ({
+          filename: entry.name,
+          idiom: 'mac',
+          scale: entry.scale,
+          size: entry.size,
+        })),
+        info: { author: 'murasaki', version: 1 },
+      }, null, 2)}\n`,
+    )
+
+    const developerDir = await resolveActoolDeveloperDir()
+    if (developerDir) {
+      const partialPlist = join(tmpRoot, 'asset-catalog-info.plist')
+      const actool = spawnSync(
+        '/usr/bin/xcrun',
+        [
+          'actool',
+          '--compile', resourcesDir,
+          '--platform', 'macosx',
+          '--target-device', 'mac',
+          '--minimum-deployment-target', '11.0',
+          '--app-icon', 'AppIcon',
+          '--standalone-icon-behavior', 'none',
+          '--output-partial-info-plist', partialPlist,
+          '--warnings',
+          '--errors',
+          assetCatalog,
+        ],
+        {
+          encoding: 'utf8',
+          env: { ...process.env, DEVELOPER_DIR: developerDir },
+        },
+      )
+      usesSystemMask = actool.status === 0 && existsSync(join(resourcesDir, 'Assets.car'))
+      if (!usesSystemMask) {
+        const detail = [actool.stdout, actool.stderr].filter(Boolean).join('\n').trim()
+        process.stdout.write(
+          `\n${warn(`icon: actool could not compile the system-rendered AppIcon; using legacy icon.icns.${detail ? `\n${detail}` : ''}`)}\n\n`,
+        )
+      }
+    } else {
+      process.stdout.write(
+        `\n${warn('icon: full Xcode was not found; using legacy icon.icns. Install Xcode to let macOS apply the current system AppIcon mask.')}\n\n`,
+      )
+    }
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
 
-  // Runtime icon (NSApp.applicationIconImage, set by the launcher binary) —
-  // plain PNG, no conversion needed.
+  // Runtime-readable source for tray/window APIs. The packaged launcher must
+  // not set this as NSApp.applicationIconImage: that would replace the
+  // system-rendered AppIcon with this raw square bitmap.
   await copyFile(src, join(resourcesDir, 'icon.png'))
 
-  return 'icon.png'
+  return { runtimePath: 'icon.png', usesSystemMask }
+}
+
+/**
+ * Create a tiny icon-only application bundle for the unbundled macOS dev
+ * host. `NSApp.applicationIconImage = NSImage(contentsOfFile: rawPng)` skips
+ * AppIcon rendering and exposes an opaque square in the Dock. Resolving this
+ * bundle through `NSWorkspace.iconForFile` gives the same system-owned mask
+ * and appearance treatment as a packaged application, without modifying the
+ * developer's source artwork.
+ *
+ * The directory intentionally lives under the OS temp directory for the
+ * duration of the dev process. It contains no runnable application code; the
+ * placeholder executable only makes the icon carrier a structurally valid
+ * bundle for LaunchServices.
+ */
+export async function buildMacDevIconBundle(
+  cwd: string,
+  config: MurasakiConfig,
+): Promise<string | null> {
+  if (process.platform !== 'darwin' || !config.icon) return null
+
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'murasaki-dev-icon-'))
+  const appDir = join(tmpRoot, `${config.productName}.app`)
+  const contentsDir = join(appDir, 'Contents')
+  const resourcesDir = join(contentsDir, 'Resources')
+  const executableDir = join(contentsDir, 'MacOS')
+  await mkdir(resourcesDir, { recursive: true })
+  await mkdir(executableDir, { recursive: true })
+
+  try {
+    const icon = await buildMacIconResources(cwd, config.icon, resourcesDir)
+    if (!icon) {
+      await rm(tmpRoot, { recursive: true, force: true })
+      return null
+    }
+
+    const executable = join(executableDir, config.productName)
+    await writeFile(executable, '#!/bin/sh\nexit 0\n')
+    await chmod(executable, 0o755)
+    await writeFile(
+      join(contentsDir, 'Info.plist'),
+      infoPlist(
+        { ...config, appId: `${config.appId}.murasaki-dev-icon` },
+        config.productName,
+        true,
+        icon.usesSystemMask,
+      ),
+    )
+    return appDir
+  } catch (error) {
+    await rm(tmpRoot, { recursive: true, force: true })
+    throw error
+  }
+}
+
+async function resolveActoolDeveloperDir(): Promise<string | null> {
+  const candidates = new Set<string>()
+  if (process.env.DEVELOPER_DIR) candidates.add(process.env.DEVELOPER_DIR)
+
+  const selected = spawnSync('/usr/bin/xcode-select', ['-p'], { encoding: 'utf8' })
+  if (selected.status === 0 && selected.stdout.trim()) candidates.add(selected.stdout.trim())
+
+  if (existsSync('/Applications')) {
+    for (const entry of await readdir('/Applications')) {
+      if (/^Xcode(?:[-_ ].*)?\.app$/i.test(entry)) {
+        candidates.add(join('/Applications', entry, 'Contents/Developer'))
+      }
+    }
+  }
+
+  for (const developerDir of candidates) {
+    const found = spawnSync('/usr/bin/xcrun', ['--find', 'actool'], {
+      encoding: 'utf8',
+      env: { ...process.env, DEVELOPER_DIR: developerDir },
+    })
+    if (found.status === 0 && found.stdout.trim()) return developerDir
+  }
+  return null
 }
 
 /**
@@ -1345,14 +1596,36 @@ async function buildWin32Icon(
     process.stdout.write(`\n${warn(`icon: ${iconPath} not found, skipping`)}\n\n`)
     return null
   }
+  const source = await readSquareIconPng(src, iconPath)
   await copyFile(src, join(resourcesDir, 'icon.png'))
-
-  const source = PNG.sync.read(await readFile(src))
   const sizes = [16, 24, 32, 48, 64, 256]
   const ico = await pngToIco(sizes.map((size) => resizePng(source, size)))
   await writeFile(join(resourcesDir, 'icon.ico'), ico)
 
   return 'icon.png'
+}
+
+async function readSquareIconPng(src: string, configuredPath: string): Promise<PNG> {
+  let source: PNG
+  try {
+    source = PNG.sync.read(await readFile(src))
+  } catch (error) {
+    throw new Error(
+      `murasaki: icon must be a valid PNG (${configuredPath}): ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (source.width !== source.height) {
+    throw new Error(
+      `murasaki: icon must be square; ${configuredPath} is ${source.width}x${source.height}. ` +
+        'Use a dedicated square app-icon source rather than a screenshot or banner.',
+    )
+  }
+  if (source.width < 512) {
+    process.stdout.write(
+      `\n${warn(`icon: ${configuredPath} is only ${source.width}px; use a 1024px source for crisp platform assets.`)}\n\n`,
+    )
+  }
+  return source
 }
 
 /**
@@ -1550,7 +1823,12 @@ function resolveWindowsPublisher(config: MurasakiConfig): string {
   )
 }
 
-export function infoPlist(config: MurasakiConfig, productName: string, hasIcon: boolean): string {
+export function infoPlist(
+  config: MurasakiConfig,
+  productName: string,
+  hasIcon: boolean,
+  hasSystemMaskedIcon = false,
+): string {
   const appId = escapeXml(config.appId)
   const name = escapeXml(productName)
   const version = escapeXml(config.version ?? '0.0.0')
@@ -1675,7 +1953,7 @@ ${associations.files.map((file) => `    <dict>
   <key>CFBundleLocalizations</key>
   <array>
 ${localizationsXml}
-  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}${permissionUsageXml}${protocolsXml}${documentTypesXml}
+  </array>${hasIcon ? '\n  <key>CFBundleIconFile</key><string>icon</string>' : ''}${hasSystemMaskedIcon ? '\n  <key>CFBundleIconName</key><string>AppIcon</string>' : ''}${permissionUsageXml}${protocolsXml}${documentTypesXml}
 </dict>
 </plist>
 `

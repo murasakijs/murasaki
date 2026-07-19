@@ -53,6 +53,25 @@ test('a custom CSP completely overrides the framework default and is attribute-e
   assert.doesNotMatch(html, /style-src/)
 })
 
+test('framework-injected custom CSP is idempotent across repeated Vite HTML transforms', () => {
+  const custom = "default-src 'none'; connect-src https://api.example.test"
+  const once = applyContentSecurityPolicy(frameworkHtml, custom, 'build')
+  const twice = applyContentSecurityPolicy(once, custom, 'build')
+
+  assert.equal(cspMetaCount(twice), 1)
+  assert.match(twice, /data-murasaki-csp/)
+  assert.match(twice, /default-src 'none'/)
+
+  const withUserPolicy = twice.replace(
+    '</head>',
+    '<meta http-equiv="Content-Security-Policy" content="script-src \'none\'"></head>',
+  )
+  assert.throws(
+    () => applyContentSecurityPolicy(withUserPolicy, custom, 'build'),
+    /configure the policy in one place/,
+  )
+})
+
 test('false opts out without removing a user-owned CSP meta tag', () => {
   assert.equal(applyContentSecurityPolicy(frameworkHtml, false, 'build'), frameworkHtml)
   const existing = '<html><head><meta content="default-src \'none\'" HTTP-EQUIV = \'Content-Security-Policy\'></head></html>'

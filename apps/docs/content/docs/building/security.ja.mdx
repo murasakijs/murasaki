@@ -4,13 +4,14 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 ---
 
 デスクトップセキュリティはプロセス境界から始まります。Murasaki は Node を renderer
-から分離し、アプリ WebView の遷移先を自身の origin に制限し、特権 loopback endpoint
-を app-session token で保護します。通常の renderer bug の影響を減らしますが、完全な
+から分離し、アプリWebViewの遷移先を自身のoriginに制限し、特権loopback endpoint
+をnative hostが発行するwindow別authorityで保護します。通常のrenderer bugの影響を減らしますが、完全な
 権限システムではありません。
 
 <Callout type="warn">
-  renderer native command は deny-by-default で、型付き `capabilities` list から許可
-  します。宣言windowごとに独立したallowlistがあり、resourceを受け取るcommandでは
+  renderer native commandはdeny-by-defaultで、型付き`capabilities` listから許可
+  します。rendererからNode/APIへのアクセスも`backendCapabilities`で別にdeny-by-default
+  です。宣言windowごとに独立したallowlistがあり、resourceを受け取るcommandでは
   URL、path、target window、OS permissionをscopeできます。renderer-to-Node関数も
   privileged application codeとして扱い、surfaceを
   小さく保ってください。
@@ -22,14 +23,21 @@ description: Murasaki の信頼境界、組み込み runtime protection、アプ
 | --- | --- | --- |
 | Remote URL → app WebView | app origin と完全一致する遷移だけを window 内で許可。off-origin HTTP(S) は system browser で開き、`file:` / `data:` / `javascript:` は拒否 | navigation behavior を弱めず、remote script を renderer に注入しない |
 | Renderer → Rust native command | exact-origin IPC checkと、call元windowごとに評価するtyped / deny-by-default allowlist | そのrendererが使うcommandだけをgrant。`window:manage`など広い操作のapp-level intentを検証 |
-| Renderer → local Node | `/api/*` と `/__murasaki/*` は random 256-bit HttpOnly / SameSite=Strict cookie を要求し Host / Origin を検証。wire payload に上限 | 各 action / route / Main function 内で引数を検証し操作を認可 |
+| Renderer → local Node | `/api/*` と `/__murasaki/*` はnative windowのlabelからHMACで導出したidentityと、そのwindowの`backendCapabilities`を要求。Host / Origin / Fetch Metadataとwire上限も検証 | 必要なmodule export、method/path、updater、event、diagnosticsだけを許可し、handler内でもobject単位の認可を行う |
 | OS URL / file activation → Node Main | 設定済み scheme / extension だけを normalize して `openRequested()` target にし、認証付き app-local channel で配送 | URL / path をすべて attacker-controlled として扱い、操作前に intent、identifier、host、file content を検証 |
 | App → update host | manifest raw bytes の Ed25519 signature、その後 payload の SHA-256 を検証 | private update key を保護し、hash/signature を同時に公開 |
 | OS → installed app | macOS Developer ID / notarization と Windows Authenticode orchestration が最終 app-owned artifact を署名・検証 | platform certificate / provider を用意して保護し、clean machine で trust policy と installed artifact をテスト |
 
-本番は全 interface ではなく `127.0.0.1` だけで listen します。開発時は loopback の
-`localhost` / `127.0.0.1` / `[::1]` を許可し、cross-site Fetch Metadata を拒否します。
-session cookie は最初の document response が設定し、JavaScript からは読めません。
+本番は全interfaceではなく`127.0.0.1`だけでlistenします。開発時はloopbackの
+`localhost` / `127.0.0.1` / `[::1]`を許可し、cross-site Fetch Metadataを拒否します。
+static document responseにはruntime bearer credentialを含めません。native hostはdocument
+startで、そのwindow専用のderived identityだけを注入します。packaged identityはlabelと
+native generationの両方にbindされ、windowを閉じるとNode側で失効し、同じlabelを再作成しても
+別HMACになります。どちらかを書き換えると検証に失敗し、secondary windowはbackend grantを
+継承しません。subframe、またはdocument originが
+正確なapp loopback originと異なる場合、credentialを定義する前にidentity bootstrapを終了します。
+main-frame-only指定でもWebView2がframeへscriptを注入するWindowsでも、このcheckを適用します。
+native lifecycle endpointはrenderer JavaScriptへ渡さない別tokenを使用します。
 
 ## WebView network and private sessions
 
@@ -40,9 +48,10 @@ same-origin navigation / IPC checkも緩和しません。
 - private / incognito sessionはWebViewがappのpersistent browser profileを使わないように
   します。userのIP addressを隠さず、Node Mainが書いたfileを消さず、app serverに対する
   anonymityも提供しません。
-- 通常windowはcookieとWeb Storageを含む1つのapplication WebContextを共有し、destroy /
-  recreate後も利用できます。incognito有効時はWryがshared contextを無視するため、複数の
-  incognito windowが1つのprivate sessionを共有する保証はなく、動作はplatform依存です。
+- WebContext / profileはwindow labelごとに分離します。secondary windowのService Worker、
+  SharedWorker、cookie、Web Storageからprimary windowの認証済みbackend requestを観測できません。
+  同じlabelをprocess内で再作成した場合はcontextを再利用します。incognito labelはnon-persistentで、
+  custom persistent storeを使えないmacOS 11〜13のsecondary labelもnon-persistentです。
 - custom User-Agentはappがrequestするoriginへ送られ、fingerprinting情報を増やす場合が
   あります。platform User-Agentの置換でserver compatibility / authentication flowが壊れる
   可能性もあります。
@@ -94,16 +103,45 @@ capabilityを省略すると何も許可されません。ただしprimaryは`wi
 
 | Permission | Scope field |
 | --- | --- |
-| `shell:openExternal` | exact URL、またはHTTP(S)末尾`/**` subtreeの`urls` |
+| `shell:openExternal`、`webview:readCookies`、`webview:writeCookies` | exact URL、またはHTTP(S)末尾`/**` subtreeの`urls` |
 | `shell:showItemInFolder` | absoluteかつ非traversalの`paths`。exactまたは末尾`/**` |
 | `window:open`、`window:manage` | 宣言済みlabelと完全一致する`windows` |
 | `systemPermission:status`、`systemPermission:request` | 完全一致する`permissions`名 |
+| `secureStorage:get`、`secureStorage:set`、`secureStorage:delete` | exact `keys`、または末尾が1つの`*`で終わるkey prefix |
 
 明示`deny`は`allow`より優先します。`deny`だけのstructured grantはそれ以外を許可し、
 従来のstring grantはそのcommandのtargetを制限しません。dialogなど他のcommandは引き続き
 command単位です。広いgrantは信頼するrendererだけへ付与し、より狭いintentはNode側でも
 強制します。application全体のprogrammatic shutdownは
 `app:quit` で別に制御されます。
+
+## backend resourceを明示的に許可する
+
+native capabilityとbackend capabilityは異なる境界を保護します。rendererからNode Main、
+Server Action、API Route、updater route、event stream、renderer diagnosticsへアクセスする
+場合は`backendCapabilities`を使います。
+
+```ts title="murasaki.config.ts"
+window: {
+  backendCapabilities: [
+    'main:src/backend/account.ts#loadAccount',
+    'action:src/actions/save.ts#saveDocument',
+    'api:POST:/api/documents/*',
+    'events:sync.*',
+    'diagnostics:renderer-error',
+  ],
+},
+windows: {
+  preview: { route: '/preview', backendCapabilities: [] },
+},
+```
+
+grantは末尾が1つの`*`で終わる場合だけprefix wildcardとなり、それ以外は完全一致です。
+API grantには大文字のHTTP methodを含めます。primaryは
+`window.backendCapabilities ?? backendCapabilities ?? []`を使い、secondaryはすべて既定`[]`
+です。`main:*`、`action:*`、`api:*`、`updater:*`、`events:*`は便利ですが広範囲なので、
+本番ではexact resourceを優先してください。shutdown、activation、window controlのnative-only
+endpointをrendererへgrantすることはできません。
 
 runtime window作成は信頼されたNode Mainだけが、configで宣言したlabelに対して実行できます。
 private native transportが運ぶのはmethodとlabelだけで、URLやcapability listは受け取りません。
@@ -126,9 +164,14 @@ byte上限を検証します。plaintext fallbackはありません。未登録�
 deleteも成功し、Linuxでは`unsupported`を返します。
 
 `secureStorage:get`、`secureStorage:set`、`secureStorage:delete`は別々にgrantしてください。
-これらはkey scopeではありません。read権限を持つrendererはapp namespace内のすべてのkeyを
-queryできるため、untrusted codeを読み込むwindowには付与しないでください。OS credential
-storeはat-rest dataを保護しますが、そのcapabilityで実行中のXSSからは保護しません。
+structured key scopeを使い、そのrendererが所有するentryだけへ限定することを推奨します。
+
+```ts
+{ permission: 'secureStorage:get', allow: { keys: ['account:*', 'theme'] } }
+```
+
+互換性のためstring grantはkey無制限です。OS credential storeはat-rest dataを保護しますが、
+grantされたkey scopeで実行中のXSSからは保護しません。
 
 keyは256 UTF-8 byte以下、valueは2,048 UTF-8 byte以下で、どちらも空文字とNULを拒否します。
 native IPC body全体にも256 KiB上限があります。`appId`を変更すると新namespaceから既存entryを
@@ -161,9 +204,9 @@ export async function loadAccount(accountId: string) {
 ```
 
 <Callout type="info">
-  runtime session は request がアプリ renderer origin を経由したことを示しますが、
-  renderer が侵害されていないことは保証しません。XSS は client bundle から呼べる
-  関数を実行できます。
+  window authorityはrequestが宣言windowのrendererから来たことを示しますが、そのrendererが
+  侵害されていないことは保証しません。XSSはそのwindowにgrantされたbackend resourceを
+  実行できます。handler内でもuser/session/object単位の認可を行ってください。
 </Callout>
 
 ## Path と URL を検証する
@@ -267,23 +310,18 @@ Node の TCP / WebSocket / HTTP listener を作れますが、Murasaki runtime-s
 
 ## In-page permission requests(getUserMedia、geolocation)
 
-Murasaki は現時点で in-page の permission request を intercept しません。renderer の
-JavaScript から `navigator.mediaDevices.getUserMedia()` や `navigator.geolocation`
-などの Web API を呼んでも、Murasaki が仲介する prompt / capability にはならず、platform
-WebView 自体の default 挙動にそのまま委ねられます。Wry 0.55 には permission-request
-handler が無く、該当 API は upstream の未リリース版にしか存在しません。この
-intercept(Murasaki 自身の capability / consent モデルへ経由させること)は、Wry が
-`with_permission_handler` を出荷した時点で対応予定です。
+developmentとpackaged appのrenderer documentには、次のresponse headerを付与します。
 
-それまでは、platform ごとの host OS WebView の default 挙動に従います(例: macOS では
-WebKit 自身の permission UI、Windows では WebView2 自身の UI)。macOS では
-camera / microphone capture は依然として OS の TCC privacy database に支配されており、
-上述の `systemPermissions.macOS.camera` / `microphone` の usage 文言や起動時 prompt は
-`AVFoundation` 経由の native capture に適用されるものであって、ページ自身の
-`getUserMedia()` 呼び出しには適用されません — こちらは WebKit layer で独立に prompt
-される(または黙って拒否される)だけです。OS の default WebView prompt によって
-camera / microphone / location へ想定外にアクセスできてしまう window に、信頼できない
-remote content を読み込ませないでください。
+```http
+Permissions-Policy: camera=(), microphone=(), geolocation=()
+```
+
+そのため、影響の大きいbrowser APIはWebKit/WebView2固有のprompt挙動へ流れず、
+fail-closedになります。これはnative featureのhost OS consentを管理する
+`systemPermission:*`とは別の境界です。Wry 0.55にはcross-platformなper-window
+permission callbackがないため、rendererのcamera / microphone / geolocationを許可する
+config escape hatchは現在提供しません。一貫した境界をnative側で強制できるまでは、
+capability-checked native featureまたは別途保護したserviceを使用してください。
 
 ## Code signing と update key は別物
 
@@ -295,17 +333,19 @@ notarization または Murasaki の Windows Authenticode `--sign` flow、更新�
 
 ## 既知の security gap
 
-- Native capabilityはwindow別で、一部のtarget-bearing commandはinline allow/deny scopeに
-  対応する。dialog default、clipboard content、tray menu content、secure storage keyなど
-  他のargumentはまだscopeできず、policyは独立署名fileではなくconfigで管理する
-- 宣言windowは1つのapplication originと認証済みlocal Node sessionを共有する。native
-  allowlistはServer Actions、`'use main'`、API route、updater endpointを隔離しないため、
-  application code側で操作を認証・認可する必要がある
+- Native capabilityはwindow別で、URL、filesystem path、secure-storage key、target window、
+  OS permissionをscopeできる。dialog default、clipboard content、tray menu content、
+  elevated processのargumentなどはまだcommand単位で、policyは独立署名fileではなくconfig管理
+- backend capabilityはServer Action、`'use main'`、API/updater route、event、diagnosticsを
+  native window別に隔離する。browser profileもwindow別に分離され、同一originのService Workerや
+  browser stateがauthority境界をまたぐことはできない。primaryは従来profileを維持し、secondaryの
+  永続化はmacOS 14+が必要（macOS 11–13は分離されたnon-persistent storeへfail closed）である。
+  XSSは自身のwindowへgrantされたresourceを使えるため、handlerでuser/session/objectを認可する
 - incognitoはpersistent profileを使わないが、複数incognito windowが同じin-memory
   sessionを共有する保証はない
 - Linux package signing は未実装。Windows Authenticode には developer が用意した
   certificate / Artifact Signing provider と Windows SDK SignTool が必要
-- Linux の protocol / file-association 登録は未実装。Windows portable archive は意図的に self-register しない
+- Linux の `.deb` は `.desktop` の `MimeType` を使ってプロトコルとファイル関連付けを登録する。展開しただけの AppDir / AppImage と Windows のポータブルアーカイブは、意図的に OS へ自己登録しない
 - renderer native APIは `src/main.ts` から直接呼べない
 
 正確な状況は[プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)

@@ -19,20 +19,20 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
       - name: Upgrade npm to latest
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.2
 
       - name: Verify tag, package, and version
         id: meta
@@ -104,18 +104,18 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
           package-manager-cache: false
 
       - name: Upgrade npm to latest
-        run: npm install -g npm@latest
+        run: npm install -g npm@11.5.2
 
       - name: Prevent duplicate publication
         run: |

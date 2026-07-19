@@ -1,0 +1,39 @@
+---
+title: Alert Dialog
+description: Interrupts the user with a modal decision that must be acknowledged.
+---
+
+## Usage
+
+```tsx
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogTitle, AlertDialogTrigger,
+} from '@murasakijs/ui'
+
+<AlertDialog>
+  <AlertDialogTrigger>Delete project</AlertDialogTrigger>
+  <AlertDialogContent>
+    <AlertDialogHeader>
+      <AlertDialogTitle>Delete this project?</AlertDialogTitle>
+      <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel>Cancel</AlertDialogCancel>
+      <AlertDialogAction>Delete</AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
+```
+
+Use an alert dialog only when the user must make an explicit choice before
+continuing. Keep the initial focus on the least destructive action. The title
+and description are announced to assistive technology.
+
+## Exports
+
+`AlertDialog`, `AlertDialogTrigger`, `AlertDialogPortal`, `AlertDialogOverlay`,
+`AlertDialogContent`, `AlertDialogHeader`, `AlertDialogFooter`,
+`AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogAction`, and
+`AlertDialogCancel`.

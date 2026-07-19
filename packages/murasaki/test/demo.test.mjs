@@ -15,13 +15,10 @@ test('resolves native macOS targets', () => {
 
 test('builds immutable release asset names', () => {
   assert.equal(
-    demoAssetName(DEMO_SPECS['local-signal'], 'darwin-arm64'),
-    'Local-Signal-0.47.2-darwin-arm64.dmg',
-  )
-  assert.equal(
     demoAssetName(DEMO_SPECS.default, 'darwin-x64'),
     'MurasakiDemo-0.47.3-darwin-x64.dmg',
   )
+  assert.deepEqual(Object.keys(DEMO_SPECS), ['default'])
 })
 
 test('selects the checksum for the exact asset', () => {

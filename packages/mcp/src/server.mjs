@@ -8,7 +8,9 @@ import {
   getApiReference,
   getConfigSchema,
   getRecipe,
+  listCapabilities,
   listRecipes,
+  listUiComponents,
   searchDocs,
 } from './knowledge.mjs'
 
@@ -57,6 +59,17 @@ export function createServer() {
     annotations: readOnlyAnnotations,
   }, async (input) => response(await getApiReference(input)))
 
+  server.registerTool('list_capabilities', {
+    title: 'List Murasaki capabilities',
+    description: 'Discover canonical feature IDs before compatibility checks, with evidence-backed maturity, platform status, public symbols, limitations, and docs URLs.',
+    inputSchema: {
+      platform: z.enum(['macos', 'windows', 'linux']).optional(),
+      status: z.enum(['stable', 'partial', 'experimental', 'planned']).optional(),
+      category: z.string().min(1).optional(),
+    },
+    annotations: readOnlyAnnotations,
+  }, async (input) => response(await listCapabilities(input)))
+
   server.registerTool('get_config_schema', {
     title: 'Get Murasaki configuration schema',
     description: 'Return the complete JSON Schema for murasaki.config or a property selected by dot path or JSON Pointer.',
@@ -66,7 +79,7 @@ export function createServer() {
 
   server.registerTool('doctor', {
     title: 'Diagnose a Murasaki project',
-    description: 'Read only known project metadata and entry paths, then report configuration and toolchain readiness. It never runs project code or modifies files.',
+    description: 'Report structure-only readiness from known project metadata and entry paths. runtimeVerified is always false because this tool never imports config, runs project code, builds, launches, or modifies files.',
     inputSchema: { projectPath: z.string().optional() },
     annotations: readOnlyAnnotations,
   }, async (input) => response(await doctor(input)))
@@ -77,6 +90,16 @@ export function createServer() {
     inputSchema: { locale: z.enum(['en', 'ja']).default('en') },
     annotations: readOnlyAnnotations,
   }, async (input) => response(await listRecipes(input)))
+
+  server.registerTool('list_ui_components', {
+    title: 'List Murasaki UI components',
+    description: 'Discover the documented @murasakijs/ui component catalog in English or Japanese before generating interface code.',
+    inputSchema: {
+      locale: z.enum(['en', 'ja']).default('en'),
+      query: z.string().min(1).optional(),
+    },
+    annotations: readOnlyAnnotations,
+  }, async (input) => response(await listUiComponents(input)))
 
   server.registerTool('get_recipe', {
     title: 'Get a Murasaki recipe',
@@ -90,7 +113,7 @@ export function createServer() {
 
   server.registerTool('check_compatibility', {
     title: 'Check Murasaki feature compatibility',
-    description: 'Check required canonical feature IDs against a target platform without treating planned or partial work as complete.',
+    description: 'Check required canonical feature IDs from list_capabilities against a target platform without treating planned or partial work as complete. Unknown IDs return suggestions instead of being silently guessed.',
     inputSchema: {
       features: z.array(z.string().min(1)).min(1).max(50),
       platform: z.enum(['macos', 'windows', 'linux']),

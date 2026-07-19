@@ -20,7 +20,9 @@ test('stdio server negotiates MCP and exposes only the intended read-only tools'
       'get_api_reference',
       'get_config_schema',
       'get_recipe',
+      'list_capabilities',
       'list_recipes',
+      'list_ui_components',
       'search_docs',
     ])
     assert.ok(tools.every((tool) => tool.annotations?.readOnlyHint === true))

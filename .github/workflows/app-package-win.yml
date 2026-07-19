@@ -28,12 +28,26 @@ name: App package smoke test (Windows)
 # napi build step below can keep relying on host-arch auto-detection exactly
 # like the original single-arch job did.
 #
-# Runs on every push to a feat/** branch (still landing on
-# feat/win-linux-packaging) plus workflow_dispatch for on-demand runs.
 on:
+  pull_request:
+    paths:
+      - '.github/scripts/win-*.ps1'
+      - '.github/workflows/app-package-win.yml'
+      - 'crates/native/**'
+      - 'packages/murasaki/**'
+      - 'packages/create-murasaki/**'
+      - 'packages/ui/**'
+      - 'pnpm-lock.yaml'
   push:
-    branches:
-      - 'feat/**'
+    branches: [main]
+    paths:
+      - '.github/scripts/win-*.ps1'
+      - '.github/workflows/app-package-win.yml'
+      - 'crates/native/**'
+      - 'packages/murasaki/**'
+      - 'packages/create-murasaki/**'
+      - 'packages/ui/**'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
 
 permissions:
@@ -54,15 +68,15 @@ jobs:
     runs-on: ${{ matrix.runner }}
     name: win-smoke (${{ matrix.arch }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
-      # No version pin: pnpm/action-setup@v4 reads it from the root
+      # No version pin: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 reads it from the root
       # package.json "packageManager" field (specifying both errors).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       # Both matrix runners are native for their arch (windows-latest is
       # x86_64, windows-11-arm is aarch64) — no cross-target flag is needed
@@ -70,7 +84,7 @@ jobs:
       # cross-target matrix entries); `targets:` here just makes sure the
       # matching target is installed on top of whatever "stable" already
       # defaults to on each host.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.rustTarget }}
 
@@ -79,7 +93,7 @@ jobs:
       # pushes only our own crate recompiles, cutting the job from ~9m to a
       # few. Keys per-runner (and therefore per-arch) automatically, so the
       # two matrix legs never share (or clobber) each other's cache.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: crates/native
 
@@ -165,7 +179,7 @@ jobs:
         shell: pwsh
         run: .github/scripts/win-smoke-test.ps1 -ExePath "${{ steps.locate.outputs.exePath }}" -TimeoutSeconds 60
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: win32-bundle-${{ matrix.arch }}
@@ -185,7 +199,6 @@ jobs:
       # going red.
       - name: Install NSIS
         shell: pwsh
-        continue-on-error: ${{ matrix.arch == 'arm64' }}
         run: |
           choco install nsis -y
           # choco doesn't always shim makensis onto PATH; add its dir so
@@ -197,7 +210,6 @@ jobs:
       # same reason as the NSIS step above.
       - name: Install WiX v4
         shell: pwsh
-        continue-on-error: ${{ matrix.arch == 'arm64' }}
         run: |
           # Pin to v4 (not the latest v7) — WiX v6+ gates `wix build` behind the
           # Open Source Maintenance Fee EULA (error WIX7015), and installer.ts's
@@ -216,7 +228,6 @@ jobs:
       # posture as the "Install WiX v4" step above.
       - name: Install WiX UI extension
         shell: pwsh
-        continue-on-error: ${{ matrix.arch == 'arm64' }}
         run: wix extension add -g WixToolset.UI.wixext/4.0.6
 
       - name: murasaki installer --target win32-${{ matrix.arch }} (test app)
@@ -248,28 +259,22 @@ jobs:
           Write-Host "zip: $($zip.FullName) ($($zip.Length) bytes)"
           "zipPath=$($zip.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          $mandatory = '${{ matrix.arch }}' -eq 'x64'
-
           $setup = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *-setup-*.exe | Select-Object -First 1
           if ($setup) {
             Write-Host "setup exe: $($setup.FullName) ($($setup.Length) bytes)"
             "setupPath=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } elseif ($mandatory) {
+          } else {
             Write-Error 'No NSIS -setup-<arch>.exe found under examples/win-smoke-app/dist'
             exit 1
-          } else {
-            Write-Host '::warning::No NSIS -setup-<arch>.exe found on the arm64 leg — makensis was likely unavailable on windows-11-arm (see the Install NSIS step above).'
           }
 
           $msi = Get-ChildItem -Path examples/win-smoke-app/dist -Filter *.msi | Select-Object -First 1
           if ($msi) {
             Write-Host "msi: $($msi.FullName) ($($msi.Length) bytes)"
             "msiPath=$($msi.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          } elseif ($mandatory) {
+          } else {
             Write-Error 'No .msi found under examples/win-smoke-app/dist (WiX build likely failed)'
             exit 1
-          } else {
-            Write-Host '::warning::No .msi found on the arm64 leg — wix was likely unavailable on windows-11-arm (see the Install WiX v4 step above).'
           }
 
       # Asserts whichever installers were produced above are well-formed by
@@ -320,7 +325,6 @@ jobs:
         id: silent-install
         if: steps.locate-installers.outputs.setupPath != ''
         shell: pwsh
-        continue-on-error: true
         run: |
           $setup = "${{ steps.locate-installers.outputs.setupPath }}"
           Write-Host "Silent-installing $setup ..."
@@ -340,20 +344,6 @@ jobs:
           Write-Host "Installed exe: $($installedExe.FullName)"
 
           .github/scripts/win-smoke-test.ps1 -ExePath $installedExe.FullName -TimeoutSeconds 60
-
-      - name: Report silent-install smoke test result
-        if: always() && steps.locate-installers.outputs.setupPath != ''
-        # Purely informational (re-surfaces the silent-install outcome). Don't
-        # let a transient pwsh-launch flake on this trivial step (seen once as
-        # 0xC0000142 on the windows-11-arm runner) fail the whole matrix leg.
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          if ('${{ steps.silent-install.outcome }}' -ne 'success') {
-            Write-Host '::warning::Silent-install smoke test did not pass (non-blocking — see the "Silent-install the NSIS installer and smoke test" step above). The installers themselves were already verified as well-formed.'
-          } else {
-            Write-Host 'Silent-install smoke test passed.'
-          }
 
       # ── Phase 3: Windows auto-updater end-to-end (updater contract §8) ────
       #
@@ -442,7 +432,7 @@ jobs:
             -SetupV1 "${{ steps.copy-v1.outputs.setupV1Path }}" `
             -SetupV2 "${{ steps.locate-installers.outputs.setupPath }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: win32-updater-e2e-log-${{ matrix.arch }}
@@ -450,7 +440,7 @@ jobs:
           if-no-files-found: warn
 
       # Full set: both installers + the portable zip (whichever exist).
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: win32-installers-${{ matrix.arch }}
@@ -462,7 +452,7 @@ jobs:
 
       # Lean artifact: just the two installers, for a quick download while
       # iterating on Windows behavior (skips the ~200MB raw bundle + portable zip).
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: win32-setup-msi-${{ matrix.arch }}

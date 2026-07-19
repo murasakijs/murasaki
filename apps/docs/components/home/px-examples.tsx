@@ -1,33 +1,29 @@
 import { Code2, ExternalLink } from "lucide-react";
 import Image, { type StaticImageData } from "next/image";
 import type { LpExtra } from "@/lib/home-content";
-import localSignalImage from "../../../../examples/local-signal/design/implementation.png";
-import focusImage from "../../../../examples/murasaki-focus/design/implementation.png";
-import violetNotesImage from "../../../../examples/violet-notes/design/implementation.png";
+import orgliaImage from "../../../../examples/orglia/design/overview-implementation.png";
+import oscillaImage from "../../../../examples/oscilla/design/implementation.png";
+import papelleImage from "../../../../examples/papelle/design/papelle-implementation.png";
 import { SampleDemoCommand } from "./sample-demo-command";
 
 const REPO_URL = "https://github.com/murasakijs/murasaki";
 const DEMO_RELEASE_URL = `${REPO_URL}/releases/tag/v0.47.3`;
-const SAMPLE_RELEASE_URL = `${REPO_URL}/releases/tag/samples-v0.47.2`;
+const EXAMPLES_URL = `${REPO_URL}/tree/main/examples`;
 
 const SAMPLE_META: {
   slug: string;
   image: StaticImageData;
   imagePosition?: string;
 }[] = [
-  { slug: "violet-notes", image: violetNotesImage },
-  { slug: "murasaki-focus", image: focusImage },
-  { slug: "local-signal", image: localSignalImage },
+  { slug: "papelle", image: papelleImage },
+  { slug: "oscilla", image: oscillaImage },
+  { slug: "orglia", image: orgliaImage },
 ];
 
-function sampleRunnerCommand(slug: string) {
-  return `pnpm dlx murasaki@latest demo ${slug}`;
-}
-
 /**
- * Runnable proof — the default scaffold and three showcase products launch
- * through the checksum-verifying CLI. Static image imports let Next emit
- * fingerprinted local assets without a runtime image service.
+ * Runnable proof for the default scaffold plus source-backed product examples.
+ * Static image imports let Next emit fingerprinted local assets without a
+ * runtime image service.
  */
 export function PxExamples({ content }: { content: LpExtra["examples"] }) {
   return (
@@ -90,7 +86,7 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
             {content.sampleLabel}
           </h3>
           <a
-            href={SAMPLE_RELEASE_URL}
+            href={EXAMPLES_URL}
             className="lp-pixel hidden items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-white/65 transition-colors hover:text-white sm:flex"
           >
             {content.downloadsLabel}
@@ -110,7 +106,7 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                 <div className="relative aspect-[16/10] overflow-hidden border border-white/25 bg-[#111014]">
                   <Image
                     src={meta.image}
-                    alt={`${app.name} desktop app`}
+                    alt={`${app.name} desktop app interface`}
                     fill
                     sizes="(min-width: 768px) 33vw, 100vw"
                     className="object-cover transition-transform duration-500 hover:scale-[1.025]"
@@ -130,20 +126,7 @@ export function PxExamples({ content }: { content: LpExtra["examples"] }) {
                     <Code2 aria-hidden="true" className="size-3.5" />
                     {content.sourceLabel}
                   </a>
-                  <a
-                    href={SAMPLE_RELEASE_URL}
-                    className="inline-flex items-center gap-2 text-white/65 transition-colors hover:text-white"
-                  >
-                    <ExternalLink aria-hidden="true" className="size-3.5" />
-                    {content.downloadsLabel}
-                  </a>
                 </div>
-                <SampleDemoCommand
-                  command={sampleRunnerCommand(meta.slug)}
-                  label={content.runner.label}
-                  copyLabel={content.runner.copy}
-                  copiedLabel={content.runner.copied}
-                />
               </article>
             );
           })}

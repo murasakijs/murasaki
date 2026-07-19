@@ -14,11 +14,12 @@ murasaki release     Auto-update manifest helpers
 murasaki help        Show this help
 ```
 
-<Callout type="warn">
-  `murasaki bundle` and `murasaki installer` produce real installers on
-  **macOS** and **Windows** today; Linux packaging is on the roadmap (it still
-  prints a "not supported yet" message). `murasaki dev` works on macOS,
-  Windows, and Linux.
+<Callout type="info">
+  Development and packaging support macOS, Windows, and Linux. Linux bundles
+  produce an AppDir and `.AppImage`; `installer` also produces a `.deb`.
+  Linux package signing, RPM packages, and repository metadata are not yet
+  implemented. An explicit Linux `--sign` request fails closed before output;
+  it never silently produces an unsigned artifact.
 </Callout>
 
 ## `murasaki dev`
@@ -37,21 +38,24 @@ A production Vite build → `dist/client`.
 Packages `dist/client` + the compiled server-actions registry + a portable
 Node runtime + the native launcher binary into `dist/bundle/` — a
 `<productName>.app` on macOS, a `<productName>/` folder with
-`<productName>.exe` on Windows.
+`<productName>.exe` on Windows, or an AppDir plus `.AppImage` on Linux.
 
 ```bash
 murasaki bundle                       # host platform + arch, unsigned
 murasaki bundle --arch x64            # cross-arch (macOS): x64 .app on Apple Silicon
 murasaki bundle --target win32-arm64  # cross-target: an arm64 Windows bundle
+murasaki bundle --target linux-x64    # Linux AppDir + AppImage
 murasaki bundle --sign                # macOS Developer ID or Windows Authenticode signing
 murasaki bundle --no-build            # reuse an existing dist/client
 ```
 
 - **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — target arch /
-  platform (defaults to the host). Windows targets are `win32-x64` / `win32-arm64`.
+  platform (defaults to the host). Targets include `darwin-arm64`,
+  `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, and `linux-arm64`.
 - **`--sign`** — Developer ID-sign the `.app` on macOS or Authenticode-sign
   the app executable before the Windows portable ZIP is created. Windows
-  signing must run on Windows with SignTool. See [Distribution](/docs/building/distribution#signing--notarization).
+  signing must run on Windows with SignTool. Linux rejects this flag until
+  built-in signing exists. See [Distribution](/docs/building/distribution#signing--notarization).
 - **`--no-build`** — skip the Vite rebuild if `dist/client` already exists.
 
 ## `murasaki installer`
@@ -59,20 +63,27 @@ murasaki bundle --no-build            # reuse an existing dist/client
 Turns the `bundle` output into a distributable installer for the target
 platform: a drag-to-install, styled `.dmg` on macOS
 (`dist/<productName>-<version>.dmg`, falling back to a plain DMG if
-Finder-styling fails); a portable `.zip`, an NSIS `.exe`, and an MSI `.msi`
-on Windows.
+Finder-styling fails); an NSIS `.exe` on Windows, plus an MSI `.msi` when the
+built-in updater is disabled; and a `.deb` on Linux. The portable Windows ZIP
+comes from the bundle step. The Linux bundle step also keeps the AppDir
+and `.AppImage` artifacts.
 
 ```bash
 murasaki installer                     # installer(s) for the host platform (re-bundles first)
 murasaki installer --target win32-x64  # Windows x64 installers
+murasaki installer --target linux-x64  # Linux amd64 .deb + bundle artifacts
 murasaki installer --sign --notarize   # macOS: Developer ID sign + notarize + staple
-murasaki installer --target win32-x64 --sign # Windows: sign app + NSIS + MSI
+murasaki installer --target win32-x64 --sign # Windows: sign app + generated installer(s)
 murasaki installer --no-build          # reuse an existing dist/bundle
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — forwarded to `bundle`.
 - **`--sign`** — macOS Developer ID or Windows Authenticode signing. On
-  Windows it signs and verifies the app executable, NSIS setup, and MSI.
+  Windows it signs and verifies the app executable and every generated
+  installer. Updater-enabled builds require per-user NSIS and skip MSI. Linux
+  rejects this flag until built-in signing exists.
+- The command fails when the platform packaging tool produces no installer.
+  Use `murasaki bundle` when a portable ZIP/AppImage is the intended output.
 - **`--notarize`** — macOS only; submits the signed `.dmg` to Apple's notary
   service and staples the ticket (`--notarize` requires `--sign`).
 
@@ -88,11 +99,18 @@ need Rust; prebuilt binaries come down from npm.
 murasaki icon assets/logo.png
 ```
 
-Generates `dist/icons/icon.icns` (macOS, via `sips` + `iconutil`) from a
-single 1024px PNG; this standalone command is PNG-only off macOS for now. You
-rarely need it, though — `murasaki bundle` already generates and embeds the
-platform icon from `config.icon` automatically: the `.icns` on macOS, and the
-Windows `.ico` (embedded into the `.exe`).
+Generates platform icon resources from one square 1024px PNG. On macOS with a
+full Xcode installation, the output contains `Assets.car` with an `AppIcon`
+asset as well as `icon.icns`: current macOS applies its own icon mask and
+appearance rendering from the asset catalog, while `.icns` remains the legacy
+fallback. With Command Line Tools only, Murasaki warns and produces the `.icns`
+fallback. The command is PNG-only off macOS for now.
+
+You rarely need to run it directly — `murasaki bundle` embeds the same resources
+from `config.icon` automatically. Do not bake macOS's rounded mask into the
+canonical source image; provide a square design and let the system mask the
+asset-catalog version. Windows builds generate an `.ico` and embed it into the
+`.exe`.
 
 ## `murasaki release`
 
@@ -107,13 +125,17 @@ Three independent modes for publishing signed auto-updates — see the
 
 - **`--keygen`** — generates the Ed25519 keypair used to sign update
   manifests. Writes `.murasaki/update-key.pub` (commit it) and
-  `.murasaki/update-key` (gitignored automatically), and prints the private
-  key once with instructions to store it as a `MURASAKI_UPDATE_KEY` GitHub
-  secret. Refuses to overwrite an existing key without `--force`.
+  `.murasaki/update-key` (mode `0600`, gitignored automatically). It never
+  prints the private key; it shows an stdin-based command for storing the file
+  as a `MURASAKI_UPDATE_KEY` GitHub secret. Refuses to overwrite an existing
+  key without `--force`.
 - **`--manifest`** — scans `dist/` for this version's payloads (the macOS
   `.app.zip`, the Windows `-setup-<arch>.exe` — the legacy un-suffixed
-  `-setup.exe` name is still recognized for win32-x64), hashes whichever
-  exist, and writes `dist/latest.json` with a `generatedAt` timestamp.
+  `-setup.exe` name is still recognized for win32-x64), and Linux
+  `-linux-<arch>.AppImage` payloads, hashes whichever exist, and writes
+  `dist/latest.json` with a `generatedAt` timestamp. Linux `.deb` packages are
+  intentionally not update payloads because the system package manager owns
+  their lifecycle.
   Missing targets are skipped, not errors. `--rollout <0-100>` writes an
   optional staged-rollout percentage.
 - **`--sign`** — signs `dist/latest.json` into `dist/latest.json.sig`. Key

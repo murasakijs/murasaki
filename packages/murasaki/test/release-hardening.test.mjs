@@ -59,6 +59,26 @@ test('release --manifest scans arch-suffixed win32 names and falls back to the l
   assert.equal(manifest.assets['darwin-x64'], undefined)
 })
 
+test('release --manifest rejects malformed versions and insecure publication URLs before scanning artifacts', async (t) => {
+  await withTempProject(
+    t,
+    `export default { appId: 'dev.test.release-validation', productName: 'ReleaseValidation' }\n`,
+  )
+
+  await assert.rejects(
+    release(['--manifest', '--base-url', 'https://updates.example.com', '--version', '1.2.3garbage']),
+    /valid semantic version/,
+  )
+  await assert.rejects(
+    release(['--manifest', '--base-url', 'http://updates.example.com', '--version', '1.2.3']),
+    /credential-free HTTPS/,
+  )
+  await assert.rejects(
+    release(['--manifest', '--base-url', 'https://user:secret@updates.example.com', '--version', '1.2.3']),
+    /credential-free HTTPS/,
+  )
+})
+
 test('release --manifest prefers the arch-suffixed win32-x64 name when both it and the legacy name exist', async (t) => {
   const root = await withTempProject(
     t,
@@ -184,5 +204,35 @@ test('installer --target win32-<arch> names the NSIS installer with an arch suff
 
     const setupPath = join(root, `dist/ArchTestApp-0.0.0-setup-${arch}.exe`)
     assert.ok(existsSync(setupPath), `expected ${setupPath} to exist`)
+  }
+})
+
+test('Windows installer fails closed when no installer tool produced an artifact', async (t) => {
+  const root = await withTempProject(
+    t,
+    `export default { appId: 'dev.test.no-installer', productName: 'NoInstallerApp' }\n`,
+  )
+  const bundleDir = join(root, 'dist/bundle/NoInstallerApp')
+  await mkdir(bundleDir, { recursive: true })
+  await writeFile(join(bundleDir, 'NoInstallerApp.exe'), 'fixture')
+  await writeFile(join(bundleDir, 'metadata.json'), '{}')
+  const oldPath = process.env.PATH
+  const oldNsisPath = process.env.MURASAKI_NSIS_PATH
+  const oldWixPath = process.env.MURASAKI_WIX_PATH
+  process.env.PATH = join(root, 'empty-path')
+  process.env.MURASAKI_NSIS_PATH = join(root, 'missing-makensis')
+  process.env.MURASAKI_WIX_PATH = join(root, 'missing-wix')
+  try {
+    await assert.rejects(
+      installer(['--target', 'win32-x64', '--no-build']),
+      /no Windows installer produced/,
+    )
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldNsisPath === undefined) delete process.env.MURASAKI_NSIS_PATH
+    else process.env.MURASAKI_NSIS_PATH = oldNsisPath
+    if (oldWixPath === undefined) delete process.env.MURASAKI_WIX_PATH
+    else process.env.MURASAKI_WIX_PATH = oldWixPath
   }
 })

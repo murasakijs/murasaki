@@ -21,10 +21,16 @@ export declare class Application {
   onQuit(callback: ((err: Error | null, ) => any)): void
   exit(): void
   /**
-   * Set the Dock/About-panel icon at runtime. Packaged apps run under a
-   * bundled `node` binary (not a "real" app executable), so `Info.plist`'s
-   * `CFBundleIconFile` alone doesn't reliably make the About panel pick up
-   * the app icon — this sets `NSApp.applicationIconImage` explicitly.
+   * Set the Dock/About-panel icon at runtime.
+   *
+   * A path ending in `.app` is resolved through `NSWorkspace`, preserving
+   * macOS's AppIcon mask and appearance treatment. This is the preferred
+   * path for the unbundled development host. A direct image path remains a
+   * compatibility fallback for callers that deliberately own the final
+   * bitmap treatment.
+   *
+   * Packaged applications do not call this method: their real bundle
+   * executable lets macOS resolve `CFBundleIconName`/`Assets.car` directly.
    * No-op (not an error) if `path` doesn't point at a readable image, or on
    * non-macOS platforms.
    */

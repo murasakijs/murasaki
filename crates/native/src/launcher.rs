@@ -54,7 +54,9 @@ pub(crate) mod shared {
     };
 
     use fs2::FileExt;
+    use hmac::{Hmac, Mac};
     use serde::{Deserialize, Serialize};
+    use sha2::Sha256;
 
     use crate::types::{MenuLabels, WebviewDownloadsOptions, WebviewProxyOptions};
     use crate::window::{WindowControlCommand, WindowLifecycleEvent};
@@ -62,6 +64,122 @@ pub(crate) mod shared {
     const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 10_000;
     const MAX_MAIN_SHUTDOWN_TIMEOUT_MS: u64 = 300_000;
     const SHUTDOWN_TRANSPORT_GRACE_MS: u64 = 2_000;
+    const MAX_LAUNCH_ARGS: usize = 64;
+    const MAX_LAUNCH_ARG_BYTES: usize = 8192;
+    const MAX_LAUNCH_TOTAL_BYTES: usize = 16 * 1024;
+    const WINDOW_TOKEN_DOMAIN: &[u8] = b"murasaki-window-authority-v2\0";
+
+    pub(crate) fn window_auth_init_script(
+        runtime_token: &str,
+        label: &str,
+        port: u16,
+        generation: u64,
+    ) -> Result<String, String> {
+        if runtime_token.len() != 64 || !runtime_token.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("runtime token must be a 256-bit hexadecimal value".to_string());
+        }
+        if label.is_empty()
+            || label.len() > 64
+            || !label.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_alphanumeric() || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+            })
+        {
+            return Err(format!("invalid window label: {label}"));
+        }
+        if port == 0 {
+            return Err("window auth origin port must be non-zero".to_string());
+        }
+        if generation == 0 {
+            return Err("window auth generation must be positive".to_string());
+        }
+        let key = decode_hex(runtime_token)?;
+        let mut mac = Hmac::<Sha256>::new_from_slice(&key)
+            .map_err(|error| format!("window token HMAC: {error}"))?;
+        mac.update(WINDOW_TOKEN_DOMAIN);
+        mac.update(label.as_bytes());
+        mac.update(&[0]);
+        mac.update(generation.to_string().as_bytes());
+        let token = mac.finalize().into_bytes();
+        let token = token
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let label = serde_json::to_string(label).map_err(|error| error.to_string())?;
+        let token = serde_json::to_string(&token).map_err(|error| error.to_string())?;
+        let expected_origin = serde_json::to_string(&format!("http://127.0.0.1:{port}"))
+            .map_err(|error| error.to_string())?;
+        Ok(format!(
+            r#"(() => {{
+  const expectedOrigin = {expected_origin}
+  if (globalThis.top !== globalThis || location.origin !== expectedOrigin) return
+  const label = {label}
+  const generation = {generation}
+  const token = {token}
+  const privileged = (url) => url.origin === location.origin && (url.pathname === '/api' || url.pathname.startsWith('/api/') || url.pathname.startsWith('/__murasaki/'))
+  const attach = (headers) => {{
+    const next = new Headers(headers)
+    next.set('x-murasaki-window-label', label)
+    next.set('x-murasaki-window-generation', String(generation))
+    next.set('x-murasaki-window-token', token)
+    return next
+  }}
+  const rawFetch = globalThis.fetch.bind(globalThis)
+  globalThis.fetch = (input, init) => {{
+    const request = new Request(input, init)
+    if (!privileged(new URL(request.url, location.href))) return rawFetch(request)
+    return rawFetch(new Request(request, {{ headers: attach(request.headers) }}))
+  }}
+  const NativeXHR = globalThis.XMLHttpRequest
+  if (NativeXHR) {{
+    const open = NativeXHR.prototype.open
+    const send = NativeXHR.prototype.send
+    NativeXHR.prototype.open = function(method, url, ...rest) {{
+      this.__murasakiPrivileged = privileged(new URL(String(url), location.href))
+      return open.call(this, method, url, ...rest)
+    }}
+    NativeXHR.prototype.send = function(body) {{
+      if (this.__murasakiPrivileged) {{
+        this.setRequestHeader('x-murasaki-window-label', label)
+        this.setRequestHeader('x-murasaki-window-generation', String(generation))
+        this.setRequestHeader('x-murasaki-window-token', token)
+      }}
+      return send.call(this, body)
+    }}
+  }}
+  const NativeEventSource = globalThis.EventSource
+  if (NativeEventSource) {{
+    globalThis.EventSource = class MurasakiEventSource extends NativeEventSource {{
+      constructor(url, options) {{
+        const next = new URL(String(url), location.href)
+        if (privileged(next)) {{
+          next.searchParams.set('__murasaki_window', label)
+          next.searchParams.set('__murasaki_window_generation', String(generation))
+          next.searchParams.set('__murasaki_window_token', token)
+        }}
+        super(next.href, options)
+      }}
+    }}
+  }}
+}})()"#
+        ))
+    }
+
+    fn decode_hex(value: &str) -> Result<Vec<u8>, String> {
+        value
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let high = (pair[0] as char)
+                    .to_digit(16)
+                    .ok_or_else(|| "invalid runtime token".to_string())?;
+                let low = (pair[1] as char)
+                    .to_digit(16)
+                    .ok_or_else(|| "invalid runtime token".to_string())?;
+                Ok(((high << 4) | low) as u8)
+            })
+            .collect()
+    }
 
     /// Subset of the packaged resources dir's `murasaki-meta.json` (written by
     /// `cli/bundle.ts`; `Contents/Resources/` on macOS, `resources/` on
@@ -455,26 +573,36 @@ pub(crate) mod shared {
     }
 
     /// Spawns `<resources_dir>/<node_binary_name> prod-server.mjs` the same way
-    /// `prod-launcher.mjs` did (see that file's header comment for why
-    /// `--port 0` + reading back the assigned port is needed instead of picking
-    /// one ourselves), and blocks until it reports its port or 15s elapses —
+    /// `prod-launcher.mjs` did, then blocks until it reports the port it
+    /// actually bound or 15s elapses. The child receives a preferred stable
+    /// app-origin port. A first launch may use bounded collision retries while
+    /// choosing its origin; once that port is persisted, retries are disabled
+    /// because moving to another HTTP origin would strand Web Storage.
     /// killing the child and returning an error on timeout/failure.
     /// `node_binary_name` (`"node"` on macOS, `"node.exe"` on Windows) is the
     /// only per-OS difference in the command line; `console` (Windows-only,
     /// see the `CREATE_NO_WINDOW` block below) is the only other per-OS
-    /// difference in this whole sequence.
+    /// difference in this whole sequence. Also hands the child a one-shot,
+    /// owner-only launch payload file carrying the bounded primary cold-start
+    /// argv + cwd. A file avoids Windows' 32,767-character environment/command
+    /// line limits; the Node child deletes it immediately after reading.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn spawn_prod_server<F>(
         resources_dir: &Path,
         node_binary_name: &str,
         console: bool,
         port: u16,
+        port_attempts: u16,
         runtime_token: &str,
+        launch_argv: &[String],
+        launch_cwd: &Path,
         guard_child: F,
     ) -> Result<(Child, u16), String>
     where
         F: FnOnce(&Child) -> Result<(), String>,
     {
         let node_path = resources_dir.join(node_binary_name);
+        let launch_path = write_launch_payload(launch_argv, launch_cwd)?;
         let mut cmd = Command::new(&node_path);
         cmd.arg("prod-server.mjs")
             .arg("--client")
@@ -489,6 +617,10 @@ pub(crate) mod shared {
             .arg(resources_dir.join("server").join("main.mjs"))
             .arg("--port")
             .arg(port.to_string())
+            .arg("--port-attempts")
+            .arg(port_attempts.to_string())
+            .arg("--launch-file")
+            .arg(&launch_path)
             .env("MURASAKI_RUNTIME_TOKEN", runtime_token)
             .current_dir(resources_dir)
             .stdin(Stdio::null())
@@ -524,9 +656,13 @@ pub(crate) mod shared {
             cmd.process_group(0);
         }
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("spawn {}: {e}", node_path.display()))?;
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                cleanup_launch_payload(&launch_path);
+                return Err(format!("spawn {}: {error}", node_path.display()));
+            }
+        };
 
         // Install platform process-lifetime protection immediately after spawn,
         // before the Node main runtime is allowed to finish startup and report
@@ -536,24 +672,30 @@ pub(crate) mod shared {
         if let Err(error) = guard_child(&child) {
             let _ = child.kill();
             let _ = child.wait();
+            cleanup_launch_payload(&launch_path);
             return Err(error);
         }
 
-        match wait_for_port(&mut child, Duration::from_secs(15)) {
+        let result = match wait_for_port(&mut child, Duration::from_secs(15)) {
             Ok(port) => Ok((child, port)),
             Err(err) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 Err(err)
             }
-        }
+        };
+        // Normally already removed by prod-server.mjs. This covers spawn and
+        // parse failures without leaving launch arguments in the temp dir.
+        cleanup_launch_payload(&launch_path);
+        result
     }
 
-    /// Stable, app-scoped HTTP origin. Web Storage keys include the port, so
+    /// Initial app-scoped HTTP origin. Web Storage keys include the port, so
     /// using port 0 made localStorage/IndexedDB/Cookies appear empty after every
-    /// relaunch. FNV-1a keeps this deterministic across Rust/Node versions and
-    /// maps into IANA's dynamic/private port range. A future second launch must
-    /// activate the first instance instead of silently selecting another port.
+    /// relaunch. FNV-1a provides a deterministic first choice in IANA's
+    /// dynamic/private range. On first launch the server may probe forward for
+    /// a free port, after which the selected origin is immutable for that app
+    /// profile so localStorage/IndexedDB/Cookies remain reachable.
     pub(super) fn app_origin_port(app_id: &str) -> u16 {
         let mut hash = 0x811c_9dc5_u32;
         for byte in app_id.as_bytes() {
@@ -563,9 +705,163 @@ pub(crate) mod shared {
         49_152 + (hash % 16_384) as u16
     }
 
-    /// Per-launch 256-bit secret used by the loopback server's HttpOnly
-    /// session cookie. This prevents an unrelated web origin from invoking
-    /// action/API/updater endpoints by scanning localhost ports.
+    const APP_ORIGIN_PORT_FILE: &str = ".murasaki-origin-port";
+
+    fn valid_app_origin_port(port: u16) -> bool {
+        (49_152..=65_535).contains(&port)
+    }
+
+    fn persisted_app_origin_port(app_id: &str) -> Option<u16> {
+        let path = app_data_dir(app_id)?.join(APP_ORIGIN_PORT_FILE);
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| raw.trim().parse::<u16>().ok())
+            .filter(|port| valid_app_origin_port(*port))
+    }
+
+    /// Returns the last successfully-bound app origin when available. The
+    /// deterministic hash remains the recovery path for first launch, deleted
+    /// state, malformed state, or an unavailable profile directory.
+    pub(super) fn preferred_app_origin_port(app_id: &str) -> u16 {
+        persisted_app_origin_port(app_id).unwrap_or_else(|| app_origin_port(app_id))
+    }
+
+    /// Only a profile without an established HTTP origin may probe for a free
+    /// port. Once persisted, an occupied port is a startup error rather than a
+    /// silent origin migration that would make durable browser data disappear.
+    pub(super) fn app_origin_port_attempts(app_id: &str) -> u16 {
+        if persisted_app_origin_port(app_id).is_some() {
+            1
+        } else {
+            128
+        }
+    }
+
+    /// Remembers the first successfully-bound origin. Callers must not replace
+    /// an existing value with a later collision fallback.
+    pub(super) fn remember_app_origin_port(app_id: &str, port: u16) -> Result<(), String> {
+        if !valid_app_origin_port(port) {
+            return Err(format!("refused to persist invalid app origin port {port}"));
+        }
+        if let Some(existing) = persisted_app_origin_port(app_id) {
+            return if existing == port {
+                Ok(())
+            } else {
+                Err(format!(
+                    "refused to migrate stable app origin from {existing} to {port}"
+                ))
+            };
+        }
+        let dir = app_data_dir(app_id)
+            .ok_or_else(|| "resolve app data directory for origin port".to_string())?;
+        fs::create_dir_all(&dir)
+            .map_err(|error| format!("create app data directory {}: {error}", dir.display()))?;
+        let path = dir.join(APP_ORIGIN_PORT_FILE);
+        let temp = dir.join(format!("{APP_ORIGIN_PORT_FILE}.{}.tmp", std::process::id()));
+        fs::write(&temp, format!("{port}\n"))
+            .map_err(|error| format!("write app origin port {}: {error}", temp.display()))?;
+        if let Err(first_error) = fs::rename(&temp, &path) {
+            // Windows cannot atomically replace an existing file with rename.
+            // The app-wide single-instance lock prevents concurrent writers.
+            let _ = fs::remove_file(&path);
+            fs::rename(&temp, &path).map_err(|error| {
+                format!(
+                    "replace app origin port {}: {error} (initial rename: {first_error})",
+                    path.display()
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Bounded JSON payload for the Node child's one-shot launch file. The
+    /// encoded argv array follows the same 64-entry / 8-KiB-entry / 16-KiB-total
+    /// contract as development. Measuring serialized JSON accounts for escape
+    /// expansion; retained arguments are always intact.
+    pub(super) fn launch_payload_value(argv: &[String], cwd: &Path) -> String {
+        let mut kept: Vec<&str> = Vec::new();
+        for arg in argv {
+            if kept.len() >= MAX_LAUNCH_ARGS {
+                break;
+            }
+            let bytes = arg.len();
+            if bytes > MAX_LAUNCH_ARG_BYTES {
+                continue;
+            }
+            let mut candidate = kept.clone();
+            candidate.push(arg.as_str());
+            if serde_json::to_vec(&candidate)
+                .map(|json| json.len() > MAX_LAUNCH_TOTAL_BYTES)
+                .unwrap_or(true)
+            {
+                break;
+            }
+            kept.push(arg.as_str());
+        }
+        serde_json::json!({
+            "argv": kept,
+            "cwd": cwd.to_string_lossy(),
+        })
+        .to_string()
+    }
+
+    fn write_launch_payload(argv: &[String], cwd: &Path) -> Result<PathBuf, String> {
+        let mut nonce = [0_u8; 8];
+        getrandom::fill(&mut nonce).map_err(|e| format!("generate launch payload nonce: {e}"))?;
+        let nonce: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+        // A unique per-launch directory prevents another local user from
+        // pre-creating a shared /tmp path and denying application startup.
+        let dir =
+            std::env::temp_dir().join(format!("murasaki-launch-{}-{nonce}", std::process::id()));
+        fs::create_dir(&dir)
+            .map_err(|e| format!("create launch payload directory {}: {e}", dir.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(error) = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)) {
+                let _ = fs::remove_dir(&dir);
+                return Err(format!(
+                    "secure launch payload directory {}: {error}",
+                    dir.display()
+                ));
+            }
+        }
+
+        let path = dir.join("payload.json");
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = match options.open(&path) {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = fs::remove_dir(&dir);
+                return Err(format!("create launch payload {}: {error}", path.display()));
+            }
+        };
+        if let Err(error) = file
+            .write_all(launch_payload_value(argv, cwd).as_bytes())
+            .and_then(|()| file.sync_all())
+        {
+            cleanup_launch_payload(&path);
+            return Err(format!("write launch payload {}: {error}", path.display()));
+        }
+        Ok(path)
+    }
+
+    fn cleanup_launch_payload(path: &Path) {
+        let _ = fs::remove_file(path);
+        if let Some(parent) = path.parent() {
+            let _ = fs::remove_dir(parent);
+        }
+    }
+
+    /// Per-launch 256-bit secret used to derive each native window's HMAC
+    /// authority and the separate native-control token. It is never placed in
+    /// a document response or renderer-readable cookie.
     pub(super) fn runtime_token() -> Result<String, String> {
         let mut bytes = [0_u8; 32];
         getrandom::fill(&mut bytes).map_err(|e| format!("generate runtime token: {e}"))?;
@@ -734,7 +1030,7 @@ pub(crate) mod shared {
         stream.set_write_timeout(Some(timeout)).ok();
         let body = serde_json::json!({ "argv": argv, "cwd": cwd.to_string_lossy() }).to_string();
         let request = format!(
-      "POST /__murasaki/main/second-instance HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      "POST /__murasaki/main/second-instance HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
       body.len()
     );
         stream
@@ -779,7 +1075,7 @@ pub(crate) mod shared {
         })
         .to_string();
         let request = format!(
-      "POST /__murasaki/main/open-request HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      "POST /__murasaki/main/open-request HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
       body.len()
     );
         stream
@@ -828,7 +1124,7 @@ pub(crate) mod shared {
 
         let body = serde_json::json!({ "reason": reason, "force": force }).to_string();
         let request = format!(
-      "POST /__murasaki/main/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      "POST /__murasaki/main/shutdown HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
       body.len()
     );
         stream
@@ -1097,7 +1393,7 @@ pub(crate) mod shared {
         stream.set_write_timeout(Some(timeout)).ok();
         let body = body.unwrap_or("");
         let request = format!(
-      "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: murasaki_runtime={runtime_token}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+      "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nX-Murasaki-Native-Token: {runtime_token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
       body.len(),
     );
         stream
@@ -1871,14 +2167,34 @@ pub(crate) mod shared {
         };
 
         use super::{
-            app_data_dir, app_instance_key, app_origin_port, crash_context, discard_apply_handoff,
-            init_crash_context, is_valid_crash_report_filename, main_shutdown_transport_timeout,
+            app_data_dir, app_instance_key, app_origin_port, app_origin_port_attempts,
+            crash_context, discard_apply_handoff, init_crash_context,
+            is_valid_crash_report_filename, main_shutdown_transport_timeout,
             native_panic_report_json, node_exit_report_json, open_targets_from_args,
-            poll_unexpected_child_exit, request_main_shutdown, resolve_windows,
-            rotate_crash_reports, runtime_token, shutdown_allows_update, write_native_crash_report,
-            Meta, NativePanicDetails, OpenTarget, ShutdownCompletion, ShutdownCoordinator,
-            ShutdownPoll,
+            poll_unexpected_child_exit, preferred_app_origin_port, remember_app_origin_port,
+            request_main_shutdown, resolve_windows, rotate_crash_reports, runtime_token,
+            shutdown_allows_update, window_auth_init_script, write_native_crash_report, Meta,
+            NativePanicDetails, OpenTarget, ShutdownCompletion, ShutdownCoordinator, ShutdownPoll,
         };
+
+        #[test]
+        fn window_authority_matches_the_node_hmac_contract() {
+            let script = window_auth_init_script(&"a".repeat(64), "main", 51_234, 7).unwrap();
+            assert!(
+                script.contains("4e7ad94e4e2d2c13d7faa20697edccb3bd99e517de8c55b77339608a1beb7c91")
+            );
+            assert!(script.contains("x-murasaki-window-label"));
+            assert!(script.contains("x-murasaki-window-generation"));
+            assert!(script.contains("x-murasaki-window-token"));
+            assert!(script.contains("const generation = 7"));
+            assert!(script.contains("http://127.0.0.1:51234"));
+            assert!(script.contains("globalThis.top !== globalThis"));
+            assert!(script.find("globalThis.top").unwrap() < script.find("const label").unwrap());
+            assert!(!script.contains(&"a".repeat(64)));
+            assert!(window_auth_init_script(&"a".repeat(64), "../main", 51_234, 1).is_err());
+            assert!(window_auth_init_script(&"a".repeat(64), "main", 0, 1).is_err());
+            assert!(window_auth_init_script(&"a".repeat(64), "main", 51_234, 0).is_err());
+        }
 
         #[test]
         fn app_origin_is_stable_and_private() {
@@ -1886,6 +2202,111 @@ pub(crate) mod shared {
             assert_eq!(first, app_origin_port("com.example.notes"));
             assert!((49_152..=65_535).contains(&first));
             assert_ne!(first, app_origin_port("com.example.chat"));
+        }
+
+        #[test]
+        fn app_origin_bootstraps_once_and_rejects_invalid_state() {
+            let app_id = format!("dev.murasaki.origin-test-{}", std::process::id());
+            let dir = app_data_dir(&app_id).expect("app data dir");
+            let state = dir.join(super::APP_ORIGIN_PORT_FILE);
+            let _ = fs::remove_dir_all(&dir);
+
+            let fallback = app_origin_port(&app_id);
+            assert_eq!(preferred_app_origin_port(&app_id), fallback);
+            assert_eq!(app_origin_port_attempts(&app_id), 128);
+            let selected = if fallback == 65_535 {
+                49_152
+            } else {
+                fallback + 1
+            };
+            remember_app_origin_port(&app_id, selected).expect("persist selected port");
+            assert_eq!(preferred_app_origin_port(&app_id), selected);
+            assert_eq!(app_origin_port_attempts(&app_id), 1);
+            assert!(remember_app_origin_port(&app_id, selected + 1).is_err());
+            assert_eq!(preferred_app_origin_port(&app_id), selected);
+
+            fs::write(&state, "80\n").expect("write invalid state");
+            assert_eq!(preferred_app_origin_port(&app_id), fallback);
+            assert_eq!(app_origin_port_attempts(&app_id), 128);
+            assert!(remember_app_origin_port(&app_id, 80).is_err());
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn launch_payload_value_is_bounded_and_valid_json() {
+            use std::path::Path;
+            // Normal case round-trips argv + cwd.
+            let v = super::launch_payload_value(
+                &["--no-sample-data".to_string(), "file.txt".to_string()],
+                Path::new("/work/dir"),
+            );
+            let parsed: serde_json::Value = serde_json::from_str(&v).unwrap();
+            assert_eq!(parsed["argv"][0], "--no-sample-data");
+            assert_eq!(parsed["argv"][1], "file.txt");
+            assert_eq!(parsed["cwd"], "/work/dir");
+
+            // Entry count is capped at MAX_LAUNCH_ARGS.
+            let many: Vec<String> = (0..200).map(|i| format!("--flag{i}")).collect();
+            let capped: serde_json::Value =
+                serde_json::from_str(&super::launch_payload_value(&many, Path::new("/"))).unwrap();
+            assert_eq!(
+                capped["argv"].as_array().unwrap().len(),
+                super::MAX_LAUNCH_ARGS
+            );
+
+            // A single oversized arg is dropped but smaller neighbors survive.
+            let huge = "x".repeat(super::MAX_LAUNCH_ARG_BYTES + 1);
+            let mixed = vec![huge, "keep".to_string()];
+            let filtered: serde_json::Value =
+                serde_json::from_str(&super::launch_payload_value(&mixed, Path::new("/"))).unwrap();
+            let argv = filtered["argv"].as_array().unwrap();
+            assert_eq!(argv.len(), 1);
+            assert_eq!(argv[0], "keep");
+
+            // JSON escape expansion counts toward the total transport bound.
+            let escaped = vec!["\\\"".repeat(4_000), "x".repeat(5_000)];
+            let bounded: serde_json::Value =
+                serde_json::from_str(&super::launch_payload_value(&escaped, Path::new("/")))
+                    .unwrap();
+            assert!(
+                serde_json::to_vec(&bounded["argv"]).unwrap().len()
+                    <= super::MAX_LAUNCH_TOTAL_BYTES
+            );
+            assert_eq!(bounded["argv"].as_array().unwrap().len(), 1);
+        }
+
+        #[test]
+        fn launch_payload_file_is_private_unique_and_removable() {
+            use std::path::Path;
+
+            let path = super::write_launch_payload(
+                &["--no-sample-data".to_string()],
+                Path::new("/fixture"),
+            )
+            .unwrap();
+            let parent = path.parent().unwrap().to_path_buf();
+            assert!(path.is_file());
+            let parsed: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(parsed["argv"][0], "--no-sample-data");
+            assert_eq!(parsed["cwd"], "/fixture");
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(
+                    std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777,
+                    0o700
+                );
+                assert_eq!(
+                    std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
+
+            super::cleanup_launch_payload(&path);
+            assert!(!path.exists());
+            assert!(!parent.exists());
         }
 
         #[test]
@@ -2000,7 +2421,7 @@ pub(crate) mod shared {
                 let read = stream.read(&mut bytes).unwrap();
                 let request = String::from_utf8_lossy(&bytes[..read]);
                 assert!(request.starts_with("POST /__murasaki/main/shutdown HTTP/1.1"));
-                assert!(request.contains("Cookie: murasaki_runtime=secret"));
+                assert!(!request.contains("Cookie:"));
                 assert!(request.contains("X-Murasaki-Native-Token: secret"));
                 assert!(request.contains("\"reason\":\"window-close\""));
                 let body = r#"{"cancelled":true,"timedOut":false}"#;
@@ -2496,13 +2917,13 @@ mod imp_macos {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        acquire_instance, app_origin_port_attempts, discard_apply_handoff, init_crash_context,
         load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
         normalize_locale, open_targets_from_args, open_targets_from_urls,
-        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
-        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
-        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
-        ShutdownPoll, WindowControlCoordinator,
+        poll_unexpected_child_exit, preferred_app_origin_port, read_meta, remember_app_origin_port,
+        report_unexpected_node_exit, request_main_open, resolve_menu_labels, resolve_windows,
+        runtime_token, shutdown_allows_update, spawn_prod_server, terminate_and_wait_child,
+        InstanceRole, ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
     };
 
     pub fn run() {
@@ -2564,7 +2985,10 @@ mod imp_macos {
             }
         };
         let runtime_token = runtime_token()?;
-        let origin_port = app_origin_port(app_id);
+        let origin_port = preferred_app_origin_port(app_id);
+        let origin_port_attempts = app_origin_port_attempts(app_id);
+        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         // `meta.console` is Windows-only (see that field's doc comment) — ignored
         // here, `spawn_prod_server` only acts on it under `#[cfg(target_os =
         // "windows")]`.
@@ -2573,12 +2997,21 @@ mod imp_macos {
             "node",
             meta.console,
             origin_port,
+            origin_port_attempts,
             &runtime_token,
+            &startup_argv,
+            &startup_cwd,
             |_| Ok(()),
         )?;
+        if origin_port_attempts > 1 {
+            if let Err(error) = remember_app_origin_port(app_id, port) {
+                terminate_and_wait_child(&mut child);
+                return Err(format!(
+                    "refused to start with a non-durable app origin: {error}"
+                ));
+            }
+        }
         primary_instance.publish(port, &runtime_token)?;
-        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
-        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
         if !startup_targets.is_empty() {
             request_main_open(
@@ -2656,8 +3089,9 @@ mod imp_macos {
         let web_context: SharedWebContext = Rc::new(RefCell::new(ProcessWebContext::default()));
         let runtime_templates = declarations
             .into_iter()
-            .map(|declaration| {
+            .map(|declaration| -> Result<_, String> {
                 let route = declaration.route().to_string();
+                let init_scripts = meta.webview.init_scripts.clone().unwrap_or_default();
                 let template = RuntimeWindowTemplate {
                     window: WindowOptions {
                         label: Some(declaration.label),
@@ -2708,14 +3142,14 @@ mod imp_macos {
                             .map(String::from),
                         serve_dir: None,
                         downloads: meta.webview.downloads.clone(),
-                        init_scripts: meta.webview.init_scripts.clone(),
+                        init_scripts: Some(init_scripts),
                         hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
-                (template, app_menu_context.clone())
+                Ok((template, app_menu_context.clone()))
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         let manager_wake = quit_proxy.clone();
         let mut runtime_windows = RuntimeWindowManager::new(
             windows.clone(),
@@ -2723,17 +3157,17 @@ mod imp_macos {
             Rc::new(move || {
                 let _ = manager_wake.send_event(());
             }),
+            true,
         );
+        runtime_windows.set_window_authority(runtime_token.clone(), port)?;
         runtime_windows.configure(runtime_templates)?;
         runtime_windows.create_on_launch(&event_loop)?;
 
-        // Dock/About-panel icon — mirrors Application::set_icon_path. As the real
-        // CFBundleExecutable, CFBundleIconFile (see cli/bundle.ts's Info.plist)
-        // already covers the Dock/Finder icon; this additionally covers the
-        // About panel, which doesn't reliably pick up CFBundleIconFile.
-        if let Some(path) = &icon_path {
-            set_app_icon(path);
-        }
+        // The packaged launcher is the bundle's real CFBundleExecutable, so
+        // macOS resolves the application icon from CFBundleIconName/Assets.car
+        // (with CFBundleIconFile/icon.icns as the legacy fallback). Do not set
+        // NSApp.applicationIconImage from the raw runtime PNG here: doing so
+        // bypasses macOS's current system mask and appearance rendering.
 
         // This is the updater's first-launch health checkpoint: the packaged
         // Node runtime is listening, the instance endpoint is published, and
@@ -3059,24 +3493,6 @@ mod imp_macos {
         None
     }
 
-    /// Sets `NSApp.applicationIconImage` — mirrors `Application::set_icon_path`
-    /// exactly (see that method's doc comment for why this is needed alongside
-    /// `CFBundleIconFile`). No-op if `path` doesn't point at a readable image.
-    fn set_app_icon(path: &Path) {
-        use objc2::{AllocAnyThread, MainThreadMarker};
-        use objc2_app_kit::{NSApplication, NSImage};
-        use objc2_foundation::NSString;
-
-        let Some(mtm) = MainThreadMarker::new() else {
-            return;
-        };
-        let ns_app = NSApplication::sharedApplication(mtm);
-        let ns_path = NSString::from_str(&path.to_string_lossy());
-        if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
-            unsafe { ns_app.setApplicationIconImage(Some(&image)) };
-        }
-    }
-
     /// Ensures this CLI-launched process is a Regular (Dock-visible, focusable)
     /// app — mirrors `Application::new`'s doc comment on why this is set up
     /// front rather than relying on tao's default handling during
@@ -3228,13 +3644,13 @@ mod imp_win {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        acquire_instance, app_origin_port_attempts, discard_apply_handoff, init_crash_context,
         load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
         normalize_locale, open_targets_from_args, open_targets_from_urls,
-        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
-        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
-        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
-        ShutdownPoll, WindowControlCoordinator,
+        poll_unexpected_child_exit, preferred_app_origin_port, read_meta, remember_app_origin_port,
+        report_unexpected_node_exit, request_main_open, resolve_menu_labels, resolve_windows,
+        runtime_token, shutdown_allows_update, spawn_prod_server, terminate_and_wait_child,
+        InstanceRole, ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
     };
     use super::win_job::KillOnCloseJob;
 
@@ -3503,7 +3919,8 @@ mod imp_win {
             }
         };
         let runtime_token = runtime_token()?;
-        let origin_port = app_origin_port(app_id);
+        let origin_port = preferred_app_origin_port(app_id);
+        let origin_port_attempts = app_origin_port_attempts(app_id);
 
         // Contract §8: on Windows `--target` is the install dir (`exe_dir`) and
         // `--relaunch` is `<installDir>\<productName>.exe` — see
@@ -3531,12 +3948,17 @@ mod imp_win {
         // see `shared::spawn_prod_server`. `meta.console` (default `false`) hides
         // the console window `node.exe` would otherwise get, via
         // `CREATE_NO_WINDOW` — see that function's doc comment.
+        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let (mut child, port) = spawn_prod_server(
             &resources_dir,
             "node.exe",
             meta.console,
             origin_port,
+            origin_port_attempts,
             &runtime_token,
+            &startup_argv,
+            &startup_cwd,
             |child| {
                 if job.assign(child) {
                     Ok(())
@@ -3548,10 +3970,16 @@ mod imp_win {
                 }
             },
         )?;
+        if origin_port_attempts > 1 {
+            if let Err(error) = remember_app_origin_port(app_id, port) {
+                terminate_and_wait_child(&mut child);
+                return Err(format!(
+                    "refused to start with a non-durable app origin: {error}"
+                ));
+            }
+        }
 
         primary_instance.publish(port, &runtime_token)?;
-        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
-        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
         if !startup_targets.is_empty() {
             request_main_open(
@@ -3624,8 +4052,9 @@ mod imp_win {
         let web_context: SharedWebContext = Rc::new(RefCell::new(ProcessWebContext::default()));
         let runtime_templates = declarations
             .into_iter()
-            .map(|declaration| {
+            .map(|declaration| -> Result<_, String> {
                 let route = declaration.route().to_string();
+                let init_scripts = meta.webview.init_scripts.clone().unwrap_or_default();
                 let template = RuntimeWindowTemplate {
                     window: WindowOptions {
                         label: Some(declaration.label),
@@ -3673,14 +4102,14 @@ mod imp_win {
                             .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
                         serve_dir: None,
                         downloads: meta.webview.downloads.clone(),
-                        init_scripts: meta.webview.init_scripts.clone(),
+                        init_scripts: Some(init_scripts),
                         hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
-                (template, app_menu_context.clone())
+                Ok((template, app_menu_context.clone()))
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         let manager_wake = quit_proxy.clone();
         let mut runtime_windows = RuntimeWindowManager::new(
             windows.clone(),
@@ -3688,7 +4117,9 @@ mod imp_win {
             Rc::new(move || {
                 let _ = manager_wake.send_event(());
             }),
+            true,
         );
+        runtime_windows.set_window_authority(runtime_token.clone(), port)?;
         runtime_windows.configure(runtime_templates)?;
         runtime_windows.set_windows_icon(window_icon.clone())?;
         runtime_windows.create_on_launch(&event_loop)?;
@@ -4048,13 +4479,13 @@ mod imp_linux {
     };
 
     use super::shared::{
-        acquire_instance, app_origin_port, discard_apply_handoff, init_crash_context,
+        acquire_instance, app_origin_port_attempts, discard_apply_handoff, init_crash_context,
         load_menu_locales, main_shutdown_transport_timeout, maybe_spawn_apply_helper,
         normalize_locale, open_targets_from_args, open_targets_from_urls,
-        poll_unexpected_child_exit, read_meta, report_unexpected_node_exit, request_main_open,
-        resolve_menu_labels, resolve_windows, runtime_token, shutdown_allows_update,
-        spawn_prod_server, terminate_and_wait_child, InstanceRole, ShutdownCoordinator,
-        ShutdownPoll, WindowControlCoordinator,
+        poll_unexpected_child_exit, preferred_app_origin_port, read_meta, remember_app_origin_port,
+        report_unexpected_node_exit, request_main_open, resolve_menu_labels, resolve_windows,
+        runtime_token, shutdown_allows_update, spawn_prod_server, terminate_and_wait_child,
+        InstanceRole, ShutdownCoordinator, ShutdownPoll, WindowControlCoordinator,
     };
 
     pub fn run() {
@@ -4151,25 +4582,37 @@ mod imp_linux {
             }
         };
         let runtime_token = runtime_token()?;
-        let origin_port = app_origin_port(app_id);
+        let origin_port = preferred_app_origin_port(app_id);
+        let origin_port_attempts = app_origin_port_attempts(app_id);
 
         // Spawns resources/node prod-server.mjs — same handshake as macOS/
         // Windows, see `shared::spawn_prod_server`. No guard callback needed
         // (unlike Windows' Job Object): `spawn_prod_server` already puts this
         // child in its own process group on Linux, and `terminate_and_wait_child`
         // SIGKILLs that whole group on any exit path.
+        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
+        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let (mut child, port) = spawn_prod_server(
             &resources_dir,
             "node",
             meta.console,
             origin_port,
+            origin_port_attempts,
             &runtime_token,
+            &startup_argv,
+            &startup_cwd,
             |_| Ok(()),
         )?;
+        if origin_port_attempts > 1 {
+            if let Err(error) = remember_app_origin_port(app_id, port) {
+                terminate_and_wait_child(&mut child);
+                return Err(format!(
+                    "refused to start with a non-durable app origin: {error}"
+                ));
+            }
+        }
 
         primary_instance.publish(port, &runtime_token)?;
-        let startup_argv: Vec<String> = std::env::args().skip(1).collect();
-        let startup_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let startup_targets = open_targets_from_args(&meta, &startup_argv, &startup_cwd);
         if !startup_targets.is_empty() {
             request_main_open(
@@ -4231,8 +4674,9 @@ mod imp_linux {
         let web_context: SharedWebContext = Rc::new(RefCell::new(ProcessWebContext::default()));
         let runtime_templates = declarations
             .into_iter()
-            .map(|declaration| {
+            .map(|declaration| -> Result<_, String> {
                 let route = declaration.route().to_string();
+                let init_scripts = meta.webview.init_scripts.clone().unwrap_or_default();
                 let template = RuntimeWindowTemplate {
                     window: WindowOptions {
                         label: Some(declaration.label),
@@ -4280,14 +4724,14 @@ mod imp_linux {
                             .map(|icon| resources_dir.join(icon).to_string_lossy().into_owned()),
                         serve_dir: None,
                         downloads: meta.webview.downloads.clone(),
-                        init_scripts: meta.webview.init_scripts.clone(),
+                        init_scripts: Some(init_scripts),
                         hotkeys_zoom: meta.webview.hotkeys_zoom,
                     },
                     create_on_launch: declaration.create_on_launch,
                 };
-                (template, app_menu_context.clone())
+                Ok((template, app_menu_context.clone()))
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
         let manager_wake = quit_proxy.clone();
         let mut runtime_windows = RuntimeWindowManager::new(
             windows.clone(),
@@ -4295,7 +4739,9 @@ mod imp_linux {
             Rc::new(move || {
                 let _ = manager_wake.send_event(());
             }),
+            true,
         );
+        runtime_windows.set_window_authority(runtime_token.clone(), port)?;
         runtime_windows.configure(runtime_templates)?;
         runtime_windows.create_on_launch(&event_loop)?;
 

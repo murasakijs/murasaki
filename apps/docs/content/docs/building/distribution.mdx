@@ -16,7 +16,7 @@ running an AppImage in a container/CI.
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization built in |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Authenticode via SignTool built in |
-| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | Not implemented (unsigned) |
+| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | Not implemented; `--sign` fails closed |
 
 <Callout type="warn">
   A generated file is not automatically distribution-ready. Test the
@@ -28,11 +28,18 @@ running an AppImage in a container/CI.
 
 ## Cross-arch builds
 
-The bundle carries a portable, target-specific Node runtime (a checksum-verified
-download from nodejs.org, cached under `~/.murasaki/node/`) plus the compiled
-native launcher binary — not whatever `node` happens to be running the CLI. That
+The bundle carries a portable, target-specific Node runtime (downloaded from
+nodejs.org and cached under `~/.murasaki/node/`) plus the compiled native
+launcher binary — not whatever `node` happens to be running the CLI. Murasaki
+verifies Node's clear-signed `SHASUMS256.txt.asc` against pinned official Node
+release-key fingerprints before trusting the selected archive checksum. That
 means an Apple Silicon dev machine can also produce an Intel build, and vice
 versa:
+
+Runtime downloads are HTTPS-only, timeout- and size-bounded, streamed to a
+private temporary file, signature- and checksum-verified before caching. Murasaki re-hashes a cached
+Node or AppImage runtime before every use; a partial or modified cache entry is
+discarded rather than packaged.
 
 ```bash
 murasaki bundle --arch x64             # x64 .app on an Apple Silicon Mac
@@ -118,10 +125,13 @@ murasaki installer --sign --notarize   # + submit the .dmg to Apple, staple the 
 - **`--sign`** signs the `.app` with a hardened runtime (Apple's documented
   flow: inner code first, then the outer bundle). The signing identity
   resolves from `$MURASAKI_SIGN_IDENTITY`, then `config.sign.identity`, then
-  the first "Developer ID Application" identity in your keychain. Entitlements
-  come from `config.sign.entitlements` if set, otherwise a default plist
-  granting Node the JIT / unsigned-executable-memory / no-library-validation
-  entitlements it needs under the hardened runtime.
+  the first "Developer ID Application" identity in your keychain. Murasaki
+  signs the main app and bundled Node helper with separate entitlement sets:
+  host/system rights stay on the app, while only Node receives JIT / unsigned-
+  executable-memory / no-library-validation. App Sandbox is not currently
+  supported; `sign.appSandbox: true` is rejected rather than emitting an
+  invalid inherited-helper signature. Override the hardened-runtime sets independently with `config.sign.entitlements`
+  and `config.sign.helperEntitlements`; missing or invalid files fail closed.
 - **`--notarize`** requires `--sign` (notarization only accepts Developer
   ID-signed code) and reads credentials from `APPLE_ID`, `APPLE_TEAM_ID`, and
   `APPLE_APP_PASSWORD` (an app-specific password) — **never from config or a
@@ -156,6 +166,11 @@ host:
 - `makensis` produces the NSIS `.exe` and may run on macOS or Windows.
 - WiX v4 produces the `.msi` and runs on Windows.
 
+For a hermetic CI toolchain, set `MURASAKI_NSIS_PATH` and/or
+`MURASAKI_WIX_PATH` to the exact executable. An explicitly configured path is
+authoritative: if it is missing or cannot run, that installer type is skipped
+and the command fails when no other installer can be produced.
+
 The NSIS installer can be `perUser` (the default, no elevation) or
 `perMachine`; MSI is always per-machine. See
 [Configuration](/docs/building/configuration#installer) for branding and
@@ -174,6 +189,11 @@ The installer command reuses that signed payload, then signs the generated NSIS
 setup and MSI. Every signing operation uses SHA-256, an RFC 3161 timestamp by
 default, and a separate `signtool verify /pa /v /tw` pass. A signing or
 verification failure stops the release.
+
+An unsigned installer is useful for local packaging checks, but current
+Windows application-control policy can block it even when the files are
+otherwise well formed. Murasaki warns in that case. Sign public artifacts;
+do not ask users to disable SmartScreen or Smart App Control.
 
 Choose one signer. Config values can be overridden in CI without editing the
 checkout:
@@ -369,7 +389,8 @@ CI (`.github/workflows/app-package-linux.yml`) always uses
 ### What's not implemented yet
 
 - No `.rpm` or repository metadata (apt/dnf repo indexes).
-- No Linux code signing (`debsign`/AppImage signing).
+- No built-in Linux code signing (`debsign`/AppImage signing). Passing
+  `--sign` fails before packaging rather than silently emitting unsigned output.
 - No self-update for the `.deb` or a bare/manually-extracted AppDir — only
   the `.AppImage` has a file to swap (see above).
 

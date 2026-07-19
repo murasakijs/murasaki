@@ -1,15 +1,15 @@
 ---
 title: クイックスタート
-description: Murasaki アプリをスキャフォールドし、HMR 付きで実行し、配布物をビルドします。
+description: Murasaki アプリを作成し、HMR 付きで開発して、配布用パッケージを生成します。
 ---
 
 ## 前提条件
 
-- **Node.js 22.12 以上**（EOLのNode 20はサポート対象外）
+- **Node.js 22.12 以上**（サポートが終了した Node.js 20 は対象外です）
 - `murasaki dev` は **macOS、Windows、Linux** で動作します。macOS の `.app` / `.dmg`
   は macOS 上でビルドする必要があります。ポータブルな Windows フォルダー / `.zip` は
-  どのホストからでもクロスビルドできます。Linux 向けアプリパッケージはロードマップにあ
-  ります。
+  どのホストからでもクロスビルドできます。Linux の x64 / arm64 向けには AppDir、
+  `.AppImage`、`.deb` を生成できます。AppImage の作成には `mksquashfs` が必要です。
 
 ## スキャフォールド
 
@@ -18,9 +18,9 @@ pnpm create murasaki@latest my-app
 cd my-app
 ```
 
-これにより、Next.js ライクなレイアウト、ネイティブウィンドウ、そして動作するコンテキス
-トメニューを備えた React 19 + Vite + Tailwind アプリが作成されます。`index.html` やエン
-トリファイルを管理する必要はありません(アプリシェルは Murasaki が管理します)。
+React 19、Vite、Tailwind を使ったアプリのひな形が作成されます。Next.js に近いディレク
+トリ構成、ネイティブウィンドウ、コンテキストメニューが最初から含まれます。アプリシェル
+は Murasaki が管理するため、`index.html` やエントリーファイルを用意する必要はありません。
 
 ## 開発
 
@@ -28,13 +28,13 @@ cd my-app
 pnpm dev
 ```
 
-Vite の開発サーバーの上にネイティブウィンドウが開きます — **React Fast Refresh と HMR
-は通常どおり動作します**。`src/app/page.tsx` を編集すると、ウィンドウが即座に更新され
-ます。
+Vite の開発サーバーとネイティブウィンドウが起動します。**React Fast Refresh と HMR は
+通常どおり利用できます**。`src/app/page.tsx` を編集すると、開いているウィンドウへすぐに
+反映されます。
 
-アプリ内のどこでも右クリックするとネイティブメニューが表示されます。カードを右クリック
-すると、そのカード専用のスコープ付きメニューが表示されます — どちらも本物の `NSMenu`
-であり、HTML のポップアップではありません。
+アプリ内を右クリックすると OS のネイティブメニューが表示されます。カード上では、その
+要素に限定したメニューへ切り替わります。どちらも HTML で再現したポップアップではなく、
+各 OS のネイティブメニューです。
 
 ## 配布物をビルドする
 
@@ -43,32 +43,33 @@ pnpm bundle
 pnpm installer
 ```
 
-バンドルにはポータブルな Node ランタイムとネイティブランチャーが同梱されるため、ビルド
-したマシン以外でも動作します。macOS では最初の2コマンドで `.app` と `.dmg` を生成しま
-す。Windows ターゲットを指定すると、どのホストからでもポータブルな Windows フォルダー
-と `.zip` を作成できます。
+配布物には Node.js ランタイムとネイティブランチャーが含まれるため、ビルドに使ったマシン
+以外でも実行できます。macOS では `.app` と `.dmg` を生成します。ターゲットを明示すると、
+Windows や Linux 向けの配布物も作成できます。
 
 ```bash
 pnpm bundle --arch x64            # ターゲットアーキテクチャを指定
 pnpm bundle --target win32-x64    # ポータブルな Windows フォルダー + .zip
+pnpm bundle --target linux-x64    # AppDir + AppImage
+pnpm installer --target linux-x64 # Debian パッケージ（.deb）
 ```
 
-`pnpm installer --target win32-x64` は、`makensis` があれば NSIS `.exe`、Windows 上で WiX
-v4 があれば MSI `.msi` も生成します。どちらの任意ツールもない場合、Windows インストー
-ラーは生成されませんが、ポータブルな `.zip` は利用できます。ツールのセットアップと全
-ターゲットは[配布](/docs/building/distribution)を参照してください。
+`pnpm installer --target win32-x64`は、`makensis`があればNSIS `.exe`を生成します。
+built-in updaterが無効で、Windows上にWiX v4もあればMSI `.msi`も生成します。updater有効時は
+意図的にper-user NSISだけを使います。installerを1つも生成できなければcommandは失敗します。
+portable `.zip`が目的なら`pnpm bundle --target win32-x64`を使ってください。必要なtoolとtargetは
+[ビルドと配布](/docs/building/distribution)を参照してください。
 
 <Callout type="warn">
-  macOS では、署名されていないビルドは他のマシンで Gatekeeper をトリガーします(受け
-  取った側は初回のみ右クリック→**開く**が必要です)。警告なしで署名・公証済みのアプリ
-  を配布する方法は、[Distribution →
-  Signing](/docs/building/distribution#signing--notarization) を参照してください。
+  macOS では、未署名のアプリを別のマシンで開くと Gatekeeper の警告が表示されます。
+  開発者以外へ配布する場合は、Developer ID で署名し、Apple の公証を受けてください。
+  手順は[署名と公証](/docs/building/distribution#signing--notarization)で説明しています。
 </Callout>
 
 ## 次へ
 
 <Cards>
-  <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="Murasaki アプリの中で何がどこにあるか。" />
+  <Card title="プロジェクト構成" href="/docs/getting-started/project-structure" description="各ディレクトリと設定ファイルの役割を確認します。" />
   <Card title="ルーティング" href="/docs/guides/routing" description="ファイルベースルーティング、レイアウト、ナビゲーション。" />
   <Card title="配布" href="/docs/building/distribution" description="ポータブルなバンドル、署名、公証。" />
 </Cards>

@@ -28,7 +28,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Verify immutable action references
+        run: node scripts/verify-action-pins.mjs
 
       - name: cargo deny check
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
@@ -37,9 +40,8 @@ jobs:
           # `unmaintained` no longer has an in-config lint level in cargo-deny
           # 0.20 (see crates/native/deny.toml's [advisories] comment) — this
           # is the supported way to keep it a warning instead of an error.
-          # Vulnerabilities remain denied by default; deny.toml's advisories
-          # `ignore` list documents the two specific advisories accepted as
-          # unreachable in this crate's dependency graph.
+          # Vulnerabilities remain denied by default; deny.toml intentionally
+          # has no advisory exceptions.
           command-arguments: --warn unmaintained
 
   npm-audit:
@@ -47,11 +49,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -71,14 +73,15 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # github/* is exempt from full-commit-SHA pinning (GitHub maintains it).
-      - uses: github/codeql-action/init@v3
+      # GitHub-owned actions are pinned too: a mutable major tag is still a
+      # supply-chain boundary in a workflow that writes security results.
+      - uses: github/codeql-action/init@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
         with:
           languages: javascript-typescript
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@b7351df727350dca84cb9d725d57dcf5bc82ba26 # v3
 
   fuzz-smoke:
     name: Fuzz smoke / crates/native (PR)
@@ -86,7 +89,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Detect crates/native changes
         id: changes
@@ -141,7 +144,7 @@ jobs:
         working-directory: crates/native
         run: cargo +nightly fuzz run --sanitizer none fuzz_update_journal -- -max_total_time=60
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure() && steps.changes.outputs.changed == 'true'
         with:
           name: fuzz-smoke-artifacts
@@ -154,7 +157,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
 
@@ -183,7 +186,7 @@ jobs:
         working-directory: crates/native
         run: cargo +nightly fuzz run --sanitizer none fuzz_update_journal -- -max_total_time=300
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: fuzz-deep-artifacts

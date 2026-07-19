@@ -163,8 +163,11 @@ test('createDevWindowTemplates and metaJson embed resolved init script contents'
   })
 
   const { createDevWindowTemplates } = await import('../dist/cli/dev.js')
-  const [devTemplate] = createDevWindowTemplates(config, root, 'http://127.0.0.1:5178/')
-  assert.deepEqual(devTemplate.webview.initScripts, ['window.__murasakiTest = true'])
+  const [devTemplate] = createDevWindowTemplates(config, root, 'http://127.0.0.1:5178/', 'a'.repeat(64))
+  assert.equal(devTemplate.webview.initScripts.length, 2)
+  assert.match(devTemplate.webview.initScripts[0], /x-murasaki-window-token/)
+  assert.doesNotMatch(devTemplate.webview.initScripts[0], new RegExp('a{64}'))
+  assert.equal(devTemplate.webview.initScripts[1], 'window.__murasakiTest = true')
 
   const metadata = JSON.parse(metaJson(config, config.productName, null, root))
   assert.deepEqual(metadata.webview.initScripts, ['window.__murasakiTest = true'])

@@ -1,0 +1,39 @@
+---
+title: Alert Dialog
+description: ユーザーが明示的に判断するまで処理を止めるモーダルダイアログです。
+---
+
+## 使い方
+
+```tsx
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogTitle, AlertDialogTrigger,
+} from '@murasakijs/ui'
+
+<AlertDialog>
+  <AlertDialogTrigger>プロジェクトを削除</AlertDialogTrigger>
+  <AlertDialogContent>
+    <AlertDialogHeader>
+      <AlertDialogTitle>削除しますか？</AlertDialogTitle>
+      <AlertDialogDescription>この操作は取り消せません。</AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel>キャンセル</AlertDialogCancel>
+      <AlertDialogAction>削除</AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
+```
+
+先へ進む前に明示的な判断が必要な場合だけ使用します。初期フォーカスは、
+できるだけ破壊的でない操作に置いてください。タイトルと説明は支援技術にも
+読み上げられます。
+
+## エクスポート
+
+`AlertDialog`, `AlertDialogTrigger`, `AlertDialogPortal`, `AlertDialogOverlay`,
+`AlertDialogContent`, `AlertDialogHeader`, `AlertDialogFooter`,
+`AlertDialogTitle`, `AlertDialogDescription`, `AlertDialogAction`,
+`AlertDialogCancel`。

@@ -1,91 +1,99 @@
 ---
 title: プロセスモデル
-description: 起動、開発時 reload、graceful shutdown、アプリ所有リソース。
+description: 起動、開発時の再読み込み、安全な終了処理、アプリが所有するリソースの管理。
 ---
 
-Murasaki はネイティブイベントループと Node のイベントループを分離します。パッケージ
-済みアプリでは Rust launcher が同梱 Node 子プロセスを起動・監視し、Node が Main
-ライフサイクルとローカル HTTP server を開始してから、ホストがレンダラーを読み込み
-ます。
+Murasaki は、ネイティブ側とNode.js側のイベントループを分離します。パッケージ済みアプリでは、
+Rustランチャーが同梱したNode.js子プロセスを起動・監視します。Node.jsがNode Mainの
+ライフサイクルとローカルHTTPサーバーを開始した後に、ホストがレンダラーを読み込みます。
 
 ```txt
-launch
-  → Rust host が per-user app lock を取得
-  → host が app-local origin と runtime token を作る
-  → Node child が src/main.ts を読み込む
-  → main.ready(context) が完了
-  → local server が listen を開始
-  → cold start 時の登録済み URL / file を main.openRequested() へ配送
-  → 宣言済みWebViewが各renderer routeを読み込む
+起動
+  → Rustホストがユーザー単位のアプリロックを取得
+  → アプリ内で使うoriginと実行時トークンを生成
+  → Node.js子プロセスがsrc/main.tsを読み込む
+  → main.ready(context)が完了
+  → ローカルサーバーが待ち受けを開始
+  → コールドスタート時の登録済みURL／ファイルをmain.openRequested()へ渡す
+  → 宣言済みWebViewが各レンダラールートを読み込む
 ```
 
-`ready()` が reject すると、未初期化のバックエンドに UI を接続せず起動に失敗します。
-DB の open、migration、アプリ所有 service の起動など、UI より先に必要な処理を置いて
-ください。
+`ready()`が失敗すると、初期化途中のバックエンドへUIを接続せず、アプリの起動も失敗します。
+データベースを開く、マイグレーションを実行する、アプリ専用サービスを開始するといった、
+UIの利用前に完了すべき処理をここへ置いてください。
 
-packaged macOS / Windows app では 2 回目の起動は別 backend を開始しません。その
-`argv` / working directory は `main.secondInstance()` に渡され、host が primary window
-を focus します。開発 mode と Linux には現状この lock がありません。
+最初のプロセスへ渡された上限付きの未加工引数と作業ディレクトリは、
+`MainContext.launch` から取得できます。開発時に渡るのは
+`murasaki dev -- <アプリ用引数>` の単独の `--` より後ろだけで、Murasaki 自身の
+CLIオプションは含まれません。詳しくは
+[Node Main](/ja/docs/guides/node-main#最初の起動引数を読む)を参照してください。
 
-## Open request
+パッケージ済みのmacOS／Windows／Linuxアプリをもう一度起動しても、別のバックエンドは開始しません。
+2回目のプロセスの`argv`と作業ディレクトリは`main.secondInstance()`へ渡され、ホストが
+メインウィンドウを前面に表示します。開発モードでは、現在この単一起動ロックを利用できません。
 
-packaged macOS / Windows app は、`murasaki.config.ts` の `protocols` と
-`fileAssociations` で custom URL scheme と document extension を登録できます。
-`ready()` の完了後、一致した activation が normalize されて
-`main.openRequested()` へ渡されます。
+## URL・ファイルを指定した起動
+
+パッケージ済みのmacOS／Windowsアプリと、インストール済みのLinux `.deb`は、
+`murasaki.config.ts`の`protocols`と`fileAssociations`を使って、独自URLスキームと
+ファイル拡張子を登録できます。
+`ready()`の完了後、対象となる起動要求を共通形式へ変換して`main.openRequested()`へ渡します。
 
 - `activation`: `cold-start` / `second-instance` / `os-event`
 - `transport`: `argv` / `open-url` / `open-file`
 - `targets`: `{ kind: 'url', url, scheme }` または `{ kind: 'file', path }`
 
-2 回目の起動では、`secondInstance()` は raw process argument を引き続き受け取り、
-`openRequested()` には登録済み URL / file だけが渡されます。cross-platform な
-open 処理は `openRequested()`、その他の secondary-launch argument は
-`secondInstance()` で扱ってください。
+2回目の起動では、`secondInstance()`は未加工のプロセス引数を受け取り、`openRequested()`には
+登録対象のURLとファイルだけが渡されます。OSに依存しないURL／ファイル処理は
+`openRequested()`へ、それ以外の2回目起動用引数は`secondInstance()`へ実装してください。
+
+Linuxの`.deb`は、生成した`.desktop`ファイルをインストールします。展開しただけのAppDirや
+AppImageにも同じメタデータは含まれますが、デスクトップ環境への登録は自動では行いません。
 
 <Callout type="warn">
-  URL / file activation は OS から届く untrusted input です。登録は hook に届く
-  input を選ぶだけで、送信元の認証や URL / file content の安全性を保証しません。
+  URLやファイルを指定した起動要求は、OSを経由して届く信頼できない入力です。登録設定は
+  フックへ渡す入力を選別しますが、送信元の認証やURL・ファイル内容の安全性までは保証しません。
 </Callout>
 
 ## 終了シーケンス
 
-通常のウィンドウ close / app quit は次の順です。
+通常のウィンドウ終了とアプリ終了は、次の順序で処理します。
 
 ```txt
-quit request
-  → beforeQuit(context)       false でキャンセル可能 ┐
-  → context.signal が abort
-  → shutdown(context)                                 ┘ 全体が shutdownTimeoutMs の上限付き
-  → Node child が終了
-  → native host が終了、または更新を適用
+終了要求
+  → beforeQuit(context)       falseを返すとキャンセル ┐
+  → context.signalを中断
+  → shutdown(context)                              ┘ 全体にshutdownTimeoutMsを適用
+  → Node.js子プロセスが終了
+  → ネイティブホストが終了、または更新を適用
 ```
 
-`beforeQuit()` は未保存ドキュメントがある場合などに通常終了をキャンセルできます。
-process signal や開発時 Main reload を含む強制終了ではキャンセルできません。
-2つのhook全体の既定上限は10秒です。`shutdown()`ではまず新規処理の受付を止め、
-その後 flush / close してください。
+`beforeQuit()`は、未保存の文書がある場合などに通常終了をキャンセルできます。プロセスシグナルや
+開発時のNode Main再読み込みを含む強制終了ではキャンセルできません。2つのフックを合わせた
+既定の制限時間は10秒です。`shutdown()`では新しい処理の受付を先に止め、その後にバッファーの
+書き出しとリソースの解放を行ってください。
 
 <Callout type="warn">
-  OSのclose controlと `appWindow.close()` はsecondaryをhideするため、`windows.open()`
-  で再表示できます。primaryの`main`を閉じるとapp quit requestになり、上記sequenceへ
-  進みます。cancelはapp全体に対するもので、cancel可能なwindow別close hookはありません。
-  Node Mainの`windows.destroy(label)`はsecondary targetを解放し、`windows.create(label)`で
-  設定済み宣言を再生成できます。
+  OSの閉じるボタンと`appWindow.close()`はサブウィンドウを非表示にするため、
+  `windows.open()`で再表示できます。`main`ウィンドウを閉じる操作はアプリの終了要求として
+  上記の処理へ進みます。終了のキャンセルはアプリ全体に作用し、ウィンドウごとにキャンセルできる
+  closeフックはありません。Node Mainの`windows.destroy(label)`は対象を破棄し、
+  `windows.create(label)`で宣言済みの設定から再作成できます。
 </Callout>
 
-## 開発時の reload
+## 開発時の再読み込み
 
-`murasaki dev` で設定された Main entry を変更すると次が実行されます。
+`murasaki dev`の実行中に、設定したNode Mainのエントリーファイルを変更すると、次の処理を行います。
 
 1. 現在の `shutdown({ reason: 'dev-reload' })`
-2. Vite による entry module の invalidate
-3. 新しい lifecycle の生成
+2. Viteによるエントリーモジュールの無効化
+3. 新しいライフサイクルの生成
 4. 新しい `ready()`
 
-Main が import するコードも Vite module graph に従いますが、現状 lifecycle restart を
-開始するのは設定した entry 自体の変更だけです。module top-level で timer / socket を
-作らず、`ready()` で作成し `shutdown()` で閉じると reload 時の leak を防げます。
+Node MainがインポートするコードもViteのモジュールグラフへ含まれますが、現在ライフサイクルを
+再開するのはエントリーファイル自体を変更した場合だけです。モジュールのトップレベルでタイマーや
+ソケットを作成せず、`ready()`で作成して`shutdown()`で閉じると、再読み込み時のリソース漏れを
+防げます。
 
 ## アプリケーションパス
 
@@ -93,26 +101,27 @@ Main が import するコードも Vite module graph に従いますが、現状
 
 | Path | 用途 |
 | --- | --- |
-| `data` | DB、アプリ所有のユーザードキュメント、永続 state |
-| `cache` | 再生成可能な cache |
+| `data` | データベース、アプリが管理するユーザー文書、永続状態 |
+| `cache` | 再生成できるキャッシュ |
 | `logs` | アプリログ |
-| `temp` | 一時 staging file |
+| `temp` | 処理途中の一時ファイル |
 
-実行ファイルの隣には書き込まないでください。パッケージ済み resource は read-only の
-場合があり、OS ごとに配置が異なり、更新時には app bundle 自体が置換されます。
+実行ファイルの隣へデータを書き込まないでください。パッケージに含まれるリソースは読み取り専用の
+場合があり、配置もOSごとに異なります。また、更新時にはアプリバンドル自体が置き換わります。
 
 ## プロセス障害
 
-ホストはNode子プロセスのlifetimeを所有し、定期的に生存を確認します。packaged backendが
-予期せず終了した場合、launcherは未確認のupdate handoffを破棄し、WebViewを閉じ、backend
-process treeを終了して非0で終了します。dead UIだけが残ることはありません。Windowsは
-Job Object、macOSはNodeとsidecar専用のprocess groupを使います。publicなcrash restart
-policy、health check hook、複数の独立worker groupを監視するAPIはまだありません。helperに
-明示的なrestart policyが必要な場合はMainのsidecar supervisorを使用してください。
+ホストはNode.js子プロセスを管理し、定期的に生存を確認します。パッケージ済みバックエンドが
+予期せず終了した場合、ランチャーは未確認の更新引き渡しを破棄し、WebViewを閉じ、バックエンドの
+プロセスツリーを終了して、0以外の終了コードを返します。操作できないUIだけが残ることはありません。
+WindowsではJob Object、macOSではNode.jsとサイドカー専用のプロセスグループを利用します。
+クラッシュ後の再起動方針、ヘルスチェック用フック、複数の独立したWorkerグループを監視する公開APIは
+まだありません。補助プロセスに明示的な再起動方針が必要な場合は、Node Mainのサイドカー監視機能を
+使用してください。
 
 ## 次へ
 
 <Cards>
-  <Card title="Node Main" href="/ja/docs/guides/node-main" description="lifecycle と型付き renderer call。" />
-  <Card title="トラブルシューティング" href="/ja/docs/building/troubleshooting" description="起動・終了障害を診断する。" />
+  <Card title="Node Main" href="/docs/guides/node-main" description="ライフサイクルと型付きレンダラー呼び出しを説明します。" />
+  <Card title="トラブルシューティング" href="/docs/building/troubleshooting" description="起動・終了時の問題を診断します。" />
 </Cards>

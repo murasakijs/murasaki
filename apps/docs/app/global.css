@@ -283,7 +283,11 @@ html > body[data-scroll-locked] {
   border-radius: 1rem;
   padding: clamp(1rem, 3vw, 1.5rem);
   background:
-    linear-gradient(135deg, color-mix(in oklch, var(--color-fd-primary) 8%, transparent), transparent 44%),
+    linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--color-fd-primary) 8%, transparent),
+      transparent 44%
+    ),
     color-mix(in oklch, currentColor 3%, transparent);
 }
 

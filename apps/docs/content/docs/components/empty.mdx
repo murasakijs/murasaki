@@ -1,0 +1,29 @@
+---
+title: Empty
+description: Explains an empty state and offers a useful next action.
+---
+
+## Usage
+
+```tsx
+import {
+  Button, Empty, EmptyContent, EmptyDescription, EmptyHeader,
+  EmptyMedia, EmptyTitle,
+} from '@murasakijs/ui'
+import { FilePlus } from 'lucide-react'
+
+<Empty>
+  <EmptyHeader>
+    <EmptyMedia variant="icon"><FilePlus aria-hidden="true" /></EmptyMedia>
+    <EmptyTitle>No documents yet</EmptyTitle>
+    <EmptyDescription>Create a document or import Markdown.</EmptyDescription>
+  </EmptyHeader>
+  <EmptyContent><Button>Create document</Button></EmptyContent>
+</Empty>
+```
+
+An empty state should say what is missing and provide the most likely recovery
+action. Decorative icons need `aria-hidden="true"`; meaningful media needs an
+accessible name supplied by the media element itself.
+
+`EmptyMedia` supports `variant="default" | "icon"`.

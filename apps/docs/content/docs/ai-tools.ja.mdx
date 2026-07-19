@@ -44,12 +44,16 @@ Murasaki はコーディングエージェントや LLM クライアント向け
 
 - `search_docs` — 英語・日本語のドキュメントを検索し、正規 URL と短い抜粋を返します。
 - `get_api_reference` — 公開シンボルの成熟度、対応 OS、制約、Docs、テスト根拠を返します。
+- `list_capabilities` — 正規の機能 ID と、その成熟度、対応 OS、公開シンボル、制約、Docs URL を一覧表示します。
 - `get_config_schema` — 設定全体、またはドットパス / JSON Pointer で選んだ項目の JSON Schema を返します。
-- `doctor` — 既知のプロジェクトメタデータとエントリーパスだけを読み取ります。設定の import、
-  プロジェクトコードの実行、ファイル変更は行いません。
+- `doctor` — 既知のプロジェクトメタデータとエントリーパスから、構造上の準備状況だけを
+  報告します。`runtimeVerified`は常に`false`です。設定の読み込み、コード実行、ビルド、起動、
+  ファイル変更は行いません。
 - `list_recipes` / `get_recipe` — チェックイン済み Docs に基づく作業別ガイドを返します。
-- `check_compatibility` — macOS、Windows、Linux に対して正規の機能 ID を照合し、partial や
-  planned を「対応済み」に格上げしません。
+- `list_ui_components` — `@murasakijs/ui` のコンポーネント一覧を英語または日本語で返し、
+  UI コードを生成する前に用途で絞り込めます。
+- `check_compatibility` — macOS、Windows、Linux に対して正規の機能 ID を照合し、`partial` や
+  `planned` を「対応済み」に格上げしません。不明な ID には候補と有効な ID の一覧を返します。
 
-互換性を検討するときは、まず `get_api_reference` をシンボル未指定で呼び出して有効な機能 ID を
-確認し、必要な ID を `check_compatibility` に渡してください。
+互換性を検討するときは、まず `list_capabilities` を呼び出し、必要な機能 ID を
+`check_compatibility` に渡してください。

@@ -24,14 +24,20 @@ half-initialized backend. Use it for resources that must exist before the UI is
 usable: opening a database, running migrations, or starting an app-owned
 service.
 
-In packaged macOS and Windows apps, a second launch does not start another
+The primary process receives its bounded raw arguments and working directory
+as `MainContext.launch`. During development, only arguments after the standalone
+delimiter in `murasaki dev -- <app-arguments>` enter that snapshot; Murasaki's
+CLI flags are never forwarded. See [Node Main](/docs/guides/node-main#read-primary-launch-arguments).
+
+In packaged macOS, Windows, and Linux apps, a second launch does not start another
 backend. Its `argv` / working directory are delivered to
 `main.secondInstance()`, and the host focuses the primary window. Development
-mode and Linux do not currently provide this lock.
+mode does not currently provide this lock.
 
 ## Open requests
 
-Packaged macOS and Windows apps can register custom URL schemes and document
+Packaged macOS and Windows apps, plus installed Linux `.deb` packages, can
+register custom URL schemes and document
 extensions with `protocols` and `fileAssociations` in
 `murasaki.config.ts`. After `ready()` has completed, matching activations are
 normalized and delivered to `main.openRequested()`:
@@ -45,6 +51,10 @@ On a second launch, `secondInstance()` still receives the raw process
 arguments while `openRequested()` receives only registered URLs and files.
 Use `openRequested()` for cross-platform open behavior and
 `secondInstance()` for other secondary-launch arguments.
+
+On Linux, the `.deb` installs the generated `.desktop` entry. A manually
+extracted AppDir or AppImage contains the same metadata but does not register
+it with the desktop environment automatically.
 
 <Callout type="warn">
   URL and file activations are untrusted operating-system input. Registration

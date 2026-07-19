@@ -46,14 +46,20 @@ stable version without a repository checkout:
   returns bounded excerpts with canonical URLs.
 - `get_api_reference` — finds public symbols and returns their maturity,
   platform status, limitations, docs, and test evidence.
+- `list_capabilities` — lists canonical feature IDs with maturity, platform
+  status, public symbols, limitations, and docs URLs.
 - `get_config_schema` — returns the full Murasaki configuration JSON Schema or
   one property selected by dot path or JSON Pointer.
-- `doctor` — reads known project metadata and entry paths. It does not import
-  the config, execute project code, or change files.
+- `doctor` — reports structure-only readiness from known project metadata and
+  entry paths. Its `runtimeVerified` value is always `false`; it does not import
+  config, execute code, build, launch, or change files.
 - `list_recipes` / `get_recipe` — returns task-oriented guides backed by the
   checked-in docs.
+- `list_ui_components` — lists the localized `@murasakijs/ui` component
+  catalog and can filter it before an agent generates interface code.
 - `check_compatibility` — checks canonical feature IDs for macOS, Windows, or
-  Linux without upgrading partial or planned work to “supported.”
+  Linux without upgrading partial or planned work to “supported.” Unknown IDs
+  return possible matches and the complete valid-ID list.
 
-For compatibility planning, call `get_api_reference` without a symbol to list
-the valid feature IDs, then pass the required IDs to `check_compatibility`.
+For compatibility planning, call `list_capabilities`, then pass its required
+feature IDs to `check_compatibility`.

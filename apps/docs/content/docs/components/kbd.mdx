@@ -1,0 +1,18 @@
+---
+title: Kbd
+description: Displays a keyboard key or shortcut.
+---
+
+## Usage
+
+```tsx
+import { Kbd, KbdGroup } from '@murasakijs/ui'
+
+<KbdGroup aria-label="Command K">
+  <Kbd>⌘</Kbd><span aria-hidden="true">+</span><Kbd>K</Kbd>
+</KbdGroup>
+```
+
+`Kbd` renders the semantic `<kbd>` element. A visual shortcut is not a keyboard
+implementation: document the action in text, implement the shortcut separately,
+and avoid overriding OS or assistive-technology shortcuts.

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { cp, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { cp, mkdir, open, readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { MurasakiConfig } from '../config.js'
@@ -37,6 +37,10 @@ const RESERVED_RESOURCE_NAMES = new Set([
   'updater-engine.mjs',
   'murasaki-meta.json',
   'menu-locales.json',
+  'Assets.car',
+  'icon.icns',
+  'icon.ico',
+  'icon.png',
   'node',
   'node.exe',
 ])
@@ -377,6 +381,11 @@ export async function stageBundleResources(
       throw new Error(`murasaki: unsafe or reserved bundle resource destination: ${toValue}`)
     }
     const sourceStat = await stat(source)
+    if (typeof item !== 'string' && item.executable === true && !sourceStat.isFile()) {
+      throw new Error(
+        `murasaki: executable bundle resource must be a file, not a directory: ${fromValue}`,
+      )
+    }
     if (sourceStat.isDirectory()) {
       await cp(source, destination, { recursive: true, dereference: true, force: true })
     } else {
@@ -386,4 +395,82 @@ export async function stageBundleResources(
     staged.push(toValue)
   }
   return staged
+}
+
+/**
+ * Resolve the already-staged, app-owned executable resources that packaging
+ * must sign before sealing the outer app/installer. Paths are derived from
+ * the same validated destinations used by `stageBundleResources`; callers
+ * must invoke this only after staging succeeded.
+ */
+export function executableBundleResourcePaths(
+  resourcesDir: string,
+  config: MurasakiConfig,
+): string[] {
+  return (config.bundle?.resources ?? [])
+    .filter((item): item is Exclude<typeof item, string> => (
+      typeof item !== 'string' && item.executable === true
+    ))
+    .map((item) => resolve(resourcesDir, item.to ?? basename(item.from)))
+}
+
+async function looksExecutable(path: string): Promise<boolean> {
+  const details = await stat(path)
+  if (!details.isFile()) return false
+  if ((details.mode & 0o111) !== 0) return true
+
+  const handle = await open(path, 'r')
+  try {
+    const header = Buffer.alloc(4_096)
+    const { bytesRead } = await handle.read(header, 0, header.length, 0)
+    if (bytesRead >= 2 && header[0] === 0x23 && header[1] === 0x21) return true // shebang
+    if (bytesRead >= 4 && header.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46]))) {
+      return true // ELF
+    }
+    if (bytesRead >= 2 && header[0] === 0x4d && header[1] === 0x5a) return true // PE/COFF
+    if (bytesRead >= 4) {
+      const magic = header.readUInt32BE(0)
+      if (new Set([
+        0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe,
+        0xcafebabe, 0xcafebabf, 0xbebafeca, 0xbfbafeca,
+      ]).has(magic)) return true // Mach-O thin/fat, both endian forms
+    }
+    return false
+  } finally {
+    await handle.close()
+  }
+}
+
+async function findExecutable(path: string): Promise<string | undefined> {
+  const details = await stat(path)
+  if (details.isFile()) return await looksExecutable(path) ? path : undefined
+  if (!details.isDirectory()) return undefined
+  for (const entry of await readdir(path)) {
+    const found = await findExecutable(join(path, entry))
+    if (found) return found
+  }
+  return undefined
+}
+
+/**
+ * Fail closed before signing when app-owned code was staged as ordinary data.
+ * Otherwise nested Mach-O/PE helpers bypass the inner-to-outer signing pass and
+ * produce a Gatekeeper/Authenticode failure only after distribution.
+ */
+export async function assertExecutableBundleResourcesDeclared(
+  resourcesDir: string,
+  config: MurasakiConfig,
+): Promise<void> {
+  for (const item of config.bundle?.resources ?? []) {
+    if (typeof item !== 'string' && item.executable === true) continue
+    const fromValue = typeof item === 'string' ? item : item.from
+    const toValue = typeof item === 'string' ? basename(fromValue) : (item.to ?? basename(fromValue))
+    const executable = await findExecutable(resolve(resourcesDir, toValue))
+    if (executable) {
+      throw new Error(
+        `murasaki: bundle resource appears executable but is not declared executable: ${fromValue}; `
+        + 'use { from, to, executable: true } so packaging can sign it',
+      )
+    }
+  }
 }

@@ -1,0 +1,23 @@
+---
+title: Toggle Group
+description: 関連するトグルを、単一選択または複数選択の操作としてまとめます。
+---
+
+## 使い方
+
+```tsx
+import { ToggleGroup, ToggleGroupItem } from '@murasakijs/ui'
+
+<ToggleGroup type="single" aria-label="文字揃え" defaultValue="left">
+  <ToggleGroupItem value="left" aria-label="左揃え">左</ToggleGroupItem>
+  <ToggleGroupItem value="center" aria-label="中央揃え">中央</ToggleGroupItem>
+</ToggleGroup>
+```
+
+値を1つだけ選ぶ場合は `type="single"`、複数選ぶ場合は
+`type="multiple"` を指定します。グループの `variant` と `size` は各項目に
+引き継がれます。アイコンだけの項目には個別のアクセシブルな名前が必要です。
+
+## エクスポート
+
+`ToggleGroup`, `ToggleGroupItem`。

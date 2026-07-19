@@ -1,5 +1,4 @@
 import { spawnSync } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +10,7 @@ import {
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { banner, dim, error, success, warn } from './brand.js'
+import { downloadHttpsFile, fetchHttpsText } from './secure-fetch.js'
 
 export interface DemoSpec {
   appName: string
@@ -29,30 +29,6 @@ export const DEMO_SPECS: Record<string, DemoSpec> = {
     releaseTag: 'v0.47.3',
     checksumAsset: 'SHA256SUMS.txt',
     description: 'the packaged create-murasaki scaffold',
-  },
-  'violet-notes': {
-    appName: 'Violet Notes',
-    assetStem: 'Violet-Notes',
-    version: '0.47.2',
-    releaseTag: 'samples-v0.47.2',
-    checksumAsset: 'SHA256SUMS',
-    description: 'a local-first Markdown editor',
-  },
-  'murasaki-focus': {
-    appName: 'Murasaki Focus',
-    assetStem: 'Murasaki-Focus',
-    version: '0.47.2',
-    releaseTag: 'samples-v0.47.2',
-    checksumAsset: 'SHA256SUMS',
-    description: 'a keyboard-first focus timer',
-  },
-  'local-signal': {
-    appName: 'Local Signal',
-    assetStem: 'Local-Signal',
-    version: '0.47.2',
-    releaseTag: 'samples-v0.47.2',
-    checksumAsset: 'SHA256SUMS',
-    description: 'a developer service monitor',
   },
 }
 
@@ -118,7 +94,11 @@ async function runDemo(argv: string[]) {
     `${warn('Developer preview: removes macOS quarantine only after checksum and code-signature verification.')}\n\n`,
   )
 
-  const checksums = await fetchText(`${releaseRoot}/${spec.checksumAsset}`)
+  const checksums = await fetchHttpsText(`${releaseRoot}/${spec.checksumAsset}`, {
+    label: `${spec.releaseTag} demo checksums`,
+    maxBytes: 4 * 1024 * 1024,
+    timeoutMs: 60_000,
+  })
   const expectedSha = checksumForAsset(checksums, asset)
   if (!expectedSha) throw new Error(`no published checksum found for ${asset}`)
 
@@ -170,8 +150,11 @@ async function installDemo(opts: {
 
   try {
     process.stdout.write(`${dim(`  downloading ${asset}…`)}\n`)
-    await fetchFile(`${releaseRoot}/${asset}`, dmgPath)
-    const actualSha = sha256File(dmgPath)
+    const actualSha = await downloadHttpsFile(`${releaseRoot}/${asset}`, dmgPath, {
+      label: asset,
+      maxBytes: 512 * 1024 * 1024,
+      timeoutMs: 10 * 60_000,
+    })
     if (actualSha !== expectedSha) throw new Error(`checksum mismatch for ${asset}`)
     process.stdout.write(`${success('SHA256 verified')}\n`)
 
@@ -235,22 +218,6 @@ function verifyCodeSignature(appPath: string) {
   }
 }
 
-async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url, { redirect: 'follow' })
-  if (!response.ok) throw new Error(`download failed (${response.status}): ${url}`)
-  return response.text()
-}
-
-async function fetchFile(url: string, path: string) {
-  const response = await fetch(url, { redirect: 'follow' })
-  if (!response.ok) throw new Error(`download failed (${response.status}): ${url}`)
-  writeFileSync(path, new Uint8Array(await response.arrayBuffer()))
-}
-
-function sha256File(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex')
-}
-
 function printList() {
   process.stdout.write('\n  Available macOS developer previews:\n\n')
   for (const [name, spec] of Object.entries(DEMO_SPECS)) {
@@ -264,7 +231,7 @@ function printHelp() {
     '\n  Usage: murasaki demo [name] [--refresh] [--no-open]\n\n' +
       '  Downloads the matching macOS demo, verifies its published SHA256 and\n' +
       '  ad-hoc code signature, removes quarantine, then opens it.\n\n' +
-      '  Names: default | violet-notes | murasaki-focus | local-signal\n' +
+      '  Names: default\n' +
       '  Flags: --list | --refresh | --no-open\n\n',
   )
 }

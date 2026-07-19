@@ -69,9 +69,10 @@ const data = await res.json()
 
 どちらもサーバー上で実行されます — 形状で使い分けます:
 
-- **API ルート**はレンダラーと Node Main Process 向けのアプリローカル HTTP エンド
-  ポイントです。パッケージ版ではアプリ実行時セッションで保護されるため、公開 Webhook
-  エンドポイントではありません。
+- **APIルート**はrendererとNode Main向けのapp-local HTTP endpointです。開発時とpackage版の
+  両方で、呼び出し元native windowのderived identityと一致する
+  `api:METHOD:/path` `backendCapabilities` grantが必要なため、public webhook endpointでは
+  ありません。
 - **サーバーアクション**([ガイド](/docs/guides/server-actions))は、React 19 のフォー
   ム / `useAction` フローに組み込まれた、型付きの RPC です — URL も `fetch` の定型コー
   ドも不要です。

@@ -27,11 +27,12 @@ export interface SerializedWindowTemplate {
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
   capabilities: string[]
   capabilityPolicy: string
+  backendCapabilities: string[]
 }
 
 /** Resolve every declared template, including windows created on demand. */
 export function serializeWindowTemplates(
-  config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'updater'>,
+  config: Pick<MurasakiConfig, 'window' | 'windows' | 'capabilities' | 'backendCapabilities' | 'updater'>,
 ): SerializedWindowTemplate[] {
   return resolveWindowDeclarations(config).map((declaration) => ({
     label: declaration.label,
@@ -54,5 +55,6 @@ export function serializeWindowTemplates(
     vibrancy: declaration.vibrancy,
     capabilities: capabilityPermissionNames(declaration.capabilities),
     capabilityPolicy: serializeCapabilityPolicy(declaration.capabilities),
+    backendCapabilities: [...declaration.backendCapabilities],
   }))
 }

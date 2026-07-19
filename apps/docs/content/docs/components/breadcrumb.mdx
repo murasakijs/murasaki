@@ -1,0 +1,32 @@
+---
+title: Breadcrumb
+description: Shows the current page's location in a hierarchy.
+---
+
+## Usage
+
+```tsx
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList,
+  BreadcrumbPage, BreadcrumbSeparator,
+} from '@murasakijs/ui'
+
+<Breadcrumb>
+  <BreadcrumbList>
+    <BreadcrumbItem><BreadcrumbLink href="/">Home</BreadcrumbLink></BreadcrumbItem>
+    <BreadcrumbSeparator />
+    <BreadcrumbItem><BreadcrumbPage>Settings</BreadcrumbPage></BreadcrumbItem>
+  </BreadcrumbList>
+</Breadcrumb>
+```
+
+`Breadcrumb` renders a `nav` named “breadcrumb”. Use `BreadcrumbPage` only for
+the current page; it supplies `aria-current="page"`. `BreadcrumbLink` accepts
+`asChild` when a router link should own the rendered element. For a collapsed
+middle section, use `BreadcrumbEllipsis` and provide another control that makes
+the hidden destinations reachable.
+
+## Exports
+
+`Breadcrumb`, `BreadcrumbList`, `BreadcrumbItem`, `BreadcrumbLink`,
+`BreadcrumbPage`, `BreadcrumbSeparator`, and `BreadcrumbEllipsis`.

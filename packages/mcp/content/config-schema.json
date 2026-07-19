@@ -14,6 +14,8 @@
       "enum": [
         "app:quit",
         "app:isElevated",
+        "autostart:read",
+        "autostart:write",
         "dialog:openFile",
         "dialog:openDirectory",
         "dialog:saveFile",
@@ -67,6 +69,158 @@
         "webview:readCookies",
         "webview:writeCookies"
       ]
+    },
+    "nativeCapabilityGrant": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/nativeCapability"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["permission"],
+          "properties": {
+            "permission": { "enum": ["shell:openExternal", "webview:readCookies", "webview:writeCookies"] },
+            "allow": { "$ref": "#/$defs/urlScope" },
+            "deny": { "$ref": "#/$defs/urlScope" }
+          },
+          "anyOf": [{ "required": ["allow"] }, { "required": ["deny"] }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["permission"],
+          "properties": {
+            "permission": { "enum": ["shell:showItemInFolder", "shell:trashItem", "shell:openPath"] },
+            "allow": { "$ref": "#/$defs/pathScope" },
+            "deny": { "$ref": "#/$defs/pathScope" }
+          },
+          "anyOf": [{ "required": ["allow"] }, { "required": ["deny"] }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["permission"],
+          "properties": {
+            "permission": { "const": "shell:runElevated" },
+            "allow": { "$ref": "#/$defs/executionScope" },
+            "deny": { "$ref": "#/$defs/executionScope" }
+          },
+          "anyOf": [{ "required": ["allow"] }, { "required": ["deny"] }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["permission"],
+          "properties": {
+            "permission": { "enum": ["window:open", "window:manage"] },
+            "allow": { "$ref": "#/$defs/windowScope" },
+            "deny": { "$ref": "#/$defs/windowScope" }
+          },
+          "anyOf": [{ "required": ["allow"] }, { "required": ["deny"] }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["permission"],
+          "properties": {
+            "permission": { "enum": ["systemPermission:status", "systemPermission:request"] },
+            "allow": { "$ref": "#/$defs/systemPermissionScope" },
+            "deny": { "$ref": "#/$defs/systemPermissionScope" }
+          },
+          "anyOf": [{ "required": ["allow"] }, { "required": ["deny"] }]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["permission"],
+          "properties": {
+            "permission": { "enum": ["secureStorage:get", "secureStorage:set", "secureStorage:delete"] },
+            "allow": { "$ref": "#/$defs/keyScope" },
+            "deny": { "$ref": "#/$defs/keyScope" }
+          },
+          "anyOf": [{ "required": ["allow"] }, { "required": ["deny"] }]
+        }
+      ]
+    },
+    "urlScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["urls"],
+      "properties": {
+        "urls": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "pathScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths"],
+      "properties": {
+        "paths": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "executionScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executions"],
+      "properties": {
+        "executions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["executable"],
+            "properties": {
+              "executable": { "type": "string", "minLength": 1 },
+              "args": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 4096 } }
+            }
+          }
+        }
+      }
+    },
+    "windowScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows"],
+      "properties": {
+        "windows": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" } }
+      }
+    },
+    "systemPermissionScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["permissions"],
+      "properties": {
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "enum": ["camera", "microphone", "screenRecording", "accessibility", "inputMonitoring", "location", "fullDiskAccess", "photos", "contacts", "calendar", "reminders", "speechRecognition", "bluetooth", "appleEvents", "localNetwork"] }
+        }
+      }
+    },
+    "keyScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["keys"],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?:[^*]*|[^*]*\\*)$" }
+        }
+      }
+    },
+    "backendCapability": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(?:(?:main|action):(?:\\*|[^\\s#*]+#[A-Za-z_$][\\w$]*|[^\\s*]+\\*)|api:(?:\\*|[A-Z]+:/api(?:/[^\\s*]*)?\\*?)|updater:(?:\\*|[^\\s*]+\\*?)|events:(?:\\*|[^\\s*]+\\*?)|diagnostics:(?:\\*|renderer-error))$"
     },
     "macCapturePermission": {
       "type": "object",
@@ -155,11 +309,19 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/nativeCapability"
+            "$ref": "#/$defs/nativeCapabilityGrant"
           },
           "uniqueItems": true,
           "default": [],
-          "description": "Per-secondary-window allowlist. It never inherits top-level capabilities."
+          "description": "Per-secondary-window native allowlist. It never inherits top-level capabilities."
+        },
+        "backendCapabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/backendCapability" },
+          "maxItems": 256,
+          "uniqueItems": true,
+          "default": [],
+          "description": "Per-secondary-window renderer-to-Node/API allowlist. It never inherits top-level backendCapabilities."
         }
       }
     }
@@ -167,14 +329,20 @@
   "properties": {
     "appId": {
       "type": "string",
-      "minLength": 1
+      "maxLength": 255,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*(?:\\.[A-Za-z0-9][A-Za-z0-9-]*)+$",
+      "description": "Portable reverse-DNS application identifier."
     },
     "productName": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 120,
+      "description": "Portable display and artifact filename; runtime validation also rejects reserved path/control characters, Windows device names, edge whitespace, and a trailing dot."
     },
     "version": {
-      "type": "string"
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$",
+      "description": "Strict semantic version without a v prefix. Numeric pre-release identifiers cannot contain leading zeroes."
     },
     "description": {
       "type": "string"
@@ -251,10 +419,17 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/nativeCapability"
+            "$ref": "#/$defs/nativeCapabilityGrant"
           },
           "uniqueItems": true,
-          "description": "Primary-window allowlist. Falls back to top-level capabilities when omitted."
+          "description": "Primary-window native allowlist. Falls back to top-level capabilities when omitted."
+        },
+        "backendCapabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/backendCapability" },
+          "maxItems": 256,
+          "uniqueItems": true,
+          "description": "Primary-window renderer-to-Node/API allowlist. Falls back to top-level backendCapabilities when omitted."
         }
       }
     },
@@ -295,64 +470,14 @@
     "capabilities": {
       "type": "array",
       "description": "Legacy primary-window native command allowlist. window.capabilities takes precedence when present; secondary windows never inherit it. The default is deny-all, except that enabling the updater implicitly grants app:quit to the primary window for the verified restart handshake.",
-      "items": {
-        "enum": [
-          "app:quit",
-          "app:isElevated",
-          "dialog:openFile",
-          "dialog:openDirectory",
-          "dialog:saveFile",
-          "dialog:message",
-          "clipboard:readText",
-          "clipboard:writeText",
-          "clipboard:readImage",
-          "clipboard:writeImage",
-          "clipboard:writeHtml",
-          "menu:application",
-          "menu:context",
-          "notification:show",
-          "shell:openExternal",
-          "shell:showItemInFolder",
-          "shell:trashItem",
-          "shell:openPath",
-          "shell:runElevated",
-          "secureStorage:get",
-          "secureStorage:set",
-          "secureStorage:delete",
-          "systemPermission:status",
-          "systemPermission:request",
-          "window:setTitle",
-          "window:setSize",
-          "window:minimize",
-          "window:toggleMaximize",
-          "window:show",
-          "window:hide",
-          "window:focus",
-          "window:close",
-          "window:setAlwaysOnTop",
-          "window:isVisible",
-          "window:isFocused",
-          "window:isMaximized",
-          "window:isMinimized",
-          "window:getLabel",
-          "window:open",
-          "window:list",
-          "window:manage",
-          "globalShortcut:register",
-          "globalShortcut:unregister",
-          "tray:create",
-          "tray:remove",
-          "tray:setTooltip",
-          "tray:setIcon",
-          "tray:setMenu",
-          "webview:download",
-          "webview:dragDrop",
-          "webview:zoom",
-          "webview:print",
-          "webview:readCookies",
-          "webview:writeCookies"
-        ]
-      },
+      "items": { "$ref": "#/$defs/nativeCapabilityGrant" },
+      "uniqueItems": true
+    },
+    "backendCapabilities": {
+      "type": "array",
+      "description": "Legacy primary-window renderer-to-Node/API allowlist. window.backendCapabilities takes precedence; secondary windows never inherit it. Default deny-all.",
+      "items": { "$ref": "#/$defs/backendCapability" },
+      "maxItems": 256,
       "uniqueItems": true
     },
     "systemPermissions": {
@@ -617,7 +742,8 @@
             },
             "endpoint": {
               "type": "string",
-              "format": "uri"
+              "format": "uri",
+              "description": "Credential-free HTTPS manifest URL. HTTP is accepted only for 127.0.0.1, localhost, or [::1] local testing."
             },
             "channel": {
               "type": "string",
@@ -630,7 +756,8 @@
             "checkInterval": {
               "oneOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[1-9]\\d*(m|h|d)$"
                 },
                 {
                   "const": false
@@ -640,6 +767,26 @@
             },
             "publicKey": {
               "type": "string"
+            },
+            "publicKeys": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 4,
+              "description": "Additional raw-32-byte base64 Ed25519 public keys pinned during key rotation."
+            },
+            "maxManifestAgeDays": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 90,
+              "description": "Reject signed manifests older than this many days. generatedAt is required by default."
+            },
+            "allowLegacyManifestsWithoutGeneratedAt": {
+              "type": "boolean",
+              "default": false,
+              "description": "Explicit compatibility escape hatch for pre-generatedAt manifests; weakens replay protection."
             }
           }
         }
@@ -811,6 +958,9 @@
           "type": "string"
         },
         "entitlements": {
+          "type": "string"
+        },
+        "helperEntitlements": {
           "type": "string"
         },
         "appSandbox": {

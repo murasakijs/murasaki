@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { PNG } from 'pngjs'
 
-import {
+import bundle, {
   linuxAppRunScript,
   linuxDesktopEntry,
   metaJson,
@@ -47,6 +47,25 @@ async function withTempProject(t) {
   t.after(() => rm(root, { recursive: true, force: true }))
   return root
 }
+
+test('an explicit Linux --sign request fails before producing an unsigned artifact', async (t) => {
+  const root = await withTempProject(t)
+  await writeFile(
+    join(root, 'murasaki.config.mjs'),
+    "export default { appId: 'dev.test.signing', productName: 'SigningFixture' }\n",
+  )
+  const previous = process.cwd()
+  process.chdir(root)
+  try {
+    await assert.rejects(
+      bundle(['--target', 'linux-x64', '--sign']),
+      /Linux AppDir\/AppImage signing is not implemented.*Refusing to emit an unsigned artifact/,
+    )
+  } finally {
+    process.chdir(previous)
+  }
+  assert.equal(existsSync(join(root, 'dist')), false)
+})
 
 // ── sanitizeLinuxExecName / sanitizeLinuxAppId ─────────────────────────────
 
@@ -184,12 +203,16 @@ test('assembling the fixed AppDir layout produces every required path with corre
 
   // ── assertions: the fixed layout contract, verbatim ──
   assert.ok(existsSync(join(appDir, 'AppRun')))
-  assert.equal((await stat(join(appDir, 'AppRun'))).mode & 0o777, 0o755)
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(appDir, 'AppRun'))).mode & 0o777, 0o755)
+  }
   assert.ok(existsSync(join(appDir, `${appId}.desktop`)))
   assert.ok(existsSync(join(appDir, `${appId}.png`)))
   assert.equal(await readlink(join(appDir, '.DirIcon')), `${appId}.png`)
   assert.ok(existsSync(join(binDir, execName)))
-  assert.equal((await stat(join(binDir, execName))).mode & 0o777, 0o755)
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(join(binDir, execName))).mode & 0o777, 0o755)
+  }
   assert.ok(existsSync(join(resourcesDir, 'murasaki-meta.json')))
   assert.ok(existsSync(join(applicationsDir, `${appId}.desktop`)))
   for (const size of [16, 32, 64, 128, 256, 512]) {
@@ -270,9 +293,11 @@ test('release --manifest scans dist/bundle for linux-x64/linux-arm64 .AppImage p
   await writeFile(join(root, 'dist/bundle/linuxreleaseapp_1.0.0_amd64.deb'), 'deb-fixture')
 
   process.chdir(root)
-  t.after(() => process.chdir(originalCwd))
-
-  await release(['--manifest', '--base-url', 'https://updates.example.com', '--version', '1.0.0'])
+  try {
+    await release(['--manifest', '--base-url', 'https://updates.example.com', '--version', '1.0.0'])
+  } finally {
+    process.chdir(originalCwd)
+  }
 
   const manifest = JSON.parse(await readFile(join(root, 'dist/latest.json'), 'utf8'))
   assert.equal(

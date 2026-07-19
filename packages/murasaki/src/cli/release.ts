@@ -9,6 +9,7 @@ import {
 import { resolve } from 'node:path'
 import pc from 'picocolors'
 import { loadUserConfig } from './load-config.js'
+import { sha256File } from './secure-fetch.js'
 
 /**
  * `murasaki release` — the auto-update publishing helpers (contract §9).
@@ -60,9 +61,9 @@ function rawPrivateKeyToDer(raw: Buffer): Buffer {
 /**
  * Generates an Ed25519 keypair and writes `.murasaki/update-key.pub`
  * (commit) + `.murasaki/update-key` (gitignored — appends the entry to
- * `.gitignore` if it isn't already covered). Prints the private key exactly
- * once, since after this it only lives in the gitignored file and (ideally)
- * a GitHub secret.
+ * `.gitignore` if it isn't already covered). The private key is never printed;
+ * the CLI gives an stdin-based command for copying the private file into a CI
+ * secret without exposing it in terminal logs, argv, or shell history.
  */
 async function keygen(argv: string[], cwd: string): Promise<void> {
   const force = argv.includes('--force')
@@ -94,11 +95,9 @@ async function keygen(argv: string[], cwd: string): Promise<void> {
 
   process.stdout.write(
     `\n  ${pc.green('✓')} wrote ${pubPath} (commit this)\n` +
-      `  ${pc.green('✓')} wrote ${privPath} (gitignored)\n\n` +
-      `  Private key — save it now, this is the only time it is printed:\n\n` +
-      `    ${privB64}\n\n` +
+      `  ${pc.green('✓')} wrote ${privPath} (mode 0600, gitignored; never printed)\n\n` +
       `  Store it as the MURASAKI_UPDATE_KEY GitHub secret so CI can sign releases:\n` +
-      `    gh secret set MURASAKI_UPDATE_KEY --body "${privB64}"\n` +
+      `    gh secret set MURASAKI_UPDATE_KEY < .murasaki/update-key\n` +
       `  (or Settings → Secrets and variables → Actions → New repository secret)\n\n`,
   )
 }
@@ -146,6 +145,8 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
     process.stderr.write(`\n  ${pc.red('✗')} --base-url and --version are required\n\n`)
     process.exit(1)
   }
+  validateReleaseVersion(version)
+  const releaseBaseUrl = validateReleaseBaseUrl(baseUrl)
 
   const config = await loadUserConfig(cwd)
   const productName = config.productName
@@ -180,10 +181,10 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
   for (const t of targets) {
     for (const file of t.files) {
       try {
-        const buf = await readFile(file)
+        const filename = file.split(/[\\/]/).pop()!
         assets[t.key] = {
-          url: `${baseUrl.replace(/\/$/, '')}/${file.split(/[\\/]/).pop()}`,
-          sha256: createHash('sha256').update(buf).digest('hex'),
+          url: new URL(encodeURIComponent(filename), releaseBaseUrl).toString(),
+          sha256: await sha256File(file),
         }
         break // first existing candidate for this target wins
       } catch {
@@ -223,6 +224,35 @@ async function manifest(argv: string[], cwd: string): Promise<void> {
   process.stdout.write(
     `\n  ${pc.green('✓')} wrote ${outPath} (${count} target${count === 1 ? '' : 's'}: ${Object.keys(assets).join(', ')})\n\n`,
   )
+}
+
+function validateReleaseVersion(version: string): void {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version)
+  if (!match
+    || [match[1], match[2], match[3]].some((part) => !Number.isSafeInteger(Number(part)))
+    || (match[4]?.split('.').some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0')) ?? false)) {
+    throw new Error('murasaki: --version must be a valid semantic version')
+  }
+}
+
+function validateReleaseBaseUrl(baseUrl: string): URL {
+  let parsed: URL
+  try {
+    parsed = new URL(baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`)
+  } catch {
+    throw new Error('murasaki: --base-url must be an absolute URL')
+  }
+  const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsed.hostname.toLowerCase())
+  if ((parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback))
+    || parsed.username
+    || parsed.password
+    || parsed.search
+    || parsed.hash) {
+    throw new Error(
+      'murasaki: --base-url must be credential-free HTTPS (loopback HTTP is allowed for testing) without query or fragment',
+    )
+  }
+  return parsed
 }
 
 /** Parses `--rollout <0-100>` (staged rollout percentage — contract-adjacent, see the auto-update guide). Exits with an error on a malformed value; `undefined` (field omitted, meaning 100%) when the flag isn't passed. */

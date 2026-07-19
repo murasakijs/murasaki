@@ -151,6 +151,17 @@ export function applyContentSecurityPolicy(
   const existing = findContentSecurityPolicyMetaTags(html)
   if (existing.length > 0) {
     if (configured !== undefined) {
+      // Vite may run transformIndexHtml more than once for the same build
+      // entry. A tag inserted by this function is therefore not a config
+      // conflict on a later pass. Keep rejecting user-owned tags (including
+      // a mixture of user- and framework-owned tags), since two independently
+      // configured policies are enforced cumulatively by browsers and can
+      // unexpectedly break an application.
+      if (existing.length === 1 && existing[0].frameworkOwned) {
+        const withoutExisting =
+          html.slice(0, existing[0].start) + html.slice(existing[0].end)
+        return insertAtHeadStart(withoutExisting, frameworkContentSecurityPolicyTag(policy))
+      }
       throw new TypeError(
         'security.csp conflicts with a Content-Security-Policy meta tag in index.html; configure the policy in one place',
       )
@@ -167,8 +178,11 @@ export function applyContentSecurityPolicy(
     return insertAtHeadStart(withoutExisting, existing.map((match) => match.tag).join('\n    '))
   }
 
-  const tag = `<meta http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(policy)}">`
-  return insertAtHeadStart(html, tag)
+  return insertAtHeadStart(html, frameworkContentSecurityPolicyTag(policy))
+}
+
+function frameworkContentSecurityPolicyTag(policy: string): string {
+  return `<meta data-murasaki-csp http-equiv="Content-Security-Policy" content="${escapeHtmlAttribute(policy)}">`
 }
 
 function insertAtHeadStart(html: string, tag: string): string {
@@ -184,10 +198,10 @@ function insertAtHeadStart(html: string, tag: string): string {
 
 function findContentSecurityPolicyMetaTags(
   html: string,
-): Array<{ tag: string; start: number; end: number }> {
+): Array<{ tag: string; start: number; end: number; frameworkOwned: boolean }> {
   // Keep string offsets stable while hiding commented-out tags from the scan.
   const visible = html.replace(/<!--[\s\S]*?-->/g, (comment) => ' '.repeat(comment.length))
-  const matches: Array<{ tag: string; start: number; end: number }> = []
+  const matches: Array<{ tag: string; start: number; end: number; frameworkOwned: boolean }> = []
   const meta = /<meta\b[^>]*>/gi
   for (let match = meta.exec(visible); match; match = meta.exec(visible)) {
     if (!/\bhttp-equiv\s*=\s*(?:"\s*content-security-policy\s*"|'\s*content-security-policy\s*'|content-security-policy(?=\s|\/?>))/i.test(match[0])) {
@@ -197,6 +211,7 @@ function findContentSecurityPolicyMetaTags(
       tag: html.slice(match.index, match.index + match[0].length),
       start: match.index,
       end: match.index + match[0].length,
+      frameworkOwned: /\bdata-murasaki-csp(?:\s*=\s*(?:""|''|data-murasaki-csp))?(?=\s|\/?>)/i.test(match[0]),
     })
   }
   return matches

@@ -1,0 +1,31 @@
+---
+title: Menubar
+description: Presents a persistent, keyboard-navigable set of application menus.
+---
+
+## Usage
+
+```tsx
+import { Menubar, MenubarContent, MenubarItem, MenubarMenu, MenubarShortcut, MenubarTrigger } from '@murasakijs/ui'
+
+<Menubar>
+  <MenubarMenu>
+    <MenubarTrigger>File</MenubarTrigger>
+    <MenubarContent>
+      <MenubarItem>New window <MenubarShortcut>⌘N</MenubarShortcut></MenubarItem>
+      <MenubarItem>Open… <MenubarShortcut>⌘O</MenubarShortcut></MenubarItem>
+    </MenubarContent>
+  </MenubarMenu>
+</Menubar>
+```
+
+Use `Menubar` for commands that remain available across an application view.
+It is a renderer component; use Murasaki's native menu configuration when the
+command must appear in the operating system menu bar.
+
+## Exports
+
+`Menubar`, `MenubarMenu`, `MenubarTrigger`, `MenubarContent`, `MenubarItem`,
+`MenubarCheckboxItem`, `MenubarRadioGroup`, `MenubarRadioItem`, `MenubarGroup`,
+`MenubarLabel`, `MenubarSeparator`, `MenubarShortcut`, `MenubarSub`,
+`MenubarSubTrigger`, `MenubarSubContent`, and `MenubarPortal`.

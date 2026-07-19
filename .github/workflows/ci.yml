@@ -23,11 +23,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -62,6 +62,9 @@ jobs:
       - name: Type-check documentation site
         run: pnpm --filter murasaki-docs types:check
 
+      - name: Test documentation navigation and component catalog
+        run: pnpm --filter murasaki-docs test
+
       - name: Build documentation site
         run: pnpm --filter murasaki-docs build
 
@@ -76,10 +79,17 @@ jobs:
           pnpm --dir packages/ui pack --pack-destination "$PACK_DIR"
           pnpm --dir crates/native pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/murasaki pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/create-murasaki pack --pack-destination "$PACK_DIR"
+
+          CREATE_TARBALL=$(find "$PACK_DIR" -maxdepth 1 -name 'create-murasaki-*.tgz' -print -quit)
+          test -n "$CREATE_TARBALL"
+          CREATE_PACKAGE_DIR="$RUNNER_TEMP/create-murasaki-package"
+          mkdir -p "$CREATE_PACKAGE_DIR"
+          tar -xzf "$CREATE_TARBALL" -C "$CREATE_PACKAGE_DIR"
 
           (
             cd "$RUNNER_TEMP"
-            node "$GITHUB_WORKSPACE/packages/create-murasaki/index.mjs" fresh-murasaki \
+            node "$CREATE_PACKAGE_DIR/package/index.mjs" fresh-murasaki \
               --yes --linter none --skip-install --no-git
           )
 
@@ -115,35 +125,130 @@ jobs:
           pnpm --dir "$APP_DIR" typecheck
           pnpm --dir "$APP_DIR" build
 
+  examples-quality:
+    name: Examples / typecheck, test, build, PostgreSQL
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: murasaki
+          POSTGRES_PASSWORD: murasaki-ci
+          POSTGRES_DB: orglia_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U murasaki -d orglia_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build framework dependencies
+        run: |
+          pnpm --filter @murasakijs/ui build
+          pnpm --filter murasaki build
+
+      - name: Verify Papelle
+        run: |
+          pnpm --dir examples/papelle typecheck
+          pnpm --dir examples/papelle test
+          pnpm --dir examples/papelle build
+
+      - name: Verify Oscilla
+        run: |
+          pnpm --dir examples/oscilla typecheck
+          pnpm --dir examples/oscilla test
+          pnpm --dir examples/oscilla build
+
+      - name: Verify Orglia
+        env:
+          TEST_DATABASE_URL: postgresql://murasaki:murasaki-ci@127.0.0.1:5432/orglia_ci
+        run: |
+          pnpm --dir examples/orglia typecheck
+          pnpm --dir examples/orglia test
+          pnpm --dir examples/orglia test:postgres
+          pnpm --dir examples/orglia build
+
+      - name: Build Orglia production container
+        run: docker build --tag orglia-ci examples/orglia
+
+      - name: Smoke-test Orglia production container
+        env:
+          ORGLIA_BOOTSTRAP_PASSWORD: orglia-ci-container-password
+        run: |
+          docker run --detach --name orglia-ci \
+            --env ORGLIA_BOOTSTRAP_PASSWORD \
+            --publish 127.0.0.1:4173:4173 \
+            orglia-ci
+          trap 'docker rm --force orglia-ci >/dev/null 2>&1 || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:4173/healthz \
+              > "$RUNNER_TEMP/orglia-health.json"; then
+              break
+            fi
+            if [ "$attempt" = 30 ]; then
+              docker logs orglia-ci
+              exit 1
+            fi
+            sleep 1
+          done
+
+          HEALTH_PATH="$RUNNER_TEMP/orglia-health.json" node <<'NODE'
+          const health = require(process.env.HEALTH_PATH)
+          if (health.ok !== true || health.database !== 'sqlite') {
+            throw new Error(`Unexpected Orglia health payload: ${JSON.stringify(health)}`)
+          }
+          NODE
+
   linux-native-build:
     name: Linux x64 / native release build, bundle smoke
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Install Linux native dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev squashfs-tools
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev squashfs-tools xvfb dbus-x11
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: x86_64-unknown-linux-gnu
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: crates/native
 
       - name: Install native package dependencies
         working-directory: crates/native
         run: pnpm install --ignore-workspace
+
+      - name: Test native crate on Linux
+        working-directory: crates/native
+        run: cargo test --locked
 
       - name: Build Linux native binding
         working-directory: crates/native
@@ -189,7 +294,7 @@ jobs:
           })
           `)
           NODE
-
+          node scripts/create-window-profile-smoke.mjs examples/ci-profile-linux linux-ci
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile
 
@@ -204,6 +309,10 @@ jobs:
 
       - name: Bundle scaffolded app (AppDir + AppImage)
         working-directory: examples/ci-linux-app
+        run: pnpm exec murasaki bundle --target linux-x64
+
+      - name: Bundle browser-profile isolation probe
+        working-directory: examples/ci-profile-linux
         run: pnpm exec murasaki bundle --target linux-x64
 
       - name: Verify AppDir layout and AppImage artifact
@@ -231,6 +340,21 @@ jobs:
           test -x "$APPIMAGE"
           echo "AppImage: $APPIMAGE"
 
+      - name: Verify persistent per-window browser-profile authority isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPIMAGE=$(find examples/ci-profile-linux/dist/bundle -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          test -n "$APPIMAGE"
+          for attempt in 1 2; do
+            bash .github/scripts/linux-smoke-test.sh \
+              "$APPIMAGE" \
+              "$RUNNER_TEMP/murasaki-linux-profile-smoke-$attempt" \
+              60 \
+              "MURASAKI_WINDOW_PROFILE_ISOLATION_OK=service-worker-denied" \
+              "true"
+          done
+
       - name: Package the .deb installer
         working-directory: examples/ci-linux-app
         run: pnpm exec murasaki installer --target linux-x64 --no-build
@@ -245,13 +369,15 @@ jobs:
           echo ".deb: $DEB"
           ar t "$DEB"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: linux-x64-bundle-failure
           path: |
             examples/ci-linux-app/dist/bundle/**
             examples/ci-linux-app/dist/*.deb
+            examples/ci-profile-linux/dist/bundle/**
+            ${{ runner.temp }}/murasaki-linux-profile-smoke-*/**
           if-no-files-found: warn
 
   macos-framework-native:
@@ -259,19 +385,19 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 55
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: crates/native
 
@@ -303,6 +429,7 @@ jobs:
               width: 800,
               height: 600,
               capabilities: ['window:list', 'window:open'],
+              backendCapabilities: ['api:POST:/api/multiwindow-probe'],
             },
             windows: {
               probe: {
@@ -313,6 +440,7 @@ jobs:
                 visible: false,
                 createOnLaunch: false,
                 capabilities: ['window:getLabel', 'window:list'],
+                backendCapabilities: ['api:POST:/api/multiwindow-probe'],
               },
             },
           })
@@ -462,12 +590,13 @@ jobs:
           }
           `)
           NODE
+          node scripts/create-window-profile-smoke.mjs examples/ci-profile-mac macos-ci
 
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile
 
-      - name: Build UI dependency
-        run: pnpm --filter @murasakijs/ui build
+      - name: Build and test UI dependency
+        run: pnpm --filter @murasakijs/ui test
 
       - name: Test Murasaki framework
         run: pnpm --filter murasaki test
@@ -494,6 +623,10 @@ jobs:
         working-directory: examples/ci-mac-app
         run: pnpm exec murasaki bundle --target darwin-arm64
 
+      - name: Bundle browser-profile isolation probe
+        working-directory: examples/ci-profile-mac
+        run: pnpm exec murasaki bundle --target darwin-arm64
+
       - name: Locate bundled application
         id: bundle
         shell: bash
@@ -513,13 +646,28 @@ jobs:
           "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
           "true"
 
-      - uses: actions/upload-artifact@v4
+      - name: Verify per-window browser-profile authority isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find examples/ci-profile-mac/dist/bundle -maxdepth 2 -type d -name '*.app' -print -quit)
+          test -n "$APP_PATH"
+          bash .github/scripts/mac-smoke-test.sh \
+            "$APP_PATH" \
+            "$RUNNER_TEMP/murasaki-mac-profile-smoke" \
+            60 \
+            "MURASAKI_WINDOW_PROFILE_ISOLATION_OK=service-worker-denied" \
+            "true"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: macos-arm64-bundle-failure
           path: |
             ${{ runner.temp }}/murasaki-mac-smoke/**
+            ${{ runner.temp }}/murasaki-mac-profile-smoke/**
             examples/ci-mac-app/dist/bundle/**/*.app/**
+            examples/ci-profile-mac/dist/bundle/**/*.app/**
           if-no-files-found: warn
 
   windows-bundle-smoke:
@@ -527,21 +675,21 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 50
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: crates/native
 
@@ -573,6 +721,7 @@ jobs:
               width: 800,
               height: 600,
               capabilities: ['window:list', 'window:open'],
+              backendCapabilities: ['api:POST:/api/multiwindow-probe'],
             },
             windows: {
               probe: {
@@ -583,6 +732,7 @@ jobs:
                 visible: false,
                 createOnLaunch: false,
                 capabilities: ['window:getLabel', 'window:list'],
+                backendCapabilities: ['api:POST:/api/multiwindow-probe'],
               },
             },
           })
@@ -732,6 +882,7 @@ jobs:
           }
           `)
           NODE
+          node scripts/create-window-profile-smoke.mjs examples/ci-profile-win windows-ci
 
       - name: Install workspace dependencies
         run: pnpm install --no-frozen-lockfile
@@ -761,6 +912,10 @@ jobs:
         working-directory: examples/ci-win-app
         run: pnpm exec murasaki bundle --target win32-x64
 
+      - name: Bundle browser-profile isolation probe
+        working-directory: examples/ci-profile-win
+        run: pnpm exec murasaki bundle --target win32-x64
+
       - name: Locate bundled executable
         id: bundle
         shell: pwsh
@@ -780,6 +935,20 @@ jobs:
           -TimeoutSeconds 60
           -ExpectedMarker "MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened"
           -ExpectBackendCrash
+
+      - name: Verify per-window browser-profile authority isolation
+        shell: pwsh
+        run: |
+          $exePath = Join-Path (Resolve-Path 'examples/ci-profile-win/dist/bundle') 'Murasaki Profile Smoke/Murasaki Profile Smoke.exe'
+          if (-not (Test-Path -LiteralPath $exePath -PathType Leaf)) {
+            Write-Error "Profile-isolation application executable was not produced: $exePath"
+            exit 1
+          }
+          .github/scripts/win-smoke-test.ps1 `
+            -ExePath $exePath `
+            -TimeoutSeconds 60 `
+            -ExpectedMarker 'MURASAKI_WINDOW_PROFILE_ISOLATION_OK=service-worker-denied' `
+            -ExpectBackendCrash
 
       - name: Generate ephemeral code-signing PFX
         shell: pwsh
@@ -900,7 +1069,7 @@ jobs:
             -ExpectedMarker 'MURASAKI_MULTIWINDOW_OK=probe:main,probe:hidden-denied-opened' `
             -ExpectBackendCrash
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: windows-x64-bundle-failure

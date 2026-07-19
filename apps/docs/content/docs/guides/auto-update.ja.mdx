@@ -27,10 +27,13 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
    ```
 
    これにより `.murasaki/update-key.pub`(コミットしてください)と
-   `.murasaki/update-key`(自動的に gitignore されます)が書き出され、秘密鍵が
-   **一度だけ**表示されます — `MURASAKI_UPDATE_KEY` という GitHub シークレットとして
-   保存してください(コマンドが、そのための `gh secret set` の実行例をそのまま表示し
-   ます)。
+   `.murasaki/update-key`(mode `0600`、自動的にgitignore)が書き出されます。秘密鍵は
+   表示されません。コマンド出力の通り、stdin経由で`MURASAKI_UPDATE_KEY`というGitHub
+   secretへ登録してください:
+
+   ```bash
+   gh secret set MURASAKI_UPDATE_KEY < .murasaki/update-key
+   ```
 
 2. アップデーターを有効化します:
 
@@ -150,8 +153,8 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
 列を検証します — 逆ではありません。そのため JSON の正規化に関する曖昧さを心配する必要
 はありません。
 
-`generatedAt`、`rollout`、`keyId` はすべてoptionalで、いずれも署名されたバイト列に
-含まれるため、同じ署名でカバーされます:
+clientでは`generatedAt`が必須で、`rollout`と`keyId`はoptionalです。いずれも署名された
+byte列に含まれるため、同じ署名でカバーされます:
 
 - **`generatedAt`** — anti-freeze/replay guardです。下記の
   [マニフェストの鮮度](#manifest-freshness)を参照してください。
@@ -268,8 +271,8 @@ jobs:
             dist/latest.json.sig
 ```
 
-`MURASAKI_UPDATE_KEY` をリポジトリシークレットとして追加してください(`--keygen` が
-表示した値です)。これはコード署名とは独立したものです — Developer ID で署名・公証さ
+`MURASAKI_UPDATE_KEY`をprivate key fileからrepository secretへ追加してください。
+shell引数へ鍵を貼り付けないでください。これはコード署名とは独立したものです — Developer ID で署名・公証さ
 れた `.dmg` も欲しい場合は[配布](/docs/building/distribution#signing--notarization)
 を参照してください。同じ `macos` ジョブにそのステップを追加しても構いません。
 
@@ -338,21 +341,25 @@ validationを迂回したconfigであっても、平文のendpointを指すこ�
 
 ## マニフェストの鮮度
 
-`generatedAt` タイムスタンプ(`murasaki release --manifest` が自動的に書き込みます)
-を含むマニフェストは、他の何よりも先に鮮度がチェックされます: `updater.maxManifestAgeDays`
+すべてのmanifestに`generatedAt`タイムスタンプ(`murasaki release --manifest`が自動生成)
+が必要で、他の何よりも先に鮮度を確認します。`updater.maxManifestAgeDays`
 (デフォルト90、最小1)より古いマニフェストは、frozenまたはreplayされた可能性がある
 ものとして拒否されます — これがないと、一度validに署名された古いマニフェストを手に
 入れた攻撃者が、それを永遠に配信し続け、既知の脆弱なバージョンにfleetを固定できてしま
 います。24時間より未来の日付が付いたマニフェストも、clock skew/tamperingの兆候として
-拒否されます(この許容範囲は固定で、設定不可です)。`generatedAt` が全く無いマニフェス
-ト — このフィールドが存在する前に公開されたもの — は後方互換のために引き続き受け入れ
-られますが、構造化された警告をログに出力します。
+拒否されます(この許容範囲は固定で、設定不可です)。`generatedAt`が無いmanifestは
+fail-closedで拒否します。移行時だけ`allowLegacyManifestsWithoutGeneratedAt: true`で一時的に
+許可できますが、warningを記録しreplay保護を弱めるため、可能な限りmanifestを再生成・再署名してください。
+packaged appはchannelごとに、認証済みの最高`generatedAt`とversionをOSのapp-data
+directoryへ永続化します。後から届いたmanifestがどちらかを巻き戻す場合、署名とageが
+validでも拒否します。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
   // ...
   updater: {
     maxManifestAgeDays: 30, // 30日より古いものを拒否
+    // allowLegacyManifestsWithoutGeneratedAt: true, // migration時のみ
   },
 })
 ```
@@ -400,8 +407,10 @@ export default defineConfig({
 アントが即座に更新を確認できます。
 
 100 未満の場合、インストール済みの各アプリは、最初にチェックした時に永続化された
-ランダムな id(`update-client-id`。`.murasaki-apply.json` handoff fileと同じ場所に
-保存されます)から安定したbucketを計算します — `sha256(id)` の最初のバイトを 100 で
+ランダムな id(`update-client-id`。MainのOS標準`context.paths.data` directoryに保存)から
+安定したbucketを計算します。可変なrollout stateを署名済み/read-onlyのapp resourcesへは
+書き込まず、そこに置くのは1回限りの`.murasaki-apply.json` launcher handoffだけです。
+bucketは`sha256(id)` の最初のバイトを 100 で
 割った余りです。bucket が `>= rollout` のクライアントは、そのチェックで「あなた向けの
 プラットフォーム用の更新はありません」と全く同じ `not-available` を受け取ります: エラー
 にもリトライの嵐にもならず、次回の定期チェックでまた試すだけです — その頃にはpercentage
@@ -419,6 +428,12 @@ export default defineConfig({
 | Windows(arm64） | `<productName>-<version>-setup-arm64.exe` | 対応 |
 | Linux AppImage(x64 / arm64） | `<productName>-<version>-linux-{x64,arm64}.AppImage` | 対応 |
 | Linux `.deb` / bare AppDir | — | 対象外 — `check()` は「system package manager が管理」と返します |
+
+Windows self-updateは意図的に**per-user NSIS** installと結び付けています。`updater`を設定
+すると、`murasaki installer`はNSISを必須とし、MSIをskipし、
+`installer.windows.installMode: 'perMachine'`を拒否します。MSIはbuilt-in updaterを無効にした
+場合だけ使えるsystem-managed deploymentです。Murasaki update engineではなく、MSI major
+upgradeまたは組織のsoftware management systemで更新してください。
 
 `murasaki installer` は NSIS インストーラーの名前に arch suffix を付けるため、x64 と
 arm64 のビルドが同じ `dist/` に置かれても衝突しません。`murasaki release --manifest`

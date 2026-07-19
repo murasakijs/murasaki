@@ -134,6 +134,21 @@ test('shared config validation allows a loopback http updater.endpoint for local
   }
 })
 
+test('shared config validation rejects updater credentials and malformed semantic versions', async (t) => {
+  for (const source of [
+    `export default { appId: 'dev.test.credentials', productName: 'Credentials', updater: { endpoint: 'https://user:secret@updates.example.com/latest.json' } }`,
+    `export default { appId: 'dev.test.version', productName: 'Version', version: '1.2.3garbage' }`,
+    `export default { appId: 'dev.test.version', productName: 'Version', version: '1.2.3-01' }`,
+    `export default { appId: 'dev.test.version', productName: 'Version', version: 'v1.2.3' }`,
+  ]) {
+    const root = await configProject(t, `${source}\n`)
+    await assert.rejects(
+      () => loadUserConfig(root),
+      /embedded credentials|valid semantic version/,
+    )
+  }
+})
+
 test('shared config validation accepts a valid publicKeys rotation set and maxManifestAgeDays', async (t) => {
   const key1 = 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='
   const key2 = 'AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI='
@@ -151,6 +166,9 @@ test('shared config validation rejects artifact path traversal components', asyn
   for (const [field, value] of [
     ['productName', "'../../outside'"],
     ['productName', "'C:\\\\outside'"],
+    ['productName', "'CON'"],
+    ['productName', "'Trailing.'"],
+    ['productName', "' padded '"],
     ['version', "'1.0.0/../../../outside'"],
     ['version', '42'],
   ]) {
@@ -163,6 +181,16 @@ test('shared config validation rejects artifact path traversal components', asyn
       () => loadUserConfig(root),
       new RegExp(`${field} must be`),
     )
+  }
+})
+
+test('shared config validation requires a portable reverse-DNS appId', async (t) => {
+  for (const appId of ['single', '.com.example', 'com..example', 'com.example/app', 'com.example_unsafe']) {
+    const root = await configProject(t, `export default {
+      appId: ${JSON.stringify(appId)},
+      productName: 'Safe Product',
+    }\n`)
+    await assert.rejects(() => loadUserConfig(root), /appId must be a reverse-DNS identifier/)
   }
 })
 

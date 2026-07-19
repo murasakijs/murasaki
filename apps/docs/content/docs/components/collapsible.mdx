@@ -1,0 +1,24 @@
+---
+title: Collapsible
+description: Expands or collapses a single section of content.
+---
+
+## Usage
+
+```tsx
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@murasakijs/ui'
+
+<Collapsible>
+  <CollapsibleTrigger>Advanced settings</CollapsibleTrigger>
+  <CollapsibleContent>Settings shown on demand.</CollapsibleContent>
+</Collapsible>
+```
+
+Use `open` and `onOpenChange` for controlled state, or `defaultOpen` for
+uncontrolled state. The trigger receives the correct expanded state and
+keyboard behavior from Radix UI. Use `Accordion` instead when several related
+sections must coordinate their open state.
+
+## Exports
+
+`Collapsible`, `CollapsibleTrigger`, and `CollapsibleContent`.

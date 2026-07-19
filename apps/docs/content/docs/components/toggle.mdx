@@ -1,0 +1,21 @@
+---
+title: Toggle
+description: A two-state button that can be pressed or unpressed.
+---
+
+## Usage
+
+```tsx
+import { Toggle } from '@murasakijs/ui'
+
+<Toggle aria-label="Toggle bold" variant="outline" size="sm">B</Toggle>
+```
+
+Use `pressed` and `onPressedChange` for a controlled toggle, or
+`defaultPressed` for an uncontrolled one. `variant` accepts `default` or
+`outline`; `size` accepts `default`, `sm`, or `lg`. Icon-only toggles need an
+accessible name.
+
+## Exports
+
+`Toggle` and `toggleVariants`.

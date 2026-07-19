@@ -1,0 +1,23 @@
+---
+title: Collapsible
+description: 1つのコンテンツ領域を開閉します。
+---
+
+## 使い方
+
+```tsx
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@murasakijs/ui'
+
+<Collapsible>
+  <CollapsibleTrigger>詳細設定</CollapsibleTrigger>
+  <CollapsibleContent>必要なときだけ表示する設定です。</CollapsibleContent>
+</Collapsible>
+```
+
+状態を制御する場合は `open` と `onOpenChange`、制御しない場合は
+`defaultOpen` を使います。トリガーの開閉状態とキーボード操作は Radix UI が
+付与します。複数の関連セクションを連動させる場合は `Accordion` が適しています。
+
+## エクスポート
+
+`Collapsible`, `CollapsibleTrigger`, `CollapsibleContent`。

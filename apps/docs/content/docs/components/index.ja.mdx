@@ -6,21 +6,80 @@ description: "@murasakijs/ui が提供するコンポーネント。"
 [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) は、スキャフォー
 ルドがデフォルトでインストールするコンポーネントライブラリです — Radix プリミティブ
 をベースに、Tailwind CSS と `class-variance-authority` でスタイリングされており、
-shadcn/ui ユーザーにはおなじみの `cn()` の作法をそのまま使っています。このページに
-掲載されている各コンポーネントは、実際に公開されているものそのものをライブでレンダリ
-ングしています。
+shadcn/ui ユーザーにはおなじみの `cn()` の作法をそのまま使っています。各ページは実際に
+公開されている API を説明しており、プレビューがあるページでは公開版のコンポーネントを
+そのまま描画しています。
 
 コンポーネントライブラリがスキャフォールドされたアプリにどう組み込まれるか(スタイル
 シートの読み込み、Tailwind プリセット、ダークモード)については、[Styling](/docs/guides/styling)
 ガイドを参照してください。
 
+## フォームとコントロール
+
 <Cards>
   <Card title="Button" href="/docs/components/button" description="ボタン、またはボタンのように見えるコンポーネントを表示します。" />
+  <Card title="Button Group" href="/docs/components/button-group" description="関連するボタンを一つのまとまりとして表示します。" />
   <Card title="Input" href="/docs/components/input" description="フォームの入力フィールド、または入力フィールドのように見えるコンポーネントを表示します。" />
+  <Card title="Input Group" href="/docs/components/input-group" description="入力欄とテキスト、アイコン、操作を一体化します。" />
+  <Card title="Label" href="/docs/components/label" description="フォームコントロールにアクセシブルなラベルを表示します。" />
+  <Card title="Field" href="/docs/components/field" description="ラベル、入力、補足、エラーを一つの項目として構成します。" />
+  <Card title="Textarea" href="/docs/components/textarea" description="複数行のテキスト入力を表示します。" />
+  <Card title="Checkbox" href="/docs/components/checkbox" description="チェック状態を切り替えます。" />
+  <Card title="Radio Group" href="/docs/components/radio-group" description="複数の選択肢から1つを選びます。" />
+  <Card title="Switch" href="/docs/components/switch" description="設定のオン・オフを切り替えます。" />
+  <Card title="Slider" href="/docs/components/slider" description="指定した範囲から1つ以上の数値を選択します。" />
+  <Card title="Toggle" href="/docs/components/toggle" description="ボタンの押下中・未押下を切り替えます。" />
+  <Card title="Toggle Group" href="/docs/components/toggle-group" description="トグルを単一選択または複数選択の操作としてまとめます。" />
   <Card title="Select" href="/docs/components/select" description="ボタンで開く、ユーザーが選択肢から選べるリストを表示します。" />
+  <Card title="Native Select" href="/docs/components/native-select" description="OS 標準の選択 UI を表示します。" />
+</Cards>
+
+## データ表示
+
+<Cards>
+  <Card title="Badge" href="/docs/components/badge" description="状態やカテゴリをコンパクトなラベルで表示します。" />
   <Card title="Card" href="/docs/components/card" description="ヘッダー・コンテンツ・フッターを持つカードを表示します。" />
+  <Card title="Avatar" href="/docs/components/avatar" description="ユーザーや対象の画像をフォールバック付きで表示します。" />
+  <Card title="Separator" href="/docs/components/separator" description="コンテンツを視覚的または意味的に区切ります。" />
+  <Card title="Skeleton" href="/docs/components/skeleton" description="コンテンツの読み込み中にプレースホルダーを表示します。" />
+  <Card title="Table" href="/docs/components/table" description="行と列で構造化されたデータを表示します。" />
+  <Card title="Item" href="/docs/components/item" description="画像、本文、補足、操作を持つ行を構成します。" />
+  <Card title="Empty" href="/docs/components/empty" description="空状態の理由と次に行える操作を示します。" />
+  <Card title="Kbd" href="/docs/components/kbd" description="キーまたはキーボードショートカットを表示します。" />
+  <Card title="Scroll Area" href="/docs/components/scroll-area" description="標準の操作を保ったスクロール領域を表示します。" />
+</Cards>
+
+## フィードバック
+
+<Cards>
+  <Card title="Alert" href="/docs/components/alert" description="重要な情報に注意を促します。" />
+  <Card title="Progress" href="/docs/components/progress" description="タスクの進捗を表示します。" />
+  <Card title="Spinner" href="/docs/components/spinner" description="処理が進行中であることを示します。" />
+  <Card title="Toast" href="/docs/components/toast" description="操作を妨げずに短い状態メッセージを表示します。" />
+</Cards>
+
+## オーバーレイとメニュー
+
+<Cards>
   <Card title="Dialog" href="/docs/components/dialog" description="プライマリウィンドウまたは他のダイアログウィンドウの上に重ねて表示されるウィンドウです。" />
+  <Card title="Alert Dialog" href="/docs/components/alert-dialog" description="先へ進む前に明示的な判断を求めます。" />
+  <Card title="Sheet" href="/docs/components/sheet" description="画面端から補助コンテンツを表示するパネルです。" />
+  <Card title="Popover" href="/docs/components/popover" description="コントロールから開くリッチなコンテンツをポータルに表示します。" />
+  <Card title="Hover Card" href="/docs/components/hover-card" description="リンクのホバーまたはフォーカス時に補助情報をプレビューします。" />
+  <Card title="Tooltip" href="/docs/components/tooltip" description="ホバーまたはフォーカス時に補足情報を表示します。" />
   <Card title="Dropdown Menu" href="/docs/components/dropdown-menu" description="ボタンで開く、メニューをユーザーに表示します。" />
+  <Card title="Context Menu" href="/docs/components/context-menu" description="右クリックまたはキーボードで選んだ対象の操作を表示します。" />
+  <Card title="Menubar" href="/docs/components/menubar" description="キーボードで移動できるアプリ内の常設メニューです。" />
+</Cards>
+
+## 開閉とナビゲーション
+
+<Cards>
   <Card title="Tabs" href="/docs/components/tabs" description="一度に1つずつ表示される、階層化されたコンテンツのセットです。" />
   <Card title="Accordion" href="/docs/components/accordion" description="それぞれがコンテンツのセクションを開閉する、縦に並んだインタラクティブな見出しの集合です。" />
+  <Card title="Collapsible" href="/docs/components/collapsible" description="1つのコンテンツ領域を開閉します。" />
+  <Card title="Breadcrumb" href="/docs/components/breadcrumb" description="階層内で現在のページがどこにあるかを示します。" />
+  <Card title="Command" href="/docs/components/command" description="キーボード中心で操作できる検索付きコマンドメニューです。" />
+  <Card title="Navigation Menu" href="/docs/components/navigation-menu" description="フライアウトにも対応した主要ナビゲーションです。" />
+  <Card title="Pagination" href="/docs/components/pagination" description="長い一覧を複数ページに分けて移動します。" />
 </Cards>

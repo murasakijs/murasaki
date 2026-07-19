@@ -1,0 +1,32 @@
+---
+title: Breadcrumb
+description: 階層内で現在のページがどこにあるかを示します。
+---
+
+## 使い方
+
+```tsx
+import {
+  Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList,
+  BreadcrumbPage, BreadcrumbSeparator,
+} from '@murasakijs/ui'
+
+<Breadcrumb>
+  <BreadcrumbList>
+    <BreadcrumbItem><BreadcrumbLink href="/">ホーム</BreadcrumbLink></BreadcrumbItem>
+    <BreadcrumbSeparator />
+    <BreadcrumbItem><BreadcrumbPage>設定</BreadcrumbPage></BreadcrumbItem>
+  </BreadcrumbList>
+</Breadcrumb>
+```
+
+`Breadcrumb` は「breadcrumb」というアクセシブル名を持つ `nav` を生成します。現在のページ
+だけに `BreadcrumbPage` を使ってください。`aria-current="page"` が自動で付きます。
+ルーターの Link をそのまま描画要素にする場合は `BreadcrumbLink` の `asChild` を使えます。
+途中の階層を省略するときは `BreadcrumbEllipsis` と、隠したリンクへ移動できるメニューを
+組み合わせてください。
+
+## エクスポート
+
+`Breadcrumb`、`BreadcrumbList`、`BreadcrumbItem`、`BreadcrumbLink`、
+`BreadcrumbPage`、`BreadcrumbSeparator`、`BreadcrumbEllipsis`。

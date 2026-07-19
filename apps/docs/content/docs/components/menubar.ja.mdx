@@ -1,0 +1,31 @@
+---
+title: Menubar
+description: キーボードで移動できる、アプリ内の常設メニューを表示します。
+---
+
+## 使い方
+
+```tsx
+import { Menubar, MenubarContent, MenubarItem, MenubarMenu, MenubarShortcut, MenubarTrigger } from '@murasakijs/ui'
+
+<Menubar>
+  <MenubarMenu>
+    <MenubarTrigger>ファイル</MenubarTrigger>
+    <MenubarContent>
+      <MenubarItem>新規ウィンドウ <MenubarShortcut>⌘N</MenubarShortcut></MenubarItem>
+      <MenubarItem>開く… <MenubarShortcut>⌘O</MenubarShortcut></MenubarItem>
+    </MenubarContent>
+  </MenubarMenu>
+</Menubar>
+```
+
+アプリ内のどの画面でも利用するコマンドに向いています。これはレンダラー用の
+コンポーネントです。OS のメニューバーに表示するコマンドには、Murasaki の
+ネイティブメニュー設定を使ってください。
+
+## エクスポート
+
+`Menubar`, `MenubarMenu`, `MenubarTrigger`, `MenubarContent`, `MenubarItem`,
+`MenubarCheckboxItem`, `MenubarRadioGroup`, `MenubarRadioItem`, `MenubarGroup`,
+`MenubarLabel`, `MenubarSeparator`, `MenubarShortcut`, `MenubarSub`,
+`MenubarSubTrigger`, `MenubarSubContent`, `MenubarPortal`。

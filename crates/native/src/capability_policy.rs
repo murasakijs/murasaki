@@ -17,6 +17,8 @@ const MAX_SCOPE_STRING_BYTES: usize = 8 * 1024;
 const KNOWN_CAPABILITIES: &[&str] = &[
     "app:quit",
     "app:isElevated",
+    "autostart:read",
+    "autostart:write",
     "dialog:openFile",
     "dialog:openDirectory",
     "dialog:saveFile",
@@ -97,8 +99,10 @@ enum Grant {
 enum ScopeMatcher {
     Urls(Vec<UrlPattern>),
     Paths(Vec<PathPattern>),
+    Executions(Vec<ExecutionPattern>),
     Windows(HashSet<String>),
     Permissions(HashSet<String>),
+    Keys(Vec<KeyPattern>),
 }
 
 #[derive(Clone, Debug)]
@@ -113,14 +117,26 @@ struct PathPattern {
     subtree: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
+struct ExecutionPattern {
+    executable: NormalizedPath,
+    args: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+enum KeyPattern {
+    Exact(String),
+    Prefix(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct NormalizedPath {
     root: PathRoot,
     components: Vec<String>,
     case_insensitive: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum PathRoot {
     Posix,
     Drive(char),
@@ -138,7 +154,7 @@ struct PolicyWire {
 #[serde(untagged)]
 enum GrantWire {
     Name(String),
-    Scoped(ScopedGrantWire),
+    Scoped(Box<ScopedGrantWire>),
 }
 
 #[derive(Deserialize)]
@@ -159,16 +175,33 @@ struct ScopeWire {
     #[serde(default)]
     paths: Option<Vec<String>>,
     #[serde(default)]
+    executions: Option<Vec<ExecutionWire>>,
+    #[serde(default)]
     windows: Option<Vec<String>>,
     #[serde(default)]
     permissions: Option<Vec<String>>,
+    #[serde(default)]
+    keys: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExecutionWire {
+    executable: String,
+    #[serde(default)]
+    args: Vec<String>,
 }
 
 pub(crate) enum CapabilityResource<'a> {
     Url(&'a url::Url),
     Path(&'a str),
+    Execution {
+        executable: &'a str,
+        args: &'a [String],
+    },
     Window(&'a str),
     Permission(&'a str),
+    Key(&'a str),
 }
 
 impl CapabilityPolicy {
@@ -246,10 +279,19 @@ impl CapabilityPolicy {
         // Absolute/non-traversing paths are mandatory even for a legacy string
         // grant. Otherwise an old unscoped grant could bypass the new baseline
         // safety property before the OS shell receives the target.
-        if let CapabilityResource::Path(value) = resource {
-            if NormalizedPath::parse(value).is_err() {
+        match &resource {
+            CapabilityResource::Path(value) => {
+                if NormalizedPath::parse(value).is_err() {
+                    return false;
+                }
+            }
+            CapabilityResource::Execution { executable, args }
+                if NormalizedPath::parse(executable).is_err()
+                    || crate::elevation::validate_args(args).is_err() =>
+            {
                 return false;
             }
+            _ => {}
         }
         let PolicyMode::V1(grants) = &self.mode else {
             return true;
@@ -263,6 +305,15 @@ impl CapabilityPolicy {
                 allow.as_ref().is_none_or(|scope| scope.matches(&resource))
             }
             None => false,
+        }
+    }
+
+    /// Operations which omit their resource (for example getCookies() without
+    /// a URL) are valid only for legacy or explicit unrestricted grants.
+    pub(crate) fn allows_without_resource(&self, permission: &str) -> bool {
+        match &self.mode {
+            PolicyMode::Legacy => true,
+            PolicyMode::V1(grants) => matches!(grants.get(permission), Some(Grant::Unrestricted)),
         }
     }
 }
@@ -279,11 +330,51 @@ impl ScopeMatcher {
                 };
                 patterns.iter().any(|pattern| pattern.matches(&value))
             }
+            (Self::Executions(patterns), CapabilityResource::Execution { executable, args }) => {
+                let Ok(executable) = NormalizedPath::parse(executable) else {
+                    return false;
+                };
+                patterns.iter().any(|pattern| {
+                    pattern.executable == executable && pattern.args.as_slice() == *args
+                })
+            }
             (Self::Windows(values), CapabilityResource::Window(value))
             | (Self::Permissions(values), CapabilityResource::Permission(value)) => {
                 values.contains(*value)
             }
+            (Self::Keys(patterns), CapabilityResource::Key(value)) => {
+                patterns.iter().any(|pattern| pattern.matches(value))
+            }
             _ => false,
+        }
+    }
+}
+
+impl KeyPattern {
+    fn parse(raw: &str) -> Result<Self, String> {
+        validate_scope_string(raw, "key pattern")?;
+        if raw.len() > crate::secure_storage::MAX_KEY_BYTES {
+            return Err(format!(
+                "key pattern must not exceed {} UTF-8 bytes",
+                crate::secure_storage::MAX_KEY_BYTES
+            ));
+        }
+        let prefix = raw.ends_with('*');
+        let candidate = if prefix { &raw[..raw.len() - 1] } else { raw };
+        if candidate.contains('*') {
+            return Err("key patterns support only one trailing * wildcard".to_string());
+        }
+        Ok(if prefix {
+            Self::Prefix(candidate.to_string())
+        } else {
+            Self::Exact(candidate.to_string())
+        })
+    }
+
+    fn matches(&self, value: &str) -> bool {
+        match self {
+            Self::Exact(pattern) => pattern == value,
+            Self::Prefix(prefix) => value.starts_with(prefix),
         }
     }
 }
@@ -343,6 +434,18 @@ impl UrlPattern {
                         .is_some_and(|rest| rest.starts_with('/'))
             }
         }
+    }
+}
+
+fn parse_cookie_url_pattern(raw: &str) -> Result<UrlPattern, String> {
+    let pattern = UrlPattern::parse(raw)?;
+    let url = match &pattern {
+        UrlPattern::Exact(url) | UrlPattern::Subtree(url) => url,
+    };
+    if matches!(url.scheme(), "http" | "https") {
+        Ok(pattern)
+    } else {
+        Err("WebView cookie URL scopes support only http and https URLs".to_string())
     }
 }
 
@@ -440,8 +543,10 @@ fn parse_scope(permission: &str, wire: ScopeWire) -> Result<ScopeMatcher, String
     let provided = [
         wire.urls.is_some(),
         wire.paths.is_some(),
+        wire.executions.is_some(),
         wire.windows.is_some(),
         wire.permissions.is_some(),
+        wire.keys.is_some(),
     ]
     .into_iter()
     .filter(|provided| *provided)
@@ -455,9 +560,13 @@ fn parse_scope(permission: &str, wire: ScopeWire) -> Result<ScopeMatcher, String
         "shell:openExternal" => {
             parse_entries(wire.urls, "urls", UrlPattern::parse).map(ScopeMatcher::Urls)
         }
-        "shell:showItemInFolder" | "shell:trashItem" | "shell:openPath" | "shell:runElevated" => {
+        "webview:readCookies" | "webview:writeCookies" => {
+            parse_entries(wire.urls, "urls", parse_cookie_url_pattern).map(ScopeMatcher::Urls)
+        }
+        "shell:showItemInFolder" | "shell:trashItem" | "shell:openPath" => {
             parse_entries(wire.paths, "paths", PathPattern::parse).map(ScopeMatcher::Paths)
         }
+        "shell:runElevated" => parse_execution_entries(wire.executions),
         "window:open" | "window:manage" => parse_exact_entries(wire.windows, "windows", |value| {
             crate::window::validate_window_label(value)
         })
@@ -472,10 +581,38 @@ fn parse_scope(permission: &str, wire: ScopeWire) -> Result<ScopeMatcher, String
             })
             .map(ScopeMatcher::Permissions)
         }
+        "secureStorage:get" | "secureStorage:set" | "secureStorage:delete" => {
+            parse_entries(wire.keys, "keys", KeyPattern::parse).map(ScopeMatcher::Keys)
+        }
         _ => Err(format!(
             "capability {permission} does not support value scopes"
         )),
     }
+}
+
+fn parse_execution_entries(entries: Option<Vec<ExecutionWire>>) -> Result<ScopeMatcher, String> {
+    let entries =
+        entries.ok_or_else(|| "scope for shell:runElevated requires executions".to_string())?;
+    if entries.is_empty() || entries.len() > MAX_SCOPE_ENTRIES {
+        return Err(format!(
+            "executions must contain 1-{MAX_SCOPE_ENTRIES} entries"
+        ));
+    }
+    let mut seen = HashSet::with_capacity(entries.len());
+    let mut parsed = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let executable = NormalizedPath::parse(&entry.executable)?;
+        crate::elevation::validate_args(&entry.args)?;
+        let identity = (executable.clone(), entry.args.clone());
+        if !seen.insert(identity.clone()) {
+            return Err("executions must not contain duplicate executable/args pairs".to_string());
+        }
+        parsed.push(ExecutionPattern {
+            executable: identity.0,
+            args: identity.1,
+        });
+    }
+    Ok(ScopeMatcher::Executions(parsed))
 }
 
 fn parse_entries<T>(
@@ -545,10 +682,17 @@ pub fn fuzz_parse_capability_policy(raw: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{CapabilityPolicy, CapabilityResource};
+    use super::{CapabilityPolicy, CapabilityResource, KNOWN_CAPABILITIES};
 
     fn parse(grants: &str) -> CapabilityPolicy {
         CapabilityPolicy::parse(Some(grants)).unwrap()
+    }
+
+    #[test]
+    fn autostart_capabilities_are_accepted_by_the_native_policy() {
+        assert!(KNOWN_CAPABILITIES.contains(&"autostart:read"));
+        assert!(KNOWN_CAPABILITIES.contains(&"autostart:write"));
+        parse(r#"{"version":1,"grants":["autostart:read","autostart:write"]}"#);
     }
 
     #[test]
@@ -600,7 +744,7 @@ mod tests {
 
     #[test]
     fn trash_item_and_open_path_are_path_scoped_exactly_like_show_item_in_folder() {
-        for permission in ["shell:trashItem", "shell:openPath", "shell:runElevated"] {
+        for permission in ["shell:trashItem", "shell:openPath"] {
             let policy = CapabilityPolicy::parse(Some(&format!(
                 r#"{{"version":1,"grants":[{{"permission":"{permission}","allow":{{"paths":["/Users/example/Downloads/**"]}}}}]}}"#,
             )))
@@ -618,6 +762,41 @@ mod tests {
                 CapabilityResource::Path("/Users/example/Downloads/../Secrets/key")
             ));
         }
+    }
+
+    #[test]
+    fn elevated_execution_scope_matches_both_executable_and_exact_arguments() {
+        let policy = parse(
+            r#"{"version":1,"grants":[{
+              "permission":"shell:runElevated",
+              "allow":{"executions":[
+                {"executable":"C:\\Program Files\\Example\\updater.exe","args":["--apply","stable"]},
+                {"executable":"C:\\Program Files\\Example\\repair.exe"}
+              ]},
+              "deny":{"executions":[
+                {"executable":"C:\\Program Files\\Example\\updater.exe","args":["--apply","stable"]}
+              ]}
+            }]}"#,
+        );
+        let allowed = |executable: &str, args: &[String]| {
+            policy.allows(
+                "shell:runElevated",
+                CapabilityResource::Execution { executable, args },
+            )
+        };
+        assert!(!allowed(
+            r"C:\Program Files\Example\updater.exe",
+            &["--apply".into(), "stable".into()],
+        ));
+        assert!(!allowed(
+            r"C:\Program Files\Example\updater.exe",
+            &["--apply".into(), "beta".into()],
+        ));
+        assert!(allowed(r"c:\program files\example\repair.exe", &[]));
+        assert!(!allowed(
+            r"C:\Program Files\Example\repair.exe",
+            &["--all".into()]
+        ));
     }
 
     #[test]
@@ -645,6 +824,40 @@ mod tests {
             "systemPermission:status",
             CapabilityResource::Permission("camera")
         ));
+    }
+
+    #[test]
+    fn secure_storage_keys_and_cookie_urls_are_scoped() {
+        let policy = parse(
+            r#"{"version":1,"grants":[
+      {"permission":"secureStorage:get","allow":{"keys":["account:*","theme"]}},
+      {"permission":"webview:readCookies","allow":{"urls":["https://api.example.com/**"]}},
+      "webview:writeCookies"
+    ]}"#,
+        );
+        assert!(policy.allows(
+            "secureStorage:get",
+            CapabilityResource::Key("account:token")
+        ));
+        assert!(policy.allows("secureStorage:get", CapabilityResource::Key("theme")));
+        assert!(!policy.allows(
+            "secureStorage:get",
+            CapabilityResource::Key("billing:token")
+        ));
+        let allowed_url = url::Url::parse("https://api.example.com/session").unwrap();
+        let denied_url = url::Url::parse("https://other.example.com/session").unwrap();
+        assert!(policy.allows("webview:readCookies", CapabilityResource::Url(&allowed_url)));
+        assert!(!policy.allows("webview:readCookies", CapabilityResource::Url(&denied_url)));
+        assert!(!policy.allows_without_resource("webview:readCookies"));
+        assert!(policy.allows_without_resource("webview:writeCookies"));
+        assert!(CapabilityPolicy::parse(Some(
+            r#"{"version":1,"grants":[{"permission":"webview:readCookies","allow":{"urls":["mailto:security@example.com"]}}]}"#,
+        ))
+        .is_err());
+        assert!(CapabilityPolicy::parse(Some(
+            r#"{"version":1,"grants":[{"permission":"secureStorage:get","allow":{"keys":["bad*middle"]}}]}"#,
+        ))
+        .is_err());
     }
 
     #[test]

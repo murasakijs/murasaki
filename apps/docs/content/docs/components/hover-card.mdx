@@ -1,0 +1,24 @@
+---
+title: Hover Card
+description: Previews related content when a link is hovered or focused.
+---
+
+## Usage
+
+```tsx
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@murasakijs/ui'
+
+<HoverCard>
+  <HoverCardTrigger href="/docs">Murasaki Docs</HoverCardTrigger>
+  <HoverCardContent>Guides, API references, and examples.</HoverCardContent>
+</HoverCard>
+```
+
+The card is supplemental: never put an action or information required to
+complete a task only inside it. `HoverCardTrigger` supports `asChild` for a
+router link. `HoverCardContent` accepts Radix positioning props such as
+`side`, `align`, and `sideOffset`.
+
+## Exports
+
+`HoverCard`, `HoverCardTrigger`, and `HoverCardContent`.

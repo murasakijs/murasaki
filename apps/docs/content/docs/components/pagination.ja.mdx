@@ -1,0 +1,31 @@
+---
+title: Pagination
+description: 長い一覧を複数ページに分けて移動します。
+---
+
+## 使い方
+
+```tsx
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationNext, PaginationPrevious,
+} from '@murasakijs/ui'
+
+<Pagination>
+  <PaginationContent>
+    <PaginationItem><PaginationPrevious href="?page=1" aria-label="前のページ">前へ</PaginationPrevious></PaginationItem>
+    <PaginationItem><PaginationLink href="?page=2" isActive>2</PaginationLink></PaginationItem>
+    <PaginationItem><PaginationNext href="?page=3" aria-label="次のページ">次へ</PaginationNext></PaginationItem>
+  </PaginationContent>
+</Pagination>
+```
+
+現在のページには `isActive` を付けると `aria-current="page"` が設定されます。
+クライアント JavaScript がなくても移動できるよう、実際のリンク先を渡してください。
+前へ・次への表示文字列とアクセシブルな名前は、アプリの言語に合わせて変更します。
+
+## エクスポート
+
+`Pagination`, `PaginationContent`, `PaginationItem`, `PaginationLink`,
+`PaginationPrevious`, `PaginationNext`, `PaginationEllipsis`,
+`PaginationLinkProps` 型。

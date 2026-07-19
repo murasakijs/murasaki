@@ -99,10 +99,10 @@ npm create murasaki@latest my-app
 cd my-app
 npm run dev
 
-# ship (macOS and Windows today — see CLI reference)
+# ship (macOS, Windows, and Linux — see CLI reference)
 npm run build       # dist/client   Vite production build
 npm run bundle      # portable native app bundle for the selected target
-npm run installer   # .dmg on macOS; optional .exe / .msi on Windows targets
+npm run installer   # .dmg; .zip/.exe/.msi; or .deb, depending on the target
 ```
 
 The scaffold gives you a React 19 + Vite + Tailwind app with a Next.js-like
@@ -116,34 +116,27 @@ head). `murasaki.config.ts` describes your app's identity and window.
 
 ## Example apps
 
-Three independent apps show different product directions. Each has its own
-source tree, app identity, icon, native bundle, and installer.
+Three independent, source-first apps test different product directions. Each
+has its own source tree, app identity, icon, persistence model, and an explicit
+requirement matrix. Read each app's README for the verified level and remaining
+framework or distribution gaps.
 
 | App | What it demonstrates | Source |
 | --- | --- | --- |
-| **Violet Notes** | Local-first Markdown editing, live preview, import/export, native menus | [`examples/violet-notes`](https://github.com/murasakijs/murasaki/tree/main/examples/violet-notes) |
-| **Murasaki Focus** | Persistent timer state, keyboard controls, consumer desktop UI | [`examples/murasaki-focus`](https://github.com/murasakijs/murasaki/tree/main/examples/murasaki-focus) |
-| **Local Signal** | API Routes, Server Actions, bundled Node runtime, request monitoring | [`examples/local-signal`](https://github.com/murasakijs/murasaki/tree/main/examples/local-signal) |
+| **Papelle** | Local-first block editor, Markdown, attachments, linked pages, database views, optional self-hosted sync | [`examples/papelle`](https://github.com/murasakijs/murasaki/tree/main/examples/papelle) |
+| **Oscilla** | REST/GraphQL/WebSocket workbench, scenarios, mocks, and an integrated traffic timeline | [`examples/oscilla`](https://github.com/murasakijs/murasaki/tree/main/examples/oscilla) |
+| **Orglia** | Self-hosted CRM, projects, orders, inventory, approvals, shifts, incidents, and analytics | [`examples/orglia`](https://github.com/murasakijs/murasaki/tree/main/examples/orglia) |
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/violet-notes/design/implementation.png" alt="Violet Notes" width="31%">
-  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/murasaki-focus/design/implementation.png" alt="Murasaki Focus" width="31%">
-  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
+  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/papelle/design/papelle-implementation.png" alt="Papelle" width="31%">
+  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/oscilla/design/implementation.png" alt="Oscilla" width="31%">
+  <img src="https://raw.githubusercontent.com/murasakijs/murasaki/main/examples/orglia/design/overview-implementation.png" alt="Orglia" width="31%">
 </p>
 
-On macOS, run the checksum-verified developer previews from the CLI. It selects
-the correct Apple silicon or Intel build, verifies the published SHA256 and
-ad-hoc code signature, then explicitly removes quarantine before launch:
-
-```bash
-pnpm dlx murasaki@latest demo violet-notes
-pnpm dlx murasaki@latest demo murasaki-focus
-pnpm dlx murasaki@latest demo local-signal
-```
-
-These are developer previews, not notarized consumer downloads. The immutable
-build artifacts remain available in the
-[sample-apps v0.47.2 release](https://github.com/murasakijs/murasaki/releases/tag/samples-v0.47.2).
+These examples are not presented as signed consumer downloads. Reproducible
+installer links will be added only after the clean-machine install, first-launch,
+update, and uninstall checks recorded in [`examples/README.md`](./examples/README.md)
+have passed.
 
 ---
 
@@ -215,6 +208,10 @@ we've benchmarked head-to-head:
 - **macOS menu-bar status items / Windows system tray.** One process-wide
   icon with native nested menus, click/menu events, tooltips, and dynamic
   icon/menu replacement, protected by per-renderer capabilities.
+- **Per-user login autostart.** Packaged macOS, Windows, and Linux apps can
+  expose an opt-in setting through typed `status` / `enable` / `disable`
+  calls. Read and write authority are separate, and development hosts cannot
+  create persistent registrations.
 - **macOS system permissions.** Declare camera/microphone purpose strings and
   optional launch prompts in config; query/request camera, microphone, screen
   recording, and accessibility consent from trusted renderer code.
@@ -281,7 +278,7 @@ murasaki build       Production Vite build → dist/client
 murasaki bundle      Native app folder / .app for the current platform
 murasaki installer   Distributable installer for the current platform
 murasaki init        Install the Rust toolchain (only if you're hacking on @murasakijs/native)
-murasaki icon        Generate .icns / .ico / .png from a single PNG
+murasaki icon        Generate Assets.car / .icns / .ico / .png from one PNG
 murasaki release     Auto-update manifest helpers
 murasaki help        Show this help
 ```
@@ -292,19 +289,16 @@ murasaki help        Show this help
 | -------------------------- | :---: | ------------------ | --------------------------------- | :---------: |
 | **macOS** (arm64, x64)     |  ✅   | `.app`             | `.dmg` — must be built on macOS   |     ✅      |
 | **Windows** (x64)          |  ✅   | folder / `.zip`    | NSIS `.exe`¹, `.msi`²             |     ✅      |
-| **Windows** (arm64)        |  ✅   | folder / `.zip`    | NSIS `.exe`¹                      |     ❌³     |
-| **Linux** (x64, arm64)     |  ✅   | AppDir + `.AppImage`⁴ | `.deb`⁴                        |    ✅⁵      |
+| **Windows** (arm64)        |  ✅   | folder / `.zip`    | NSIS `.exe`¹                      |     ✅      |
+| **Linux** (x64, arm64)     |  ✅   | AppDir + `.AppImage`³ | `.deb`³                        |    ✅⁴      |
 
 <sub>¹ needs `makensis` on the build machine — it cross-compiles from macOS/Linux.
 ² needs WiX v4, and must be built on Windows.
-³ the Windows installer's filename doesn't encode the architecture yet, so the
-update manifest can't tell an arm64 build from an x64 one — tracked as a
-follow-up.
-⁴ `bundle`/`installer` need `mksquashfs` (`squashfs-tools`) to build the
+³ `bundle`/`installer` need `mksquashfs` (`squashfs-tools`) to build the
 `.AppImage` and cross-compile from any host; the native launcher runs the
 produced AppDir/`.AppImage`/`.deb` (window, webview, single-instance, deep
 links, crash reporting).
-⁵ AppImage only — self-update journal-swaps the running `.AppImage` file in
+⁴ AppImage only — self-update journal-swaps the running `.AppImage` file in
 place and relaunches with `--appimage-extract-and-run` (no FUSE required). A
 `.deb` install has no self-contained file to swap; `check()` reports it as
 managed by the system package manager instead.</sub>
@@ -600,7 +594,8 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
   native launcher runs the produced bundle end-to-end (window, webview,
   single-instance, deep links, crash reporting) and self-updates via the
   AppImage; no code signing, `.rpm`, or repository metadata yet.
-- 🚧 **Next** — Windows arm64 auto-update and v1.0 stabilization.
+- 🚧 **Next** — v1.0 stabilization and broader packaged-app smoke coverage
+  across supported OS/architecture combinations.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current
   architecture renders entirely on the client, so this is a bigger
   architectural shift we're evaluating for after v1.0 rather than something

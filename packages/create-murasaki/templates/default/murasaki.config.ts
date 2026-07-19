@@ -11,6 +11,9 @@ export default defineConfig({
   // picker in the Windows installer. Trim to `['en']` for English-only.
   locales: ['en', 'ja'],
   capabilities: ['menu:context', 'clipboard:readText', 'clipboard:writeText'],
+  // Renderer-to-Node/API authority is separate from native capabilities and
+  // deny-all by default. This starter exposes only its documented API demo.
+  backendCapabilities: ['api:POST:/api/action-demo'],
   window: {
     title: 'Murasaki App',
     width: 1000,

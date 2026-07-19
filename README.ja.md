@@ -98,10 +98,10 @@ npm create murasaki@latest my-app
 cd my-app
 npm run dev
 
-# 配布 (macOS と Windows に対応 — CLI リファレンス参照)
+# 配布（macOS、Windows、Linux に対応 — CLI リファレンス参照）
 npm run build       # dist/client   Vite の本番ビルド
 npm run bundle      # 選択したターゲット向けのポータブルなネイティブアプリ
-npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe / .msi
+npm run installer   # ターゲットに応じて .dmg、.zip/.exe/.msi、または .deb
 ```
 
 生成される雛形は React 19 + Vite + Tailwind のアプリで、Next.js に近い構成です。
@@ -115,22 +115,25 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
 
 ## サンプルアプリ
 
-異なるプロダクト方向を示す、独立した3本のインストール可能なアプリです。それぞれが
-専用のソース、アプリID、アイコン、ネイティブbundle、インストーラーを持ちます。
+異なるプロダクト方向を検証する、ソース先行の3つの独立したアプリです。それぞれが専用の
+ソース、アプリID、アイコン、永続化方式、要件マトリクスを持ちます。検証済みの範囲と残って
+いるFramework／配布上の課題は、各アプリのREADMEで確認できます。
 
 | アプリ | 実装例 | ソース |
 | --- | --- | --- |
-| **Violet Notes** | ローカルMarkdown編集、ライブプレビュー、入出力、ネイティブメニュー | [`examples/violet-notes`](./examples/violet-notes) |
-| **Murasaki Focus** | タイマー永続化、キーボード操作、コンシューマー向けデスクトップUI | [`examples/murasaki-focus`](./examples/murasaki-focus) |
-| **Local Signal** | API Routes、Server Actions、Node同梱、リクエスト監視 | [`examples/local-signal`](./examples/local-signal) |
+| **Papelle** | ブロック編集、Markdown、添付、ページ間リンク、データベース表示、任意のセルフホスト同期 | [`examples/papelle`](./examples/papelle) |
+| **Oscilla** | REST／GraphQL／WebSocket、シナリオ、モック、通信タイムライン | [`examples/oscilla`](./examples/oscilla) |
+| **Orglia** | CRM、プロジェクト、受発注、在庫、申請、シフト、インシデント、分析 | [`examples/orglia`](./examples/orglia) |
 
 <p align="center">
-  <img src="./examples/violet-notes/design/implementation.png" alt="Violet Notes" width="31%">
-  <img src="./examples/murasaki-focus/design/implementation.png" alt="Murasaki Focus" width="31%">
-  <img src="./examples/local-signal/design/implementation.png" alt="Local Signal" width="31%">
+  <img src="./examples/papelle/design/papelle-implementation.png" alt="Papelle" width="31%">
+  <img src="./examples/oscilla/design/implementation.png" alt="Oscilla" width="31%">
+  <img src="./examples/orglia/design/overview-implementation.png" alt="Orglia" width="31%">
 </p>
 
-[macOS／Windows向けサンプルインストーラーはsample-apps v0.47.2リリースからダウンロードできます。](https://github.com/murasakijs/murasaki/releases/tag/samples-v0.47.2)
+現時点では、署名済みの一般利用者向けダウンロードとして案内していません。
+[`examples/README.ja.md`](./examples/README.ja.md)に定めたクリーン環境でのインストール、
+初回起動、更新、アンインストール検証が完了してから、再現可能な配布物を公開します。
 
 ---
 
@@ -202,6 +205,9 @@ npm run installer   # macOS は .dmg、Windows は任意ツールにより .exe 
 - **macOSメニューバーのステータス項目 / Windowsシステムトレイ** — process-wide
   icon、native nested menu、click / menu event、tooltip、動的icon / menu差し替えを
   renderer別capabilityの下で利用できます。
+- **ユーザー単位のログイン時自動起動** — packaged macOS / Windows / Linux appで、
+  型付きの`status` / `enable` / `disable`を使ったopt-in設定を提供できます。read / write
+  権限は分離され、開発hostから永続的な登録は作れません。
 - **macOSシステム権限** — camera / microphoneの用途説明と任意の起動時promptをconfigに
   宣言し、信頼済みrendererからcamera、microphone、screen recording、accessibilityの
   status取得 / requestができます。
@@ -264,7 +270,7 @@ murasaki build       本番用 Vite ビルド → dist/client
 murasaki bundle      現在のプラットフォーム向けのネイティブアプリフォルダ / .app
 murasaki installer   現在のプラットフォーム向けの配布用インストーラ
 murasaki init        Rust ツールチェーンをインストール (@murasakijs/native をいじる場合のみ)
-murasaki icon        単一の PNG から .icns / .ico / .png を生成
+murasaki icon        単一の PNG から Assets.car / .icns / .ico / .png を生成
 murasaki release     自動アップデート用マニフェストのヘルパー
 murasaki help        このヘルプを表示
 ```
@@ -275,18 +281,16 @@ murasaki help        このヘルプを表示
 | ------------------------------ | :---: | ---------------- | --------------------------------- | :--------------: |
 | **macOS**(arm64, x64)         |  ✅   | `.app`           | `.dmg` — macOS 上でビルドが必要   |       ✅         |
 | **Windows**(x64)              |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹、`.msi`²          |       ✅         |
-| **Windows**(arm64)            |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹                   |      ❌³         |
-| **Linux**(x64, arm64)         |  ✅   | AppDir + `.AppImage`⁴ | `.deb`⁴                      |      ✅⁵         |
+| **Windows**(arm64)            |  ✅   | フォルダー / `.zip` | NSIS `.exe`¹                   |       ✅         |
+| **Linux**(x64, arm64)         |  ✅   | AppDir + `.AppImage`³ | `.deb`³                      |      ✅⁴         |
 
 <sub>¹ ビルドマシンに `makensis` が必要です(macOS / Linux からクロスコンパイルできます)。
 ² WiX v4 が必要で、Windows 上でビルドする必要があります。
-³ Windows インストーラのファイル名がまだアーキテクチャを含んでいないため、更新マニフェストが
-arm64 ビルドと x64 ビルドを区別できません。フォローアップとして管理しています。
-⁴ `bundle` / `installer` は `.AppImage` の生成と任意ホストからのクロスビルドに
+³ `bundle` / `installer` は `.AppImage` の生成と任意ホストからのクロスビルドに
 `mksquashfs`(`squashfs-tools`)が必要です。ネイティブランチャーは生成した
 AppDir / `.AppImage` / `.deb` を実際に動かします(window、webview、
 single-instance、deep link、crash reporting)。
-⁵ AppImage のみです — self-update は実行中の `.AppImage` ファイル自体を
+⁴ AppImage のみです — self-update は実行中の `.AppImage` ファイル自体を
 その場で journal 方式 swap し、`--appimage-extract-and-run` で再起動します
 (FUSE 不要)。`.deb` でインストールした場合は swap できるファイルが無いため、
 `check()` は system package manager が管理している旨を返します。</sub>
@@ -300,8 +304,10 @@ single-instance、deep link、crash reporting)。
 - **Linux には code signing、`.rpm`、repository metadata がありません。**
   AppDir / `.AppImage` / `.deb` はいずれも未署名で出荷され、Fedora/RHEL 向け
   パッケージや apt/dnf の repository index もまだありません。
-- **Windows バイナリは Authenticode 署名されていません。** murasaki 側で対応
-  していないため、初回起動時に SmartScreen の警告が出ます。
+- **Windows Authenticode には自分の証明書または署名プロバイダーが必要です。**
+  `--sign` はアプリ実行ファイル、portable ZIP、NSIS setup、MSIを署名・検証しますが、
+  Murasakiが発行元reputationを代行することはできません。新しい発行元では
+  reputationが蓄積するまでSmartScreen警告が表示される場合があります。
 - **macOS の署名と notarization には、ご自身の有料 Apple Developer ID が必要です** —
   [署名と配布](#署名と配布) を参照してください。既定は未署名です。
 - **更新マニフェストの `mandatory` は助言的なフラグです。** murasaki はこのフラグを
@@ -540,7 +546,7 @@ murasaki は **pre-1.0** です——v1.0 までの間に API が変更される
 - ✅ **Windows パッケージング** — ポータブル `.zip`、NSIS `.exe`、`.msi`。
   いずれも macOS / Linux からクロスコンパイルできます。
 - ✅ **自動アップデート** — 署名付きマニフェスト、SHA-256 検証付きダウンロード、
-  そのまま自分自身を置き換えて再起動。macOS、Windows x64、Linux AppImage に
+  そのまま自分自身を置き換えて再起動。macOS、Windows x64 / arm64、Linux AppImage に
   対応しています。
 - ✅ **Linux ディストリビューション** — AppDir + `.AppImage` と `.deb`。
   macOS / Windows / Linux からクロスコンパイルできます(`.AppImage` の生成には
@@ -548,7 +554,8 @@ murasaki は **pre-1.0** です——v1.0 までの間に API が変更される
   実際に動かし(window、webview、single-instance、deep link、crash
   reporting)、AppImage は self-update にも対応します。code signing、`.rpm`、
   repository metadata はまだありません。
-- 🚧 **次にやること** — Windows arm64 の自動アップデート、v1.0 の安定化。
+- 🚧 **次にやること** — v1.0 の安定化と、対応するOS / architectureを横断する
+  packaged app smoke testの拡充。
 - 🔭 **検討中(post-1.0)**: サーバーサイドレンダリング + ストリーミング。現状の
   アーキテクチャはクライアント側で完結してレンダリングしているため、これは
   近いフェーズで計画しているものではなく、v1.0 以降に評価するより大きな

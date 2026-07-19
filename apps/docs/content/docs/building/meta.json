@@ -3,6 +3,7 @@
   "pages": [
     "cli",
     "configuration",
+    "migration-0.55",
     "security",
     "distribution",
     "debugging",

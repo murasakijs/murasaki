@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.41.0"
+version = "0.42.0"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
@@ -32,6 +32,7 @@ serde_json = "1"
 # unconditional (not GUI-stack/platform gated) since it's pure Rust with no
 # native deps of its own.
 sha2 = "0.10"
+hmac = "0.12"
 getrandom = "0.3"
 fs2 = "0.4"
 
@@ -58,7 +59,7 @@ window-vibrancy = "0.6"
 security-framework = "3.7"
 security-framework-sys = "2.17"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSVisualEffectView", "NSView", "NSWindow", "NSImage"] }
+objc2-app-kit = { version = "0.3", features = ["NSVisualEffectView", "NSView", "NSWindow", "NSImage", "NSWorkspace"] }
 objc2-foundation = "0.3"
 block2 = "0.6"
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }
@@ -98,6 +99,7 @@ libc = "0.2"
 # (unlike macOS/Linux — see prod-server.mjs's `ppid === 1` check).
 [target.'cfg(target_os = "windows")'.dependencies]
 global-hotkey = "0.8"
+windows-registry = "0.6"
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Globalization",
@@ -141,3 +143,10 @@ napi-build = "2"
 lto = true
 strip = "symbols"
 codegen-units = 1
+
+# wayland-scanner 0.31.10's published manifest still selects vulnerable
+# quick-xml 0.39.x. Upstream has already moved the same 0.31.10 package to
+# quick-xml 0.41; pin that reviewed commit until the corrected crate is
+# published. The exact revision keeps release builds reproducible.
+[patch.crates-io]
+wayland-scanner = { git = "https://github.com/Smithay/wayland-rs.git", rev = "a55c54b4e138e29181d63908ece06fd2a13550a0" }

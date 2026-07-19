@@ -1,0 +1,37 @@
+---
+title: Context Menu
+description: Displays contextual actions when the user right-clicks or invokes the keyboard menu key.
+---
+
+## Usage
+
+```tsx
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
+  ContextMenuShortcut, ContextMenuTrigger,
+} from '@murasakijs/ui'
+
+<ContextMenu>
+  <ContextMenuTrigger className="rounded-md border p-8">
+    Right-click this area
+  </ContextMenuTrigger>
+  <ContextMenuContent>
+    <ContextMenuItem>Rename <ContextMenuShortcut>F2</ContextMenuShortcut></ContextMenuItem>
+    <ContextMenuSeparator />
+    <ContextMenuItem>Delete</ContextMenuItem>
+  </ContextMenuContent>
+</ContextMenu>
+```
+
+Every action must also be reachable without a pointer. The trigger supports
+the browser and operating system keyboard conventions provided by Radix UI.
+Nested, checkbox, and radio items are available through the corresponding
+`ContextMenuSub*`, `ContextMenuCheckboxItem`, and `ContextMenuRadio*` exports.
+
+## Exports
+
+`ContextMenu`, `ContextMenuTrigger`, `ContextMenuContent`, `ContextMenuItem`,
+`ContextMenuCheckboxItem`, `ContextMenuRadioGroup`, `ContextMenuRadioItem`,
+`ContextMenuGroup`, `ContextMenuLabel`, `ContextMenuSeparator`,
+`ContextMenuShortcut`, `ContextMenuSub`, `ContextMenuSubTrigger`,
+`ContextMenuSubContent`, and `ContextMenuPortal`.

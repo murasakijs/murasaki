@@ -1,0 +1,33 @@
+---
+title: Toast
+description: Displays a brief, non-blocking status message.
+---
+
+## Setup
+
+Mount one `Toaster` near the application root:
+
+```tsx
+import { Toaster } from '@murasakijs/ui'
+
+export function App() {
+  return <><Routes /><Toaster /></>
+}
+```
+
+Then create a message from a client component:
+
+```tsx
+import { Button, toast } from '@murasakijs/ui'
+
+<Button onClick={() => toast({
+  title: 'Saved',
+  description: 'The workspace is available offline.',
+})}>Save</Button>
+```
+
+Use toasts for brief confirmation, not for information the user must retain or
+act on before continuing. Errors that require correction belong next to the
+failing control. Low-level exports (`ToastProvider`, `Toast`, `ToastAction`,
+`ToastClose`, `ToastTitle`, `ToastDescription`, and `ToastViewport`) support a
+custom renderer. `useToast()` exposes the same store as `toast()`.

@@ -377,6 +377,7 @@ impl Application {
             self.windows.clone(),
             self.web_context.clone(),
             self.wake.clone(),
+            false,
         );
         manager
             .configure(configured)
@@ -706,10 +707,16 @@ impl Application {
         std::process::exit(0);
     }
 
-    /// Set the Dock/About-panel icon at runtime. Packaged apps run under a
-    /// bundled `node` binary (not a "real" app executable), so `Info.plist`'s
-    /// `CFBundleIconFile` alone doesn't reliably make the About panel pick up
-    /// the app icon — this sets `NSApp.applicationIconImage` explicitly.
+    /// Set the Dock/About-panel icon at runtime.
+    ///
+    /// A path ending in `.app` is resolved through `NSWorkspace`, preserving
+    /// macOS's AppIcon mask and appearance treatment. This is the preferred
+    /// path for the unbundled development host. A direct image path remains a
+    /// compatibility fallback for callers that deliberately own the final
+    /// bitmap treatment.
+    ///
+    /// Packaged applications do not call this method: their real bundle
+    /// executable lets macOS resolve `CFBundleIconName`/`Assets.car` directly.
     /// No-op (not an error) if `path` doesn't point at a readable image, or on
     /// non-macOS platforms.
     #[napi(js_name = "setIconPath")]
@@ -717,13 +724,18 @@ impl Application {
         #[cfg(target_os = "macos")]
         {
             use objc2::{AllocAnyThread, MainThreadMarker};
-            use objc2_app_kit::{NSApplication, NSImage};
+            use objc2_app_kit::{NSApplication, NSImage, NSWorkspace};
             use objc2_foundation::NSString;
 
             if let Some(mtm) = MainThreadMarker::new() {
                 let ns_app = NSApplication::sharedApplication(mtm);
                 let ns_path = NSString::from_str(&path);
-                if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
+                if path.to_ascii_lowercase().ends_with(".app") {
+                    let image = NSWorkspace::sharedWorkspace().iconForFile(&ns_path);
+                    unsafe { ns_app.setApplicationIconImage(Some(&image)) };
+                } else if let Some(image) =
+                    NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path)
+                {
                     unsafe { ns_app.setApplicationIconImage(Some(&image)) };
                 }
             }

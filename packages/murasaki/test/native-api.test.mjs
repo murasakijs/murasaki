@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   app,
   appWindow,
+  autostart,
   clipboard,
   dialog,
   globalShortcut,
@@ -46,6 +47,7 @@ test('renderer native API uses request-correlated bridge calls', async () => {
         'systemPermission.status': call.args.permission === 'fullDiskAccess' ? 'unknown' : 'notDetermined',
         'systemPermission.request': 'granted',
         'notification.show': 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
+        'autostart.status': 'enabled',
         'secureStorage.get': call.args.key === 'missing' ? null : 'stored-secret',
         'globalShortcut.register': {
           id: call.args.id ?? 'Control+Shift+KeyK',
@@ -63,6 +65,9 @@ test('renderer native API uses request-correlated bridge calls', async () => {
   globalThis.window = fakeWindow
 
   await app.quit()
+  assert.equal(await autostart.status(), 'enabled')
+  await autostart.enable()
+  await autostart.disable()
   assert.deepEqual(await dialog.openFile({ multiple: true }), ['/tmp/example.txt'])
   assert.equal(await clipboard.readText(), 'copied')
   await clipboard.writeText('next')
@@ -137,6 +142,9 @@ test('renderer native API uses request-correlated bridge calls', async () => {
 
   assert.deepEqual(calls.map(({ method }) => method), [
     'app.quit',
+    'autostart.status',
+    'autostart.enable',
+    'autostart.disable',
     'dialog.openFile',
     'clipboard.readText',
     'clipboard.writeText',
@@ -183,8 +191,8 @@ test('renderer native API uses request-correlated bridge calls', async () => {
     'tray.setMenu',
     'tray.remove',
   ])
-  assert.equal(calls[1].args.multiple, true)
-  assert.equal(calls[3].args.text, 'next')
+  assert.equal(calls.find(({ method }) => method === 'dialog.openFile').args.multiple, true)
+  assert.equal(calls.find(({ method }) => method === 'clipboard.writeText').args.text, 'next')
   assert.deepEqual(calls.find(({ method }) => method === 'secureStorage.set').args, {
     key: 'session',
     value: 'next-secret',

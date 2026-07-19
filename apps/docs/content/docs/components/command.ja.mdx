@@ -1,0 +1,28 @@
+---
+title: Command
+description: キーボード中心で操作できる、検索付きコマンドメニューです。
+---
+
+## 使い方
+
+```tsx
+import {
+  Command, CommandEmpty, CommandGroup, CommandInput,
+  CommandItem, CommandList, CommandShortcut,
+} from '@murasakijs/ui'
+
+<Command className="rounded-lg border">
+  <CommandInput placeholder="コマンドを検索…" />
+  <CommandList>
+    <CommandEmpty>見つかりませんでした。</CommandEmpty>
+    <CommandGroup heading="移動">
+      <CommandItem>設定を開く <CommandShortcut>⌘,</CommandShortcut></CommandItem>
+    </CommandGroup>
+  </CommandList>
+</Command>
+```
+
+モーダルのコマンドパレットには `CommandDialog` を使い、Dialog の props で開閉状態を管理
+します。表示したショートカットは説明にすぎないため、キー処理は別途実装してください。
+ショートカットを使えない利用者も同じ操作へ到達できる UI が必要です。`Command` は `cmdk`
+を利用し、検索とフィルタリング用の props をそのまま渡せます。

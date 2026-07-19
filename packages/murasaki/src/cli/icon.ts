@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
-import { existsSync, mkdirSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
+import { mkdirSync } from 'node:fs'
 import pc from 'picocolors'
+import { buildMacIconResources } from './bundle.js'
 
 /**
  * `murasaki icon assets/logo.png` → dist/icons/{icon.icns, icon.ico, icon.png set}
@@ -9,7 +9,7 @@ import pc from 'picocolors'
  */
 export default async function icon(argv: string[]) {
   const src = argv[0]
-  if (!src || !existsSync(src)) {
+  if (!src) {
     process.stderr.write(
       `\n  ${pc.red('✗')} usage: murasaki icon <path-to-1024.png>\n\n`,
     )
@@ -20,21 +20,10 @@ export default async function icon(argv: string[]) {
   mkdirSync(out, { recursive: true })
 
   if (process.platform === 'darwin') {
-    const sizes = [16, 32, 64, 128, 256, 512, 1024]
-    const iset = resolve(out, 'icon.iconset')
-    mkdirSync(iset, { recursive: true })
-    for (const s of sizes) {
-      spawnSync(
-        'sips',
-        ['-z', String(s), String(s), src, '--out', resolve(iset, `icon_${s}x${s}.png`)],
-        { stdio: 'inherit' },
-      )
-    }
-    spawnSync('iconutil', ['-c', 'icns', iset, '-o', resolve(out, 'icon.icns')], {
-      stdio: 'inherit',
-    })
+    const result = await buildMacIconResources(cwd, src, out)
+    if (!result) process.exit(1)
     process.stdout.write(
-      `\n  ${pc.green('✓')} dist/icons/icon.icns written\n\n`,
+      `\n  ${pc.green('✓')} dist/icons/${result.usesSystemMask ? 'Assets.car + icon.icns' : 'icon.icns'} written\n\n`,
     )
   } else {
     process.stdout.write(

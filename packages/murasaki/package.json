@@ -1,6 +1,6 @@
 {
   "name": "murasaki",
-  "version": "0.54.0",
+  "version": "0.55.0",
   "description": "Next.js DX for desktop apps. React 19 + Vite + Rust-native.",
   "keywords": [
     "desktop",
@@ -65,6 +65,7 @@
     "@murasakijs/native": "workspace:^",
     "@murasakijs/ui": "workspace:^",
     "@vitejs/plugin-react": "^5.0.4",
+    "openpgp": "6.3.1",
     "picocolors": "^1.1.0",
     "png-to-ico": "^3.0.2",
     "pngjs": "^7.0.0",

@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import test from 'node:test'
 
 import buildServer from '../dist/cli/build-server.js'
+import { copyMainRuntime } from '../dist/cli/bundle.js'
 import {
+  assertExecutableBundleResourcesDeclared,
+  executableBundleResourcePaths,
   packageNameFromImport,
   readServerDependenciesManifest,
   stageBundleResources,
@@ -60,6 +63,19 @@ async function fixture(t) {
 
   return root
 }
+
+test('packaged Main runtime copies every compiled relative import', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'murasaki-main-runtime-copy-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  await copyMainRuntime(root)
+  await Promise.all([
+    access(join(root, '.murasaki-runtime/runtime/main-runtime.js')),
+    access(join(root, '.murasaki-runtime/runtime/launch.js')),
+    access(join(root, '.murasaki-runtime/main/logger.js')),
+    access(join(root, '.murasaki-runtime/main/sidecar.js')),
+    access(join(root, '.murasaki-runtime/main/crash-reports.js')),
+  ])
+})
 
 test('packageNameFromImport recognizes bare package subpaths only', () => {
   assert.equal(packageNameFromImport('ws'), 'ws')
@@ -132,6 +148,31 @@ test('staging recursively copies dependency trees and explicit resources', async
     await readFile(join(resources, 'app-data/prisma/migrations/001.sql'), 'utf8'),
     'select 1;',
   )
+
+  await writeFile(join(root, 'worker-bin'), 'executable-placeholder')
+  const executableConfig = {
+    appId: 'com.example.fixture',
+    productName: 'Fixture',
+    bundle: { resources: [{ from: 'worker-bin', to: 'sidecars/worker-bin', executable: true }] },
+  }
+  assert.deepEqual(await stageBundleResources(root, resources, executableConfig), ['sidecars/worker-bin'])
+  assert.deepEqual(
+    executableBundleResourcePaths(resources, executableConfig),
+    [join(resources, 'sidecars/worker-bin')],
+  )
+  await assertExecutableBundleResourcesDeclared(resources, executableConfig)
+
+  await writeFile(join(root, 'unmarked-helper'), Buffer.from([0xcf, 0xfa, 0xed, 0xfe]))
+  const unmarkedConfig = {
+    appId: 'com.example.fixture',
+    productName: 'Fixture',
+    bundle: { resources: ['unmarked-helper'] },
+  }
+  await stageBundleResources(root, resources, unmarkedConfig)
+  await assert.rejects(
+    assertExecutableBundleResourcesDeclared(resources, unmarkedConfig),
+    /appears executable.*executable: true/,
+  )
 })
 
 test('staging reports missing dynamic dependencies and rejects reserved resource destinations', async (t) => {
@@ -185,15 +226,33 @@ test('staging reports missing dynamic dependencies and rejects reserved resource
     }),
     /unsafe or reserved bundle resource destination/,
   )
+  for (const generatedIcon of ['Assets.car', 'icon.icns', 'icon.ico', 'icon.png']) {
+    await assert.rejects(
+      stageBundleResources(root, resources, {
+        appId: 'com.example.fixture',
+        productName: 'Fixture',
+        bundle: { resources: [{ from: 'package.json', to: generatedIcon }] },
+      }),
+      /unsafe or reserved bundle resource destination/,
+      `${generatedIcon} must not overwrite generated application icon resources`,
+    )
+  }
+  await assert.rejects(
+    stageBundleResources(root, resources, {
+      appId: 'com.example.fixture',
+      productName: 'Fixture',
+      bundle: { resources: [{ from: '.', to: 'sidecars', executable: true }] },
+    }),
+    /executable bundle resource must be a file/,
+  )
 
   await writeFile(
     join(server, 'runtime-dependencies.json'),
     JSON.stringify({ version: 1, dependencies: ['ws'] }),
   )
-  const foreignTarget = {
-    platform: process.platform === 'win32' ? 'darwin' : 'win32',
-    arch: process.arch === 'arm64' ? 'x64' : 'arm64',
-  }
+  const foreignTarget = process.platform === 'linux' && process.arch === 'x64'
+    ? { platform: 'win32', arch: 'arm64' }
+    : { platform: 'linux', arch: 'x64' }
   await assert.rejects(
     stageServerDependencies(root, server, join(root, 'foreign-resources'), {
       appId: 'com.example.fixture',

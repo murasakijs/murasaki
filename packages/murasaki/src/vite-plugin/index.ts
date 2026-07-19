@@ -14,6 +14,7 @@ import { mainModulesPlugin } from './main-modules.js'
 import { mainEventsPlugin } from './main-events.js'
 import { preparePlugins } from '../plugin-runtime.js'
 import { DEFAULT_RENDERER_ENV_PREFIX, loadProjectEnv } from '../cli/load-env.js'
+import { serializeWindowTemplates } from '../cli/window-metadata.js'
 
 export interface MurasakiPluginOptions {
   config: MurasakiConfig
@@ -27,6 +28,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
   validateConfig(opts.config)
   const prepared = preparePlugins(opts.config)
   const config = prepared.config
+  const windows = serializeWindowTemplates(config)
   return [
     {
       name: 'murasaki:environment',
@@ -44,7 +46,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     // still resolve to a URL.
     svgr(),
     fileRouterPlugin({ srcDir: opts.srcDir }),
-    runtimeSecurityPlugin(),
+    runtimeSecurityPlugin(windows),
     mainEventsPlugin(),
     mainModulesPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),

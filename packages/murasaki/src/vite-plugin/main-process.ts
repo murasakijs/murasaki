@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import type { Plugin } from 'vite'
 import { validateMainShutdownTimeoutMs, type MurasakiConfig } from '../config.js'
 import { MainRuntime } from '../runtime/main-runtime.js'
+import { consumeDevLaunchArgv, type LaunchSnapshot } from '../runtime/launch.js'
 import { isAuthorizedNativeRequest, runtimeToken } from './runtime-security.js'
 import { murasakiVersion } from '../cli/brand.js'
 import type { MainWindowLifecycleEvent } from '../main/index.js'
@@ -78,10 +79,19 @@ export function mainProcessPlugin({ config }: Options): Plugin {
       // resolving src/main.ts against cwd would then start the wrong module
       // (or silently skip main entirely).
       const projectRoot = server.config.root
+      // Consume the dev launch transport exactly once, here, before any runtime
+      // (and thus any app-owned sidecar) can spawn — deleting the env var so
+      // sidecars never inherit it. The frozen snapshot is shared by the initial
+      // runtime and every HMR-created replacement, so a reload can never observe
+      // a different launch than cold start.
+      const launch: LaunchSnapshot = Object.freeze({
+        argv: Object.freeze(consumeDevLaunchArgv()),
+        cwd: projectRoot,
+      })
       const entry = config.main === false
         ? null
         : resolve(projectRoot, config.main?.entry ?? 'src/main.ts')
-      let runtime = entry && existsSync(entry) ? createRuntime(config, projectRoot) : undefined
+      let runtime = entry && existsSync(entry) ? createRuntime(config, projectRoot, launch) : undefined
       let transition = Promise.resolve()
       let closing = false
       let terminalClosing = false
@@ -186,7 +196,7 @@ export function mainProcessPlugin({ config }: Options): Plugin {
             if (closing) return
             const module = server.moduleGraph.getModuleById(entry)
             if (module) server.moduleGraph.invalidateModule(module)
-            runtime = createRuntime(config, projectRoot)
+            runtime = createRuntime(config, projectRoot, launch)
             return start()
           })
           .catch((error) => {
@@ -313,7 +323,7 @@ function readShutdownRequest(
   })
 }
 
-function createRuntime(config: MurasakiConfig, projectRoot: string): MainRuntime {
+function createRuntime(config: MurasakiConfig, projectRoot: string, launch: LaunchSnapshot): MainRuntime {
   const shutdownTimeoutMs = config.main === false ? undefined : config.main?.shutdownTimeoutMs
   validateMainShutdownTimeoutMs(shutdownTimeoutMs)
   return new MainRuntime({
@@ -326,5 +336,6 @@ function createRuntime(config: MurasakiConfig, projectRoot: string): MainRuntime
     isPackaged: false,
     shutdownTimeoutMs,
     diagnostics: config.diagnostics,
+    launch,
   })
 }

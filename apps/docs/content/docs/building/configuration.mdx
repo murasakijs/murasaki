@@ -18,6 +18,7 @@ export default defineConfig({
     title: 'Murasaki App',
     width: 1000,
     height: 700,
+    backendCapabilities: ['api:POST:/api/documents'],
   },
   capabilities: ['dialog:openFile', 'clipboard:writeText'],
 })
@@ -30,9 +31,9 @@ declarative window labels/routes synchronously. There is nothing to await.
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `appId` | `string` | **Required.** Bundle identifier (e.g. `com.example.my-app`) — becomes `CFBundleIdentifier` on macOS. |
-| `productName` | `string` | **Required.** Display name — the `.app` filename, Dock/menu-bar label, and DMG volume name. |
-| `version` | `string?` | App version. Shown in the native About panel; used in the `.dmg` filename. Defaults to `0.0.0`. |
+| `appId` | `string` | **Required.** Portable reverse-DNS identifier (e.g. `com.example.my-app`; letters, digits, dots, and hyphens) — becomes `CFBundleIdentifier` on macOS. |
+| `productName` | `string` | **Required.** Portable 1–120 character display/file name — the `.app` filename, Dock/menu-bar label, and DMG volume name. Path characters, Windows device names, edge whitespace, and trailing dots are rejected. |
+| `version` | `string?` | Strict semantic version (for example `1.2.3` or `1.2.3-beta.1`; no `v` prefix). Shown in the native About panel and artifact filenames. Defaults to `0.0.0`. |
 | `description` | `string?` | Short description shown in the native "About `<app>`" panel. |
 | `copyright` | `string?` | Copyright notice shown in the About panel. |
 | `homepage` | `string?` | Homepage URL shown in the About panel. |
@@ -41,6 +42,7 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `windows` | `Record<string, SecondaryWindowConfig>?` | Secondary windows keyed by stable label — see [below](#windows). |
 | `webview` | `WebviewConfig?` | Application-wide User-Agent, private session, and unauthenticated proxy settings — see [below](#webview). |
 | `capabilities` | `NativeCapabilityGrant[]?` | Primary-window native renderer grants. Used only when `window.capabilities` is omitted. Default is deny-all. |
+| `backendCapabilities` | `BackendCapability[]?` | Primary-window renderer-to-Node/API grants. Used only when `window.backendCapabilities` is omitted. Default is deny-all. |
 | `systemPermissions` | `SystemPermissionsConfig?` | Host-OS consent declarations and packaged macOS launch prompts — see [below](#systempermissions). |
 | `main` | `false \| object?` | Long-lived Node Main entry and shutdown bound — see [below](#main). |
 | `bundle` | `object?` | Node dependency and non-code resource packaging — see [below](#bundle). |
@@ -51,7 +53,7 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `locales` | `string[]?` | BCP-47 UI languages your app supports (e.g. `['en', 'ja']`). Feeds the macOS bundle's `CFBundleLocalizations` and constrains Murasaki's default native menu translations. Defaults to every language Murasaki ships menu translations for: `en`, `ja`, `zh-Hans`, `ko`, `es`, `fr`, `de`. |
 | `devPort` | `number?` | Vite dev server port during `murasaki dev`. Defaults to `5178` (auto-increments if taken). |
 | `targets` | `Target[]?` | Build targets. Defaults to the host platform. One or more of `darwin-arm64`, `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, `linux-arm64`. |
-| `icon` | `string?` | Path to a source PNG (ideally 1024px). `murasaki icon` / `murasaki bundle` fan it out to `.icns` / `.ico` / a PNG set. |
+| `icon` | `string?` | Path to a square source PNG (1024px recommended). On macOS with full Xcode, Murasaki compiles `Assets.car` so the OS applies its current mask, and retains `.icns` as a legacy fallback. Windows/Linux resources come from the same source. |
 | `protocols` | `ProtocolConfig[]?` | Custom URL schemes registered by packaged macOS apps and Windows installers — see [below](#protocols). |
 | `fileAssociations` | `FileAssociationConfig[]?` | Document extensions registered by packaged macOS apps and Windows installers — see [below](#fileassociations). |
 | `installer` | `object?` | macOS DMG and Windows installer options — see [below](#installer). |
@@ -71,6 +73,7 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `route` | `string?` | Same-origin path loaded in this window. Defaults to `/`; full/protocol-relative URLs are rejected. |
 | `visible` | `boolean?` | Initial visibility. Defaults to `true` for `main`, `false` for secondary windows. |
 | `capabilities` | `NativeCapabilityGrant[]?` | Per-window native grants. Secondary windows default to deny-all. |
+| `backendCapabilities` | `BackendCapability[]?` | Per-window Node Main, Server Action, API Route, updater, event, and diagnostics grants. Secondary windows default to deny-all. |
 
 <Callout type="info">
   On macOS, `vibrancy` installs the matching semantic `NSVisualEffectView`
@@ -90,6 +93,7 @@ and command allowlist:
 window: {
   route: '/',
   capabilities: ['window:open', 'window:list', 'window:manage'],
+  backendCapabilities: ['api:POST:/api/settings'],
 },
 windows: {
   settings: {
@@ -98,6 +102,7 @@ windows: {
     height: 560,
     createOnLaunch: false,
     capabilities: [],
+    backendCapabilities: ['api:GET:/api/settings'],
   },
 },
 ```
@@ -153,15 +158,18 @@ Platform constraints:
 - Windows proxy support uses WebView2 browser arguments. Custom User-Agent
   requires WebView2 86.0.616.0 or newer; private mode requires
   101.0.1210.39 or newer. WebView2 ignores those settings on older runtimes.
-- Linux packaging remains unavailable. Development builds pass these options
-  to Wry/WebKitGTK, but Linux is not a supported distribution target yet.
+- Linux development and packaged AppDir/AppImage/`.deb` builds pass these
+  options to Wry/WebKitGTK. Test the behavior against the WebKitGTK version
+  shipped by each target distribution.
 
 Incognito controls local WebView persistence only. It does not anonymize
 network traffic, hide the client from a proxy/server, or make app-level Node
-data private. Normal windows share one application WebContext and therefore
-share cookies/storage. Wry ignores that shared context when `incognito` is
-enabled, so session sharing between multiple incognito windows is
-platform-dependent and not guaranteed. See
+data private. Murasaki isolates browser profiles by native window so cookies,
+storage, and workers do not cross per-window backend authority. The primary
+keeps the historical app profile. Secondary profiles persist on Windows/Linux
+and macOS 14+; macOS 11–13 uses isolated non-persistent stores. Session sharing
+between windows is therefore intentionally unsupported; use Main/API state for
+explicit sharing. See
 [Security](/docs/building/security#webview-network-and-private-sessions).
 
 ## `capabilities`
@@ -172,6 +180,8 @@ uses; unknown permissions do not grant anything:
 ```ts
 capabilities: [
   'app:quit',
+  'autostart:read',
+  'autostart:write',
   'dialog:openFile',
   'clipboard:readText',
   'clipboard:writeText',
@@ -188,6 +198,9 @@ cannot use the native bridge. Window management adds `window:getLabel`,
 `window:open`, `window:list`, and `window:manage`. Programmatic application
 shutdown requires `app:quit`; enabling the built-in updater grants it to the
 primary window for the verified restart handshake.
+Login startup is split into read and write authority: use `autostart:read` for
+`status()` and reserve `autostart:write` for settings UI that calls
+`enable()` or `disable()`.
 
 Use a structured `NativeCapabilityGrant` when a target-bearing command must be
 limited. `deny` takes precedence over `allow`; a trailing `/**` is the only
@@ -199,11 +212,38 @@ capabilities: [
   { permission: 'shell:showItemInFolder', allow: { paths: ['/Users/me/Documents/**'] } },
   { permission: 'window:manage', allow: { windows: ['settings', 'preview'] } },
   { permission: 'systemPermission:request', allow: { permissions: ['camera'] } },
+  { permission: 'secureStorage:get', allow: { keys: ['account:*'] } },
+  { permission: 'webview:writeCookies', allow: { urls: ['https://app.example.com/**'] } },
 ]
 ```
 
-String grants remain unrestricted for compatibility. URL/path scopes are
-validated while loading config and enforced again by the Rust host.
+String grants remain unrestricted for compatibility. URL, path, key, window,
+and OS-permission scopes are validated while loading config and enforced again
+by the Rust host.
+
+## `backendCapabilities`
+
+Renderer access to local Node resources is separately deny-by-default. The
+primary window uses `window.backendCapabilities ?? backendCapabilities ?? []`;
+secondary windows inherit nothing and use their own list or `[]`.
+
+```ts
+backendCapabilities: [
+  'main:src/backend/account.ts#loadAccount',
+  'action:src/actions/save.ts#saveDocument',
+  'api:POST:/api/documents/*',
+  'updater:check',
+  'events:sync.*',
+  'diagnostics:renderer-error',
+]
+```
+
+Resources match exactly unless the grant ends in one trailing `*`, which is a
+prefix wildcard. API resources include the uppercase method. Broad grants
+such as `main:*`, `action:*`, `api:*`, `updater:*`, and `events:*` are valid,
+but exact resources are safer for production. Native shutdown, activation,
+and window-control endpoints are not grantable to renderers. See
+[Security](/docs/building/security#grant-backend-resources-explicitly).
 
 ## `systemPermissions`
 
@@ -270,15 +310,19 @@ terminal/Node identity used by `murasaki dev`.
 
 ### Entitlements and the App Sandbox
 
-`sign.appSandbox` (default `false`) controls how `murasaki bundle --sign`'s
-generated default entitlements plist reacts to declared `systemPermissions`:
-with it off (Murasaki's default hardened-runtime-only posture), only
-`appleEvents` adds anything (`com.apple.security.automation.apple-events`) —
-every other kind works from its Info.plist usage string alone. With it on,
-`com.apple.security.app-sandbox` plus each declared kind's documented App
-Sandbox entitlement are added too (`photos` has none and is never added). This
-derivation only applies to the generated default plist — a custom
-`sign.entitlements` file is always used verbatim. See
+Murasaki currently supports hardened-runtime signing, not the macOS App
+Sandbox. With `sign.appSandbox` left at its default `false`, Murasaki derives
+the Hardened Runtime resource-access entitlements for camera, microphone,
+location, photos, contacts, calendar/reminders, and Apple Events from
+`systemPermissions.macOS`. A signed build needs both those host entitlements
+and the corresponding Info.plist purpose strings. Bluetooth and speech
+recognition only need their purpose strings under this non-sandboxed posture.
+The bundled Node helper alone receives its hardened-runtime JIT rights; native
+add-ons receive no executable entitlement. `sign.appSandbox: true` is rejected
+fail-closed because Apple's inherited sandbox helper rules are incompatible
+with the current embedded Node/JIT architecture. Custom `sign.entitlements`
+and `sign.helperEntitlements` files are used verbatim, and configured paths
+must exist and pass `plutil` validation. See
 [Native APIs → Entitlements and the App Sandbox](/docs/guides/native-apis#entitlements-and-the-app-sandbox)
 for the full per-kind mapping.
 
@@ -320,8 +364,10 @@ protocols: [
 
 Duplicate or invalid schemes fail the build. macOS writes the registration into
 the packaged `.app`'s `Info.plist`. Windows NSIS/MSI installers write the OS
-registration; a portable Windows archive does not. Linux registration is not
-implemented.
+registration; a portable Windows archive does not. Linux writes the matching
+`MimeType` entries into the `.desktop` file; installing the `.deb` registers
+that file and refreshes the desktop database. A manually extracted AppDir or
+AppImage does not perform an OS-level registration step.
 
 ## `fileAssociations`
 
@@ -349,9 +395,10 @@ fileAssociations: [
 
 Extensions must be unique across all entries; invalid extensions and MIME types
 fail the build. Matching files are delivered to Node Main's `openRequested()`
-hook. The same artifact limits as `protocols` apply: packaged macOS `.app` and
-installed Windows NSIS/MSI are supported, while portable Windows archives,
-Linux, and `murasaki dev` do not install associations.
+hook. The same artifact limits as `protocols` apply: packaged macOS `.app`,
+installed Windows NSIS/MSI, and installed Linux `.deb` packages register the
+association. Portable Windows archives, manually extracted AppDir/AppImage
+artifacts, and `murasaki dev` do not install OS-level associations.
 
 See [Deep links and file associations](/docs/guides/deep-links) for delivery
 semantics, testing, and untrusted-input requirements.
@@ -369,6 +416,7 @@ bundle: {
   resources: [
     'prisma/schema.prisma',
     { from: 'prisma/migrations', to: 'database/migrations' },
+    { from: 'bin/indexer', to: 'sidecars/indexer', executable: true },
   ],
 }
 ```
@@ -377,7 +425,7 @@ bundle: {
 | --- | --- | --- |
 | `external` | `string[]?` | Stage packages in the app's `node_modules`. Add computed/dynamic package loads here. Prefer this for native addons and packages with runtime data. |
 | `noExternal` | `string[]?` | Force packages into the compiled server bundle. Use for JS-only packages without runtime assets. |
-| `resources` | `Array<string \| { from: string; to?: string }>?` | Copy files/directories into packaged resources. String entries use the source basename; object entries choose a relative destination. |
+| `resources` | `Array<string \| { from: string; to?: string; executable?: boolean }>?` | Copy files/directories into packaged resources. String entries use the source basename; object entries choose a relative destination. Mark every app-owned executable sidecar with `executable: true` so macOS/Windows signing seals it before the outer artifact. Executable directories are rejected. |
 
 Do not place secrets in `resources`; everything in an app bundle is readable by
 the user. Test native addons on every target architecture.
@@ -539,15 +587,18 @@ type UpdaterConfig =
       publicKey?: string               // base64 Ed25519 public key — defaults to .murasaki/update-key.pub
       publicKeys?: string[]            // additional pinned keys for rotation (max 4 total with publicKey)
       maxManifestAgeDays?: number      // reject a manifest older than this many days, default 90
+      allowLegacyManifestsWithoutGeneratedAt?: boolean // migration escape hatch, default false
     }
 ```
 
 There is deliberately no `provider` field — GitHub vs. self-hosted is
 inferred from whether `repo` or `endpoint` is set, so it can't drift out of
 sync with the rest of the config. There is also no way to disable signature
-verification, and a self-hosted `endpoint` must be `https:` (an `http:`
+verification, and a self-hosted `endpoint` must be credential-free `https:` (an `http:`
 endpoint is only accepted for loopback hosts — `127.0.0.1`, `localhost`,
 `[::1]` — for local testing), enforced both here and again at fetch time.
+`generatedAt` is required by default for replay protection. The legacy escape
+hatch should only be enabled while migrating an older signed manifest.
 
 `checkOnStart` and `checkInterval` are driven by the update engine itself, so
 they apply whether or not anything in your UI ever calls `check()`. You can
@@ -581,6 +632,13 @@ Murasaki's defaults.
 | `sidebar` | `string?` | Welcome/finish BMP. NSIS expects 164×314; MSI expects 493×312. |
 | `license` | `string?` | NSIS `.txt`/`.rtf` or MSI `.rtf` license file. |
 
+When the built-in updater is enabled, Windows distribution is intentionally
+NSIS per-user only: MSI generation is skipped and `installMode: 'perMachine'`
+is rejected. MSI remains available when `updater` is disabled for deployments
+managed through MSI major upgrades. The installer command fails if the
+required platform packaging tool produces no installer; use `murasaki bundle`
+when you only need the portable ZIP.
+
 ## `sign`
 
 Murasaki signs with **your** certificate/provider — it ships none of its own.
@@ -593,14 +651,16 @@ variables, never from this config — see
 | Field | Type | Description |
 | --- | --- | --- |
 | `identity` | `string?` | Signing identity, e.g. `"Developer ID Application: Name (TEAMID)"`. Defaults to `$MURASAKI_SIGN_IDENTITY`, then the first "Developer ID Application" identity in your keychain. |
-| `entitlements` | `string?` | Path to a custom entitlements `.plist`. Defaults to a Node-friendly hardened-runtime set (JIT + unsigned executable memory + disabled library validation) plus a derivation from declared `systemPermissions` — see [`systemPermissions` → Entitlements and the App Sandbox](#systempermissions). |
-| `appSandbox` | `boolean?` | Opt into the macOS App Sandbox in the generated default entitlements plist. Default `false`. |
+| `entitlements` | `string?` | Custom `.plist` for the main app executable. Defaults to minimum host permissions derived from `systemPermissions`. Missing/invalid files fail the build. |
+| `helperEntitlements` | `string?` | Custom `.plist` for the bundled Node helper. Defaults to Node's JIT/library-loading hardened-runtime rights. Missing/invalid files fail the build. |
+| `appSandbox` | `boolean?` | Reserved. `true` is rejected fail-closed by the current bundled-Node architecture; use the default hardened-runtime signing. Default `false`. |
 
 ### `sign.windows`
 
 `murasaki bundle --sign --target win32-x64` signs the app executable before
 the portable ZIP is made. `murasaki installer --sign --target win32-x64`
-also signs each generated NSIS setup and MSI, then verifies every signature
+also signs each generated installer (NSIS and, when the updater is disabled,
+MSI), then verifies every signature
 with the Authenticode policy. This step runs on Windows with SignTool.
 
 | Field | Type | Description |

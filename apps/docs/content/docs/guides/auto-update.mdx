@@ -26,9 +26,13 @@ the whole trust model is a single Ed25519 keypair you generate once.
    ```
 
    This writes `.murasaki/update-key.pub` (commit it) and
-   `.murasaki/update-key` (gitignored automatically), and prints the private
-   key **once** — save it as a `MURASAKI_UPDATE_KEY` GitHub secret (the
-   command prints the exact `gh secret set` invocation to do that).
+   `.murasaki/update-key` (mode `0600`, gitignored automatically). The private
+   key is not printed. Copy it to a `MURASAKI_UPDATE_KEY` GitHub secret through
+   stdin, as the command output shows:
+
+   ```bash
+   gh secret set MURASAKI_UPDATE_KEY < .murasaki/update-key
+   ```
 
 2. Turn the updater on:
 
@@ -149,8 +153,8 @@ fewer platforms than a manifest might otherwise cover.
 ever parsing them as JSON, never the other way around — there's no JSON
 canonicalization ambiguity to worry about.
 
-`generatedAt`, `rollout`, and `keyId` are all optional, and all covered by
-that same signature since they live in the signed bytes:
+`generatedAt` is required by the client; `rollout` and `keyId` are optional.
+All three are covered by that same signature since they live in the signed bytes:
 
 - **`generatedAt`** — an anti-freeze/replay guard. See [Manifest
   freshness](#manifest-freshness) below.
@@ -268,8 +272,8 @@ jobs:
             dist/latest.json.sig
 ```
 
-Add `MURASAKI_UPDATE_KEY` as a repository secret (the value `--keygen`
-printed). This is independent of code-signing — see
+Add `MURASAKI_UPDATE_KEY` as a repository secret from the private key file;
+do not paste it into a shell argument. This is independent of code-signing — see
 [Distribution](/docs/building/distribution#signing--notarization) if you also
 want a Developer ID-signed, notarized `.dmg`; nothing stops you from adding
 those steps to the same `macos` job.
@@ -344,23 +348,28 @@ manifest](#self-hosting-the-manifest)).
 
 ## Manifest freshness
 
-Every manifest that includes a `generatedAt` timestamp (written automatically
-by `murasaki release --manifest`) is checked for freshness before anything
-else: a manifest older than `updater.maxManifestAgeDays` (default 90, minimum
+Every manifest must include a `generatedAt` timestamp (written automatically
+by `murasaki release --manifest`) and is checked for freshness before anything
+else. A manifest older than `updater.maxManifestAgeDays` (default 90, minimum
 1) is rejected outright, as a possibly frozen or replayed manifest — without
 this, an attacker who once captured a validly-signed old manifest could keep
 serving it forever, freezing a fleet on a known-vulnerable version. A
 manifest dated more than 24 hours in the future is also rejected, as a
 clock-skew/tampering signal (that tolerance is fixed, not configurable). A
-manifest with no `generatedAt` at all — published before this field
-existed — is still accepted for backward compatibility, but logs a
-structured warning.
+manifest with no `generatedAt` fails closed. A pre-`generatedAt` deployment can
+temporarily opt in with `allowLegacyManifestsWithoutGeneratedAt: true`; this
+logs a warning and weakens replay protection, so regenerate and re-sign the
+manifest instead whenever possible. Packaged apps also persist the highest
+authenticated `generatedAt` and version per channel in their OS app-data
+directory. A later manifest that moves either value backwards is rejected even
+when its signature and age are otherwise valid.
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
   // ...
   updater: {
     maxManifestAgeDays: 30, // reject anything older than 30 days
+    // allowLegacyManifestsWithoutGeneratedAt: true, // migration only
   },
 })
 ```
@@ -409,8 +418,11 @@ percentage into the manifest. Absent (or `100`) means every client sees the
 update immediately, same as today.
 
 Below 100, each installed app computes a stable bucket from a random id
-persisted the first time it checks (`update-client-id`, stored alongside the
-`.murasaki-apply.json` handoff file) — `sha256(id)`'s first byte, mod 100.
+persisted the first time it checks (`update-client-id`, stored in Main's
+OS-standard `context.paths.data` directory) — `sha256(id)`'s first byte, mod
+100. Mutable rollout state is never written into the signed/read-only app
+resources; only the one-shot `.murasaki-apply.json` launcher handoff lives
+there.
 A client whose bucket is `>= rollout` gets `not-available` for that check,
 exactly like "no update for your platform": no error, no retry storm, just
 try again on the next scheduled check, by which point you may have raised
@@ -427,6 +439,13 @@ doesn't change what a client is allowed to install, only when it's offered.
 | Windows (arm64) | `<productName>-<version>-setup-arm64.exe` | Supported |
 | Linux AppImage (x64 / arm64) | `<productName>-<version>-linux-{x64,arm64}.AppImage` | Supported |
 | Linux `.deb` / bare AppDir | — | Not applicable — `check()` reports "managed by the system package manager" |
+
+Windows self-update is deliberately coupled to a **per-user NSIS** install.
+When `updater` is configured, `murasaki installer` requires NSIS, skips MSI,
+and rejects `installer.windows.installMode: 'perMachine'`. MSI is a separate,
+system-managed deployment path available only when the built-in updater is
+disabled; upgrade it with MSI major upgrades or your organization's software
+management system instead of the Murasaki update engine.
 
 `murasaki installer` names the NSIS installer with an arch suffix so x64 and
 arm64 builds never collide in the same `dist/`; `murasaki release

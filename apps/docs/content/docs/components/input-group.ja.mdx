@@ -1,0 +1,23 @@
+---
+title: Input Group
+description: 入力欄とテキスト、アイコン、操作ボタンを一体化します。
+---
+
+## 使い方
+
+```tsx
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@murasakijs/ui'
+
+<InputGroup>
+  <InputGroupAddon aria-hidden="true">https://</InputGroupAddon>
+  <InputGroupInput aria-label="ドメイン" placeholder="example.com" />
+  <InputGroupButton type="button">コピー</InputGroupButton>
+</InputGroup>
+```
+
+`InputGroupAddon` の `align` は `"inline-start"` または `"inline-end"` です。一つの
+グループに主要な入力欄は一つだけ置き、必ずラベルを付けます。アイコンだけの
+`InputGroupButton` には `aria-label` が必要です。操作できない短い値には
+`InputGroupText` を使います。
+
+入力欄には標準の `<input>` 属性、ボタンには `Button` の props を渡せます。

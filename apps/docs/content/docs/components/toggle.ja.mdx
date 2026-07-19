@@ -1,0 +1,21 @@
+---
+title: Toggle
+description: 押下中・未押下の2状態を切り替えるボタンです。
+---
+
+## 使い方
+
+```tsx
+import { Toggle } from '@murasakijs/ui'
+
+<Toggle aria-label="太字を切り替え" variant="outline" size="sm">B</Toggle>
+```
+
+制御する場合は `pressed` と `onPressedChange`、制御しない場合は
+`defaultPressed` を使います。`variant` は `default` または `outline`、
+`size` は `default`, `sm`, `lg` です。アイコンだけのトグルには
+アクセシブルな名前が必要です。
+
+## エクスポート
+
+`Toggle`, `toggleVariants`。

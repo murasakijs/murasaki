@@ -10,8 +10,10 @@ import test from 'node:test'
 
 import { stringifyWire, parseWire, WIRE_CONTENT_TYPE } from '../dist/runtime/wire.js'
 import { serverActionsPlugin } from '../dist/vite-plugin/server-actions.js'
+import { deriveWindowToken } from '../dist/runtime/window-auth.js'
 
 const packageDir = resolve(import.meta.dirname, '..')
+const RUNTIME_TOKEN = 'a'.repeat(64)
 
 async function copyMainRuntimeFixture(root) {
   const runtimeRoot = join(root, '.murasaki-runtime')
@@ -21,6 +23,7 @@ async function copyMainRuntimeFixture(root) {
   await mkdir(mainDir, { recursive: true })
   await Promise.all([
     copyFile(join(packageDir, 'dist/runtime/main-runtime.js'), join(runtimeDir, 'main-runtime.js')),
+    copyFile(join(packageDir, 'dist/runtime/launch.js'), join(runtimeDir, 'launch.js')),
     copyFile(join(packageDir, 'dist/main/logger.js'), join(mainDir, 'logger.js')),
     copyFile(join(packageDir, 'dist/main/sidecar.js'), join(mainDir, 'sidecar.js')),
     copyFile(join(packageDir, 'dist/main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
@@ -179,6 +182,10 @@ export const registry = {
   await copyFile(join(packageDir, 'dist/runtime/updater.js'), join(root, 'updater-engine.mjs'))
   await copyFile(join(packageDir, 'dist/runtime/wire.js'), join(root, 'wire.mjs'))
   await copyMainRuntimeFixture(root)
+  await writeFile(join(root, 'murasaki-meta.json'), JSON.stringify({
+    productName: 'Actions wire test',
+    windows: [{ label: 'main', backendCapabilities: ['action:*'] }],
+  }))
 
   const child = spawn(
     process.execPath,
@@ -190,7 +197,11 @@ export const registry = {
       '--main', join(serverDir, 'main.mjs'),
       '--port', '0',
     ],
-    { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, HOME: root } },
+    {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, HOME: root, MURASAKI_RUNTIME_TOKEN: RUNTIME_TOKEN },
+    },
   )
   t.after(async () => {
     child.kill('SIGTERM')
@@ -210,10 +221,13 @@ export const registry = {
     child.once('exit', (code) => reject(new Error(`server exited early (${code})`)))
   })
   const origin = `http://127.0.0.1:${port}`
-  const bootstrap = await fetch(`${origin}/`)
-  const runtimeCookie = (bootstrap.headers.getSetCookie?.()[0] ?? bootstrap.headers.get('set-cookie')).split(';', 1)[0]
   const base = `${origin}/__murasaki/action/${encodeURIComponent('src/actions.ts')}`
-  const headers = { cookie: runtimeCookie, 'content-type': WIRE_CONTENT_TYPE }
+  const headers = {
+    'x-murasaki-window-label': 'main',
+    'x-murasaki-window-generation': '1',
+    'x-murasaki-window-token': deriveWindowToken(RUNTIME_TOKEN, 'main'),
+    'content-type': WIRE_CONTENT_TYPE,
+  }
 
   const response = await fetch(`${base}/echo`, {
     method: 'POST',

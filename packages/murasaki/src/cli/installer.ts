@@ -43,6 +43,13 @@ export default async function installer(argv: string[]) {
     if (argv.includes('--notarize')) {
       throw new Error('murasaki: --notarize is only available for macOS DMG installers.')
     }
+    if (argv.includes('--sign')) {
+      throw new Error(
+        'murasaki: Linux .deb signing is not implemented. Refusing to emit an unsigned '
+          + 'package for an explicit --sign request; build without --sign or sign it in a '
+          + 'documented downstream Debian release pipeline.',
+      )
+    }
     await installerLinux(argv, cwd, config, target.arch)
     return
   }
@@ -401,14 +408,12 @@ const WEBVIEW2_BOOTSTRAPPER_URL = 'https://go.microsoft.com/fwlink/p/?LinkId=212
  * then produces a NSIS `-setup.exe` and a WiX `.msi` from the staged
  * `dist/bundle/<productName>/` folder (bundle.ts's `bundleWin32`).
  *
- * Both `makensis` and `wix` are optional local tools — like the macOS path
- * degrading to a plain DMG when Automation permission is missing, this warns
- * and skips whichever tool isn't found rather than hard-failing, so
- * `murasaki installer --target win32-x64` still succeeds wherever only one
- * (or neither) is installed — e.g. this can run on a Mac with `makensis`
- * installed via `brew install makensis` to verify the NSIS script compiles,
- * even though `wix` (Windows-only) will always skip there. Both tools run in
- * CI (windows-latest), where both are installed.
+ * `makensis` and `wix` are optional individually, but the installer command
+ * fails when neither can produce an installer. A portable ZIP is a bundle,
+ * not a successful installer result. Apps using built-in self-update produce
+ * only NSIS: updating an MSI-owned installation out of band would violate
+ * Windows Installer ownership/repair semantics. Managed MSI apps disable the
+ * built-in updater and ship MSI major upgrades instead.
  */
 async function installerWin32(
   argv: string[],
@@ -436,14 +441,29 @@ async function installerWin32(
 
   const nsisPath = await buildNsisInstaller({ cwd, config, productName, version, bundleDir, branding, arch })
   if (shouldSign && nsisPath) signWindowsArtifact(nsisPath, config, cwd)
-  const msiPath = await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
+  const msiPath = config.updater
+    ? null
+    : await buildMsiInstaller({ cwd, config, productName, version, bundleDir, arch, branding })
+  if (config.updater) {
+    process.stdout.write(
+      `\n${dim('installer: MSI skipped because built-in self-update is enabled; the signed NSIS setup is the Windows update payload.')}\n\n`,
+    )
+  }
   if (shouldSign && msiPath) signWindowsArtifact(msiPath, config, cwd)
 
   if (!nsisPath && !msiPath) {
+    throw new Error(
+      config.updater
+        ? 'murasaki: no Windows installer produced — built-in self-update requires NSIS; install makensis and retry'
+        : 'murasaki: no Windows installer produced — install NSIS/makensis or WiX v4 and retry',
+    )
+  }
+  if (!shouldSign) {
+    const artifacts = [nsisPath, msiPath].filter((path): path is string => Boolean(path))
     process.stdout.write(
-      `\n${warn('installer: neither makensis nor wix were found on PATH — no Windows installer produced.')}\n` +
-        `${dim('  the portable folder/.zip from `murasaki bundle --target win32-x64` still works.')}\n` +
-        `${dim('  install NSIS (https://nsis.sourceforge.net/, or `brew install makensis` on macOS) and/or WiX v4 (`dotnet tool install --global wix`).')}\n\n`,
+      `\n${warn('The generated Windows installer is unsigned. SmartScreen or application-control policy may block it.')}\n` +
+        `${artifacts.map((path) => `${dim('  Artifact:')}  ${JSON.stringify(path)}`).join('\n')}\n` +
+        `${dim('  For distribution, configure sign.windows and rerun with --sign. Do not ask users to disable Windows security controls.')}\n\n`,
     )
   }
 }
@@ -562,6 +582,10 @@ function detectTool(cmd: string, versionArgs: string[]): boolean {
  * spaces in `Program Files (x86)` need no quoting.
  */
 function resolveMakensis(): string | null {
+  const override = process.env.MURASAKI_NSIS_PATH
+  if (override !== undefined) {
+    return override.length > 0 && detectTool(override, ['-VERSION']) ? override : null
+  }
   if (detectTool('makensis', ['-VERSION'])) return 'makensis'
   if (process.platform === 'win32') {
     const roots = [
@@ -576,6 +600,15 @@ function resolveMakensis(): string | null {
     }
   }
   return null
+}
+
+/** Resolves WiX, with an explicit override for reproducible toolchains/CI. */
+function resolveWix(): string | null {
+  const override = process.env.MURASAKI_WIX_PATH
+  if (override !== undefined) {
+    return override.length > 0 && detectTool(override, ['--version']) ? override : null
+  }
+  return detectTool('wix', ['--version']) ? 'wix' : null
 }
 
 /**
@@ -1382,7 +1415,8 @@ async function buildMsiInstaller(opts: {
 }): Promise<string | null> {
   const { cwd, config, productName, version, bundleDir, arch, branding } = opts
 
-  if (!detectTool('wix', ['--version'])) {
+  const wix = resolveWix()
+  if (!wix) {
     process.stdout.write(
       `\n${warn('installer: wix not found — skipping the .msi installer (expected on macOS/Linux; WiX is Windows-only).')}\n` +
         `${dim('  install: dotnet tool install --global wix')}\n\n`,
@@ -1425,7 +1459,7 @@ async function buildMsiInstaller(opts: {
     )
 
     const result = spawnSync(
-      'wix',
+      wix,
       ['build', wxsPath, '-arch', wixArch, '-ext', 'WixToolset.UI.wixext', '-out', msiPath],
       { encoding: 'utf8' },
     )
@@ -1773,12 +1807,6 @@ async function installerLinux(
   const productName = config.productName
   const version = config.version ?? '0.0.0'
   const appDir = resolve(cwd, 'dist/bundle', `${productName}.AppDir`)
-
-  if (argv.includes('--sign')) {
-    process.stdout.write(
-      `\n${warn('installer: --sign is not implemented for Linux .deb packages yet — producing an unsigned package.')}\n`,
-    )
-  }
 
   // Same re-bundle-by-default / --no-build convention as the darwin/win32 paths.
   const skipBuild = argv.includes('--no-build')

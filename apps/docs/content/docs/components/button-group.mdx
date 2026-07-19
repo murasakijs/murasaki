@@ -1,0 +1,30 @@
+---
+title: Button Group
+description: Groups related buttons or controls into one visual unit.
+---
+
+## Usage
+
+```tsx
+import { Button, ButtonGroup, ButtonGroupText } from '@murasakijs/ui'
+
+<ButtonGroup aria-label="Text alignment">
+  <Button variant="outline">Left</Button>
+  <Button variant="outline">Center</Button>
+  <Button variant="outline">Right</Button>
+</ButtonGroup>
+```
+
+Set `orientation="vertical"` for a vertical stack. `ButtonGroupText` adds a
+non-interactive label or value, while `ButtonGroupSeparator` creates an explicit
+divider. Give the group an `aria-label` or `aria-labelledby` when the surrounding
+content does not already identify its purpose.
+
+## API
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `orientation` | `"horizontal" \| "vertical"` | `"horizontal"` |
+
+Exports: `ButtonGroup`, `ButtonGroupText`, `ButtonGroupSeparator`, and
+`buttonGroupVariants`.

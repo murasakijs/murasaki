@@ -1,0 +1,36 @@
+---
+title: Context Menu
+description: 右クリックやキーボードのメニュー操作で、対象に応じたコマンドを表示します。
+---
+
+## 使い方
+
+```tsx
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
+  ContextMenuShortcut, ContextMenuTrigger,
+} from '@murasakijs/ui'
+
+<ContextMenu>
+  <ContextMenuTrigger className="rounded-md border p-8">
+    この領域を右クリック
+  </ContextMenuTrigger>
+  <ContextMenuContent>
+    <ContextMenuItem>名前を変更 <ContextMenuShortcut>F2</ContextMenuShortcut></ContextMenuItem>
+    <ContextMenuSeparator />
+    <ContextMenuItem>削除</ContextMenuItem>
+  </ContextMenuContent>
+</ContextMenu>
+```
+
+すべての操作はポインターなしでも実行できるようにしてください。トリガーは
+Radix UI が提供するブラウザーと OS のキーボード操作に対応します。
+サブメニュー、チェック項目、ラジオ項目にも専用のエクスポートがあります。
+
+## エクスポート
+
+`ContextMenu`, `ContextMenuTrigger`, `ContextMenuContent`, `ContextMenuItem`,
+`ContextMenuCheckboxItem`, `ContextMenuRadioGroup`, `ContextMenuRadioItem`,
+`ContextMenuGroup`, `ContextMenuLabel`, `ContextMenuSeparator`,
+`ContextMenuShortcut`, `ContextMenuSub`, `ContextMenuSubTrigger`,
+`ContextMenuSubContent`, `ContextMenuPortal`。

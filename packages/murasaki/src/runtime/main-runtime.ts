@@ -12,6 +12,7 @@ import type {
 import { createMainLogger } from '../main/logger.js'
 import { createSidecarSupervisor } from '../main/sidecar.js'
 import { createCrashDiagnostics, writeCrashReportSync } from '../main/crash-reports.js'
+import { sanitizeLaunchArgv } from './launch.js'
 
 const DEFAULT_MAIN_SHUTDOWN_TIMEOUT_MS = 10_000
 const MAX_MAIN_SHUTDOWN_TIMEOUT_MS = 300_000
@@ -51,6 +52,11 @@ export interface MainRuntimeOptions {
   /** Internal/test override; normal apps use platform-standard locations. */
   paths?: MainContext['paths']
   diagnostics?: MainRuntimeDiagnosticsOptions
+  /**
+   * Primary cold-start argv + cwd from the native launcher. Omitted in dev,
+   * where it resolves to empty argv and the project root as cwd.
+   */
+  launch?: { argv?: readonly string[]; cwd?: string }
 }
 
 export interface ShutdownOptions {
@@ -402,6 +408,8 @@ async function createMainContext(
     signal,
     log,
   })
+  const resolvedProjectRoot = resolve(options.projectRoot)
+  const launch = resolveLaunchInfo(options.launch, resolvedProjectRoot)
   return {
     appId: options.appId,
     productName: options.productName,
@@ -409,8 +417,9 @@ async function createMainContext(
     isPackaged: options.isPackaged,
     platform: process.platform,
     arch: process.arch,
-    projectRoot: resolve(options.projectRoot),
+    projectRoot: resolvedProjectRoot,
     resourcesPath,
+    launch,
     paths,
     log,
     diagnostics: createCrashDiagnostics(crashReportsDir),
@@ -426,6 +435,21 @@ function resolveDiagnosticsOptions(
     ? DEFAULT_KEEP_CRASH_REPORTS
     : Math.min(MAX_KEEP_CRASH_REPORTS, Math.max(MIN_KEEP_CRASH_REPORTS, diagnostics.keepReports))
   return { crashReports: diagnostics?.crashReports ?? true, keepReports }
+}
+
+/**
+ * Normalizes launcher-supplied `launch` into the `MainContext.launch` shape
+ * with defensive bounds (the native side already bounds this, but the runtime
+ * also runs in dev/tests/standalone). Non-strings and oversized args are
+ * dropped; missing argv → empty; missing/empty cwd → project root.
+ */
+function resolveLaunchInfo(
+  launch: MainRuntimeOptions['launch'],
+  projectRoot: string,
+): { argv: string[]; cwd: string } {
+  const argv = sanitizeLaunchArgv(launch?.argv)
+  const cwd = typeof launch?.cwd === 'string' && launch.cwd.length > 0 ? launch.cwd : projectRoot
+  return { argv, cwd }
 }
 
 interface CrashHookOptions {

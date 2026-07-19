@@ -75,17 +75,21 @@ processes differ:
 | Backend calls | Vite middleware | Bundled loopback HTTP server |
 | URL/file registration | Not installed by dev mode | macOS app metadata or Windows installer registry |
 
-Production uses a deterministic loopback port derived from `appId`, giving the
-renderer a stable origin across launches. The Windows WebView2 profile is also
-isolated by `appId`. Keep `appId` stable after release: changing it can change
-the application data paths, browser profile, bundle identity, single-instance
-lock, and local origin.
+Production begins with a deterministic loopback port derived from `appId` and
+persists the port that actually binds. If another application already owns the
+first choice, the bundled server selects a bounded fallback and reuses it on
+later launches. This keeps the renderer origin stable without making unrelated
+hash-colliding apps mutually exclusive. Keep `appId` stable after release:
+changing it can change application data paths, browser profiles, bundle
+identity, the single-instance lock, and the local origin.
 
-Normal windows share an application WebContext, so their browser session
-survives destroy/recreate within the process. Routes and native capability
-policies remain template-specific. Incognito WebViews are an exception: Wry
-ignores the shared context for them, so cross-window incognito session sharing
-is platform-dependent and not guaranteed.
+Each window label owns a distinct WebContext. Service Workers, SharedWorkers,
+cookies, and Web Storage from a secondary window therefore cannot observe the
+primary window's authenticated backend traffic. Recreating the same label
+reuses its context within the process; persistent profile behavior across
+launches is platform-dependent. On macOS 11–13, secondary labels use isolated
+non-persistent stores because custom persistent stores require macOS 14.
+`webview.incognito: true` makes every label non-persistent.
 
 ## Next.js-like, not Next.js itself
 

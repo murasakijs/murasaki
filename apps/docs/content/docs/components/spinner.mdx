@@ -1,0 +1,20 @@
+---
+title: Spinner
+description: Indicates that an operation is in progress.
+---
+
+## Usage
+
+```tsx
+import { Button, Spinner } from '@murasakijs/ui'
+
+<Button disabled>
+  <Spinner aria-label="Saving" />
+  Saving…
+</Button>
+```
+
+`Spinner` renders an animated SVG with `role="status"`. Replace its default
+“Loading” label with a task-specific `aria-label`, especially when no adjacent
+text describes the operation. Respect `prefers-reduced-motion` in the
+application stylesheet when continuous animation is not essential.

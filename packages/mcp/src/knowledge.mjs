@@ -94,6 +94,35 @@ export async function getApiReference({ symbol, featureId, limit = 30 } = {}) {
   }
 }
 
+export async function listCapabilities({ platform, status, category } = {}) {
+  const { capabilities } = await loadKnowledge()
+  const features = capabilities.features.filter((feature) => {
+    if (status && feature.status !== status) return false
+    if (category && feature.category !== category) return false
+    if (platform && !feature.platforms[platform]) return false
+    return true
+  })
+
+  return {
+    frameworkVersion: capabilities.frameworkVersion,
+    filters: {
+      platform: platform ?? null,
+      status: status ?? null,
+      category: category ?? null,
+    },
+    featureIds: features.map((feature) => feature.id),
+    features: features.map((feature) => ({
+      id: feature.id,
+      category: feature.category,
+      maturity: feature.status,
+      platforms: feature.platforms,
+      apiSymbols: feature.apiSymbols,
+      limitations: feature.limitations,
+      docsUrl: `https://murasaki.ichi10.com${feature.docsSlug}`,
+    })),
+  }
+}
+
 function decodePath(path) {
   if (!path) return []
   if (path.startsWith('/')) return path.slice(1).split('/').map((part) => part.replaceAll('~1', '/').replaceAll('~0', '~'))
@@ -138,6 +167,36 @@ export async function listRecipes({ locale = 'en' } = {}) {
   }
 }
 
+export async function listUiComponents({ locale = 'en', query } = {}) {
+  const { docs } = await loadKnowledge()
+  const queryTokens = query ? tokens(query) : []
+  const components = docs.documents
+    .filter((document) => document.locale === locale && document.slug.startsWith('components/'))
+    .filter((document) => {
+      if (queryTokens.length === 0) return true
+      const haystack = `${document.title} ${document.description} ${document.content}`
+        .toLocaleLowerCase()
+        .normalize('NFKC')
+      return queryTokens.every((token) => haystack.includes(token))
+    })
+    .map((document) => ({
+      id: document.slug.slice('components/'.length),
+      title: document.title,
+      description: document.description,
+      url: document.url,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title, locale))
+
+  return {
+    package: '@murasakijs/ui',
+    locale,
+    query: query ?? null,
+    count: components.length,
+    componentIds: components.map((component) => component.id),
+    components,
+  }
+}
+
 export async function getRecipe({ id, locale = 'en' }) {
   const { docs, recipes } = await loadKnowledge()
   const recipe = recipes.recipes.find((candidate) => candidate.id === id)
@@ -150,9 +209,27 @@ export async function getRecipe({ id, locale = 'en' }) {
 
 export async function checkCompatibility({ features, platform }) {
   const { capabilities } = await loadKnowledge()
+  const availableFeatureIds = capabilities.features.map((feature) => feature.id)
   const results = features.map((id) => {
     const feature = capabilities.features.find((candidate) => candidate.id === id)
-    if (!feature) return { id, verdict: 'unknown', reason: 'Feature ID is not present in the canonical capability manifest.' }
+    if (!feature) {
+      const inputTokens = new Set(tokens(id).flatMap((token) => token.split(/[-_/]+/)).filter(Boolean))
+      const suggestions = capabilities.features
+        .map((candidate) => ({
+          id: candidate.id,
+          score: candidate.id.split('-').reduce((score, token) => score + (inputTokens.has(token) ? 1 : 0), 0),
+        }))
+        .filter((candidate) => candidate.score > 0)
+        .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+        .slice(0, 5)
+        .map((candidate) => candidate.id)
+      return {
+        id,
+        verdict: 'unknown',
+        reason: 'Feature ID is not present in the canonical capability manifest. Call list_capabilities to discover valid IDs.',
+        suggestions,
+      }
+    }
     const platformStatus = feature.platforms[platform]
     const verdict = platformStatus === 'supported' && feature.status === 'stable'
       ? 'supported'
@@ -179,7 +256,7 @@ export async function checkCompatibility({ features, platform }) {
         : results.some((result) => result.verdict === 'limited')
           ? 'limited'
           : 'supported'
-  return { frameworkVersion: capabilities.frameworkVersion, platform, overall, results }
+  return { frameworkVersion: capabilities.frameworkVersion, platform, overall, results, availableFeatureIds }
 }
 
 async function exists(path) {
@@ -209,7 +286,16 @@ export function isSupportedMurasakiNodeVersion(version) {
 export async function doctor({ projectPath = process.cwd() } = {}) {
   const root = resolve(projectPath)
   const rootStat = await exists(root)
-  if (!rootStat?.isDirectory()) return { projectPath: root, overall: 'fail', checks: [{ id: 'project', status: 'fail', message: 'Project directory does not exist.' }] }
+  if (!rootStat?.isDirectory()) {
+    return {
+      projectPath: root,
+      assessment: 'structure-only',
+      runtimeVerified: false,
+      overall: 'fail',
+      checks: [{ id: 'project', status: 'fail', message: 'Project directory does not exist.' }],
+      nextSteps: ['Create or select a Murasaki project before running build and runtime verification.'],
+    }
+  }
 
   const checks = []
   const packagePath = join(root, 'package.json')
@@ -249,5 +335,16 @@ export async function doctor({ projectPath = process.cwd() } = {}) {
     : { id: 'node', status: 'fail', message: `Node ${process.versions.node} is outside murasaki's supported range (>=22.12.0).` })
 
   const overall = checks.some((check) => check.status === 'fail') ? 'fail' : checks.some((check) => check.status === 'warn') ? 'warn' : 'pass'
-  return { projectPath: root, overall, checks }
+  return {
+    projectPath: root,
+    assessment: 'structure-only',
+    runtimeVerified: false,
+    overall,
+    checks,
+    nextSteps: [
+      'Run the project typecheck and production build.',
+      'Launch murasaki dev and exercise real data paths.',
+      'Launch the packaged bundle on every claimed target OS.',
+    ],
+  }
 }

@@ -103,15 +103,16 @@ struct WebContextIdentity {
     incognito: bool,
 }
 
-/// One browser context per application process. The Application/launcher owns
-/// this handle and every Webview retains a clone, so the context is dropped
-/// only after the final platform WebView. Wry deliberately ignores this
-/// context for incognito WebViews, so private sessions are not promised to be
-/// shared between windows.
+/// One browser context per native window, grouped under a single application
+/// identity. Per-window contexts are a security boundary: a Service Worker,
+/// SharedWorker, cookie, or other browser-profile state belonging to a less
+/// trusted secondary window must not observe the primary window's authenticated
+/// backend requests. The Application/launcher owns this collection and every
+/// Webview retains a clone, so a context is dropped only after its WebView.
 #[derive(Default)]
 pub(crate) struct ProcessWebContext {
     identity: Option<WebContextIdentity>,
-    context: Option<WebContext>,
+    contexts: HashMap<String, WebContext>,
 }
 
 pub(crate) type SharedWebContext = Rc<RefCell<ProcessWebContext>>;
@@ -121,6 +122,7 @@ impl ProcessWebContext {
         &mut self,
         app_id: Option<&str>,
         incognito: bool,
+        label: &str,
     ) -> std::result::Result<&mut WebContext, String> {
         let identity = WebContextIdentity {
             app_id: app_id.map(str::to_string),
@@ -135,15 +137,20 @@ impl ProcessWebContext {
             }
         } else {
             self.identity = Some(identity);
-            self.context = Some(WebContext::new(if incognito {
-                None
-            } else {
-                webview2_data_dir(app_id)
-            }));
         }
-        self.context
-            .as_mut()
-            .ok_or_else(|| "application WebContext is unavailable".to_string())
+        if !self.contexts.contains_key(label) {
+            self.contexts.insert(
+                label.to_string(),
+                WebContext::new(if incognito {
+                    None
+                } else {
+                    persistent_webview_data_dir(app_id, label)
+                }),
+            );
+        }
+        self.contexts
+            .get_mut(label)
+            .ok_or_else(|| "window WebContext is unavailable".to_string())
     }
 }
 
@@ -431,6 +438,7 @@ struct NativeCallContext<'a> {
     capabilities: &'a [String],
     capability_policy: &'a CapabilityPolicy,
     app_id: Option<&'a str>,
+    is_packaged: bool,
     current_label: &'a str,
     windows: &'a SharedWindowRegistry,
     wake: &'a dyn Fn(),
@@ -524,18 +532,24 @@ pub struct Webview {
     _window: SharedWindow,
 }
 
-/// A writable directory for WebView2's user-data folder, or `None` to accept
-/// wry's default.
+/// A writable, app-and-window-scoped browser data directory, or `None` on
+/// platforms where Murasaki uses the engine's native data-store API.
 ///
 /// On Windows, wry lets WebView2 default its user-data folder to a location
 /// next to the host executable. For `murasaki dev`/prod that host is `node.exe`
 /// — commonly `C:\Program Files\nodejs\`, which isn't writable — so WebView2
 /// aborts environment creation with `E_ACCESSDENIED` (0x80070005). Pin it under
-/// `%LOCALAPPDATA%` instead. macOS/Linux keep the default (`None`).
+/// `%LOCALAPPDATA%` instead. On Linux an unspecified WebKitGTK data manager is
+/// process-global and may reuse the default profile, so pin it under
+/// `$XDG_DATA_HOME` (or `~/.local/share`) for secondary windows as well. The
+/// Linux primary intentionally keeps `None`: releases through 0.54 used
+/// WebKitGTK's default persistent profile, so moving `main` would make existing
+/// localStorage/IndexedDB/cookies appear deleted after an upgrade. macOS uses
+/// WKWebsiteDataStore identifiers for secondary windows and keeps `None` here.
 ///
 /// Uses `cfg!(..)` rather than `#[cfg]` so the whole function type-checks on
 /// every host (the Windows branch is dead code off-Windows, but still compiled).
-fn webview2_data_dir(app_id: Option<&str>) -> Option<std::path::PathBuf> {
+fn persistent_webview_data_dir(app_id: Option<&str>, label: &str) -> Option<std::path::PathBuf> {
     if cfg!(target_os = "windows") {
         let base = std::env::var_os("LOCALAPPDATA")?;
         // Never share browser state between unrelated Murasaki apps. Besides
@@ -545,16 +559,81 @@ fn webview2_data_dir(app_id: Option<&str>) -> Option<std::path::PathBuf> {
             .filter(|value| !value.is_empty())
             .map(sanitize_profile_name)
             .unwrap_or_else(|| "default".to_string());
-        let dir = std::path::PathBuf::from(base)
-            .join("murasaki")
-            .join(profile)
-            .join("WebView2");
-        // Best-effort: WebView2 creates missing dirs itself, but only one level.
+        let dir =
+            scoped_webview_data_dir(std::path::PathBuf::from(base), &profile, "WebView2", label);
+        let _ = std::fs::create_dir_all(&dir);
+        Some(dir)
+    } else if cfg!(target_os = "linux") {
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|home| std::path::PathBuf::from(home).join(".local").join("share"))
+            })?;
+        let dir = linux_webview_data_dir(base, app_id, label)?;
         let _ = std::fs::create_dir_all(&dir);
         Some(dir)
     } else {
         None
     }
+}
+
+fn linux_webview_data_dir(
+    base: std::path::PathBuf,
+    app_id: Option<&str>,
+    label: &str,
+) -> Option<std::path::PathBuf> {
+    // Compatibility is part of the storage boundary. Before per-window
+    // contexts, WebKitGTK's `main` window used its default profile. Keep that
+    // exact profile and isolate only secondary windows in explicit app-scoped
+    // directories.
+    if label == "main" {
+        return None;
+    }
+    let profile = app_id
+        .filter(|value| !value.is_empty())
+        .map(sanitize_profile_name)
+        .unwrap_or_else(|| "default".to_string());
+    Some(scoped_webview_data_dir(base, &profile, "WebKitGTK", label))
+}
+
+fn scoped_webview_data_dir(
+    base: std::path::PathBuf,
+    profile: &str,
+    engine: &str,
+    label: &str,
+) -> std::path::PathBuf {
+    let mut dir = base.join("murasaki").join(profile).join(engine);
+    // Preserve the established primary layout while isolating every secondary
+    // window under a collision-resistant subdirectory.
+    if label != "main" {
+        dir = dir.join("windows").join(sanitize_profile_name(label));
+    }
+    dir
+}
+
+#[cfg(target_os = "macos")]
+fn webview_profile_identifier(app_id: Option<&str>, label: &str) -> [u8; 16] {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"murasaki-webview-profile-v1\0");
+    hasher.update(app_id.unwrap_or_default().as_bytes());
+    hasher.update(b"\0");
+    hasher.update(label.as_bytes());
+    let digest = hasher.finalize();
+    let mut identifier = [0_u8; 16];
+    identifier.copy_from_slice(&digest[..16]);
+    identifier
+}
+
+#[cfg(target_os = "macos")]
+fn macos_supports_persistent_window_profiles() -> bool {
+    use objc2_foundation::NSProcessInfo;
+    NSProcessInfo::processInfo()
+        .operatingSystemVersion()
+        .majorVersion
+        >= 14
 }
 
 fn sanitize_profile_name(value: &str) -> String {
@@ -793,6 +872,8 @@ fn permission_for_native_method(method: &str) -> Option<&'static str> {
     match method {
         "app.quit" => Some("app:quit"),
         "app.isElevated" => Some("app:isElevated"),
+        "autostart.status" => Some("autostart:read"),
+        "autostart.enable" | "autostart.disable" => Some("autostart:write"),
         "dialog.openFile" => Some("dialog:openFile"),
         "dialog.openDirectory" => Some("dialog:openDirectory"),
         "dialog.saveFile" => Some("dialog:saveFile"),
@@ -877,10 +958,12 @@ impl Webview {
             windows,
             web_context,
             wake,
+            false,
             true,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_unregistered(
         window: SharedWindow,
         opts: WebviewOptions,
@@ -889,6 +972,7 @@ impl Webview {
         windows: SharedWindowRegistry,
         web_context: SharedWebContext,
         wake: Box<dyn Fn() + 'static>,
+        is_packaged: bool,
     ) -> Result<Self> {
         Self::new_internal(
             window,
@@ -898,6 +982,7 @@ impl Webview {
             windows,
             web_context,
             wake,
+            is_packaged,
             false,
         )
     }
@@ -911,6 +996,7 @@ impl Webview {
         windows: SharedWindowRegistry,
         web_context: SharedWebContext,
         wake: Box<dyn Fn() + 'static>,
+        is_packaged: bool,
         attach_to_registry: bool,
     ) -> Result<Self> {
         let network = validate_webview_network(&opts)
@@ -952,7 +1038,7 @@ impl Webview {
 
         let mut web_context_borrow = web_context.borrow_mut();
         let process_context = web_context_borrow
-            .context_for(opts.app_id.as_deref(), network.incognito)
+            .context_for(opts.app_id.as_deref(), network.incognito, &label)
             .map_err(|error| Error::new(Status::InvalidArg, error))?;
         let mut builder = WebViewBuilder::new_with_web_context(process_context)
             .with_devtools(opts.devtools.unwrap_or(cfg!(debug_assertions)))
@@ -963,6 +1049,22 @@ impl Webview {
             // `WebviewOptions::hotkeys_zoom`'s doc comment. Config-owned, not
             // capability-gated, so it's applied unconditionally.
             .with_hotkeys_zoom(opts.hotkeys_zoom.unwrap_or(false));
+        #[cfg(target_os = "macos")]
+        if label != "main" && !network.incognito {
+            use wry::WebViewBuilderExtDarwin;
+            if macos_supports_persistent_window_profiles() {
+                builder = builder.with_data_store_identifier(webview_profile_identifier(
+                    opts.app_id.as_deref(),
+                    &label,
+                ));
+            } else {
+                // Custom persistent WKWebsiteDataStore identifiers require
+                // macOS 14. On supported macOS 11-13, use a distinct
+                // non-persistent store for each secondary instead of silently
+                // sharing the primary's Service Worker authority.
+                builder = builder.with_incognito(true);
+            }
+        }
         if let Some(user_agent) = network.user_agent {
             builder = builder.with_user_agent(user_agent);
         }
@@ -1038,6 +1140,7 @@ impl Webview {
         let ipc_capability_policy = capability_policy.clone();
         let ipc_capabilities = capabilities.clone();
         let ipc_app_id = opts.app_id.clone();
+        let ipc_is_packaged = is_packaged;
         let ipc_label = label.clone();
         let ipc_windows = windows.clone();
         let ipc_tray_slot = tray_slot.clone();
@@ -1121,6 +1224,7 @@ impl Webview {
                             capabilities: &ipc_capabilities,
                             capability_policy: &ipc_capability_policy,
                             app_id: ipc_app_id.as_deref(),
+                            is_packaged: ipc_is_packaged,
                             current_label: &ipc_label,
                             windows: &ipc_windows,
                             wake: ipc_wake.as_ref(),
@@ -1441,13 +1545,10 @@ fn handle_drag_drop_event(
     dispatch_custom_event(webview_slot, name, detail);
 }
 
-/// The murasaki runtime session auth cookie — see
-/// `packages/murasaki/src/vite-plugin/runtime-security.ts`'s `RUNTIME_COOKIE`
-/// and `assets/prod-server.mjs`'s identically-named constant. Invisible and
-/// immutable through `webview.getCookies`/`setCookie`/`deleteCookie` (see the
-/// cookie handlers in `handle_native_call` below), so a compromised renderer
-/// holding `webview:readCookies`/`webview:writeCookies` can never read or
-/// forge the app's own privileged session.
+/// A legacy runtime-cookie name kept reserved as defense in depth. Current
+/// runtime authentication uses per-window HMAC authority, not cookies. Keep
+/// the old name invisible and immutable so an application cookie cannot be
+/// confused with runtime state during upgrades or mixed-version launches.
 const PROTECTED_SESSION_COOKIE_NAME: &str = "murasaki_runtime";
 
 const MAX_COOKIES_RESULT: usize = 1000;
@@ -1483,10 +1584,52 @@ fn is_valid_cookie_value(value: &str) -> bool {
 
 fn parse_cookie_url(url: &str) -> std::result::Result<url::Url, String> {
     let parsed = url::Url::parse(url).map_err(|_| "url must be an absolute URL".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("url must be an http or https URL".to_string());
+    if !matches!(parsed.scheme(), "http" | "https")
+        || parsed.host_str().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("url must be a credential-free http or https URL with a host".to_string());
     }
     Ok(parsed)
+}
+
+fn validate_cookie_domain(
+    url: &url::Url,
+    requested: Option<&str>,
+) -> std::result::Result<String, String> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| "url must include a host".to_string())?;
+    if let Some(requested) = requested {
+        let normalized = requested.trim_start_matches('.');
+        if normalized.is_empty() || !normalized.eq_ignore_ascii_case(host) {
+            return Err(
+                "cookie domain must exactly match the URL host; parent-domain cookies are not exposed to renderer code"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(host.to_string())
+}
+
+fn cookie_scope_url(url: &url::Url, path: &str) -> std::result::Result<url::Url, String> {
+    if !path.starts_with('/')
+        || path.len() > 2_048
+        || path
+            .bytes()
+            .any(|byte| byte < 0x20 || byte == 0x7f || byte == b';')
+    {
+        return Err(
+            "cookie path must start with '/', contain no controls or ';', and be at most 2048 UTF-8 bytes"
+                .to_string(),
+        );
+    }
+    let mut scoped = url.clone();
+    scoped.set_path(path);
+    scoped.set_query(None);
+    scoped.set_fragment(None);
+    Ok(scoped)
 }
 
 fn truncate_utf8(value: &str, max_bytes: usize) -> String {
@@ -1588,6 +1731,7 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         capabilities,
         capability_policy,
         app_id,
+        is_packaged,
         current_label,
         windows,
         wake,
@@ -1748,6 +1892,18 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             Ok(serde_json::Value::Null)
         }
         "app.isElevated" => Ok(serde_json::Value::Bool(crate::elevation::is_elevated())),
+        "autostart.status" => {
+            let app_id = app_id.ok_or_else(|| "autostart requires a packaged appId".to_string())?;
+            crate::autostart::status(app_id, is_packaged).map(serde_json::Value::from)
+        }
+        "autostart.enable" => {
+            let app_id = app_id.ok_or_else(|| "autostart requires a packaged appId".to_string())?;
+            crate::autostart::enable(app_id, is_packaged).map(|_| serde_json::Value::Null)
+        }
+        "autostart.disable" => {
+            let app_id = app_id.ok_or_else(|| "autostart requires a packaged appId".to_string())?;
+            crate::autostart::disable(app_id, is_packaged).map(|_| serde_json::Value::Null)
+        }
         "dialog.openFile" => {
             let opts = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             crate::dialog::open_file_dialog(Some(opts))
@@ -1835,7 +1991,18 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                         .to_string(),
                 );
             }
-            crate::shell::shell_show_item_in_folder(args.target)
+            let resolved =
+                crate::shell::resolve_entry_parent_target(&args.target, "shell.showItemInFolder")?;
+            if !capability_policy.allows(
+                "shell:showItemInFolder",
+                CapabilityResource::Path(&resolved),
+            ) {
+                return Err(
+                    "shell.showItemInFolder resolved target is outside its capability scope"
+                        .to_string(),
+                );
+            }
+            crate::shell::shell_show_item_in_folder(resolved)
                 .map(|_| serde_json::Value::Null)
                 .map_err(|e| e.to_string())
         }
@@ -1846,7 +2013,14 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                     "shell.trashItem requires an allowed absolute non-traversing path".to_string(),
                 );
             }
-            crate::shell::shell_trash_item(&args.path).map(|_| serde_json::Value::Null)
+            let resolved =
+                crate::shell::resolve_entry_parent_target(&args.path, "shell.trashItem")?;
+            if !capability_policy.allows("shell:trashItem", CapabilityResource::Path(&resolved)) {
+                return Err(
+                    "shell.trashItem resolved target is outside its capability scope".to_string(),
+                );
+            }
+            crate::shell::shell_trash_item(&resolved).map(|_| serde_json::Value::Null)
         }
         "shell.openPath" => {
             let args: PathArg = serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
@@ -1855,26 +2029,51 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                     "shell.openPath requires an allowed absolute non-traversing path".to_string(),
                 );
             }
-            crate::shell::shell_open_path(&args.path).map(|_| serde_json::Value::Null)
+            let resolved = crate::shell::resolve_open_path_target(&args.path)?;
+            if !capability_policy.allows("shell:openPath", CapabilityResource::Path(&resolved)) {
+                return Err(
+                    "shell.openPath resolved target is outside its capability scope".to_string(),
+                );
+            }
+            crate::shell::shell_open_path(&resolved).map(|_| serde_json::Value::Null)
         }
         "shell.runElevated" => {
             let args: RunElevatedArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             if !capability_policy.allows(
                 "shell:runElevated",
-                CapabilityResource::Path(&args.executable),
+                CapabilityResource::Execution {
+                    executable: &args.executable,
+                    args: &args.args,
+                },
             ) {
                 return Err(
-                    "shell.runElevated requires an allowed absolute non-traversing executable path"
+                    "shell.runElevated requires an allowed executable and exact argument list"
                         .to_string(),
                 );
             }
-            crate::elevation::shell_run_elevated(&args.executable, &args.args)
+            let resolved = crate::elevation::resolve_elevated_executable(&args.executable)?;
+            if !capability_policy.allows(
+                "shell:runElevated",
+                CapabilityResource::Execution {
+                    executable: &resolved,
+                    args: &args.args,
+                },
+            ) {
+                return Err(
+                    "shell.runElevated resolved executable is outside its capability scope"
+                        .to_string(),
+                );
+            }
+            crate::elevation::shell_run_elevated(&resolved, &args.args)
                 .map(|_| serde_json::Value::Null)
         }
         "secureStorage.get" => {
             let args: SecureStorageKeyArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("secureStorage:get", CapabilityResource::Key(&args.key)) {
+                return Err("secureStorage.get key is outside its capability scope".to_string());
+            }
             let app_id = app_id.ok_or_else(|| {
                 "secure storage requires a non-empty config.appId namespace".to_string()
             })?;
@@ -1884,6 +2083,9 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         "secureStorage.set" => {
             let args: SecureStorageSetArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("secureStorage:set", CapabilityResource::Key(&args.key)) {
+                return Err("secureStorage.set key is outside its capability scope".to_string());
+            }
             let app_id = app_id.ok_or_else(|| {
                 "secure storage requires a non-empty config.appId namespace".to_string()
             })?;
@@ -1893,6 +2095,10 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
         "secureStorage.delete" => {
             let args: SecureStorageKeyArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
+            if !capability_policy.allows("secureStorage:delete", CapabilityResource::Key(&args.key))
+            {
+                return Err("secureStorage.delete key is outside its capability scope".to_string());
+            }
             let app_id = app_id.ok_or_else(|| {
                 "secure storage requires a non-empty config.appId namespace".to_string()
             })?;
@@ -2249,6 +2455,18 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             let args: WebviewGetCookiesArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             let url = args.url.as_deref().map(parse_cookie_url).transpose()?;
+            match &url {
+                Some(url)
+                    if !capability_policy
+                        .allows("webview:readCookies", CapabilityResource::Url(url)) =>
+                {
+                    return Err("webview.getCookies URL is outside its capability scope".to_string())
+                }
+                None if !capability_policy.allows_without_resource("webview:readCookies") => {
+                    return Err("scoped webview.getCookies requires an explicit URL".to_string())
+                }
+                _ => {}
+            }
             let webview_ref = webview_slot.borrow();
             let webview = webview_ref
                 .as_ref()
@@ -2270,9 +2488,7 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             let args: WebviewSetCookieArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             if is_protected_cookie_name(&args.name) {
-                return Err(
-                    "cannot modify the reserved murasaki runtime session cookie".to_string()
-                );
+                return Err("cannot modify the reserved murasaki runtime cookie".to_string());
             }
             if !is_valid_cookie_name(&args.name) {
                 return Err(
@@ -2285,12 +2501,14 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 ));
             }
             let parsed_url = parse_cookie_url(&args.url)?;
-            let domain = args
-                .domain
-                .clone()
-                .or_else(|| parsed_url.host_str().map(str::to_string))
-                .ok_or_else(|| "url must include a host".to_string())?;
             let path = args.path.clone().unwrap_or_else(|| "/".to_string());
+            let domain = validate_cookie_domain(&parsed_url, args.domain.as_deref())?;
+            let scope_url = cookie_scope_url(&parsed_url, &path)?;
+            if !capability_policy
+                .allows("webview:writeCookies", CapabilityResource::Url(&scope_url))
+            {
+                return Err("webview.setCookie URL is outside its capability scope".to_string());
+            }
             let cookie = build_writable_cookie(
                 args.name,
                 args.value,
@@ -2311,9 +2529,7 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
             let args: WebviewDeleteCookieArg =
                 serde_json::from_value(payload.args).map_err(|e| e.to_string())?;
             if is_protected_cookie_name(&args.name) {
-                return Err(
-                    "cannot modify the reserved murasaki runtime session cookie".to_string()
-                );
+                return Err("cannot modify the reserved murasaki runtime cookie".to_string());
             }
             if !is_valid_cookie_name(&args.name) {
                 return Err(
@@ -2321,6 +2537,12 @@ fn handle_native_call(context: NativeCallContext<'_>, payload: NativeCallPayload
                 );
             }
             let parsed_url = parse_cookie_url(&args.url)?;
+            let scope_url = cookie_scope_url(&parsed_url, "/")?;
+            if !capability_policy
+                .allows("webview:writeCookies", CapabilityResource::Url(&scope_url))
+            {
+                return Err("webview.deleteCookie URL is outside its capability scope".to_string());
+            }
             let domain = parsed_url
                 .host_str()
                 .map(str::to_string)
@@ -3268,15 +3490,17 @@ fn mime_for(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        app_menu_is_allowed, context_menu_is_allowed, download_event_url_is_eventable,
-        drag_drop_event_payload, ipc_body_is_allowed, ipc_origin_is_trusted,
-        is_protected_cookie_name, is_valid_cookie_name, is_valid_cookie_value,
-        is_valid_zoom_factor, max_native_call_body_bytes, native_call_body_is_allowed,
-        native_method_is_allowed, navigation_policy, parse_cookie_url, prepare_tray_menu_items,
-        resolve_max_size_bound, sanitize_profile_name, should_dispatch_dragover, truncate_utf8,
+        app_menu_is_allowed, context_menu_is_allowed, cookie_scope_url,
+        download_event_url_is_eventable, drag_drop_event_payload, ipc_body_is_allowed,
+        ipc_origin_is_trusted, is_protected_cookie_name, is_valid_cookie_name,
+        is_valid_cookie_value, is_valid_zoom_factor, linux_webview_data_dir,
+        max_native_call_body_bytes, native_call_body_is_allowed, native_method_is_allowed,
+        navigation_policy, parse_cookie_url, prepare_tray_menu_items, resolve_max_size_bound,
+        sanitize_profile_name, scoped_webview_data_dir, should_dispatch_dragover, truncate_utf8,
         valid_proxy_host, validate_app_menu_payload, validate_context_menu_payload,
-        validate_webview_network, wry_proxy, AppMenuPayload, ContextMenuPayload, NavigationPolicy,
-        ValidatedProxyProtocol, DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
+        validate_cookie_domain, validate_webview_network, wry_proxy, AppMenuPayload,
+        ContextMenuPayload, NavigationPolicy, ValidatedProxyProtocol,
+        DEFAULT_MAX_METHOD_BODY_BYTES, MAX_CLIPBOARD_WRITE_HTML_BODY_BYTES,
         MAX_CLIPBOARD_WRITE_IMAGE_BODY_BYTES, MAX_IPC_PREPARSE_BODY_BYTES, TRAY_MENU_ID_PREFIX,
     };
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -3291,6 +3515,9 @@ mod tests {
         time::{Duration, Instant},
     };
     use wry::DragDropEvent;
+
+    #[cfg(target_os = "macos")]
+    use super::{webview_profile_identifier, ProcessWebContext};
 
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
@@ -3495,6 +3722,9 @@ mod tests {
             ("shell.openPath", "shell:openPath"),
             ("shell.runElevated", "shell:runElevated"),
             ("app.isElevated", "app:isElevated"),
+            ("autostart.status", "autostart:read"),
+            ("autostart.enable", "autostart:write"),
+            ("autostart.disable", "autostart:write"),
         ] {
             assert!(!native_method_is_allowed(method, &[]));
             assert!(native_method_is_allowed(method, &[permission.to_string()]));
@@ -3825,6 +4055,71 @@ mod tests {
     }
 
     #[test]
+    fn persistent_webview_directories_are_isolated_by_app_and_window() {
+        let base = std::path::PathBuf::from("/profiles");
+        let app = sanitize_profile_name("com.example.app");
+        let other_app = sanitize_profile_name("com.example.other");
+        let main = scoped_webview_data_dir(base.clone(), &app, "WebKitGTK", "main");
+        let settings = scoped_webview_data_dir(base.clone(), &app, "WebKitGTK", "settings");
+        let other = scoped_webview_data_dir(base, &other_app, "WebKitGTK", "main");
+        assert_eq!(
+            main,
+            std::path::Path::new("/profiles/murasaki")
+                .join(&app)
+                .join("WebKitGTK")
+        );
+        assert!(settings.starts_with(&main));
+        assert_ne!(settings, main);
+        assert_ne!(other, main);
+    }
+
+    #[test]
+    fn linux_primary_keeps_the_historical_default_profile() {
+        let base = std::path::PathBuf::from("/profiles");
+        assert_eq!(
+            linux_webview_data_dir(base.clone(), Some("com.example.app"), "main"),
+            None
+        );
+        let settings = linux_webview_data_dir(base, Some("com.example.app"), "settings")
+            .expect("secondary profile");
+        assert!(settings.ends_with(
+            std::path::Path::new("WebKitGTK")
+                .join("windows")
+                .join(sanitize_profile_name("settings"))
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn window_profiles_are_stable_and_isolated_by_label() {
+        let main = webview_profile_identifier(Some("com.example.app"), "main");
+        assert_eq!(
+            main,
+            webview_profile_identifier(Some("com.example.app"), "main")
+        );
+        assert_ne!(
+            main,
+            webview_profile_identifier(Some("com.example.app"), "settings")
+        );
+        assert_ne!(
+            main,
+            webview_profile_identifier(Some("com.example.other"), "main")
+        );
+
+        let mut contexts = ProcessWebContext::default();
+        contexts
+            .context_for(Some("com.example.app"), false, "main")
+            .unwrap();
+        contexts
+            .context_for(Some("com.example.app"), false, "settings")
+            .unwrap();
+        assert_eq!(contexts.contexts.len(), 2);
+        assert!(contexts
+            .context_for(Some("com.example.other"), false, "main")
+            .is_err());
+    }
+
+    #[test]
     fn webview_network_options_are_bounded_and_parsed() {
         let options = WebviewOptions {
             user_agent: Some("Murasaki/1.0 (Desktop)".to_string()),
@@ -3994,7 +4289,7 @@ mod tests {
     }
 
     #[test]
-    fn the_murasaki_runtime_session_cookie_is_protected_case_insensitively() {
+    fn the_legacy_murasaki_runtime_cookie_name_is_reserved_case_insensitively() {
         assert!(is_protected_cookie_name("murasaki_runtime"));
         assert!(is_protected_cookie_name("MURASAKI_RUNTIME"));
         assert!(is_protected_cookie_name("Murasaki_Runtime"));
@@ -4009,6 +4304,24 @@ mod tests {
         assert!(parse_cookie_url("ftp://example.com/").is_err());
         assert!(parse_cookie_url("not a url").is_err());
         assert!(parse_cookie_url("javascript:alert(1)").is_err());
+        assert!(parse_cookie_url("https://user:secret@example.com/").is_err());
+        assert!(parse_cookie_url("https://").is_err());
+    }
+
+    #[test]
+    fn cookie_domain_and_path_cannot_escape_the_scoped_url() {
+        let parsed = parse_cookie_url("https://app.example.com/account").unwrap();
+        assert_eq!(
+            validate_cookie_domain(&parsed, Some(".APP.example.com")).unwrap(),
+            "app.example.com"
+        );
+        assert!(validate_cookie_domain(&parsed, Some("example.com")).is_err());
+        assert!(validate_cookie_domain(&parsed, Some("other.example.com")).is_err());
+
+        let scoped = cookie_scope_url(&parsed, "/settings/profile").unwrap();
+        assert_eq!(scoped.as_str(), "https://app.example.com/settings/profile");
+        assert!(cookie_scope_url(&parsed, "relative").is_err());
+        assert!(cookie_scope_url(&parsed, "/bad;path").is_err());
     }
 
     #[test]

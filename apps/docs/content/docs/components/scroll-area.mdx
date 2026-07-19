@@ -1,0 +1,20 @@
+---
+title: Scroll Area
+description: Adds consistently styled scrollbars without changing native scrolling.
+---
+
+## Usage
+
+```tsx
+import { ScrollArea } from '@murasakijs/ui'
+
+<ScrollArea className="h-72 w-80 rounded-md border">
+  <div className="p-4">Long content…</div>
+</ScrollArea>
+```
+
+Set an explicit height or maximum height so overflow can occur. The viewport
+keeps native wheel, trackpad, touch, and keyboard scrolling. `ScrollArea` adds a
+vertical bar automatically. Add `<ScrollBar orientation="horizontal" />` as a
+child when horizontal scrolling is part of the design; avoid two-dimensional
+scroll regions when a responsive layout can remove the overflow.

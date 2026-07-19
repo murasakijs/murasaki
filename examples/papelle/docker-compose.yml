@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: papelle
+      POSTGRES_USER: papelle
+      POSTGRES_PASSWORD: papelle-local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U papelle -d papelle"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - papelle-postgres:/var/lib/postgresql/data
+
+  sync:
+    build: ./server
+    environment:
+      DATABASE_URL: postgres://papelle:papelle-local@postgres:5432/papelle
+      HOST: 0.0.0.0
+      PORT: 4100
+      PAPELLE_ROOM_TOKEN: ${PAPELLE_ROOM_TOKEN:?copy .env.example to .env and set PAPELLE_ROOM_TOKEN}
+    ports:
+      - "127.0.0.1:4100:4100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  papelle-postgres:

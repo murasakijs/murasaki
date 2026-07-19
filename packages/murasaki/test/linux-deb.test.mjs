@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,13 +9,32 @@ import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 
 import { readArArchive, readUstarTar, writeArArchive, writeUstarTar } from '../dist/cli/deb.js'
-import { debControlFile, debMd5sumsFile, sanitizeDebName } from '../dist/cli/installer.js'
+import installer, { debControlFile, debMd5sumsFile, sanitizeDebName } from '../dist/cli/installer.js'
 
 async function withTempDir(t) {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-linux-deb-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   return root
 }
+
+test('an explicit Linux .deb --sign request fails before producing an unsigned package', async (t) => {
+  const root = await withTempDir(t)
+  await writeFile(
+    join(root, 'murasaki.config.mjs'),
+    "export default { appId: 'dev.test.signing', productName: 'SigningFixture' }\n",
+  )
+  const previous = process.cwd()
+  process.chdir(root)
+  try {
+    await assert.rejects(
+      installer(['--target', 'linux-x64', '--sign']),
+      /Linux \.deb signing is not implemented.*Refusing to emit an unsigned package/,
+    )
+  } finally {
+    process.chdir(previous)
+  }
+  assert.equal(existsSync(join(root, 'dist')), false)
+})
 
 // ── sanitizeDebName ─────────────────────────────────────────────────────
 

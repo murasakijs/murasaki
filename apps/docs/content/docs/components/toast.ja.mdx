@@ -1,0 +1,33 @@
+---
+title: Toast
+description: 操作を妨げずに、短い状態メッセージを表示します。
+---
+
+## セットアップ
+
+アプリのルート付近に `Toaster` を一つ配置します。
+
+```tsx
+import { Toaster } from '@murasakijs/ui'
+
+export function App() {
+  return <><Routes /><Toaster /></>
+}
+```
+
+クライアントコンポーネントからメッセージを作成します。
+
+```tsx
+import { Button, toast } from '@murasakijs/ui'
+
+<Button onClick={() => toast({
+  title: '保存しました',
+  description: 'オフラインでも利用できます。',
+})}>保存</Button>
+```
+
+Toast は短い完了通知に使います。後から確認する必要がある情報や、先へ進む前に対応が必要な
+内容には使わないでください。入力を直す必要があるエラーは、該当する項目の近くへ表示します。
+独自の表示を組む場合は `ToastProvider`、`Toast`、`ToastAction`、`ToastClose`、
+`ToastTitle`、`ToastDescription`、`ToastViewport` を利用できます。`useToast()` は
+`toast()` と同じストアを返します。

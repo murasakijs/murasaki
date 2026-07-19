@@ -1,0 +1,75 @@
+services:
+  orglia:
+    build: .
+    ports:
+      - "4173:4173"
+    environment:
+      ORGLIA_BOOTSTRAP_PASSWORD_FILE: /run/secrets/orglia_bootstrap_password
+      ORGLIA_PUBLIC_ORIGIN: ${ORGLIA_PUBLIC_ORIGIN:-}
+      SQLITE_PATH: /app/data/orglia.db
+    secrets:
+      - orglia_bootstrap_password
+    volumes:
+      - orglia-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:4173/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  orglia-postgres:
+    profiles: ["postgres"]
+    build: .
+    ports:
+      - "4174:4173"
+    environment:
+      ORGLIA_BOOTSTRAP_PASSWORD_FILE: /run/secrets/orglia_bootstrap_password
+      ORGLIA_PUBLIC_ORIGIN: ${ORGLIA_PUBLIC_ORIGIN:-}
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: orglia
+      PGUSER: orglia
+      PGPASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - orglia_bootstrap_password
+      - postgres_password
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: orglia
+      POSTGRES_USER: orglia
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - orglia-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orglia"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+secrets:
+  orglia_bootstrap_password:
+    environment: ORGLIA_BOOTSTRAP_PASSWORD
+  postgres_password:
+    environment: ORGLIA_POSTGRES_PASSWORD
+
+volumes:
+  orglia-data:
+  orglia-postgres:

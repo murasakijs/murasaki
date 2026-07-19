@@ -1,0 +1,28 @@
+---
+title: Field
+description: Composes a label, control, help text, and validation error.
+---
+
+## Usage
+
+```tsx
+import { Field, FieldDescription, FieldError, FieldLabel, Input } from '@murasakijs/ui'
+
+<Field data-invalid={Boolean(error)}>
+  <FieldLabel htmlFor="email">Email</FieldLabel>
+  <Input id="email" aria-describedby="email-help email-error" aria-invalid={Boolean(error)} />
+  <FieldDescription id="email-help">Used for account recovery.</FieldDescription>
+  <FieldError id="email-error">{error}</FieldError>
+</Field>
+```
+
+`Field` supplies layout and invalid-state styling; it does not infer IDs or ARIA
+relationships. Connect labels, descriptions, and errors explicitly as shown.
+`FieldError` renders only when it has children. Use `FieldGroup` to space several
+fields and `orientation="horizontal"` for compact desktop forms.
+
+## API
+
+| Prop | Type | Default |
+| --- | --- | --- |
+| `orientation` | `"vertical" \| "horizontal"` | `"vertical"` |

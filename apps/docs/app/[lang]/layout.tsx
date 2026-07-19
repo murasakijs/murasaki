@@ -34,7 +34,7 @@ export async function generateMetadata(
   // template as "Quick start | Murasaki".
   const pageTitle =
     lang === "ja"
-      ? "Murasaki | デスクトップアプリのための Next.js DX"
+      ? "Murasaki | Next.js の開発体験をデスクトップへ"
       : "Murasaki | Next.js DX for desktop apps";
   const socialTitle = pageTitle;
 

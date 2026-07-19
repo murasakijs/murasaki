@@ -108,21 +108,21 @@ test('webview.deleteCookie sends the exact payload shape', async (t) => {
   assert.deepEqual(calls[0].args, { url: 'https://example.com/', name: 'session_id' })
 })
 
-// The native host rejects any set/delete targeting the murasaki runtime's own
-// reserved session-auth cookie (case-insensitively) — see
+// The native host keeps the legacy murasaki runtime cookie name reserved
+// (case-insensitively) as defense in depth — see
 // `crates/native/src/webview.rs`'s `PROTECTED_SESSION_COOKIE_NAME` and its
 // Rust unit tests. This asserts the TS wrapper faithfully surfaces that
 // rejection rather than swallowing or reshaping it.
-test('webview.setCookie/deleteCookie surface the reserved-session-cookie rejection', async (t) => {
+test('webview.setCookie/deleteCookie surface the reserved-runtime-cookie rejection', async (t) => {
   const rejection = {
     ok: false,
-    error: { message: 'cannot modify the reserved murasaki runtime session cookie' },
+    error: { message: 'cannot modify the reserved murasaki runtime cookie' },
   }
   const { fakeWindow: setWindow } = fakeBridge(() => rejection)
   globalThis.window = setWindow
   await assert.rejects(
     () => webview.setCookie({ url: 'https://example.com/', name: 'murasaki_runtime', value: 'x' }),
-    /reserved murasaki runtime session cookie/,
+    /reserved murasaki runtime cookie/,
   )
 
   const { fakeWindow: deleteWindow } = fakeBridge(() => rejection)
@@ -130,6 +130,6 @@ test('webview.setCookie/deleteCookie surface the reserved-session-cookie rejecti
   t.after(() => { delete globalThis.window })
   await assert.rejects(
     () => webview.deleteCookie({ url: 'https://example.com/', name: 'MURASAKI_RUNTIME' }),
-    /reserved murasaki runtime session cookie/,
+    /reserved murasaki runtime cookie/,
   )
 })

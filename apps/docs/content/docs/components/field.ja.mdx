@@ -1,0 +1,28 @@
+---
+title: Field
+description: ラベル、入力、補足、入力エラーを一つのフォーム項目として構成します。
+---
+
+## 使い方
+
+```tsx
+import { Field, FieldDescription, FieldError, FieldLabel, Input } from '@murasakijs/ui'
+
+<Field data-invalid={Boolean(error)}>
+  <FieldLabel htmlFor="email">メールアドレス</FieldLabel>
+  <Input id="email" aria-describedby="email-help email-error" aria-invalid={Boolean(error)} />
+  <FieldDescription id="email-help">アカウントの復旧に使用します。</FieldDescription>
+  <FieldError id="email-error">{error}</FieldError>
+</Field>
+```
+
+`Field` が提供するのはレイアウトとエラー時のスタイルです。ID や ARIA の関連付けは自動では
+行いません。例のようにラベル、補足、エラーを入力要素へ明示的に関連付けてください。
+`FieldError` は子要素があるときだけ表示されます。複数項目の間隔には `FieldGroup`、
+横並びのフォームには `orientation="horizontal"` を使えます。
+
+## API
+
+| Prop | 型 | 既定値 |
+| --- | --- | --- |
+| `orientation` | `"vertical" \| "horizontal"` | `"vertical"` |

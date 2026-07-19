@@ -212,12 +212,13 @@ hideされます。`main` のcloseはアプリのquit requestであり、`before
 そこでcancel可能です。その後、上限付き `shutdown()` を経てnative hostが終了します。
 window別close hookはまだありません。
 
-## Session共有
+## Session分離
 
-通常windowはapplication WebContextを共有するため、起動時作成・動的作成・再作成した
-window間でcookieとWeb Storageを共有します。routeとcapability policyはwindowごとに
-独立しています。`webview.incognito: true`ではWryがshared WebContextを無視するため、
-複数incognito window間のsession共有はplatform依存であり保証されません。
+WebContext / profileはwindow labelごとに分離するため、起動時作成・動的作成したlabel間で
+cookie、Web Storage、Service Worker、SharedWorkerを共有しません。同じlabelをprocess内で
+再作成した場合はcontextを再利用します。Windowsではpersistent labelごとのprofileをapp専用の
+WebView2 data directory以下へ保存します。`webview.incognito: true`では全labelが
+non-persistent contextを使用します。
 
 ## Window別の最小権限
 
@@ -236,10 +237,11 @@ export default defineConfig({
       { permission: 'window:open', allow: { windows: ['settings'] } },
       { permission: 'window:manage', allow: { windows: ['settings'] } },
     ],
+    backendCapabilities: ['api:GET:/api/account'],
   },
   windows: {
-    settings: { route: '/settings', capabilities: [] },
-    importer: { route: '/import', capabilities: ['dialog:openFile'] },
+    settings: { route: '/settings', capabilities: [], backendCapabilities: ['api:GET:/api/settings'] },
+    importer: { route: '/import', capabilities: ['dialog:openFile'], backendCapabilities: [] },
   },
 })
 ```
@@ -251,11 +253,18 @@ structured `window:open` / `window:manage` grantでは完全一致するtarget l
 実行可能なuser-authored contentを読み込まず、広い操作のapp-level intentも検証して
 ください。
 
-これはnative commandの境界であり、renderer全体のsandboxではありません。宣言windowは
-現在、同じapplication originと認証済みlocal Node sessionを共有するため、Server Actions、
-`'use main'`、API route、updater HTTP endpointはこのlistでは分離されません。それらの
-handler内でもapplication操作を認証・認可し、deny-all windowをuntrusted executable
-content向けのsandboxとして扱わないでください。
+native allowlistとbackend allowlistは別の境界を保護します。各native windowはlabel-bound
+HMAC identityを受け取り、`backendCapabilities`がServer Action、`'use main'`、API route、
+updater route、event、diagnosticsを制限します。secondary windowは既定でbackend grantを
+持ちません。routeは同じHTTP originを使いますが、browser profileはwindowごとに分離される
+ため、あるwindowのService Worker、SharedWorker、cookie、storageが別windowのbackend
+authorityを引き継ぐことはありません。primaryは従来のapplication profileを維持します。
+secondary profileはWindows/LinuxとmacOS 14+で永続化され、custom persistent WebKit storeを
+使えないmacOS 11–13ではwindow別のnon-persistent storeへfail closedします。ただし完全な
+renderer sandboxではなく、XSSは自身のwindowにgrantされたresourceをすべて利用できます。
+handler内でもuser/session/object単位の認証・認可を行い、untrusted executable contentを
+application windowへ読み込まないでください。複数windowで共有する永続stateはbrowser
+storageではなくMain/API handlerを経由させてください。
 
 ## 次へ
 

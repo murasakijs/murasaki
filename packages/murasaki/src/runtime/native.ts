@@ -77,6 +77,7 @@ export interface WebviewOptions {
   transparent?: boolean
   /** Stable application id used to isolate the native WebView profile. */
   appId?: string
+  /** Internal host marker. Persistent OS integrations reject dev WebViews. */
   /** Complete custom User-Agent value for the native WebView. */
   userAgent?: string
   /** Use a non-persistent private session. */
@@ -139,6 +140,7 @@ interface NativeModule {
     run(): void
     exit(): void
     onQuit(cb: () => void): void
+    /** Prefer a macOS `.app` bundle path so the OS resolves the AppIcon mask. */
     setIconPath(path: string): void
   }
   showNotification: (opts: {

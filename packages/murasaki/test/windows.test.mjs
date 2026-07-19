@@ -17,6 +17,7 @@ test('resolves a backwards-compatible primary window', () => {
     visible: true,
     createOnLaunch: true,
     capabilities: ['clipboard:readText'],
+    backendCapabilities: [],
   }])
 })
 
@@ -60,6 +61,7 @@ test('resolves primary overrides and deny-all hidden secondary windows', () => {
       primary: true,
       visible: true,
       createOnLaunch: true,
+      backendCapabilities: [],
     },
     {
       route: '/settings',
@@ -69,6 +71,7 @@ test('resolves primary overrides and deny-all hidden secondary windows', () => {
       visible: false,
       createOnLaunch: true,
       capabilities: [],
+      backendCapabilities: [],
     },
     {
       route: '/palette#commands',
@@ -77,6 +80,7 @@ test('resolves primary overrides and deny-all hidden secondary windows', () => {
       label: 'palette',
       primary: false,
       createOnLaunch: true,
+      backendCapabilities: [],
     },
   ])
 })
@@ -125,6 +129,54 @@ test('validates and de-duplicates every configured capability list', () => {
   }
 })
 
+test('backend capabilities are explicit, de-duplicated, and secondary windows default deny-all', () => {
+  const windows = resolveWindowDeclarations({
+    backendCapabilities: ['main:src/backend.ts#read', 'api:GET:/api/items/*', 'api:GET:/api/items/*'],
+    windows: {
+      preview: {},
+      monitor: { backendCapabilities: ['events:monitor.*'] },
+    },
+  })
+  assert.deepEqual(windows[0].backendCapabilities, [
+    'main:src/backend.ts#read',
+    'api:GET:/api/items/*',
+  ])
+  assert.deepEqual(windows[1].backendCapabilities, [])
+  assert.deepEqual(windows[2].backendCapabilities, ['events:monitor.*'])
+
+  for (const invalid of [
+    ['*'],
+    ['main:src/backend.ts'],
+    ['api:get:/api/items'],
+    ['api:GET:https://example.com/'],
+    ['main:*#read'],
+    ['native:*'],
+  ]) {
+    assert.throws(
+      () => resolveWindowDeclarations({ backendCapabilities: invalid }),
+      /invalid backendCapabilities grant/,
+    )
+  }
+})
+
+test('rejects Windows per-machine self-update before producing an incompatible installer', () => {
+  assert.throws(
+    () => defineConfig({
+      appId: 'dev.test.per-machine-update',
+      productName: 'Per Machine Update',
+      updater: true,
+      installer: { windows: { installMode: 'perMachine' } },
+    }),
+    /updater is incompatible.*perMachine/,
+  )
+  assert.doesNotThrow(() => defineConfig({
+    appId: 'dev.test.managed-msi',
+    productName: 'Managed MSI',
+    updater: false,
+    installer: { windows: { installMode: 'perMachine' } },
+  }))
+})
+
 test('validates structured native capability scopes and preserves them in metadata', () => {
   const capabilities = [
     {
@@ -146,7 +198,7 @@ test('validates structured native capability scopes and preserves them in metada
     },
     {
       permission: 'shell:runElevated',
-      allow: { paths: ['/tmp/murasaki/**'] },
+      allow: { executions: [{ executable: '/tmp/murasaki/updater', args: ['--apply'] }] },
     },
     {
       permission: 'window:manage',
@@ -155,6 +207,14 @@ test('validates structured native capability scopes and preserves them in metada
     {
       permission: 'systemPermission:request',
       allow: { permissions: ['camera'] },
+    },
+    {
+      permission: 'secureStorage:get',
+      allow: { keys: ['account:*', 'theme'] },
+    },
+    {
+      permission: 'webview:writeCookies',
+      allow: { urls: ['https://app.example.com/**'] },
     },
   ]
   const resolved = resolveWindowDeclarations({ capabilities })
@@ -189,14 +249,20 @@ test('rejects ambiguous or unsafe structured capability scopes', () => {
     [{ permission: 'shell:openPath', allow: { urls: ['https://example.com/**'] } }],
     [{ permission: 'shell:runElevated', allow: { urls: ['https://example.com/**'] } }],
     [{ permission: 'shell:runElevated', allow: { paths: ['relative/**'] } }],
+    [{ permission: 'shell:runElevated', allow: { executions: [{ executable: 'relative/tool.exe' }] } }],
+    [{ permission: 'shell:runElevated', allow: { executions: [{ executable: '/tmp/tool', args: ['bad\narg'] }] } }],
+    [{ permission: 'shell:runElevated', allow: { executions: [{ executable: '/tmp/tool', extra: true }] } }],
     [{ permission: 'window:manage', allow: { windows: ['bad label'] } }],
     [{ permission: 'systemPermission:request', allow: { permissions: ['bogusPermission'] } }],
     [{ permission: 'secureStorage:get', allow: { paths: ['/tmp/**'] } }],
+    [{ permission: 'secureStorage:get', allow: { keys: ['bad*middle'] } }],
+    [{ permission: 'webview:readCookies', allow: { paths: ['/tmp/**'] } }],
+    [{ permission: 'webview:readCookies', allow: { urls: ['mailto:security@example.com'] } }],
     ['window:manage', { permission: 'window:manage', allow: { windows: ['settings'] } }],
   ]) {
     assert.throws(
       () => resolveWindowDeclarations({ capabilities }),
-      /not valid|must define|must not be empty|trailing \/\*\*|cannot contain a query|credential-free|absolute path|invalid window label|unknown system permission|more than one grant/,
+      /not valid|must define|must not be empty|1-256|at most 64|unknown field|trailing \/\*\*|trailing \*|cannot contain a query|credential-free|only http and https|absolute path|invalid window label|unknown system permission|more than one grant/,
     )
   }
 })
@@ -346,7 +412,7 @@ test('passes frameless/titlebar/max-size/fullscreen fields through dev and bundl
   let meta
   try {
     const { createDevWindowTemplates } = await import('../dist/cli/dev.js')
-    ;[devTemplate] = createDevWindowTemplates(config, process.cwd(), 'http://127.0.0.1:5178/')
+    ;[devTemplate] = createDevWindowTemplates(config, process.cwd(), 'http://127.0.0.1:5178/', 'a'.repeat(64))
     meta = JSON.parse(metaJson(config, config.productName, null, process.cwd()))
   } finally {
     console.warn = originalWarn
@@ -431,7 +497,7 @@ test('keeps dormant declarations in dev and bundle metadata', async () => {
   )
 
   const { createDevWindowTemplates } = await import('../dist/cli/dev.js')
-  const devTemplates = createDevWindowTemplates(config, process.cwd(), 'http://127.0.0.1:5178/')
+  const devTemplates = createDevWindowTemplates(config, process.cwd(), 'http://127.0.0.1:5178/', 'a'.repeat(64))
   assert.deepEqual(
     devTemplates.map(({ window, createOnLaunch }) => ({ label: window.label, createOnLaunch })),
     [
@@ -530,6 +596,7 @@ test('bundle metadata contains resolved windows and keeps primary flat fields', 
       width: 1024,
       capabilities: ['clipboard:readText'],
       capabilityPolicy: JSON.stringify({ version: 1, grants: ['clipboard:readText'] }),
+      backendCapabilities: [],
     },
     {
       label: 'settings',
@@ -540,6 +607,7 @@ test('bundle metadata contains resolved windows and keeps primary flat fields', 
       height: 640,
       capabilities: [],
       capabilityPolicy: JSON.stringify({ version: 1, grants: [] }),
+      backendCapabilities: [],
     },
   ])
 })
