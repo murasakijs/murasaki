@@ -41,7 +41,7 @@ fs2 = "0.4"
 tao = { version = "0.35", features = ["rwh_06"] }
 wry = { version = "0.55", features = ["devtools", "mac-proxy"] }
 muda = "0.19"
-rfd = "0.15"
+rfd = "0.17"
 tray-icon = "0.24"
 arboard = "3"
 notify-rust = "4"
