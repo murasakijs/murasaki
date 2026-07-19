@@ -1,6 +1,6 @@
 {
   "name": "create-murasaki",
-  "version": "0.55.3",
+  "version": "0.55.4",
   "description": "Scaffolder for Murasaki apps.",
   "license": "MIT",
   "repository": {
@@ -16,8 +16,5 @@
     "index.mjs",
     "templates"
   ],
-  "dependencies": {
-    "@inquirer/prompts": "^7.0.0",
-    "nanospinner": "^1.0.0"
-  }
+  "dependencies": {}
 }

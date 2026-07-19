@@ -4,6 +4,13 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
+## 0.55.4 — zero-dependency scaffolder
+
+- Removes the scaffolder's runtime dependency tree in favor of Node's built-in prompt and spinner
+  primitives, preventing package-store link failures before the CLI can start.
+- Guarantees the unattended `--yes --skip-install` path runs directly from the packed tarball with
+  no installed dependencies.
+
 ## 0.55.3 — reusable dependency verification
 
 - Lets the release gate reuse an already-published workspace package only when its published git

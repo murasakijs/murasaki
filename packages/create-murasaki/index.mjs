@@ -2,13 +2,12 @@
 // create-murasaki — Scaffolder for Murasaki apps.
 // Usage: npm create murasaki@latest my-app
 
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
-import { input, select } from '@inquirer/prompts'
-import { createSpinner } from 'nanospinner'
+import { existsSync } from 'node:fs'
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import { createInterface } from 'node:readline/promises'
+import { fileURLToPath } from 'node:url'
 
 // ── ANSI truecolor (Oomurasaki palette) ────────────────────────────────
 const BRIGHT = '\x1b[38;2;168;85;247m'
@@ -125,7 +124,7 @@ function installArgs(pm) {
   return ['install']
 }
 
-// Async on purpose: the caller shows a nanospinner while this runs, and the
+// Async on purpose: the caller shows a spinner while this runs, and the
 // spinner animates on a timer. A synchronous spawnSync would block the event
 // loop for the whole install, freezing the spinner on its first frame — so we
 // spawn and await instead, keeping the loop free to render frames.
@@ -172,29 +171,72 @@ function initGit(targetDir) {
   log(c(GREEN) + '  ✔' + c(RESET) + ' Git initialized')
 }
 
+async function ask(message, defaultValue) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    const answer = await rl.question(`${c(BRIGHT)}?${c(RESET)} ${message} (${defaultValue}) `)
+    return answer.trim() || defaultValue
+  } finally {
+    rl.close()
+  }
+}
+
 async function promptForName() {
-  return input({
-    message: 'Project name',
-    default: 'my-app',
-    validate(v) {
-      const t = (v || '').trim()
-      if (!t) return 'Please enter a project name.'
-      if (!isValidPackageName(t)) return 'Use lowercase letters, digits, dot, hyphen, underscore. Start with a letter or digit.'
-      return true
-    },
-  })
+  while (true) {
+    const name = await ask('Project name', 'my-app')
+    if (isValidPackageName(name)) return name
+    log(
+      c(RED) +
+        '  Use lowercase letters, digits, dot, hyphen, underscore. Start with a letter or digit.' +
+        c(RESET),
+    )
+  }
 }
 
 async function promptForLinter() {
-  return select({
-    message: 'Which linter would you like to use?',
-    default: 'biome',
-    choices: [
-      { value: 'biome', name: 'Biome', description: 'fast, single tool, recommended' },
-      { value: 'eslint', name: 'ESLint', description: 'classic, huge ecosystem' },
-      { value: 'none', name: 'None', description: 'add your own later' },
-    ],
-  })
+  log(`${c(BRIGHT)}?${c(RESET)} Which linter would you like to use?`)
+  log(`  1) ${c(BOLD)}Biome${c(RESET)} — fast, single tool, recommended`)
+  log(`  2) ${c(BOLD)}ESLint${c(RESET)} — classic, huge ecosystem`)
+  log(`  3) ${c(BOLD)}None${c(RESET)} — add your own later`)
+  const choices = new Map([
+    ['1', 'biome'],
+    ['biome', 'biome'],
+    ['2', 'eslint'],
+    ['eslint', 'eslint'],
+    ['3', 'none'],
+    ['none', 'none'],
+  ])
+  while (true) {
+    const answer = (await ask('Choose 1–3', '1')).toLowerCase()
+    const linter = choices.get(answer)
+    if (linter) return linter
+    log(c(RED) + '  Enter 1, 2, 3, biome, eslint, or none.' + c(RESET))
+  }
+}
+
+function startSpinner(text) {
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+  let frame = 0
+  let timer
+  if (process.stdout.isTTY) {
+    process.stdout.write(`${frames[frame]} ${text}`)
+    timer = setInterval(() => {
+      frame = (frame + 1) % frames.length
+      process.stdout.write(`\r${frames[frame]} ${text}`)
+    }, 80)
+  } else {
+    log(`  ${text}...`)
+  }
+
+  const finish = (symbol, message) => {
+    if (timer) clearInterval(timer)
+    if (process.stdout.isTTY) process.stdout.write(`\r\x1b[2K${symbol} ${message}\n`)
+    else log(`${symbol} ${message}`)
+  }
+  return {
+    success: ({ text: message }) => finish('✔', message),
+    error: ({ text: message }) => finish('✖', message),
+  }
 }
 
 async function applyBiome(targetDir) {
@@ -374,7 +416,7 @@ async function main() {
   const pm = detectPackageManager()
   let installed = false
   if (!skipInstall) {
-    const spinner = createSpinner('Installing dependencies').start()
+    const spinner = startSpinner('Installing dependencies')
     const res = await runInstall(target, pm)
     if (res.status === 0) {
       spinner.success({ text: 'Dependencies installed' })
