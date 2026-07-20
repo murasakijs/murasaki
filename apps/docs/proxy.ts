@@ -1,6 +1,5 @@
-import { createI18nMiddleware } from "fumadocs-core/i18n/middleware";
 import { isMarkdownPreferred, rewritePath } from "fumadocs-core/negotiation";
-import type { NextFetchEvent, NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { i18n } from "@/lib/i18n";
 import { docsContentRoute, docsRoute } from "@/lib/shared";
@@ -14,13 +13,58 @@ const { rewrite: rewriteSuffix } = rewritePath(
   `${docsContentRoute}{/*path}/content.md`,
 );
 
-// Locale routing (see lib/i18n.ts's `hideLocale: "default-locale"`): rewrites
-// unprefixed paths (`/`, `/docs/...`) internally to the default language
-// (`/en/...`) so English ships with no URL prefix, and redirects an explicit
-// `/en/...` down to its unprefixed form; `/ja/...` is left untouched.
-const i18nMiddleware = createI18nMiddleware(i18n);
+// Next can run proxy again for an internal rewrite in development/standalone
+// mode. Mark that request so `/docs -> /en/docs` is not immediately treated as
+// a user-visible `/en/docs` request and redirected back to `/docs`.
+const INTERNAL_LOCALE_REWRITE = "x-murasaki-internal-locale-rewrite";
 
-export default function proxy(request: NextRequest, event: NextFetchEvent) {
+function handleLocale(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // English docs have their own unprefixed App Router route. Serving it
+  // directly keeps Next's server and browser pathname identical; rewriting
+  // `/docs` to `/en/docs` makes pathname-driven Fumadocs UI hydrate with a
+  // different active sidebar item and TOC label (React error #418).
+  if (pathname === docsRoute || pathname.startsWith(`${docsRoute}/`)) {
+    return NextResponse.next();
+  }
+
+  const [, firstSegment] = pathname.split("/");
+  const pathLocale = i18n.languages.find(
+    (language) => language === firstSegment,
+  );
+
+  if (request.headers.get(INTERNAL_LOCALE_REWRITE) === "1") {
+    return NextResponse.next();
+  }
+
+  if (!pathLocale) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/${i18n.defaultLanguage}${pathname}`.replaceAll(
+      /\/+/g,
+      "/",
+    );
+    const headers = new Headers(request.headers);
+    headers.set(INTERNAL_LOCALE_REWRITE, "1");
+
+    return NextResponse.rewrite(url, { request: { headers } });
+  }
+
+  if (pathLocale === i18n.defaultLanguage) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/${pathname.split("/").slice(2).join("/")}`.replaceAll(
+      /\/+/g,
+      "/",
+    );
+    const response = NextResponse.redirect(url);
+    response.cookies.set("FD_LOCALE", pathLocale, { path: "/" });
+    return response;
+  }
+
+  return NextResponse.next();
+}
+
+export default function proxy(request: NextRequest) {
   // `docsRoute` (`/docs`) is the unprefixed — i.e. default-language — docs
   // path, so this negotiation only needs to run before the i18n rewrite
   // above ever touches the request, not after: it matches the same paths
@@ -38,7 +82,7 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
     }
   }
 
-  return i18nMiddleware(request, event);
+  return handleLocale(request);
 }
 
 export const config = {
