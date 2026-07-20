@@ -133,13 +133,29 @@ test('config schema supports dot paths and rejects unknown paths', async () => {
 
 })
 
-test('compatibility never upgrades planned features to supported', async () => {
-  // linux-distribution graduated to "partial" this phase (RFC 0002 L2a) —
-  // code-signing is still genuinely "planned" on Linux, so it now carries
-  // this test's "never upgrades planned to supported" scenario instead.
+test('compatibility maps partial features to a limited verdict, never over-upgrading', async () => {
+  // Milestone: after the Linux parity phase, NO feature is "planned" on any
+  // platform (nor is any feature.status "planned"). code-signing on Linux
+  // graduated planned -> partial once GPG detached signing landed, so the
+  // manifest no longer has a live "planned" fixture. This guard fails loudly
+  // if a future feature reintroduces a "planned" value, forcing a conscious
+  // update to the planned->verdict expectations here.
+  const manifest = JSON.parse(
+    await readFile(new URL('../../murasaki/capabilities.json', import.meta.url), 'utf8'),
+  )
+  const planned = manifest.features.flatMap((feature) =>
+    [feature.status, ...Object.values(feature.platforms)]
+      .filter((value) => value === 'planned')
+      .map(() => feature.id),
+  )
+  assert.deepEqual(planned, [], `expected no "planned" values, found on: ${planned.join(', ')}`)
+
+  // code-signing on Linux is partial (GPG detached .sig for AppImage/deb),
+  // so its verdict is "limited", never "supported".
   const result = await checkCompatibility({ features: ['code-signing', 'native-utilities'], platform: 'linux' })
-  assert.equal(result.overall, 'planned')
-  assert.equal(result.results[0].verdict, 'planned')
+  assert.equal(result.overall, 'limited')
+  assert.equal(result.results[0].platformStatus, 'partial')
+  assert.equal(result.results[0].verdict, 'limited')
   assert.equal(result.results[1].verdict, 'limited')
 
   const macos = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'macos' })
