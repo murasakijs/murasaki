@@ -1932,7 +1932,7 @@ dependencies = [
  "base64",
  "block2",
  "fs2",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "global-hotkey",
  "gtk",
  "hmac",
