@@ -429,7 +429,7 @@
     {
       "id": "content-security-policy",
       "category": "security",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -437,7 +437,7 @@
       },
       "limitations": [
         "Murasaki injects environment-specific default CSP into framework and user-owned HTML, supports a complete security.csp override or explicit opt-out, and normalizes a user-owned CSP tag to the beginning of head.",
-        "The policy is delivered by meta tag, so header-only directives such as frame-ancestors, sandbox, and reporting are not enforced; CSP does not sanitize HTML or authorize Node functions, and inline styles remain enabled for compatibility."
+        "The resolved policy is delivered by both the Content-Security-Policy response header (dev middleware and the packaged production server) and a meta tag from a single resolver, so header-only directives such as frame-ancestors 'none' are enforced; the meta tag carries the shareable subset with header-only directives (frame-ancestors, sandbox, report-uri, report-to) stripped. security.csp: false opts out of both delivery paths. CSP does not sanitize HTML or authorize Node functions, reporting endpoints are not configured by default, and inline styles remain enabled for compatibility."
       ],
       "apiSymbols": [
         "MurasakiConfig.security",
@@ -445,6 +445,8 @@
       ],
       "testEvidence": [
         "packages/murasaki/test/csp.test.mjs",
+        "packages/murasaki/test/runtime-security.test.mjs",
+        "packages/murasaki/test/prod-server-http.test.mjs",
         "packages/murasaki/src/vite-plugin/shell.ts"
       ],
       "docsSlug": "/docs/building/security"
@@ -647,22 +649,21 @@
     {
       "id": "webview-session-network",
       "category": "native-integration",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
-        "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
+        "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS, Windows, and Linux WebViews.",
         "Browser profiles are isolated by native window. The primary retains the historical app profile; secondary profiles persist on Windows/Linux and macOS 14+, while macOS 11-13 uses isolated non-persistent stores. Cross-window cookie/storage/worker sharing is intentionally unsupported; apps should share durable state through Main/API handlers.",
         "macOS proxy configuration requires macOS 14+ and fails startup on older releases; Windows custom User-Agent requires WebView2 86.0.616.0+ and private mode requires 101.0.1210.39+, with older runtimes ignoring those settings. Per-window overrides and authenticated proxies are not supported.",
         "webview:download confines sanitized, collision-resolved downloads to a configured (or OS default) directory and reports start/completion events; there is no reliable id correlating a completed event with the started event it followed, and macOS never reports a completed download's path (an upstream WebKit limitation).",
         "webview:dragDrop reports file drag-and-drop events (dragover throttled to 20/sec) without ever blocking the OS default, so file inputs keep working regardless of the grant. webview.initScripts injects trusted, config-owned JavaScript before page load and is not capability-gated.",
         "webview:zoom bounds page zoom to 0.25-5.0 and is available on macOS 11+/iOS 14+ only; webview.hotkeysZoom (config, not a capability) enables OS zoom hotkeys/gestures on Windows only. webview:print opens the platform print dialog; there is no find-in-page API because Wry exposes none.",
         "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete and support structured URL scopes. Scoped reads require an explicit URL; writes are checked against the effective cookie path, and domain overrides must exactly match the URL host. The reserved legacy murasaki_runtime name is filtered out of reads and rejected from writes/deletes as defense in depth, although runtime authentication no longer relies on a cookie. deleteCookie matches by name, the URL host as domain, and the default / path only.",
-        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead.",
-        "On Linux, webview.deleteCookie() resolves but the deletion is not reliably reflected by a subsequent webview.readCookies() (a WebKitGTK/libsoup cookie-manager nuance); cookie set/read and the custom User-Agent work. Verified on packaged Linux."
+        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead."
       ],
       "apiSymbols": [
         "MurasakiConfig.webview",
@@ -680,7 +681,8 @@
         "packages/murasaki/test/webview-events.test.mjs",
         "crates/native/src/webview.rs",
         "crates/native/src/download.rs",
-        "crates/native/src/launcher.rs"
+        "crates/native/src/launcher.rs",
+        "examples/linux-parity-probe/src/lib/probeOrchestrator.ts"
       ],
       "docsSlug": "/docs/guides/webview"
     },
