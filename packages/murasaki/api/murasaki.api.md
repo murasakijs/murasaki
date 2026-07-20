@@ -363,6 +363,8 @@ export type MurasakiBuildTarget = 'darwin-arm64' | 'darwin-x64' | 'win32-x64' | 
 
 // @public
 export interface MurasakiConfig {
+    // Warning: (ae-forgotten-export) The symbol "AboutConfig" needs to be exported by the entry point index.d.ts
+    about?: AboutConfig;
     // (undocumented)
     appId: string;
     authors?: string[];

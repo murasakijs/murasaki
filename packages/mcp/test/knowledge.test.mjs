@@ -25,8 +25,8 @@ test('generated capability knowledge exactly matches the canonical manifest', as
 
   const feature = canonical.features.find((candidate) => candidate.id === 'single-instance-and-deep-links')
   assert.ok(feature)
-  assert.equal(feature.status, 'partial')
-  assert.deepEqual(feature.platforms, { macos: 'supported', windows: 'supported', linux: 'partial' })
+  assert.equal(feature.status, 'stable')
+  assert.deepEqual(feature.platforms, { macos: 'supported', windows: 'supported', linux: 'supported' })
   for (const symbol of [
     'ProtocolConfig',
     'FileAssociationConfig',
@@ -106,13 +106,13 @@ test('API reference preserves canonical maturity and limitations', async () => {
   const result = await getApiReference({ symbol: 'useUpdate' })
   assert.equal(result.features.length, 1)
   assert.equal(result.features[0].id, 'auto-update')
-  assert.equal(result.features[0].maturity, 'partial')
+  assert.equal(result.features[0].maturity, 'stable')
   assert.ok(result.features[0].limitations.length > 0)
 
   const openRequest = await getApiReference({ symbol: 'MainDefinition.openRequested' })
   assert.equal(openRequest.features.length, 1)
   assert.equal(openRequest.features[0].id, 'single-instance-and-deep-links')
-  assert.equal(openRequest.features[0].maturity, 'partial')
+  assert.equal(openRequest.features[0].maturity, 'stable')
 })
 
 test('capabilities can be discovered before compatibility checks', async () => {
@@ -133,13 +133,12 @@ test('config schema supports dot paths and rejects unknown paths', async () => {
 
 })
 
-test('compatibility maps partial features to a limited verdict, never over-upgrading', async () => {
-  // Milestone: after the Linux parity phase, NO feature is "planned" on any
-  // platform (nor is any feature.status "planned"). code-signing on Linux
-  // graduated planned -> partial once GPG detached signing landed, so the
-  // manifest no longer has a live "planned" fixture. This guard fails loudly
-  // if a future feature reintroduces a "planned" value, forcing a conscious
-  // update to the planned->verdict expectations here.
+test('compatibility maps platform maturity to a verdict, never over-upgrading', async () => {
+  // After the stability declaration every feature.status is "stable" and no
+  // feature is "planned" on any platform, so verdicts are now driven purely by
+  // the per-platform status. This guard fails loudly if a future feature
+  // reintroduces a "planned" value, forcing a conscious update to the
+  // planned->verdict expectations here.
   const manifest = JSON.parse(
     await readFile(new URL('../../murasaki/capabilities.json', import.meta.url), 'utf8'),
   )
@@ -150,30 +149,46 @@ test('compatibility maps partial features to a limited verdict, never over-upgra
   )
   assert.deepEqual(planned, [], `expected no "planned" values, found on: ${planned.join(', ')}`)
 
-  // code-signing on Linux is partial (GPG detached .sig for AppImage/deb),
-  // so its verdict is "limited", never "supported".
-  const result = await checkCompatibility({ features: ['code-signing', 'native-utilities'], platform: 'linux' })
-  assert.equal(result.overall, 'limited')
-  assert.equal(result.results[0].platformStatus, 'partial')
-  assert.equal(result.results[0].verdict, 'limited')
-  assert.equal(result.results[1].verdict, 'limited')
+  // A stable feature that is "supported" on the target platform verifies as
+  // "supported"; native-utilities is supported on all three platforms.
+  const supported = await checkCompatibility({ features: ['native-utilities'], platform: 'linux' })
+  assert.equal(supported.overall, 'supported')
+  assert.equal(supported.results[0].platformStatus, 'supported')
+  assert.equal(supported.results[0].verdict, 'supported')
 
-  const macos = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'macos' })
-  assert.equal(macos.overall, 'limited')
-  assert.equal(macos.results[0].platformStatus, 'supported')
+  // A "partial" platform status caps the verdict at "limited" even though the
+  // feature itself is stable. tray-and-global-shortcuts is partial on Linux
+  // (needs an AppIndicator host, and shortcuts need X11/XWayland); mixing it
+  // with a supported feature still drags the overall down to "limited".
+  const partial = await checkCompatibility({
+    features: ['native-utilities', 'tray-and-global-shortcuts'],
+    platform: 'linux',
+  })
+  assert.equal(partial.overall, 'limited')
+  assert.equal(partial.results[0].verdict, 'supported')
+  assert.equal(partial.results[1].platformStatus, 'partial')
+  assert.equal(partial.results[1].verdict, 'limited')
 
-  const windows = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'windows' })
-  assert.equal(windows.overall, 'limited')
-  assert.equal(windows.results[0].platformStatus, 'supported')
+  // An "unsupported" platform status is never upgraded: system-permissions has
+  // no OS equivalent on Linux (unsupported) and is usage-driven on Windows
+  // (partial), so those verdicts are "unsupported" and "limited" respectively.
+  const linuxPerms = await checkCompatibility({ features: ['system-permissions'], platform: 'linux' })
+  assert.equal(linuxPerms.overall, 'unsupported')
+  assert.equal(linuxPerms.results[0].platformStatus, 'unsupported')
+  assert.equal(linuxPerms.results[0].verdict, 'unsupported')
 
-  // Linux graduated from "planned" to "partial" this phase too (cold-start
-  // argv + second-instance forwarding now work) — no longer a "planned"
-  // verdict, but still not "supported" (feature.status is "partial", and no
-  // OS-level association registration exists for a manually-extracted
-  // AppDir the way NSIS/MSI provide on Windows).
+  const windowsPerms = await checkCompatibility({ features: ['system-permissions'], platform: 'windows' })
+  assert.equal(windowsPerms.overall, 'limited')
+  assert.equal(windowsPerms.results[0].platformStatus, 'partial')
+  assert.equal(windowsPerms.results[0].verdict, 'limited')
+
+  // single-instance-and-deep-links graduated to fully supported on Linux this
+  // phase: cold-start argv and second-instance activation forward through the
+  // loopback channel, and .deb desktop-file registration is verified, so it now
+  // verifies as "supported" rather than the earlier "limited".
   const linux = await checkCompatibility({ features: ['single-instance-and-deep-links'], platform: 'linux' })
-  assert.equal(linux.overall, 'limited')
-  assert.equal(linux.results[0].platformStatus, 'partial')
+  assert.equal(linux.overall, 'supported')
+  assert.equal(linux.results[0].platformStatus, 'supported')
 
   const unknown = await checkCompatibility({ features: ['tray'], platform: 'macos' })
   assert.equal(unknown.overall, 'unknown')

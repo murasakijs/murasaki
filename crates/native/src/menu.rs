@@ -21,6 +21,7 @@ use crate::types::MenuItemOptions;
 pub(crate) type SharedMenu = Rc<RefCell<Option<Menu>>>;
 
 pub(crate) mod native_menu_ids {
+    pub(crate) const ABOUT: &str = "murasaki-menu:about";
     pub(crate) const QUIT: &str = "murasaki-menu:quit";
     pub(crate) const CLOSE: &str = "murasaki-menu:close";
     pub(crate) const MINIMIZE: &str = "murasaki-menu:minimize";
@@ -62,6 +63,7 @@ pub(crate) struct AboutInfo<'a> {
     pub copyright: Option<&'a str>,
     pub homepage: Option<&'a str>,
     pub authors: Option<&'a [String]>,
+    pub custom: Option<&'a crate::types::AboutPanelOptions>,
 }
 
 /// Owned counterpart of `AboutInfo` — needed wherever the about-metadata has
@@ -82,6 +84,7 @@ pub(crate) struct AboutInfoOwned {
     pub copyright: Option<String>,
     pub homepage: Option<String>,
     pub authors: Option<Vec<String>>,
+    pub custom: Option<crate::types::AboutPanelOptions>,
 }
 
 #[cfg(target_os = "macos")]
@@ -94,6 +97,7 @@ impl AboutInfoOwned {
             copyright: self.copyright.as_deref(),
             homepage: self.homepage.as_deref(),
             authors: self.authors.as_deref(),
+            custom: self.custom.as_ref(),
         }
     }
 }
@@ -141,14 +145,36 @@ fn build_macos_app_submenu(
         .and_then(|l| l.about.as_deref())
         .map(String::from)
         .unwrap_or_else(|| format!("About {}", info.name));
-    let about_metadata = macos_about_metadata(info);
-
     let app_menu = Submenu::new(info.name, true);
+    if let Some(custom) = info.custom {
+        crate::about::configure(Some(crate::about::AboutPresentation {
+            name: info.name.to_string(),
+            version: info.version.map(String::from),
+            fallback_description: info.description.map(String::from),
+            options: custom.clone(),
+        }));
+        app_menu
+            .append(&MenuItem::with_id(
+                native_menu_ids::ABOUT,
+                &about_label,
+                true,
+                None,
+            ))
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    } else {
+        crate::about::configure(None);
+        let about_metadata = macos_about_metadata(info);
+        app_menu
+            .append(&PredefinedMenuItem::about(
+                Some(&about_label),
+                Some(about_metadata),
+            ))
+            .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
+    }
     let quit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit");
     let quit_accelerator = "CmdOrCtrl+Q".parse::<Accelerator>().ok();
     app_menu
         .append_items(&[
-            &PredefinedMenuItem::about(Some(&about_label), Some(about_metadata)),
             &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::services(labels.and_then(|l| l.services.as_deref())),
             &PredefinedMenuItem::separator(),
@@ -1006,6 +1032,7 @@ mod tests {
             copyright: None,
             homepage: None,
             authors: None,
+            custom: None,
         };
         let metadata = super::macos_about_metadata(&info);
 

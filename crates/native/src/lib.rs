@@ -12,6 +12,8 @@ use napi_derive::napi;
 
 mod types;
 
+#[cfg(target_os = "macos")]
+mod about;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]
 mod application;
 #[cfg(not(any(target_os = "freebsd", target_os = "android")))]

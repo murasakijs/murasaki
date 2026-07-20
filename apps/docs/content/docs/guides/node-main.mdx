@@ -454,7 +454,7 @@ durable queue. Store durable state in Node and expose a `'use main'` snapshot
 function when a subscriber must recover missed values.
 
 <Callout type="warn">
-  `'use main'` is an experimental RPC boundary, not an authorization boundary.
+  `'use main'` is an RPC boundary, not an authorization boundary.
   Treat every argument as untrusted renderer input: validate types, normalize
   filesystem paths, and authorize access to application data inside the Node
   function.

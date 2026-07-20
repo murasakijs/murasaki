@@ -190,6 +190,7 @@ impl Application {
             copyright: None,
             homepage: None,
             authors: None,
+            about: None,
             menu_labels: None,
             decorations: None,
             title_bar_style: None,
@@ -217,6 +218,7 @@ impl Application {
                 copyright: opts.copyright.as_deref(),
                 homepage: opts.homepage.as_deref(),
                 authors: opts.authors.as_deref(),
+                custom: opts.about.as_ref(),
             };
             let menu = build_default_app_menu(&about, opts.menu_labels.as_ref())?;
             menu.init_for_nsapp();
@@ -352,6 +354,7 @@ impl Application {
                 copyright: opts.copyright.as_deref(),
                 homepage: opts.homepage.as_deref(),
                 authors: opts.authors.as_deref(),
+                custom: opts.about.as_ref(),
             };
             let menu = build_default_app_menu(&about, opts.menu_labels.as_ref())?;
             menu.init_for_nsapp();
@@ -410,6 +413,7 @@ impl Application {
                 copyright: opts.copyright.clone(),
                 homepage: opts.homepage.clone(),
                 authors: opts.authors.clone(),
+                custom: opts.about.clone(),
             },
         }
     }

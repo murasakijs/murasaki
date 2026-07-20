@@ -1,9 +1,12 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import {
   authenticateWindowRequest,
   isBackendCapabilityAllowed,
 } from '../runtime/window-auth.js'
+import { resolveHeaderContentSecurityPolicy } from './shell.js'
 
 const PRIVILEGED_PREFIXES = ['/api/', '/__murasaki/']
 const NATIVE_ONLY_PATHS = new Set([
@@ -29,14 +32,62 @@ export function runtimeToken(): string {
   return resolvedRuntimeToken
 }
 
+export interface RuntimeSecurityOptions {
+  /** Same `security.csp` value the app-shell plugin resolves the meta tag from — kept as one resolver (shell.ts's `resolveHeaderContentSecurityPolicy`) so dev's header and meta tag never drift. */
+  csp?: string | false
+}
+
 /** Protect dev loopback endpoints with native-issued, per-window authority. */
-export function runtimeSecurityPlugin(windows: readonly WindowAuthority[]): Plugin {
+export function runtimeSecurityPlugin(
+  windows: readonly WindowAuthority[],
+  options: RuntimeSecurityOptions = {},
+): Plugin {
   const token = runtimeToken()
   const grants = new Map(windows.map((window) => [window.label, window.backendCapabilities]))
   return {
     name: 'murasaki:runtime-security',
     apply: 'serve',
     configureServer(server) {
+      // `server.config.root` is authoritative only once Vite has merged
+      // inline/user/plugin config, which configureServer runs after — so
+      // this path is captured here rather than at plugin construction, even
+      // though the root itself is stable for the life of the dev server.
+      const indexHtmlPath = resolve(server.config.root, 'index.html')
+
+      // When `security.csp` is explicitly configured (a string, or `false`
+      // for the opt-out), the header never depends on index.html — resolve
+      // it once here, with no per-request file IO. `indexHtml` is passed as
+      // `null` because resolveHeaderContentSecurityPolicy only ever reads it
+      // when `configured === undefined`, which isn't this branch.
+      const staticCspHeader = options.csp === undefined
+        ? undefined
+        : resolveHeaderContentSecurityPolicy(options.csp, 'serve', null)
+
+      // When `security.csp` is unconfigured, whether the header is suppressed
+      // depends on whether index.html *currently* declares a user-owned CSP
+      // meta tag (see shell.ts's applyContentSecurityPolicy/
+      // resolveHeaderContentSecurityPolicy) — and index.html can change
+      // mid-session: Vite live-reloads an edited index.html without
+      // restarting the dev server (so configureServer never reruns), and the
+      // meta-tag transform itself (appShellPlugin's transformIndexHtml)
+      // already re-evaluates index.html on every request. This header must
+      // track the file live too, or the two delivery mechanisms drift apart
+      // mid-session until a restart. So read the file fresh on each request
+      // rather than caching a decision: a stat/mtime/size cache key can miss
+      // an equal-length edit that swaps a meta tag in or out within a single
+      // coarse mtime tick, and this branch only runs on the (infrequent) HTML
+      // navigations the gate below allows, where one small read is negligible.
+      const currentCspHeader = (): string | false => {
+        if (staticCspHeader !== undefined) return staticCspHeader
+        let indexHtml: string | null
+        try {
+          indexHtml = readFileSync(indexHtmlPath, 'utf8')
+        } catch {
+          indexHtml = null
+        }
+        return resolveHeaderContentSecurityPolicy(undefined, 'serve', indexHtml)
+      }
+
       server.middlewares.use((req, res, next) => {
         const pathname = new URL(req.url ?? '/', 'http://murasaki.local').pathname
         const privileged = pathname === '/api'
@@ -73,6 +124,10 @@ export function runtimeSecurityPlugin(windows: readonly WindowAuthority[]): Plug
           // per-window native permission callback is available, deny these
           // high-impact Web APIs at the document boundary for every renderer.
           res.setHeader('permissions-policy', DEFAULT_PERMISSIONS_POLICY)
+          // security.csp: false opts out of the header too, not just the meta
+          // tag applyContentSecurityPolicy injects into the served HTML.
+          const cspHeader = currentCspHeader()
+          if (cspHeader !== false) res.setHeader('content-security-policy', cspHeader)
         }
         next()
       })

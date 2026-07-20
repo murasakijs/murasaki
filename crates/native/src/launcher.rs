@@ -215,6 +215,8 @@ pub(crate) mod shared {
         #[serde(default)]
         pub(super) authors: Option<Vec<String>>,
         #[serde(default)]
+        pub(super) about: Option<crate::types::AboutPanelOptions>,
+        #[serde(default)]
         pub(super) locales: Option<Vec<String>>,
         #[serde(default)]
         pub(super) width: Option<i32>,
@@ -3061,6 +3063,7 @@ mod imp_macos {
             copyright: meta.copyright.as_deref(),
             homepage: meta.homepage.as_deref(),
             authors: meta.authors.as_deref(),
+            custom: meta.about.as_ref(),
         };
         let menu = build_default_app_menu(&about, Some(&menu_labels))
             .map_err(|e| format!("build menu: {e}"))?;
@@ -3076,6 +3079,7 @@ mod imp_macos {
             copyright: meta.copyright.clone(),
             homepage: meta.homepage.clone(),
             authors: meta.authors.clone(),
+            custom: meta.about.clone(),
         };
         let app_menu_context = AppMenuContext {
             menu_slot: app_menu_slot.clone(),
@@ -3122,6 +3126,7 @@ mod imp_macos {
                         copyright: meta.copyright.clone(),
                         homepage: meta.homepage.clone(),
                         authors: meta.authors.clone(),
+                        about: meta.about.clone(),
                         menu_labels: Some(menu_labels.clone()),
                     },
                     webview: WebviewOptions {
@@ -4050,6 +4055,7 @@ mod imp_win {
             copyright: meta.copyright.as_deref(),
             homepage: meta.homepage.as_deref(),
             authors: meta.authors.as_deref(),
+            custom: None,
         };
         let menu_bar = build_menu_bar(Some(&about), Some(&menu_labels))
             .map_err(|e| format!("build menu bar: {e}"))?;
@@ -4097,6 +4103,7 @@ mod imp_win {
                         copyright: meta.copyright.clone(),
                         homepage: meta.homepage.clone(),
                         authors: meta.authors.clone(),
+                        about: None,
                         menu_labels: Some(menu_labels.clone()),
                     },
                     webview: WebviewOptions {
@@ -4665,6 +4672,7 @@ mod imp_linux {
             copyright: meta.copyright.as_deref(),
             homepage: meta.homepage.as_deref(),
             authors: meta.authors.as_deref(),
+            custom: None,
         };
         let menu_bar = build_menu_bar(Some(&about), Some(&menu_labels))
             .map_err(|e| format!("build menu bar: {e}"))?;
@@ -4712,6 +4720,7 @@ mod imp_linux {
                         copyright: meta.copyright.clone(),
                         homepage: meta.homepage.clone(),
                         authors: meta.authors.clone(),
+                        about: None,
                         menu_labels: Some(menu_labels.clone()),
                     },
                     webview: WebviewOptions {

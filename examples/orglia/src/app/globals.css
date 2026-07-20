@@ -10,6 +10,8 @@
 	--text: #172033;
 	--muted: #667085;
 	--border: #d8dee8;
+	--field-border: #667085;
+	--field-border-hover: #344054;
 	--blue: #2563eb;
 	--violet: #6d3de8;
 	--orange: #ea580c;
@@ -46,17 +48,32 @@ textarea {
 	color: inherit;
 	font: inherit;
 }
+input,
+select,
+textarea {
+	background-color: var(--surface);
+	border: 1px solid var(--field-border);
+	box-shadow: inset 0 0 0 1px rgb(102 112 133 / 0.08);
+	transition:
+		border-color 0.14s ease,
+		box-shadow 0.14s ease,
+		background-color 0.14s ease;
+}
+input:hover:not(:disabled),
+select:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+	border-color: var(--field-border-hover);
+}
 button,
 select {
 	cursor: pointer;
 }
-button:focus-visible,
-select:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-[tabindex="0"]:focus-visible {
-	outline: 3px solid #60a5fa;
-	outline-offset: 2px;
+input:disabled,
+select:disabled,
+textarea:disabled,
+input[readonly],
+textarea[readonly] {
+	background: #f8fafc;
 }
 button:disabled {
 	cursor: not-allowed;
@@ -369,14 +386,16 @@ h3 {
 	min-height: 34px;
 	padding: 0 8px;
 	background: #fff;
-	border: 1px solid var(--border);
+	border: 1px solid var(--field-border);
 	border-radius: 6px;
 }
-.topbar select {
+.topbar select,
+.topbar select:hover:not(:disabled) {
 	max-width: 175px;
 	height: 30px;
 	background: transparent;
 	border: 0;
+	box-shadow: none;
 	font-size: 11px;
 }
 .avatar {
@@ -1151,7 +1170,7 @@ td > small {
 	min-height: 32px;
 	padding: 0 8px;
 	background: white;
-	border: 1px solid var(--border);
+	border: 1px solid var(--field-border);
 	border-radius: 5px;
 }
 .coverage-bars {
@@ -1219,7 +1238,7 @@ td > small {
 	height: 34px;
 	padding: 0 8px;
 	background: #fff;
-	border: 1px solid var(--border);
+	border: 1px solid var(--field-border);
 	border-radius: 5px;
 }
 .filter-bar > span {
@@ -1391,7 +1410,7 @@ td > small {
 	padding: 7px 9px;
 	color: var(--text);
 	background: #fff;
-	border: 1px solid var(--border);
+	border: 1px solid var(--field-border);
 	border-radius: 5px;
 	font-size: 12px;
 	font-weight: 500;
@@ -1570,6 +1589,16 @@ td > small {
 		width: min(360px, 92vw);
 	}
 }
+
+button:not(:disabled):focus-visible,
+select:not(:disabled):focus-visible,
+input:not(:disabled):focus-visible,
+textarea:not(:disabled):focus-visible,
+[tabindex="0"]:focus-visible {
+	border-color: var(--blue);
+	outline: 3px solid #60a5fa;
+	outline-offset: 2px;
+}
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
@@ -1716,7 +1745,8 @@ td > small {
 .action-comment textarea {
 	width: 100%;
 	padding: 8px;
-	border: 1px solid var(--border);
+	background: #fff;
+	border: 1px solid var(--field-border);
 	border-radius: 5px;
 	resize: vertical;
 }
@@ -1762,7 +1792,7 @@ td > small {
 	min-height: 34px;
 	padding: 0 8px;
 	background: #fff;
-	border: 1px solid var(--border);
+	border: 1px solid var(--field-border);
 	border-radius: 5px;
 }
 .number-input {
@@ -1859,7 +1889,7 @@ td summary {
 .login-card input {
 	min-height: 42px;
 	padding: 8px 10px;
-	border: 1px solid var(--border);
+	border: 1px solid var(--field-border);
 	border-radius: 6px;
 }
 .login-card form .button {
@@ -1883,8 +1913,11 @@ td summary {
 	gap: 5px;
 }
 .login-locale select {
-	background: transparent;
-	border: 0;
+	min-height: 32px;
+	padding: 0 8px;
+	background: #fff;
+	border: 1px solid var(--field-border);
+	border-radius: 5px;
 }
 .app-loading {
 	display: grid;

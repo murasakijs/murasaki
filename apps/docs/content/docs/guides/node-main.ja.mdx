@@ -437,7 +437,7 @@ eventは`'use main'`と同じrich-value wire codecを使い、認証済みapp-lo
 のsnapshot関数も公開してください。
 
 <Callout type="warn">
-  `'use main'` は experimental な RPC 境界であり、認可境界ではありません。すべての
+  `'use main'` は RPC 境界であり、認可境界ではありません。すべての
   引数を信頼できない renderer input として扱い、型検証、filesystem path の正規化、
   app data へのアクセス認可を Node 関数内で実施してください。
 </Callout>

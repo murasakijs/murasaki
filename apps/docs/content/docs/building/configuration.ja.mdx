@@ -38,6 +38,7 @@ export default defineConfig({
 | `copyright` | `string?` | About パネルに表示される著作権表示。 |
 | `homepage` | `string?` | About パネルに表示されるホームページ URL。 |
 | `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
+| `about` | `AboutConfig?` | サイズ、段落、詳細行、外部リンクボタンを設定できるmacOS Aboutパネル — [下記](#about)を参照。 |
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
 | `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したlabelをkeyにしたsecondary window — [下記](#windows)を参照。 |
 | `webview` | `WebviewConfig?` | app-wide User-Agent、private session、unauthenticated proxy設定 — [下記](#webview)を参照。 |
@@ -58,6 +59,50 @@ export default defineConfig({
 | `fileAssociations` | `FileAssociationConfig[]?` | packaged macOS app / Windows installer が登録する document extension — [下記](#fileassociations)を参照。 |
 | `installer` | `object?` | macOS DMG / Windows installer option — [下記](#installer)を参照。 |
 | `sign` | `object?` | macOS Developer ID / Windows Authenticode 署名 — [下記](#sign)を参照。 |
+
+## `about`
+
+`about` を省略するとOS標準のコンパクトなAboutダイアログを維持します。macOSでは、
+宣言した場合だけカスタマイズ可能なネイティブAppKitパネルへ切り替わります。
+Windows / Linuxは現時点では標準のメタデータダイアログを使います。
+
+```ts title="murasaki.config.ts"
+about: {
+  name: 'My App',
+  width: 520,
+  height: 680,
+  paragraphs: [
+    '作業に集中できるデスクトップワークスペース。',
+    'Murasakiで構築されています。',
+  ],
+  paragraphSpacing: 16,
+  details: [
+    { label: 'Build', value: '15212' },
+    {
+      label: 'Commit',
+      value: '332b2aefc',
+      href: 'https://github.com/example/app/commit/332b2aefc',
+    },
+  ],
+  buttons: [
+    { label: 'Docs', href: 'https://docs.example.com' },
+    { label: 'GitHub', href: 'https://github.com/example/app' },
+  ],
+},
+```
+
+| フィールド | 型 | 説明 |
+| --- | --- | --- |
+| `name` | `string?` | パネルの見出し。既定は`productName`。 |
+| `width` | `number?` | 論理ピクセル単位の幅。360〜900、既定480。 |
+| `height` | `number?` | 論理ピクセル単位の高さ。320〜1000。省略時は内容から自動調整。 |
+| `paragraphs` | `string[]?` | 中央揃えの本文段落、最大8件。省略時は`description`。 |
+| `paragraphSpacing` | `number?` | 段落間の余白、0〜48。既定12。 |
+| `details` | `{ label, value, href? }[]?` | label/valueの詳細行、最大12件。Versionを指定しなければ自動追加。 |
+| `buttons` | `{ label, href }[]?` | 下端に並べるネイティブボタン、最大6件。 |
+
+外部リンクはcredentialを含まない絶対`http` / `https` / `mailto` URLに限定されます。
+アイコンはmacOSがinstalled bundleから解決するため、Finder / Dockと同じmask済み表示になります。
 
 ## `window`
 

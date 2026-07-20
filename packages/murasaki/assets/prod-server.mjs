@@ -175,6 +175,16 @@ const handleUpdateRequest = createUpdateRequestHandler(updateEngine)
 // standalone (per the header comment above) without a real meta.json.
 const diagnosticsConfig = meta.diagnostics ?? { crashReports: true, keepReports: 20 }
 
+// Already fully resolved by cli/bundle.ts's metaJson() (via
+// resolveContentSecurityPolicy — the same resolver vite-plugin/shell.ts uses
+// for the meta tag and vite-plugin/runtime-security.ts uses for the dev
+// header), so this process never re-derives the default policy itself:
+// `meta.csp` is either the resolved policy string or `false` (the
+// security.csp: false opt-out). A real bundle always sets this key; a
+// missing key only happens when this file runs standalone without a real
+// meta.json, in which case no Content-Security-Policy header is sent.
+const cspHeader = meta.csp === false ? false : (typeof meta.csp === 'string' ? meta.csp : undefined)
+
 const mainRuntime = new MainRuntime({
   appId,
   productName: meta.productName ?? 'Murasaki',
@@ -947,6 +957,12 @@ async function serveStatic(req, res) {
   // per-window permission callback today, so renderer documents may not use
   // these Web APIs until Murasaki can enforce that boundary natively.
   res.setHeader('permissions-policy', 'camera=(), microphone=(), geolocation=()')
+  // CSP only matters for documents — mirrors the dev middleware's Accept:
+  // text/html gate (src/vite-plugin/runtime-security.ts). Subresources
+  // (JS/CSS/images/etc.) are already covered by the document's policy.
+  if (cspHeader !== false && cspHeader !== undefined && extname(target) === '.html') {
+    res.setHeader('content-security-policy', cspHeader)
+  }
   if (target === join(canonicalClientDir, 'index.html')) {
     res.setHeader('cache-control', 'no-store')
   }
@@ -1010,7 +1026,16 @@ function listenWithFallback(initialPort, maxAttempts) {
 
   const attempt = () => {
     attempts += 1
+    const onListening = () => {
+      server.off('error', onError)
+      listeningPort = server.address().port
+      process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
+    }
     const onError = (error) => {
+      // A failed listen never emits `listening`, so remove this attempt's
+      // one-shot listener before trying another candidate. Leaving it attached
+      // accumulates stale callbacks and eventually triggers MaxListeners.
+      server.off('listening', onListening)
       // Windows reports EACCES, rather than EADDRINUSE, when the deterministic
       // private port falls inside an OS-excluded range (commonly reserved by
       // Hyper-V/WinNAT). On a first launch both conditions mean this candidate
@@ -1029,11 +1054,8 @@ function listenWithFallback(initialPort, maxAttempts) {
     }
 
     server.once('error', onError)
-    server.listen(candidate, '127.0.0.1', () => {
-      server.off('error', onError)
-      listeningPort = server.address().port
-      process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
-    })
+    server.once('listening', onListening)
+    server.listen(candidate, '127.0.0.1')
   }
 
   attempt()
@@ -1043,7 +1065,13 @@ function nextPrivatePort(current) {
   const first = 49_152
   const count = 16_384
   const offset = current >= first && current < first + count ? current - first : 0
-  return first + ((offset + 1) % count)
+  // Windows excluded ranges are commonly contiguous blocks hundreds of ports
+  // wide. Advancing by one can exhaust every bounded first-launch attempt
+  // inside the same reserved block. An odd stride is coprime with the 2^14
+  // private-range size, so retries deterministically spread across the entire
+  // range while still visiting every candidate before repeating.
+  const stride = 521
+  return first + ((offset + stride) % count)
 }
 
 let processShutdown

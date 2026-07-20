@@ -4,6 +4,36 @@
 use napi_derive::napi;
 
 #[napi(object)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutDetailOptions {
+    pub label: String,
+    pub value: String,
+    pub href: Option<String>,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutButtonOptions {
+    pub label: String,
+    pub href: String,
+}
+
+#[napi(object)]
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutPanelOptions {
+    pub name: Option<String>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub paragraphs: Option<Vec<String>>,
+    pub paragraph_spacing: Option<i32>,
+    pub details: Option<Vec<AboutDetailOptions>>,
+    pub buttons: Option<Vec<AboutButtonOptions>>,
+}
+
+#[napi(object)]
 #[derive(Clone)]
 pub struct WindowOptions {
     /// Stable label used by cross-window APIs. `main` is reserved for the
@@ -39,6 +69,8 @@ pub struct WindowOptions {
     pub homepage: Option<String>,
     /// Populates the authors field of the native "About <app>" panel.
     pub authors: Option<Vec<String>>,
+    /// Opts into Murasaki's configurable About panel.
+    pub about: Option<AboutPanelOptions>,
     /// Localized labels for the standard menu bar — macOS's App/Edit/Window
     /// (see `crate::menu::build_default_app_menu`) and Windows's/Linux's
     /// File/Edit/Window (see `crate::menu::build_menu_bar`). Falls back to

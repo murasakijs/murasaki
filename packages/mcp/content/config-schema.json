@@ -360,6 +360,82 @@
         "type": "string"
       }
     },
+    "about": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional configurable native About panel. Currently rendered as a custom AppKit panel on macOS; Windows/Linux retain their standard dialog.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 360,
+          "maximum": 900,
+          "default": 480
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 1000,
+          "description": "Auto-sized from content when omitted."
+        },
+        "paragraphs": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "paragraphSpacing": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 48,
+          "default": 12
+        },
+        "details": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "value": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "href": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 2048,
+                "description": "Credential-free http, https, or mailto URL. Link values use the native macOS link color."
+              }
+            }
+          }
+        },
+        "buttons": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "href"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "href": {
+                "type": "string",
+                "format": "uri",
+                "maxLength": 2048,
+                "description": "Credential-free http, https, or mailto URL."
+              }
+            }
+          }
+        }
+      }
+    },
     "window": {
       "type": "object",
       "additionalProperties": false,

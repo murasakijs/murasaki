@@ -180,15 +180,14 @@ async function cookieSetAndRead(cookieUrl: string, name: string): Promise<void> 
 }
 
 /**
- * Deletes `name` and polls briefly for a subsequent read to stop reflecting
- * it. Returns a diagnostic string ('ok' or a failure detail) instead of
- * throwing — during automated headless (Xvfb) Linux verification this did
- * not converge within a generous window even though set/read above always
- * did; see this task's final report. Not gating on this keeps the PASS
- * marker representative of the (confirmed-working) core capability while
- * still surfacing the observation via the reported note.
+ * Deletes `name` and confirms a subsequent read stops reflecting it. Required
+ * assertion — see the vendored wry `delete_cookie` fix in
+ * crates/native/vendor/wry/PATCH.md ("WebKitCookieManager::delete_cookie
+ * matches by full cookie equality, not by (name, domain, path)"), which made
+ * this converge on the very first read. The bounded 5s poll stays as a safety
+ * margin for the async round trip rather than asserting on the first read.
  */
-async function cookieDeleteObserved(cookieUrl: string, name: string): Promise<string> {
+async function cookieDeleteObserved(cookieUrl: string, name: string): Promise<void> {
   await webview.deleteCookie({ url: cookieUrl, name })
   const deadline = Date.now() + 5000
   let stillPresent = true
@@ -198,7 +197,9 @@ async function cookieDeleteObserved(cookieUrl: string, name: string): Promise<st
     if (!stillPresent) break
     await sleep(150)
   }
-  return stillPresent ? `cookie ${name} still present 5s after deleteCookie()` : 'ok'
+  if (stillPresent) {
+    throw new Error(`cookie ${name} still present 5s after deleteCookie()`)
+  }
 }
 
 async function checkWebviewSession(): Promise<void> {
@@ -210,13 +211,9 @@ async function checkWebviewSession(): Promise<void> {
     const cookieUrl = 'https://example.com/'
     const cookieName = 'murasaki-linux-parity-probe'
     await cookieSetAndRead(cookieUrl, cookieName)
-    const deleteDetail = await cookieDeleteObserved(cookieUrl, cookieName)
+    await cookieDeleteObserved(cookieUrl, cookieName)
 
-    await report(
-      'webview-session-network',
-      true,
-      deleteDetail === 'ok' ? undefined : `diagnostic (non-fatal): deleteCookie — ${deleteDetail}`,
-    )
+    await report('webview-session-network', true)
   } catch (error) {
     await report('webview-session-network', false, errorMessage(error))
   }

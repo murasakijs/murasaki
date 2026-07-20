@@ -136,6 +136,7 @@ export function createDevWindowTemplates(
       copyright: config.copyright,
       homepage: config.homepage,
       authors: config.authors,
+      about: config.about,
       menuLabels: resolveMenuLabels(config.productName, detectLocale(), config.locales),
     },
     webview: {
