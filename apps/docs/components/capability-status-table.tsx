@@ -135,7 +135,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "server-actions": [
     "Actionは同梱されたローカルNode runtimeで実行されます。Next.js Server Actionsそのものでも、リモート公開RPCサービスでもありません。",
-    "version付きwire formatには値とpayloadの上限があり、Murasaki 1.0までは変更される可能性があります。",
+    "version付きwire formatはwire version 1で凍結されています。1.x系のdecoderは常にv1を受け付け、値とpayloadの明示的な上限はcontractualで、将来の拡張はより高いversionをnegotiateしつつv1へfallbackします。",
   ],
   "api-routes": [
     "ルートはアプリ内のローカルNode processから提供され、公開ネットワークサービスとしての利用は想定していません。",
@@ -152,6 +152,11 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   "node-main-lifecycle": [
     "src/main.ts lifecycleはready、cancel可能なbeforeQuit、時間制限付きshutdown、second-launch配送、app path、AbortSignal、renderer向けtyped live event、そして開発・packaged両方でのdeclared window管理を提供します。",
     "設定済みのsecondary windowはruntimeで生成・破棄でき、packaged hostは同梱Nodeの予期しない終了を検出すると未確定のupdate handoffを破棄し、backend process treeを終了させたうえでWebViewを残したままにせず非ゼロ終了します。再生可能なlifecycle event、公開されたcrash-restart policy、health-check APIは未実装です。macOSでは、外部からのDock QuitやOSログアウトはtao経由のcancel可能なbeforeQuitを保証できません。",
+  ],
+  "login-autostart": [
+    "per-userのlogin startupはautostart.status/enable/disableとして公開され、read/write別々のrenderer capabilityの背後にあります。murasaki dev下では拒否されるため、Node開発用executableが誤って登録されることはありません。",
+    "macOSはuser LaunchAgentを、Windowsはcurrent-userのRun registry keyを、LinuxはXDG Autostartを使用します。statusは、保存済みのregistrationが現在のpackaged executableと完全に一致する場合にのみenabledを報告します。ユーザーやOS policyによってapp外でregistrationが無効化・削除されることもあります。",
+    "macOSのLaunchAgent実装はApp Sandbox buildと互換性がありません。別途署名されたlogin-item helperはまだ実装されていません。",
   ],
   "native-window": [
     "trusted Node Mainから設定済みのsecondary templateを生成・破棄・再生成でき、generation単位のlifecycle eventを受け取れます。rendererは宣言済みwindowの表示・管理に限定され、runtime URLやcapability policyを指定することはできません。",
@@ -174,14 +179,17 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "対象を指定する一部commandはinlineのallow/deny scopeに対応します。それ以外のargumentはcommand単位で、native renderer APIはsrc/main.tsから直接利用できません。",
     "dialog.showMessageはnative OSのmessage boxを表示します。clipboardはPNG画像とHTMLの読み書きにも対応し、それぞれ上限付き・個別permissionです。shell.trashItemとshell.openPathはshell.showItemInFolderと同様にpathスコープで、shell.openPathはURLとUNC/device pathを拒否します。",
     "notification.showが返すidはlocal bookkeeping専用の生成idです。upstreamのnotify-rustはmacOS/Windowsでclick/actionコールバックを配信できないため、このidが後続eventと対応することはありません。",
+    "app.isElevated()は全platformでread-only・capability-gatedなself-queryです(Windows: process tokenのelevation state、macOS/Linux: effective root)。失敗することはありません。",
+    "shell.runElevated({ executable, args? })は既存の絶対path・non-traversingなexecutableをWindowsのUAC「runas」promptを通じて起動します: Windows専用で、shell.openPathと同様にpathスコープされ、shellを経由することはなく、fire-and-forgetです(起動した時点でresolveし、終了時ではありません)。ユーザーがpromptを拒否した場合は固有のmessage「elevation was cancelled by the user」でrejectされ、それ以外のplatformではunsupported errorでrejectされます。",
   ],
   "secure-storage": [
     "文字列valueはmacOS Keychain、Windows Credential Manager、(Linuxでは)freedesktop.orgのSecret Service D-Bus APIへ、SHA-256から導出したappId/key namespaceの下で保存されます。存在しないkeyはnullを返し、inputとIPCは上限付きで、どのplatformにもplaintext fallbackはありません。",
-    "Linuxでは稼働中のSecret Service provider(gnome-keyring、KWalletのksecretsservice、KeePassXCなど)が必要です。到達可能なproviderがない場合、plaintext fallbackではなく構造化されたerrorですべてのoperationが失敗します。",
-    "get、set、deleteはそれぞれ独立したdeny-by-defaultのwindow別capabilityを持ちますが、許可はkey単位ではなくcommand単位です。rendererが侵害されると、そのapp namespace内で許可されたsecure-storage operationをすべて利用できてしまいます。",
+    "Linuxはvalueをfreedesktop.orgのSecret Service D-Bus API経由で保存します。これはGNOME(gnome-keyring)とKDE(KWallet)では既定で提供されます。到達可能なproviderがない場合、すべてのoperationはplaintext fallbackではなく構造化されたerrorでfail closedします。",
+    "get、set、deleteはそれぞれ独立したdeny-by-defaultのwindow別capabilityを持ち、許可はcommand単位のgrantに加えてkey単位のallow/deny scope(完全一致のkeyと末尾prefix pattern)にも対応します。scopeなしのgrantは、そのapp namespace内のすべてのkeyを当該windowへ露出します。",
   ],
   "auto-update": [
     "署名付きmanifest(pinned-key rotationとkeyIdヒント付き)、上限付きdownload、SHA-256によるpayload検証、manifestの鮮度・anti-replayチェック、段階的なpercentage rollout、staged handoff/relaunchはpackaged済みのmacOS、Windows(x64・arm64)、Linux AppImageアプリで実装済みです。",
+    "Windowsのself-updateにはper-userのNSIS installが必要です。updater-enabled buildはinstallMode=perMachineを拒否し、MSIをskipします。MSIはsystem管理による大規模upgrade向けに、組み込みのupdaterを無効化した状態で利用できます。",
     "自前でホストするendpointはhttpsが必須です(loopback httpはlocal testing限定で許可)。delta/differential updateは未実装です。Linuxのself-updateはAppImage packaging形式でのみ動作します(実行中の.AppImageファイルをその場でjournal-swapし、--appimage-extract-and-runで再起動)。.debインストールや手動展開したAppDirには差し替えるファイルがないため、check()はerrorではなく構造化されたnot-available理由(updateはsystem package managerが管理)を返します。",
   ],
   "application-packaging": [
@@ -199,7 +207,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "content-security-policy": [
     "Murasakiは環境別の既定CSPをframework / user-owned HTMLへ注入し、完全なsecurity.csp override、明示的opt-out、user-owned CSP tagのhead先頭への移動に対応します。",
-    "policyはmeta tag配信のためframe-ancestors、sandbox、reportingなどheader専用directiveを強制できません。CSPはHTMLのsanitizeやNode関数の認可を行わず、互換性のためinline styleを許可します。",
+    "解決済みのpolicyは、単一のresolverからContent-Security-Policy response header(devのmiddlewareとpackaged済みのproduction server)とmeta tagの両方で配信されます。そのためframe-ancestors 'none'などheader専用directiveも強制されます。meta tagはheader専用directive(frame-ancestors、sandbox、report-uri、report-to)を除いた共有可能なsubsetを載せます。security.csp: falseは両方の配信経路をopt outします。CSPはHTMLのsanitizeやNode関数の認可は行わず、reporting endpointは既定では設定されず、互換性のためinline styleは引き続き許可されます。",
   ],
   "multi-window": [
     "windowはconfigでの宣言が必須です。secondary templateは起動時生成をopt outでき、trusted Node Mainから生成・破棄・再生成できます。任意のruntime URL、native policy、未宣言のlabelは拒否されます。",
@@ -214,9 +222,13 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "shortcutの利用可否はOS予約bindingや他のapplicationにも依存するため、packaged OSでのsmoke testingが必要です。",
   ],
   "system-permissions": [
-    "packaged済みのmacOS appはcamera/microphone/locationのusage descriptionを宣言し、起動時にcamera、microphone、screen-recording、accessibility、input-monitoring、locationのconsentを要求できます。同じpermissionはcapability-gatedなrenderer APIからquery/requestできます。対応するのはこの7種類で、すべてmacOS専用です — WindowsとLinuxには、これらが表すapp-scopedなTCC promptに相当するOSレベルの機能がありません。",
-    "fullDiskAccessはguidance-onlyです。macOSにはこれに対応するTCC request APIが存在しないため、`request()`はSystem SettingsのFull Disk Accessペインを開くだけで(権限取得を装うことはありません)、`status()`はTCCで保護されたfileを読み取るdocument済みのbest-effort heuristicであり、実際の答えの代わりに`unknown`を返すことがあります。",
-    "locationの`mode: 'always'`はInfo.plistへ`NSLocationWhenInUseUsageDescription`と`NSLocationAlwaysAndWhenInUseUsageDescription`の両方を書き込み、request時にも同じInfo.plist keyを読み戻すため、追加の配線なしでrequestOnLaunchとruntimeの`systemPermission.request('location')`呼び出しの両方に同一に適用されます。",
+    "packaged済みのmacOS appは、camera、microphone、screen recording、accessibility、input monitoring、location、full disk access、photos、contacts、calendar、reminders、speech recognition、Bluetoothについて、capability-gatedなrenderer APIと(ほとんどの種別で)任意のlaunch-time promptからusage descriptionを宣言し、consentをquery/requestできます。これは13種類のrequest-capableな種別と、下記2種類のdeclaration-only(appleEvents、localNetwork)を合わせたものです。この15種類はすべてmacOS専用です — WindowsとLinuxには、これらが表すapp-scopedなTCC promptに相当するOSレベルの機能がありません。",
+    "fullDiskAccessはguidance-onlyです。macOSにはこれに対応するTCC request APIが存在しないため、`request()`はSystem SettingsのFull Disk Accessペインを開くだけで(権限取得を主張することはありません)、`status()`はTCCで保護されたfileを読み取るdocument化されたbest-effort heuristicであり、実際の答えの代わりに`unknown`を返すことがあります。",
+    "appleEventsとlocalNetworkはdeclaration-onlyです。Murasakiはそれぞれのpurpose string(NSAppleEventsUsageDescription/NSLocalNetworkUsageDescription)を書き込みますが、どちらにもquery APIはありません。appleEventsの`request()`はguidanceとしてSystem SettingsのAutomationペインを開くだけです(consentはtarget-app単位で、send時にしか解決できません)。localNetworkの`status()`/`request()`はどちらも静的な`unknown`のno-opです。macOSが実際のlocal-networkアクセス発生時に自動的にpromptするためです。どちらにも`requestOnLaunch`のconfig fieldはありません。",
+    "bluetoothには明示的なrequest callがありません。CoreBluetoothはcentral managerが最初にinstantiateされた時点でconsentを暗黙的に決定します。`status()`はclass propertyである`CBManager.authorization`を読み取り、稼働中のmanager instanceを必要としません。`request()`は(`location`と同様にdelegateなしで)managerをinstantiateし、そのOS側の判定を発火させるためだけに存在します。",
+    "calendar/remindersのlaunch-timeおよびruntimeの`request()`は、実行中のsystemが対応していればmacOS 14+のfull-access EventKit APIを使用し、そうでなければ非推奨のpre-14 entity-type APIへfallbackします(build時ではなくcall時にNSProcessInfoで判定)。Info.plistには常にlegacyと14+ full-access両方のusage-description keyが含まれるため、1つのpackaged buildが両方で正しく動作します。",
+    "locationの`mode: 'always'`はInfo.plistへ`NSLocationWhenInUseUsageDescription`と`NSLocationAlwaysAndWhenInUseUsageDescription`の両方を書き込み、request時にも同じInfo.plist keyを読み戻すため、追加の配線なしで`requestOnLaunch`とruntimeの`systemPermission.request('location')`呼び出しの両方に同一に適用されます。",
+    "Hardened-runtime署名はmain-appとbundleされたNodeのentitlementsを分離します。main appは`systemPermissions.macOS`から宣言済みのcamera、microphone、location、photos、contacts、calendar/reminders、Apple Eventsのresource-access権限を導出します。署名済みbuildはInfo.plistのpurpose stringに加えてこれらの権限が必要です。Bluetoothのdevice entitlementはApp-Sandbox専用で、speech recognitionにはHardened Runtimeのresource entitlementがありません。NodeのみがJIT/unsigned-executable-memory/disabled-library-validationを取得します。Native add-onには実行可能entitlementが付与されず、app所有のexecutable bundle resourceはmacOS/Windowsのinner-to-outer署名のために`executable: true`とmarkする必要があります。`sign.appSandbox: true`はfail-closedで拒否されます。Appleのinherit-only helper ruleが現在のbundleされたNode/JITアーキテクチャと非互換なためです。カスタムの`sign.entitlements`および`sign.helperEntitlements`ファイルはそのまま使用され、設定されたファイルが欠落・不正な場合はfail closedします。",
     "Windowsのunpackaged desktopではprivacy consentがapp単位のlaunch promptではなくusage駆動のため、これらの汎用callはunsupportedを返します。Linuxは未実装です。開発時のrequestはterminal/Node hostのidentityを使うため、packaged appでの検証が必要です。",
   ],
   "single-instance-and-deep-links": [
@@ -233,7 +245,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "crash reportはlocalのJSONファイルのみで、Murasakiが送信することはありません。minidump/native symbolicationの対応、自動uploadはなく、murasaki dev下でのrenderer captureはno-opです(その代わりdevのerror overlayがUXを担います)。crash-reporting serviceへの連携はapplication側の責務です。",
   ],
   "webview-session-network": [
-    "application全体のcustom User-Agent、non-persistent/incognito session、上限付きの未認証HTTP CONNECTまたはSOCKSv5 proxy endpointは、runtimeで検証されたうえで開発・packaged済みmacOS/Windows WebViewのWryへ渡されます。",
+    "application全体のcustom User-Agent、non-persistent/incognito session、上限付きの未認証HTTP CONNECTまたはSOCKSv5 proxy endpointは、runtimeで検証されたうえで開発・packaged済みmacOS、Windows、Linux WebViewのWryへ渡されます。",
     "Browser profileはnative window単位で分離されます。primaryは従来からのapp profileを保持し、secondary profileはWindows/LinuxおよびmacOS 14+では永続化されます。macOS 11-13は分離された非永続storeを使用します。window間でのcookie/storage/workerの共有は意図的に未対応で、永続的なstateはMain/APIハンドラを通じて共有してください。",
     "macOSのproxy設定にはmacOS 14以降が必要で、それより古いOSではstartupが失敗します。Windowsのcustom User-AgentにはWebView2 86.0.616.0以降、private modeには101.0.1210.39以降が必要で、古いruntimeはこれらの設定を無視します。window単位のoverrideとauthenticatedなproxyには対応していません。",
     "webview:downloadは、sanitizeされ衝突解決済みのdownloadを設定済み(またはOS既定)のdirectoryへ限定し、start/completion eventを報告します。completion eventのidをstart eventと確実に対応付ける手段はなく、macOSは完了したdownloadのpathを報告しません(upstream WebKitの制限)。",
@@ -241,7 +253,6 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "webview:zoomはpage zoomを0.25〜5.0に制限し、macOS 11+/iOS 14+でのみ利用できます。webview.hotkeysZoom(capabilityではなくconfig)はWindowsでのみOS zoom hotkey/gestureを有効にします。webview:printはplatformのprint dialogを開きます。Wryがfind-in-page APIを公開していないため、この機能はありません。",
     "webview:readCookies/webview:writeCookiesは上限付きのcookie読み取り・設定・削除を公開し、構造化されたURL scopeに対応します。scope付きの読み取りには明示的なURLが必要で、書き込みは有効なcookie pathと照合され、domain overrideはURLホストと完全に一致する必要があります。予約済みのlegacy名murasaki_runtimeは、runtime認証がすでにcookieに依存していなくても防御的措置として読み取りから除外され、書き込み・削除からは拒否されます。deleteCookieはname、URLホストをdomainとして、default(/)pathのみで一致判定します。",
     "rendererのcamera、microphone、geolocation Web APIは、framework所有のPermissions-Policy headerによってfail closedになります。Wry 0.55にはcross-platformなwindow単位のpermission callbackがないため、これらのAPIをconfigから有効化することはまだできません。capability-checkされたnative機能を代わりに使用してください。",
-    "Linuxでは、webview.deleteCookie()はresolveしますが、その削除が後続のwebview.readCookies()に確実に反映されるとは限りません(WebKitGTK/libsoupのcookie manager特有の挙動)。cookieのset/readとcustom User-Agentは問題なく動作します。packaged Linuxで検証済みです。",
   ],
   "build-time-plugin-sdk": [
     "trustedなbuild-time pluginは、Vite PluginOptions、決定的なbundle dependency/resource、runtimeで検証されたstable nameを持つ直列のdev/build/bundle lifecycle hookを提供できます。",
