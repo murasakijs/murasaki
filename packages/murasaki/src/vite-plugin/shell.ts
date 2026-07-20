@@ -177,6 +177,39 @@ export function resolveContentSecurityPolicy(
   return configured ?? (command === 'serve' ? DEFAULT_DEVELOPMENT_CSP : DEFAULT_PRODUCTION_CSP)
 }
 
+/** True iff `html` declares its own (non-framework-owned) CSP meta tag — see `resolveHeaderContentSecurityPolicy`. */
+export function htmlDeclaresUserContentSecurityPolicy(html: string): boolean {
+  return findContentSecurityPolicyMetaTags(html).some((match) => !match.frameworkOwned)
+}
+
+/**
+ * Resolves the `Content-Security-Policy` *response header* policy — the
+ * single source of truth for both the dev middleware
+ * (vite-plugin/runtime-security.ts) and the packaged app's bundle metadata
+ * (cli/bundle.ts's `metaJson`), so the two never diverge.
+ *
+ * Delegates to `resolveContentSecurityPolicy` for the actual policy string in
+ * every case except one: when `security.csp` is unconfigured and the
+ * project's `index.html` declares its own CSP meta tag, `applyContentSecurityPolicy`
+ * defers to that user-owned tag and injects none of its own (see the
+ * `configured === undefined` branch there). Emitting the framework default as
+ * a header in that case would still layer on top of the user's meta policy —
+ * browsers enforce multiple CSPs cumulatively — silently tightening (and
+ * likely breaking) a policy the user believed they fully controlled. This
+ * returns `false` (no header at all) in exactly that case so the user's meta
+ * tag remains the sole, authoritative policy.
+ */
+export function resolveHeaderContentSecurityPolicy(
+  configured: string | false | undefined,
+  command: 'serve' | 'build',
+  indexHtml: string | null,
+): string | false {
+  if (configured === undefined && indexHtml !== null && htmlDeclaresUserContentSecurityPolicy(indexHtml)) {
+    return false
+  }
+  return resolveContentSecurityPolicy(configured, command)
+}
+
 export function applyContentSecurityPolicy(
   html: string,
   configured: string | false | undefined,

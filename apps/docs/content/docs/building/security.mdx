@@ -304,7 +304,12 @@ export default defineConfig({
 A string is a complete override, not a directive merge, and it applies to
 both delivery mechanisms identically. If a user-owned `index.html` already has
 a CSP meta tag, Murasaki keeps it and moves it to the beginning of `<head>`.
-Setting both that tag and a `security.csp` string is a build error instead of
+In this case (a CSP meta tag with no `security.csp` configured), Murasaki
+delivers the policy through the meta tag only and does not also send a
+`Content-Security-Policy` response header — the two would otherwise be
+enforced cumulatively by the browser, silently tightening (and potentially
+breaking) the policy the user already fully controls through the tag. Setting
+both that tag and a `security.csp` string is a build error instead of
 silently choosing one. Use the browser console's CSP violation to identify a
 blocked source, then add only that source or move the resource to the app
 origin.

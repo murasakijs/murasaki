@@ -1,10 +1,12 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import {
   authenticateWindowRequest,
   isBackendCapabilityAllowed,
 } from '../runtime/window-auth.js'
-import { resolveContentSecurityPolicy } from './shell.js'
+import { resolveHeaderContentSecurityPolicy } from './shell.js'
 
 const PRIVILEGED_PREFIXES = ['/api/', '/__murasaki/']
 const NATIVE_ONLY_PATHS = new Set([
@@ -31,7 +33,7 @@ export function runtimeToken(): string {
 }
 
 export interface RuntimeSecurityOptions {
-  /** Same `security.csp` value the app-shell plugin resolves the meta tag from — kept as one resolver (shell.ts's `resolveContentSecurityPolicy`) so dev's header and meta tag never drift. */
+  /** Same `security.csp` value the app-shell plugin resolves the meta tag from — kept as one resolver (shell.ts's `resolveHeaderContentSecurityPolicy`) so dev's header and meta tag never drift. */
   csp?: string | false
 }
 
@@ -42,14 +44,24 @@ export function runtimeSecurityPlugin(
 ): Plugin {
   const token = runtimeToken()
   const grants = new Map(windows.map((window) => [window.label, window.backendCapabilities]))
-  // This plugin only ever runs in dev (`apply: 'serve'` below), so the
-  // resolved policy is always the DEFAULT_DEVELOPMENT_CSP one (or the user's
-  // full override, or `false` for the opt-out) — never the production policy.
-  const cspHeader = resolveContentSecurityPolicy(options.csp, 'serve')
   return {
     name: 'murasaki:runtime-security',
     apply: 'serve',
     configureServer(server) {
+      // Resolved once here (not per request) rather than at plugin
+      // construction, since it needs `server.config.root` — authoritative
+      // only once Vite has merged inline/user/plugin config, which
+      // configureServer runs after. This plugin only ever runs in dev
+      // (`apply: 'serve'` above), so `resolveHeaderContentSecurityPolicy`
+      // always resolves against DEFAULT_DEVELOPMENT_CSP (or the user's full
+      // override, or `false` for the opt-out) — never the production policy.
+      // If `security.csp` is unconfigured and the project's index.html
+      // declares its own CSP meta tag, this resolves to `false`: the app
+      // shell defers to that user-owned tag (see shell.ts), so emitting the
+      // framework default here too would enforce both cumulatively.
+      const indexHtmlPath = resolve(server.config.root, 'index.html')
+      const indexHtml = existsSync(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf8') : null
+      const cspHeader = resolveHeaderContentSecurityPolicy(options.csp, 'serve', indexHtml)
       server.middlewares.use((req, res, next) => {
         const pathname = new URL(req.url ?? '/', 'http://murasaki.local').pathname
         const privileged = pathname === '/api'

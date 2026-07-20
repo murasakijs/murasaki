@@ -1,5 +1,5 @@
 import { resolve, dirname, join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, writeFile, rm, cp, copyFile, chmod, readdir, readFile, symlink, stat } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -21,7 +21,7 @@ import {
   type MurasakiConfig,
   type MurasakiBuildTarget,
 } from '../config.js'
-import { resolveContentSecurityPolicy } from '../vite-plugin/shell.js'
+import { resolveHeaderContentSecurityPolicy } from '../vite-plugin/shell.js'
 import { serializeWindowTemplates } from './window-metadata.js'
 import { resolveInitScripts } from './init-scripts.js'
 import { resolveUpdater } from '../resolve-updater.js'
@@ -841,12 +841,19 @@ export function metaJson(
       // Node's and the native launcher's) for `frameworkVersion`.
       frameworkVersion: murasakiVersion(),
       diagnostics: resolveDiagnosticsConfig(config),
-      // The same resolver vite-plugin/shell.ts's appShellPlugin uses for the
-      // meta tag and vite-plugin/runtime-security.ts uses for the dev
+      // The same resolver vite-plugin/runtime-security.ts uses for the dev
       // Content-Security-Policy header ('build' here, since this is the
       // bundle for a packaged app) — prod-server.mjs sets the identical
       // header from this value rather than re-deriving a default itself.
-      csp: resolveContentSecurityPolicy(config.security?.csp, 'build'),
+      // Reads the project's index.html (not dist/client's, which by this
+      // point already has the framework meta tag injected) so this resolves
+      // `false` (no header) in the same case shell.ts's applyContentSecurityPolicy
+      // defers to a user-owned CSP meta tag instead of injecting its own.
+      csp: resolveHeaderContentSecurityPolicy(
+        config.security?.csp,
+        'build',
+        existsSync(resolve(cwd, 'index.html')) ? readFileSync(resolve(cwd, 'index.html'), 'utf8') : null,
+      ),
       description: config.description,
       copyright: config.copyright,
       homepage: config.homepage,

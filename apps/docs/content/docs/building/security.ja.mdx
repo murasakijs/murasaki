@@ -282,8 +282,12 @@ export default defineConfig({
 
 stringはdirective mergeではなく完全なoverrideであり、header・meta tagの両方に同一に
 適用されます。user-owned `index.html`にCSP metaがあればそれを維持して`<head>`先頭へ
-移動します。既存tagと`security.csp` stringの両方を設定すると、片方を暗黙に選ばず
-build errorにします。blockされたsourceはbrowser consoleのCSP violationで確認し、その
+移動します。このケース(`security.csp`未設定でCSP meta tagが存在する場合)では、
+Murasakiはmeta tagだけでpolicyを配信し、`Content-Security-Policy` response headerは
+送信しません。両方送ってしまうとbrowser側でcumulativeに強制され、userが完全に把握して
+いるはずのmeta tagのpolicyを暗黙に上書き(実質的にさらに制限)してしまうためです。
+既存tagと`security.csp` stringの両方を設定すると、片方を暗黙に選ばずbuild errorに
+します。blockされたsourceはbrowser consoleのCSP violationで確認し、その
 sourceだけを追加するかapp originへ移してください。
 
 既存appを移行するときはproductionのinline scriptをexternal moduleへ移します。remote

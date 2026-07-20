@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test, { after } from 'node:test'
 import {
   authorizedWindowLabel,
   backendResourceForRequest,
@@ -16,6 +19,12 @@ import {
 import { DEFAULT_DEVELOPMENT_CSP } from '../dist/vite-plugin/shell.js'
 
 const TOKEN = 'a'.repeat(64)
+
+// A default project root with no index.html of its own, so runDevMiddleware's
+// existing callers keep resolving the unstripped framework default CSP,
+// exactly as they did before the header started reading index.html.
+const defaultRoot = mkdtempSync(join(tmpdir(), 'murasaki-runtime-security-'))
+after(() => rmSync(defaultRoot, { recursive: true, force: true }))
 
 test('renderer Web API permissions fail closed by default', () => {
   assert.equal(DEFAULT_PERMISSIONS_POLICY, 'camera=(), microphone=(), geolocation=()')
@@ -73,10 +82,13 @@ test('native control requests require the separate private native header', () =>
 })
 
 /** Extracts the plugin's dev middleware and runs it against a fake req/res pair. */
-function runDevMiddleware(options, req) {
+function runDevMiddleware(options, req, root = defaultRoot) {
   let middleware
   const plugin = runtimeSecurityPlugin([], options)
-  plugin.configureServer({ middlewares: { use: (fn) => { middleware = fn } } })
+  plugin.configureServer({
+    config: { root },
+    middlewares: { use: (fn) => { middleware = fn } },
+  })
   const headers = {}
   let nextCalled = false
   const res = {
@@ -128,6 +140,35 @@ test('dev middleware emits a user-supplied CSP override byte-identical to the co
   const custom = "default-src 'none'; connect-src https://api.example.test"
   const { headers } = runDevMiddleware({ csp: custom }, htmlGetRequest('/'))
   assert.equal(headers['content-security-policy'], custom)
+})
+
+test('dev middleware omits the CSP header entirely when deferring to a user-owned CSP meta tag in index.html', () => {
+  const root = mkdtempSync(join(tmpdir(), 'murasaki-runtime-security-usermeta-'))
+  writeFileSync(
+    join(root, 'index.html'),
+    '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head><body></body></html>',
+  )
+  try {
+    // The header would otherwise be enforced cumulatively alongside the
+    // user's own meta CSP — suppress it so their policy stays authoritative.
+    const { headers } = runDevMiddleware({}, htmlGetRequest('/'), root)
+    assert.equal(headers['content-security-policy'], undefined)
+    assert.equal(headers['permissions-policy'], DEFAULT_PERMISSIONS_POLICY)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('dev middleware sets the full default CSP header when index.html has no CSP meta tag of its own', () => {
+  const root = mkdtempSync(join(tmpdir(), 'murasaki-runtime-security-nometa-'))
+  writeFileSync(join(root, 'index.html'), '<!doctype html><html><head><title>App</title></head><body></body></html>')
+  try {
+    const { headers } = runDevMiddleware({}, htmlGetRequest('/'), root)
+    assert.equal(headers['content-security-policy'], DEFAULT_DEVELOPMENT_CSP)
+    assert.match(DEFAULT_DEVELOPMENT_CSP, /frame-ancestors 'none'/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('backend authority resources are stable and grants are exact or trailing-prefix only', () => {

@@ -5,12 +5,15 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { defineConfig } from '../dist/config.js'
+import { metaJson } from '../dist/cli/bundle.js'
 import {
   appShellPlugin,
   applyContentSecurityPolicy,
   DEFAULT_DEVELOPMENT_CSP,
   DEFAULT_PRODUCTION_CSP,
+  htmlDeclaresUserContentSecurityPolicy,
   resolveContentSecurityPolicy,
+  resolveHeaderContentSecurityPolicy,
   stripHeaderOnlyDirectives,
 } from '../dist/vite-plugin/shell.js'
 
@@ -169,6 +172,68 @@ test('app shell ownership follows the configured and resolved Vite root', async 
   noHtmlPlugin.config({ root: userRoot })
   noHtmlPlugin.configResolved({ command: 'serve', root: frameworkRoot })
   assert.equal(typeof noHtmlPlugin.configureServer({}), 'function')
+})
+
+test('htmlDeclaresUserContentSecurityPolicy detects a user-owned CSP meta tag but not a framework-owned one', () => {
+  assert.equal(
+    htmlDeclaresUserContentSecurityPolicy(
+      '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head></html>',
+    ),
+    true,
+  )
+  assert.equal(
+    htmlDeclaresUserContentSecurityPolicy(
+      '<html><head><meta data-murasaki-csp http-equiv="Content-Security-Policy" content="default-src \'self\'"></head></html>',
+    ),
+    false,
+  )
+  assert.equal(htmlDeclaresUserContentSecurityPolicy(frameworkHtml), false)
+})
+
+test('resolveHeaderContentSecurityPolicy suppresses the header only when deferring to a user-owned meta tag', () => {
+  const userMetaHtml = '<html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head></html>'
+  const noMetaHtml = frameworkHtml
+
+  // false opts out regardless of index.html.
+  assert.equal(resolveHeaderContentSecurityPolicy(false, 'build', userMetaHtml), false)
+  assert.equal(resolveHeaderContentSecurityPolicy(false, 'build', null), false)
+
+  // A configured string is always the full header policy, unstripped — this
+  // combination never reaches here in practice when index.html also has a
+  // meta tag (applyContentSecurityPolicy throws first), but the resolver
+  // itself stays a pure pass-through.
+  const custom = "default-src 'self'; frame-ancestors 'self' https://embed.example.test"
+  assert.equal(resolveHeaderContentSecurityPolicy(custom, 'build', userMetaHtml), custom)
+  assert.equal(resolveHeaderContentSecurityPolicy(custom, 'serve', null), custom)
+
+  // Unconfigured + a user-owned CSP meta tag in index.html: defer to it, no header.
+  assert.equal(resolveHeaderContentSecurityPolicy(undefined, 'build', userMetaHtml), false)
+  assert.equal(resolveHeaderContentSecurityPolicy(undefined, 'serve', userMetaHtml), false)
+
+  // Unconfigured + no index.html, or an index.html without a CSP meta tag: full default header.
+  assert.equal(resolveHeaderContentSecurityPolicy(undefined, 'build', null), DEFAULT_PRODUCTION_CSP)
+  assert.equal(resolveHeaderContentSecurityPolicy(undefined, 'build', noMetaHtml), DEFAULT_PRODUCTION_CSP)
+  assert.equal(resolveHeaderContentSecurityPolicy(undefined, 'serve', noMetaHtml), DEFAULT_DEVELOPMENT_CSP)
+})
+
+test('bundle metadata suppresses csp when the source index.html declares a user CSP meta tag, else carries the full default', async (t) => {
+  const withMeta = await mkdtemp(join(tmpdir(), 'murasaki-bundle-csp-usermeta-'))
+  const withoutMeta = await mkdtemp(join(tmpdir(), 'murasaki-bundle-csp-nometa-'))
+  t.after(() => Promise.all([
+    rm(withMeta, { recursive: true, force: true }),
+    rm(withoutMeta, { recursive: true, force: true }),
+  ]))
+  await writeFile(
+    join(withMeta, 'index.html'),
+    '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head><body></body></html>',
+  )
+
+  const config = defineConfig({ appId: 'dev.csp.meta', productName: 'CSP Meta Test' })
+  const withMetaMeta = JSON.parse(metaJson(config, config.productName, null, withMeta))
+  assert.equal(withMetaMeta.csp, false)
+
+  const withoutMetaMeta = JSON.parse(metaJson(config, config.productName, null, withoutMeta))
+  assert.equal(withoutMetaMeta.csp, DEFAULT_PRODUCTION_CSP)
 })
 
 test('CSP configuration rejects HTML/control injection and invalid values', () => {
