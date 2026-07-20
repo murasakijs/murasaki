@@ -187,11 +187,11 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "application-packaging": [
     "macOSの.app/.dmgと、Windowsのportable .zip、NSIS .exe、WiX .msiを生成できます。",
-    "Linux向けのAppDir/AppImage/deb artifact組み立ては実装済みです(murasaki bundle/installer --target linux-x64|linux-arm64)。macOS/Windows bundleと同じresource layoutから生成され、build hostにmksquashfs(squashfs-tools)が必要です。native launcherは生成されたAppImage/.debをwindow、webview、single-instance、deep link、AppImageのself-updateまでend-to-endで実行します。rpm packaging、repository metadata、コード署名は未実装です。MSIにはWiXが必要で、WiXはWindows上でのみ動作します。",
+    "Linux向けのAppDir/AppImage/deb artifact組み立ては実装済みです(murasaki bundle/installer --target linux-x64|linux-arm64)。macOS/Windows bundleと同じresource layoutから生成され、build hostにmksquashfs(squashfs-tools)が必要です。native launcherは生成されたAppImage/.debをwindow、webview、single-instance、deep link、AppImageのself-updateまでend-to-endで実行します。rpm packaging、repository metadataは未実装ですが、コード署名はGPG detached署名で利用できます(code-signing機能を参照)。MSIにはWiXが必要で、WiXはWindows上でのみ動作します。",
   ],
   "code-signing": [
     "開発者がcredentialを用意した場合、macOSのDeveloper ID署名とApple notarizationを利用できます。",
-    "Windows Authenticodeは、開発者が用意したPFX/store証明書またはMicrosoft Artifact Signing providerを通じて、application実行ファイル、portable ZIP payload、NSIS setup、MSIへ署名・検証します。Linuxのpackage署名は未実装で、macOSのad-hoc署名は利用者からの信頼を確立しません。",
+    "Windows Authenticodeは、開発者が用意したPFX/store証明書またはMicrosoft Artifact Signing providerを通じて、application実行ファイル、portable ZIP payload、NSIS setup、MSIへ署名・検証します。macOSのad-hoc署名は利用者からの信頼を確立しません。",
     "Linux: `murasaki installer --sign`は、.AppImage、.deb、そして両者を束ねたSHA256SUMSに対してdetachedかつarmored形式のGPG署名(<artifact>.sig)を生成し、dpkg-sigがPATH上にあればDebianネイティブの署名も追加で埋め込みます(opportunistic)。署名鍵は$MURASAKI_GPG_KEYまたはsign.linux.gpgKeyで選択し、passphraseは$MURASAKI_GPG_PASSPHRASEまたはgpg-agentからのみ取得します。distro repositoryのtrust storeやapt/dnf keyringとの統合はなく、rpmにも対応していません。",
   ],
   "loopback-endpoint-protection": [
@@ -251,7 +251,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "linux-distribution": [
     "AppDir/AppImage/debのartifact組み立て(application-packaging capability参照)とnative launcher runtimeは、いずれもend-to-endで動作します: window/webview生成、single-instance lock、cold-startのdeep link(.desktopのExec行由来のargv)とsecond-instanceの転送、graceful shutdown、native crash reportingが、packaged済みのAppImageまたは.debから実行され、Docker上のXvfb + 専用D-Bus sessionおよびapp-package-linux.ymlで検証されています。",
-    "AppImageのself-updateは動作します(実行中の.AppImageをjournal付きで単一ファイル差し替えし、--appimage-extract-and-runで再起動、health checkに失敗した場合はfirst launchでrollback)。.debインストールや素の/手動展開したAppDirには差し替える単一ファイルがなくself-updateは提供されず、updateはsystem package managerが管理すると報告します。rpm packaging、repository metadata、コード署名は未実装です。",
+    "AppImageのself-updateは動作します(実行中の.AppImageをjournal付きで単一ファイル差し替えし、--appimage-extract-and-runで再起動、health checkに失敗した場合はfirst launchでrollback)。.debインストールや素の/手動展開したAppDirには差し替える単一ファイルがなくself-updateは提供されず、updateはsystem package managerが管理すると報告します。rpm packaging、repository metadataは未実装ですが、コード署名はGPG detached署名で利用できます(code-signing機能を参照)。",
   ],
 };
 

@@ -358,7 +358,7 @@
       },
       "limitations": [
         "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today. Installer creation fails closed when no platform installer is produced. Windows updater builds require per-user NSIS and skip MSI; MSI is generated only with the built-in updater disabled.",
-        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging, repository metadata, and code signing are not implemented. WiX is required for MSI and only runs on Windows."
+        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging and repository metadata are not implemented; code signing is available via detached GPG signatures (see the code-signing feature). WiX is required for MSI and only runs on Windows."
       ],
       "apiSymbols": [
         "murasaki bundle",
@@ -384,7 +384,7 @@
       },
       "limitations": [
         "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",
-        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Linux package signing is not implemented; ad-hoc macOS signatures do not establish user trust.",
+        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Ad-hoc macOS signatures do not establish user trust.",
         "Linux: `murasaki installer --sign` produces detached, armored GPG signatures (<artifact>.sig) for the .AppImage, the .deb, and a combined SHA256SUMS, and opportunistically embeds a Debian-native signature via dpkg-sig when it is on PATH. The signing key is selected via $MURASAKI_GPG_KEY or sign.linux.gpgKey; the passphrase comes only from $MURASAKI_GPG_PASSPHRASE or the gpg-agent. There is no distro-repository trust-store or apt/dnf keyring integration, and no rpm."
       ],
       "apiSymbols": [
@@ -721,7 +721,7 @@
       },
       "limitations": [
         "AppDir/AppImage/deb artifact assembly (see the application-packaging capability) and the native launcher runtime both work end to end: window/webview creation, single-instance locking, cold-start deep links (argv from the .desktop Exec line) and second-instance forwarding, graceful shutdown, and native crash reporting all run from the packaged AppImage or .deb, verified under Xvfb + a private D-Bus session in Docker and in app-package-linux.yml.",
-        "AppImage self-update works (journaled single-file swap of the running .AppImage, relaunch via --appimage-extract-and-run, first-launch rollback on a failed health check); a .deb install or a bare/manually-extracted AppDir has no self-update (there is no single file to swap) and reports updates as managed by the system package manager instead. rpm packaging, repository metadata, and code signing are not implemented."
+        "AppImage self-update works (journaled single-file swap of the running .AppImage, relaunch via --appimage-extract-and-run, first-launch rollback on a failed health check); a .deb install or a bare/manually-extracted AppDir has no self-update (there is no single file to swap) and reports updates as managed by the system package manager instead. rpm packaging and repository metadata are not implemented; code signing is available via detached GPG signatures (see the code-signing feature)."
       ],
       "apiSymbols": [],
       "testEvidence": [
