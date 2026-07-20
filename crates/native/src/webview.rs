@@ -152,6 +152,23 @@ impl ProcessWebContext {
             .get_mut(label)
             .ok_or_else(|| "window WebContext is unavailable".to_string())
     }
+
+    /// Drop the per-window WebContext for a destroyed secondary window so a
+    /// later window with the same label builds a fresh one.
+    ///
+    /// The context is keyed by window label and, on Linux (WebKitGTK), a stale
+    /// `WebContext` whose `WebView` has been destroyed still references that
+    /// view's X resources; reusing it to build the recreated window's `WebView`
+    /// operates on a freed XID and aborts the process with an X11 `BadWindow`
+    /// error. macOS (`WKWebsiteDataStore`) and Windows (WebView2 environments)
+    /// are designed to be reused, so this only mattered on Linux — but dropping
+    /// the context on destroy everywhere keeps the lifecycle uniform. The
+    /// on-disk profile directory is unaffected, so a recreated window resumes
+    /// the same persisted storage. Must be called only after the window's
+    /// `WebView` has been dropped (a live `WebView` borrows its `WebContext`).
+    pub(crate) fn release_context(&mut self, label: &str) {
+        self.contexts.remove(label);
+    }
 }
 
 fn ipc_body_is_allowed(len: usize) -> bool {
