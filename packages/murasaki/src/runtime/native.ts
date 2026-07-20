@@ -52,8 +52,8 @@ export interface WindowOptions {
   /** Initial borderless-fullscreen state. */
   fullscreen?: boolean
   vibrancy?: 'hud' | 'sidebar' | 'popover' | null
-  /** macOS only. Resolved path to a PNG icon shown in the standard "About
-   * <app>" panel. */
+  /** Legacy compatibility field. The macOS About panel uses the same
+   * system-resolved application icon as the Dock. */
   icon?: string
   /** Populates the "Version" field of the native "About <app>" panel. */
   version?: string

@@ -23,9 +23,11 @@ pub struct WindowOptions {
     pub transparent: Option<bool>,
     /// macOS only. Values: 'hud' | 'sidebar' | 'popover' | 'window-background' | null
     pub vibrancy: Option<String>,
-    /// macOS only. Resolved path to a PNG icon used for the standard "About
-    /// <app>" panel (`NSAboutPanelOptionApplicationIcon`). Does not affect the
-    /// Dock icon — see `Application::setIconPath` for that.
+    /// Legacy compatibility field. The macOS About panel intentionally uses
+    /// `NSApplication.applicationIconImage`, keeping it visually identical to
+    /// the system-rendered Dock icon. Set the application icon through
+    /// `Application::setIconPath` in an unbundled host; packaged apps resolve
+    /// it from `Assets.car` automatically.
     pub icon: Option<String>,
     /// Populates the "Version" field of the native "About <app>" panel.
     pub version: Option<String>,

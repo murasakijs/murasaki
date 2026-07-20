@@ -3025,6 +3025,7 @@ mod imp_macos {
         }
 
         set_activation_policy_regular();
+        set_application_icon_from_bundle(&app_bundle);
 
         let event_loop = EventLoop::<()>::new();
         crate::system_permission::request_many(&meta.system_permissions_on_launch)?;
@@ -3039,6 +3040,9 @@ mod imp_macos {
             let _ = shortcut_proxy.send_event(());
         }));
 
+        // Runtime-readable PNG remains available for tray/window APIs. The
+        // About panel deliberately does not consume it; macOS resolves that
+        // icon from NSApplication.applicationIconImage instead.
         let icon_path = meta.icon.as_ref().map(|icon| resources_dir.join(icon));
 
         let locale_table = load_menu_locales(&resources_dir);
@@ -3052,7 +3056,6 @@ mod imp_macos {
 
         let about = AboutInfo {
             name: &meta.product_name,
-            icon_path: icon_path.as_ref().and_then(|p| p.to_str()),
             version: meta.version.as_deref(),
             description: meta.description.as_deref(),
             copyright: meta.copyright.as_deref(),
@@ -3068,10 +3071,6 @@ mod imp_macos {
 
         let about_owned = AboutInfoOwned {
             name: meta.product_name.clone(),
-            icon_path: icon_path
-                .as_ref()
-                .and_then(|p| p.to_str())
-                .map(String::from),
             version: meta.version.clone(),
             description: meta.description.clone(),
             copyright: meta.copyright.clone(),
@@ -3508,6 +3507,29 @@ mod imp_macos {
             ns_app.activateIgnoringOtherApps(true);
         }
     }
+
+    /// Resolves the running bundle through LaunchServices and installs that
+    /// rendered image as NSApplication's canonical icon. This is the same
+    /// representation Finder/Dock use (mask, shadow, and current appearance),
+    /// unlike the opaque source PNG kept in Resources for tray APIs. The
+    /// standard About panel then inherits this image because its metadata does
+    /// not override NSAboutPanelOptionApplicationIcon.
+    fn set_application_icon_from_bundle(app_bundle: &Path) {
+        use objc2::MainThreadMarker;
+        use objc2_app_kit::{NSApplication, NSWorkspace};
+        use objc2_foundation::NSString;
+
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let Some(path) = app_bundle.to_str() else {
+            return;
+        };
+
+        let image = NSWorkspace::sharedWorkspace().iconForFile(&NSString::from_str(path));
+        let ns_app = NSApplication::sharedApplication(mtm);
+        unsafe { ns_app.setApplicationIconImage(Some(&image)) };
+    }
 }
 
 /// Windows Job Object wrapping the spawned `node.exe` child so the OS kills
@@ -3596,10 +3618,8 @@ mod win_job {
 /// The "About <app>" panel *is* handled here too, via a Help menu appended
 /// by `menu::build_menu_bar` (muda's `PredefinedMenuItem::about` is
 /// cross-platform, same call macOS's app-name submenu uses) — see that
-/// function's doc comment. `icon_path` isn't threaded through on Windows
-/// (unlike macOS's `about`, below): muda's Windows About dialog is built from
-/// this launcher's own `AboutInfo`, whose `icon_path` field is left `None`
-/// here rather than plumbed from `window_icon`'s already-decoded tao `Icon`.
+/// function's doc comment. The native window icon is decoded separately from
+/// the About metadata on Windows.
 ///
 /// Deferred macOS-parity items, left for a later packaging phase:
 ///  - Menu-bar keyboard accelerators (Ctrl+Z etc.) — see
@@ -3613,7 +3633,7 @@ mod win_job {
 /// `hIcon` on its `WNDCLASSEX`, so without this the window chrome itself
 /// (top-left corner, Alt-Tab) falls back to Windows' generic default even on
 /// a properly icon-embedded `.exe`. Decoding `resources/icon.png` (the same
-/// file `meta.icon` already points at for macOS's About panel) and setting
+/// file `meta.icon` points at) and setting
 /// it via `WindowBuilder::with_window_icon` fixes that; tao's Windows backend
 /// sets both `ICON_SMALL` and `ICON_BIG` (`WM_SETICON`) from the one image,
 /// so there's no separate small/big asset to manage.
@@ -4023,14 +4043,8 @@ mod imp_win {
             meta.locales.as_deref(),
             &locale_table,
         );
-        // No `icon_path` here (unlike `imp_macos`'s `about`, which reuses the
-        // already-resolved `icon_path`): this launcher only ever decodes the app
-        // icon into a tao `Icon` (`window_icon`, for the window chrome itself),
-        // not a path muda's About dialog could load — see the module doc
-        // comment above.
         let about = AboutInfo {
             name: &meta.product_name,
-            icon_path: None,
             version: meta.version.as_deref(),
             description: meta.description.as_deref(),
             copyright: meta.copyright.as_deref(),
@@ -4419,10 +4433,7 @@ mod imp_win {
     }
 
     /// Decodes a PNG at `path` into a `tao::window::Icon` for the window's
-    /// title-bar/Alt-Tab icon — same decode logic as `menu::load_icon_rgba`
-    /// (macOS's About-panel icon), just producing tao's `Icon` type instead of
-    /// muda's; `png` (already a dependency for that macOS path) is reused
-    /// as-is rather than pulling in a second decoder. Returns `None` on any
+    /// title-bar/Alt-Tab icon. Returns `None` on any
     /// decode failure (unreadable file, unsupported color type, etc.) — the
     /// caller falls back to no icon (tao's default) rather than erroring the
     /// launcher out over a cosmetic issue.
@@ -4647,12 +4658,8 @@ mod imp_linux {
             meta.locales.as_deref(),
             &locale_table,
         );
-        // No `icon_path` — same reasoning as `imp_win`'s `AboutInfo` (see that
-        // module's doc comment): muda's About dialog never reads it on either
-        // platform's non-macOS backend.
         let about = AboutInfo {
             name: &meta.product_name,
-            icon_path: None,
             version: meta.version.as_deref(),
             description: meta.description.as_deref(),
             copyright: meta.copyright.as_deref(),

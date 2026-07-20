@@ -9,10 +9,6 @@ use std::{cell::RefCell, rc::Rc};
 use muda::{accelerator::Accelerator, AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use napi::bindgen_prelude::{Error, Result, Status};
 
-// `Icon` only backs `load_icon_rgba`'s macOS About-panel icon decoding below.
-#[cfg(target_os = "macos")]
-use muda::Icon;
-
 use crate::types::MenuItemOptions;
 
 /// A currently-installed application menu, shared between whoever installs
@@ -61,13 +57,6 @@ pub(crate) fn build_menu(items: &[MenuItemOptions]) -> Result<Menu> {
 /// macOS and Windows/Linux render different subsets of its fields.
 pub(crate) struct AboutInfo<'a> {
     pub name: &'a str,
-    /// Only ever read by macOS's `build_macos_app_submenu` (the About panel's
-    /// icon) — Windows/Linux's `build_menu_bar_help_submenu` never reads it
-    /// (see that function's doc comment), so `imp_win`/`imp_linux` always
-    /// construct this with `None`, making the field otherwise dead weight on
-    /// those targets.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub icon_path: Option<&'a str>,
     pub version: Option<&'a str>,
     pub description: Option<&'a str>,
     pub copyright: Option<&'a str>,
@@ -88,7 +77,6 @@ pub(crate) struct AboutInfo<'a> {
 #[derive(Clone)]
 pub(crate) struct AboutInfoOwned {
     pub name: String,
-    pub icon_path: Option<String>,
     pub version: Option<String>,
     pub description: Option<String>,
     pub copyright: Option<String>,
@@ -101,7 +89,6 @@ impl AboutInfoOwned {
     pub(crate) fn as_ref(&self) -> AboutInfo<'_> {
         AboutInfo {
             name: &self.name,
-            icon_path: self.icon_path.as_deref(),
             version: self.version.as_deref(),
             description: self.description.as_deref(),
             copyright: self.copyright.as_deref(),
@@ -154,22 +141,7 @@ fn build_macos_app_submenu(
         .and_then(|l| l.about.as_deref())
         .map(String::from)
         .unwrap_or_else(|| format!("About {}", info.name));
-    // Provide explicit metadata so the standard About panel shows the product
-    // name — without it macOS derives the panel from the running process, which
-    // is the bundled `node` binary, and the panel reads "node". Likewise, the
-    // panel only shows an icon if `icon` is `Some` — otherwise it falls back to
-    // the bundle icon, which the bundled `node` process isn't associated with.
-    let about_metadata = AboutMetadata {
-        name: Some(info.name.to_string()),
-        version: info.version.map(|s| s.to_string()),
-        comments: info.description.map(|s| s.to_string()),
-        copyright: info.copyright.map(|s| s.to_string()),
-        website: info.homepage.map(|s| s.to_string()),
-        authors: info.authors.map(|a| a.to_vec()),
-        credits: build_about_credits(info.description, info.homepage),
-        icon: info.icon_path.and_then(load_icon_rgba),
-        ..Default::default()
-    };
+    let about_metadata = macos_about_metadata(info);
 
     let app_menu = Submenu::new(info.name, true);
     let quit_label = labels.and_then(|l| l.quit.as_deref()).unwrap_or("Quit");
@@ -189,6 +161,27 @@ fn build_macos_app_submenu(
         .map_err(|e| Error::new(Status::GenericFailure, e.to_string()))?;
 
     Ok(app_menu)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_about_metadata(info: &AboutInfo) -> AboutMetadata {
+    // Keep product metadata explicit so the panel never derives the native
+    // launcher's crate name. The icon is intentionally omitted: macOS then
+    // uses NSApplication.applicationIconImage, the same system-resolved
+    // AppIcon shown in the Dock. Supplying the source PNG through
+    // NSAboutPanelOptionApplicationIcon would bypass Assets.car rendering and
+    // expose its opaque square canvas in the About panel.
+    AboutMetadata {
+        name: Some(info.name.to_string()),
+        version: info.version.map(|s| s.to_string()),
+        comments: info.description.map(|s| s.to_string()),
+        copyright: info.copyright.map(|s| s.to_string()),
+        website: info.homepage.map(|s| s.to_string()),
+        authors: info.authors.map(|a| a.to_vec()),
+        credits: build_about_credits(info.description, info.homepage),
+        icon: None,
+        ..Default::default()
+    }
 }
 
 /// The standard Edit submenu (Undo/Redo/sep/Cut/Copy/Paste/Select All) — see
@@ -457,37 +450,6 @@ fn build_about_credits(description: Option<&str>, homepage: Option<&str>) -> Opt
     } else {
         Some(lines.join("\n"))
     }
-}
-
-/// Decodes a PNG at `path` into a `muda::Icon` for the About panel. Returns
-/// `None` on any decode failure (unreadable file, unsupported color type,
-/// etc.) — callers fall back to no icon rather than erroring out.
-#[cfg(target_os = "macos")]
-fn load_icon_rgba(path: &str) -> Option<Icon> {
-    let file = std::fs::File::open(path).ok()?;
-    let decoder = png::Decoder::new(file);
-    let mut reader = decoder.read_info().ok()?;
-    let mut buf = vec![0; reader.output_buffer_size()];
-    let frame = reader.next_frame(&mut buf).ok()?;
-    buf.truncate(frame.buffer_size());
-
-    let info = reader.info();
-    let (width, height) = (info.width, info.height);
-
-    let rgba = match (info.color_type, info.bit_depth) {
-        (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
-        (png::ColorType::Rgb, png::BitDepth::Eight) => {
-            let mut out = Vec::with_capacity(buf.len() / 3 * 4);
-            for chunk in buf.chunks_exact(3) {
-                out.extend_from_slice(chunk);
-                out.push(255);
-            }
-            out
-        }
-        _ => return None,
-    };
-
-    Icon::from_rgba(rgba, width, height).ok()
 }
 
 /// Windows and Linux: stable item ids for `build_menu_bar`'s custom
@@ -1033,6 +995,24 @@ fn predefined(role: &str) -> Option<PredefinedMenuItem> {
 mod tests {
     use super::lifecycle_role_accelerator;
     use muda::accelerator::Accelerator;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn about_panel_uses_the_system_resolved_application_icon() {
+        let info = super::AboutInfo {
+            name: "Example",
+            version: Some("1.2.3"),
+            description: None,
+            copyright: None,
+            homepage: None,
+            authors: None,
+        };
+        let metadata = super::macos_about_metadata(&info);
+
+        assert_eq!(metadata.name.as_deref(), Some("Example"));
+        assert_eq!(metadata.version.as_deref(), Some("1.2.3"));
+        assert!(metadata.icon.is_none());
+    }
 
     #[test]
     fn close_role_defaults_to_platform_command_or_control_w() {

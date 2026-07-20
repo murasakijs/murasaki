@@ -27,6 +27,10 @@ Linux (up from 2), each verified end to end in a packaged AppImage.
 
 ### Fixed
 
+- **macOS About-panel icon rendering.** The standard About panel now inherits
+  the LaunchServices-resolved application icon instead of receiving the raw
+  source PNG. Its mask, corner radius, shadow, and appearance therefore match
+  the icon shown by Finder and the Dock.
 - **Linux multi-window recreate crash.** Destroying and recreating a secondary
   window at runtime aborted the packaged process with an X11 `BadWindow` error.
   Two stacked causes are fixed: per-window `WebContext`s are now released on

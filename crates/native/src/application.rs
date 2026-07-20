@@ -212,7 +212,6 @@ impl Application {
             let app_name = opts.title.as_deref().unwrap_or("Murasaki");
             let about = crate::menu::AboutInfo {
                 name: app_name,
-                icon_path: opts.icon.as_deref(),
                 version: opts.version.as_deref(),
                 description: opts.description.as_deref(),
                 copyright: opts.copyright.as_deref(),
@@ -348,7 +347,6 @@ impl Application {
             let app_name = opts.title.as_deref().unwrap_or("Murasaki");
             let about = crate::menu::AboutInfo {
                 name: app_name,
-                icon_path: opts.icon.as_deref(),
                 version: opts.version.as_deref(),
                 description: opts.description.as_deref(),
                 copyright: opts.copyright.as_deref(),
@@ -407,7 +405,6 @@ impl Application {
             #[cfg(target_os = "macos")]
             about_info: crate::menu::AboutInfoOwned {
                 name: opts.title.clone().unwrap_or_else(|| "Murasaki".to_string()),
-                icon_path: opts.icon.clone(),
                 version: opts.version.clone(),
                 description: opts.description.clone(),
                 copyright: opts.copyright.clone(),

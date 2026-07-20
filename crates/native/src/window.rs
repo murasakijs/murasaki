@@ -1403,7 +1403,6 @@ mod tests {
             #[cfg(target_os = "macos")]
             about_info: crate::menu::AboutInfoOwned {
                 name: "Murasaki".to_string(),
-                icon_path: None,
                 version: None,
                 description: None,
                 copyright: None,
