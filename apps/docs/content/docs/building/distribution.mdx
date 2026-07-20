@@ -16,7 +16,7 @@ running an AppImage in a container/CI.
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization built in |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`; WiX `.msi` on Windows | Authenticode via SignTool built in |
-| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | Not implemented; `--sign` fails closed |
+| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | GPG detached signatures via `--sign`; no distro-repo/keyring trust |
 
 <Callout type="warn">
   A generated file is not automatically distribution-ready. Test the
@@ -323,9 +323,11 @@ Add these repository secrets to sign + notarize (omit them all for an unsigned
 <Callout type="info">
   The native launcher runs the produced AppDir/`.AppImage`/`.deb`: window,
   webview, single-instance locking, deep links, graceful shutdown, and
-  crash reporting all work the same way they do on macOS/Windows. Signing,
-  `.rpm`, and repository metadata are not implemented yet — see "What's not
-  implemented yet" below.
+  crash reporting all work the same way they do on macOS/Windows.
+  `murasaki installer --sign` GPG-signs the artifacts — see
+  [Signing: GPG detached signatures](#signing-gpg-detached-signatures)
+  below. `.rpm` and repository metadata are not implemented yet — see
+  "What's not implemented yet" below.
 </Callout>
 
 ```bash
@@ -386,11 +388,49 @@ CI (`.github/workflows/app-package-linux.yml`) always uses
   managed by the system package manager" result instead of checking a
   manifest — never an error.
 
+### Signing: GPG detached signatures
+
+<Callout type="info">
+  Murasaki owns the signing orchestration here too — it never generates or
+  stores a GPG key for you. Supply an existing key; `--sign` fails closed
+  instead of silently shipping unsigned artifacts.
+</Callout>
+
+```bash
+pnpm exec murasaki installer --target linux-x64 --sign
+```
+
+`--sign` produces a detached, ASCII-armored GPG signature (`<artifact>.sig`)
+for the `.AppImage`, for the `.deb`, and for a combined `SHA256SUMS` file that
+lists both artifacts' checksums, so a recipient can verify either the
+per-file signature or the checksum manifest. When `dpkg-sig` is on `PATH`,
+Murasaki also opportunistically embeds a Debian-native signature directly
+into the `.deb`; this is best-effort and does not block `--sign` if
+`dpkg-sig` is unavailable.
+
+The signing key resolves from `$MURASAKI_GPG_KEY` (a key ID, fingerprint, or
+email known to your local `gpg` keyring), then `sign.linux.gpgKey` in
+`murasaki.config.ts`. The passphrase comes **only** from
+`$MURASAKI_GPG_PASSPHRASE` or an already-unlocked `gpg-agent` — never from
+config or a file.
+
+Recipients verify with their own copy of `gpg`:
+
+```bash
+gpg --verify MyApp-1.0.0-linux-x64.AppImage.sig MyApp-1.0.0-linux-x64.AppImage
+gpg --verify SHA256SUMS.sig SHA256SUMS
+```
+
+This proves the artifact matches what your key signed; it does not by itself
+establish that your key is trustworthy — recipients still need your public
+key out-of-band (a keyserver, your website, a release note) to make that
+judgment call themselves.
+
 ### What's not implemented yet
 
 - No `.rpm` or repository metadata (apt/dnf repo indexes).
-- No built-in Linux code signing (`debsign`/AppImage signing). Passing
-  `--sign` fails before packaging rather than silently emitting unsigned output.
+- No apt/dnf keyring or distro-repository trust integration for the GPG
+  signature above — it proves artifact integrity, not repository trust.
 - No self-update for the `.deb` or a bare/manually-extracted AppDir — only
   the `.AppImage` has a file to swap (see above).
 
@@ -403,7 +443,8 @@ CI (`.github/workflows/app-package-linux.yml`) always uses
 - Test configured URL schemes and file associations for cold start and while
   the primary app instance is already running.
 - Exercise Node Main shutdown, offline startup, and failed network requests.
-- Verify macOS signatures/notarization and Windows Authenticode signatures.
+- Verify macOS signatures/notarization, Windows Authenticode signatures, and
+  Linux GPG signatures.
 - Generate and sign the Murasaki update manifest only after final payloads are
   immutable.
 - Publish payloads, `latest.json`, and `latest.json.sig` together.

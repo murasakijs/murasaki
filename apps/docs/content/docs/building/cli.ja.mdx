@@ -17,8 +17,9 @@ murasaki help        このヘルプを表示する
 
 <Callout type="info">
   開発とパッケージングは macOS、Windows、Linux に対応しています。Linux の `bundle` は
-  AppDir と `.AppImage` を、`installer` は `.deb` も生成します。Linux のパッケージ署名、
-  RPM、パッケージリポジトリ用メタデータは未対応です。Linuxで明示的に`--sign`を渡すと
+  AppDir と `.AppImage` を、`installer` は `.deb` も生成します。Linux の `--sign` は
+  `.AppImage`、`.deb`、まとめた `SHA256SUMS` にGPG署名します。RPM、パッケージ
+  リポジトリ用メタデータは未対応です。`--sign`を明示的に渡すとどのplatformでも
   出力前にfail-closedで停止し、未署名artifactを成功扱いにはしません。
 </Callout>
 
@@ -53,9 +54,9 @@ murasaki bundle --no-build            # 既存の dist/client を再利用する
   プラットフォーム（デフォルトはホスト）。`darwin-arm64`、`darwin-x64`、
   `win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` を指定できます。
 - **`--sign`** — macOS では `.app` を Developer ID 署名し、Windows では
-  portable ZIP 作成前に app executable を Authenticode 署名します。Windows 署名は
-  SignTool がある Windows 上で実行します。Linuxではbuilt-in署名が実装されるまでこの
-  flagを拒否します。詳しくは
+  portable ZIP 作成前に app executable を Authenticode 署名し、Linux では
+  生成された `.AppImage` をGPG署名します。Windows 署名は
+  SignTool がある Windows 上で実行します。詳しくは
   [Distribution](/ja/docs/building/distribution#signing--notarization)を参照してください。
 - **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップする。
 
@@ -78,10 +79,12 @@ murasaki installer --no-build          # 既存の dist/bundle を再利用す�
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — `bundle` に転送されます。
-- **`--sign`** — macOS の Developer ID または Windows の Authenticode 署名。
-  Windowsではapp executableと生成されたすべてのinstallerを署名・検証します。updater有効時は
-  per-user NSISを必須とし、MSIをskipします。Linuxではbuilt-in署名が実装されるまで
-  このflagを拒否します。
+- **`--sign`** — macOS の Developer ID、Windows の Authenticode、または
+  Linux の GPG 署名。Windowsではapp executableと生成されたすべてのinstallerを
+  署名・検証します。updater有効時は per-user NSISを必須とし、MSIをskipします。
+  Linuxでは `.AppImage`、`.deb`、まとめた `SHA256SUMS` にGPG署名します。詳しくは
+  [Distribution](/ja/docs/building/distribution)の「GPG detached 署名」を
+  参照してください。
 - platform packaging toolからinstallerを1つも生成できなければcommandは失敗します。
   portable ZIP / AppImageが目的なら`murasaki bundle`を使ってください。
 - **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary サービスに

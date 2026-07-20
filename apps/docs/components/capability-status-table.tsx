@@ -160,6 +160,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "borderless fullscreenのみ対応しており、exclusive/dedicated video mode fullscreenはありません。",
     "titleBarStyle: 'hidden'はmacOS専用です(transparentなtitlebar + hidden title + full-size content view)。Windows / Linuxはこのoptionを受け取っても無視します。",
     "getMonitors()が返すgeometry(position、size)はphysical pixelで、logical/CSS pixelではありません。",
+    "Linuxでは、runtimeにsecondary windowを生成・破棄したのち再度生成する操作はまだ安定していません: destroy→recreateの経路はpackaged processをX11のBadWindow errorでクラッシュさせます(追跡中)。primary windowと起動時に宣言されたsecondary windowは問題なく動作し、影響を受けるのはruntimeでのrecreate経路のみです。",
   ],
   "application-menu": [
     "native application menuはmacOS、Windows、Linux(GTK、muda経由)で利用できます。差し替えはprocess-globalでprimary rendererに限定され、menu:applicationと各privileged roleのcapabilityが必要です。",
@@ -191,6 +192,7 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   "code-signing": [
     "開発者がcredentialを用意した場合、macOSのDeveloper ID署名とApple notarizationを利用できます。",
     "Windows Authenticodeは、開発者が用意したPFX/store証明書またはMicrosoft Artifact Signing providerを通じて、application実行ファイル、portable ZIP payload、NSIS setup、MSIへ署名・検証します。Linuxのpackage署名は未実装で、macOSのad-hoc署名は利用者からの信頼を確立しません。",
+    "Linux: `murasaki installer --sign`は、.AppImage、.deb、そして両者を束ねたSHA256SUMSに対してdetachedかつarmored形式のGPG署名(<artifact>.sig)を生成し、dpkg-sigがPATH上にあればDebianネイティブの署名も追加で埋め込みます(opportunistic)。署名鍵は$MURASAKI_GPG_KEYまたはsign.linux.gpgKeyで選択し、passphraseは$MURASAKI_GPG_PASSPHRASEまたはgpg-agentからのみ取得します。distro repositoryのtrust storeやapt/dnf keyringとの統合はなく、rpmにも対応していません。",
   ],
   "loopback-endpoint-protection": [
     "開発時のprivileged endpointはHttpOnly SameSite runtime sessionを要求し、loopback Host、Origin、Fetch Metadataを検証します。",
@@ -203,6 +205,8 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   "multi-window": [
     "windowはconfigでの宣言が必須です。secondary templateは起動時生成をopt outでき、trusted Node Mainから生成・破棄・再生成できます。任意のruntime URL、native policy、未宣言のlabelは拒否されます。",
     "secondaryのOS/self closeは再openできるようhideし、Node Mainからのdestroyはnative resourceを解放し、再生成時にgenerationをincrementします。application menuはprocess-globalでprimary所有のままです。",
+    "各native windowは独立したbrowser profileを持つため、Service Worker、SharedWorker、cookie、storageが他windowのbackend authorityを引き継ぐことはありません。secondary profileはWindows/LinuxおよびmacOS 14+では永続化され、macOS 11-13では別の非永続WebKit storeを使用します。",
+    "Linuxは未対応です: secondary windowをruntimeで破棄してから再生成する操作はpackaged processをX11のBadWindow errorでクラッシュさせます。起動時に宣言されたsecondary windowは動作しますが、multi-windowが前提とするruntimeでのrecreate lifecycleは動作しません(既知のissueとして追跡中)。",
   ],
   "tray-and-global-shortcuts": [
     "macOS status item / Windows system-tray iconはprocess-wideで1つ、tooltip、click event、native nested menu、menu-item event、動的なicon/menu差し替えを備えます。最後に成功したcreateが以前のownerを置き換えます。",
@@ -232,12 +236,14 @@ const JA_LIMITATIONS: Record<string, string[]> = {
   ],
   "webview-session-network": [
     "application全体のcustom User-Agent、non-persistent/incognito session、上限付きの未認証HTTP CONNECTまたはSOCKSv5 proxy endpointは、runtimeで検証されたうえで開発・packaged済みmacOS/Windows WebViewのWryへ渡されます。",
+    "Browser profileはnative window単位で分離されます。primaryは従来からのapp profileを保持し、secondary profileはWindows/LinuxおよびmacOS 14+では永続化されます。macOS 11-13は分離された非永続storeを使用します。window間でのcookie/storage/workerの共有は意図的に未対応で、永続的なstateはMain/APIハンドラを通じて共有してください。",
     "macOSのproxy設定にはmacOS 14以降が必要で、それより古いOSではstartupが失敗します。Windowsのcustom User-AgentにはWebView2 86.0.616.0以降、private modeには101.0.1210.39以降が必要で、古いruntimeはこれらの設定を無視します。window単位のoverrideとauthenticatedなproxyには対応していません。",
     "webview:downloadは、sanitizeされ衝突解決済みのdownloadを設定済み(またはOS既定)のdirectoryへ限定し、start/completion eventを報告します。completion eventのidをstart eventと確実に対応付ける手段はなく、macOSは完了したdownloadのpathを報告しません(upstream WebKitの制限)。",
     "webview:dragDropはfile drag-and-drop event(dragoverは20/秒にthrottle)を、OS既定の動作を妨げることなく報告します。file inputはgrantの有無に関わらず動作します。webview.initScriptsはtrustedでconfig所有のJavaScriptをpage load前に注入し、capabilityでは制御されません。",
     "webview:zoomはpage zoomを0.25〜5.0に制限し、macOS 11+/iOS 14+でのみ利用できます。webview.hotkeysZoom(capabilityではなくconfig)はWindowsでのみOS zoom hotkey/gestureを有効にします。webview:printはplatformのprint dialogを開きます。Wryがfind-in-page APIを公開していないため、この機能はありません。",
-    "webview:readCookies/webview:writeCookiesは上限付きのcookie読み取り・設定・削除を公開します。murasaki runtime自身のsession-auth cookieは、許可されたcapabilityに関わらず読み取りから除外され、書き込み・削除からは拒否されます。deleteCookieはname、URLホストをdomainとして、default(/)pathのみで一致判定します。",
-    "page内のpermission request(getUserMedia、geolocation)はinterceptされません。Wry 0.55にはpermission handlerがないため、platform WebView既定の挙動にfall throughします。Wryがpermission handlerを提供次第、interceptionに対応する予定です。",
+    "webview:readCookies/webview:writeCookiesは上限付きのcookie読み取り・設定・削除を公開し、構造化されたURL scopeに対応します。scope付きの読み取りには明示的なURLが必要で、書き込みは有効なcookie pathと照合され、domain overrideはURLホストと完全に一致する必要があります。予約済みのlegacy名murasaki_runtimeは、runtime認証がすでにcookieに依存していなくても防御的措置として読み取りから除外され、書き込み・削除からは拒否されます。deleteCookieはname、URLホストをdomainとして、default(/)pathのみで一致判定します。",
+    "rendererのcamera、microphone、geolocation Web APIは、framework所有のPermissions-Policy headerによってfail closedになります。Wry 0.55にはcross-platformなwindow単位のpermission callbackがないため、これらのAPIをconfigから有効化することはまだできません。capability-checkされたnative機能を代わりに使用してください。",
+    "Linuxでは、webview.deleteCookie()はresolveしますが、その削除が後続のwebview.readCookies()に確実に反映されるとは限りません(WebKitGTK/libsoupのcookie manager特有の挙動)。cookieのset/readとcustom User-Agentは問題なく動作します。packaged Linuxで検証済みです。",
   ],
   "build-time-plugin-sdk": [
     "trustedなbuild-time pluginは、Vite PluginOptions、決定的なbundle dependency/resource、runtimeで検証されたstable nameを持つ直列のdev/build/bundle lifecycle hookを提供できます。",

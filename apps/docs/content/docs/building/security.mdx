@@ -376,8 +376,10 @@ the OS artifact, plus Murasaki's manifest signature and payload hash.
   its own window; handlers must enforce user/session/object authorization.
 - Incognito prevents persistent profile use but does not guarantee that
   multiple incognito windows share the same in-memory session.
-- Linux package signing is not implemented. Windows Authenticode requires a
-  developer-supplied certificate/Artifact Signing provider and Windows SDK SignTool.
+- Linux package signing (`murasaki installer --sign`) produces detached GPG
+  signatures with no apt/dnf keyring or distro-repository trust integration.
+  Windows Authenticode requires a developer-supplied certificate/Artifact
+  Signing provider and Windows SDK SignTool.
 - Linux `.deb` packages install protocol/file-association `MimeType` entries
   through their `.desktop` file. Manually extracted AppDir/AppImage artifacts
   and Windows portable archives intentionally do not self-register.

@@ -319,7 +319,7 @@ const en: HomeContent = {
         status: "Partial support",
         available: true,
         description:
-          "AppImage and .deb packages (x64 & arm64), with self-update for AppImage; rpm packaging and code signing aren't shipped yet.",
+          "AppImage and .deb packages (x64 & arm64), with self-update for AppImage and GPG code signing (murasaki installer --sign); rpm packaging isn't shipped yet.",
       },
     ],
   },
@@ -451,7 +451,7 @@ const ja: HomeContent = {
     {
       title: "署名済み配布",
       description:
-        "macOS のコード署名・公証、Windows と Linux の配布パッケージ生成に対応します。",
+        "macOS はコード署名・公証、Windows は Authenticode、Linux は GPG 署名に対応した配布パッケージを生成します。",
     },
   ],
   whyMurasaki: {
@@ -573,7 +573,7 @@ const ja: HomeContent = {
         status: "部分対応",
         available: true,
         description:
-          "AppImage と .deb パッケージ（x64 / arm64）に対応。AppImage は自己更新にも対応します。rpm とコード署名は未対応です。",
+          "AppImage と .deb パッケージ（x64 / arm64）に対応。AppImage は自己更新に、murasaki installer --sign は GPG コード署名に対応します。rpm は未対応です。",
       },
     ],
   },

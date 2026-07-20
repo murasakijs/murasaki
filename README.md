@@ -309,15 +309,21 @@ Rust toolchain.
 
 **Known limitations, stated plainly:**
 
-- **Linux has no code signing, `.rpm`, or repository metadata.**
-  AppDir/`.AppImage`/`.deb` all ship unsigned, and there's no Fedora/RHEL
-  package or apt/dnf repository index yet.
+- **Linux signing is GPG-only, with no `.rpm` or repository metadata.**
+  `murasaki installer --sign` detached-signs the `.AppImage`, the `.deb`, and
+  a combined `SHA256SUMS` with GPG (opportunistically embedding a
+  `dpkg-sig` signature too), but there's no apt/dnf keyring or distro-repo
+  trust integration, and no Fedora/RHEL package yet.
 - **Windows Authenticode needs your own certificate or signing provider.**
   `--sign` wires SignTool across the app executable, portable ZIP payload,
   NSIS setup, and MSI, but Murasaki cannot establish publisher reputation for
   you. A new publisher may still see SmartScreen prompts while reputation grows.
 - **macOS signing and notarization need your own paid Apple Developer ID** — see
   [Signing & distribution](#signing--distribution). Unsigned is the default.
+- **Runtime multi-window recreate is unsupported on Linux.** Destroying and
+  then recreating a secondary window at runtime crashes the packaged process
+  with an X11 `BadWindow` error (tracked). Launch-time-declared secondary
+  windows work fine — only the runtime destroy→recreate path is affected.
 - **`mandatory` in the update manifest is advisory.** murasaki hands the flag to
   your app; it does not force the update on the user's behalf.
 
@@ -587,13 +593,16 @@ murasaki is **pre-1.0** — the API can still change before v1.0.
   cross-compiled from macOS/Linux.
 - ✅ **Auto-update** — signed manifests, SHA-256-verified downloads, and
   in-place replacement + relaunch on macOS, Windows x64, and Linux AppImage.
-- ✅ **Code signing** — macOS Developer ID + notarization and Windows
-  Authenticode (PFX/store certificates or Microsoft Artifact Signing).
+- ✅ **Code signing** — macOS Developer ID + notarization, Windows
+  Authenticode (PFX/store certificates or Microsoft Artifact Signing), and
+  Linux GPG detached signing (`murasaki installer --sign` signs the
+  `.AppImage`, `.deb`, and `SHA256SUMS`; no apt/dnf keyring integration or
+  `.rpm` yet).
 - ✅ **Linux distribution** — AppDir + `.AppImage` and `.deb`, cross-compiled
   from macOS/Windows/Linux (`mksquashfs` required for the `.AppImage`). The
   native launcher runs the produced bundle end-to-end (window, webview,
   single-instance, deep links, crash reporting) and self-updates via the
-  AppImage; no code signing, `.rpm`, or repository metadata yet.
+  AppImage; no `.rpm` or repository metadata yet.
 - 🚧 **Next** — v1.0 stabilization and broader packaged-app smoke coverage
   across supported OS/architecture combinations.
 - 🔭 **Exploring (post-1.0):** server-side rendering + streaming. The current

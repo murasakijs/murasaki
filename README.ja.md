@@ -301,15 +301,22 @@ single-instance、deep link、crash reporting)。
 
 **既知の制限(隠さず明記します):**
 
-- **Linux には code signing、`.rpm`、repository metadata がありません。**
-  AppDir / `.AppImage` / `.deb` はいずれも未署名で出荷され、Fedora/RHEL 向け
-  パッケージや apt/dnf の repository index もまだありません。
+- **Linux の署名は GPG のみで、`.rpm` や repository metadata はありません。**
+  `murasaki installer --sign` は `.AppImage`、`.deb`、両者をまとめた
+  `SHA256SUMS` に GPG の detached 署名を付与します(`dpkg-sig` があれば
+  そちらの署名も追加で埋め込みます)が、apt/dnf の keyring や distro-repo の
+  trust 統合はなく、Fedora/RHEL 向けパッケージもまだありません。
 - **Windows Authenticode には自分の証明書または署名プロバイダーが必要です。**
   `--sign` はアプリ実行ファイル、portable ZIP、NSIS setup、MSIを署名・検証しますが、
   Murasakiが発行元reputationを代行することはできません。新しい発行元では
   reputationが蓄積するまでSmartScreen警告が表示される場合があります。
 - **macOS の署名と notarization には、ご自身の有料 Apple Developer ID が必要です** —
   [署名と配布](#署名と配布) を参照してください。既定は未署名です。
+- **Linux では runtime でのマルチウィンドウ再生成に対応していません。**
+  secondary window を runtime で破棄してから再生成すると、packaged process が
+  X11 の `BadWindow` エラーでクラッシュします(追跡中)。起動時に宣言した
+  secondary window は問題なく動作します — 影響があるのは runtime での
+  destroy→recreate の経路のみです。
 - **更新マニフェストの `mandatory` は助言的なフラグです。** murasaki はこのフラグを
   アプリに渡すだけで、ユーザーに更新を強制することはしません。
 
@@ -548,12 +555,16 @@ murasaki は **pre-1.0** です——v1.0 までの間に API が変更される
 - ✅ **自動アップデート** — 署名付きマニフェスト、SHA-256 検証付きダウンロード、
   そのまま自分自身を置き換えて再起動。macOS、Windows x64 / arm64、Linux AppImage に
   対応しています。
+- ✅ **コード署名** — macOS Developer ID + notarization、Windows Authenticode
+  (PFX/store証明書またはMicrosoft Artifact Signing)、そしてLinuxのGPG detached
+  署名(`murasaki installer --sign`が`.AppImage`、`.deb`、`SHA256SUMS`に署名。
+  apt/dnfのkeyring統合や`.rpm`はまだありません)。
 - ✅ **Linux ディストリビューション** — AppDir + `.AppImage` と `.deb`。
   macOS / Windows / Linux からクロスコンパイルできます(`.AppImage` の生成には
   `mksquashfs` が必要)。ネイティブランチャーは生成した bundle を end-to-end で
   実際に動かし(window、webview、single-instance、deep link、crash
-  reporting)、AppImage は self-update にも対応します。code signing、`.rpm`、
-  repository metadata はまだありません。
+  reporting)、AppImage は self-update にも対応します。`.rpm`、repository
+  metadata はまだありません。
 - 🚧 **次にやること** — v1.0 の安定化と、対応するOS / architectureを横断する
   packaged app smoke testの拡充。
 - 🔭 **検討中(post-1.0)**: サーバーサイドレンダリング + ストリーミング。現状の
