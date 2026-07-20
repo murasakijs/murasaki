@@ -251,9 +251,13 @@ deep-link URL へ renderer を自動 navigation させたり、query 値を HTML
 ## Content Security Policy
 
 Murasaki は document に `X-Content-Type-Options: nosniff` と `Referrer-Policy:
-no-referrer`を設定し、framework-owned / user-owned HTMLへCSP meta tagを1つ注入します。
-production既定値は`script-src 'self'`を使い、object、frame、base URL変更、inline script
-attribute、他originへのform送信を遮断します。一方remote-backed appのHTTPS / WSS接続は
+no-referrer`を設定し、解決済みのCSPを2つの経路で配信します。1つは配信されるHTML
+documentすべてに付く`Content-Security-Policy` response header(developmentのVite
+middlewareとpackaged appのNode serverの両方が設定します)、もう1つはframework-owned /
+user-owned HTMLへ注入するCSP meta tagです。どちらも同じ解決済みpolicyから生成されるため
+乖離しません。production既定値は`script-src 'self'`を使い、object、frame、base URL変更、
+inline script attribute、他originへのform送信を遮断し、このappのdocumentを他documentへ
+frameさせません(`frame-ancestors 'none'`)。一方remote-backed appのHTTPS / WSS接続は
 許可し、image / font / mediaには一般的なHTTPS / data / blob sourceを許可します。
 Reactのstyle attributeとruntime CSS互換性のため、`style-src 'self' 'unsafe-inline'`は
 残しています。
@@ -268,32 +272,41 @@ export default defineConfig({
   appId: 'com.example.notes',
   productName: 'Notes',
   security: {
-    csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.example.com; object-src 'none'; base-uri 'none'; frame-src 'none'",
+    csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.example.com; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'",
   },
 })
 
-// Murasakiの注入だけを無効化:
+// headerとmeta tagの両方を無効化:
 // security: { csp: false }
 ```
 
-stringはdirective mergeではなく完全なoverrideです。user-owned `index.html`にCSP metaが
-あればそれを維持して`<head>`先頭へ移動します。既存tagと`security.csp` stringの両方を
-設定すると、片方を暗黙に選ばずbuild errorにします。blockされたsourceはbrowser consoleの
-CSP violationで確認し、そのsourceだけを追加するかapp originへ移してください。
+stringはdirective mergeではなく完全なoverrideであり、header・meta tagの両方に同一に
+適用されます。user-owned `index.html`にCSP metaがあればそれを維持して`<head>`先頭へ
+移動します。このケース(`security.csp`未設定でCSP meta tagが存在する場合)では、
+Murasakiはmeta tagだけでpolicyを配信し、`Content-Security-Policy` response headerは
+送信しません。両方送ってしまうとbrowser側でcumulativeに強制され、userが完全に把握して
+いるはずのmeta tagのpolicyを暗黙に上書き(実質的にさらに制限)してしまうためです。
+既存tagと`security.csp` stringの両方を設定すると、片方を暗黙に選ばずbuild errorに
+します。blockされたsourceはbrowser consoleのCSP violationで確認し、その
+sourceだけを追加するかapp originへ移してください。
 
 既存appを移行するときはproductionのinline scriptをexternal moduleへ移します。remote
 script / frameは既定でblockされるため、必要なら明示的にoverrideしてください。HTTPS / WSS
 backendは既定で利用できます。remoteのplain HTTP backendにはoverrideが必要です
 （same-origin loopback callは許可されます）。
 
-meta配信CSPにはbrowser定義の制約があります。tagをparseした位置から適用されるため
-Murasakiは`<head>`先頭へ注入または移動します。`frame-ancestors`、`sandbox`、reportingなどの
-directiveはmeta tagから完全には利用できないため、既定policyにも含めていません。これらが
-必要な実network serviceではresponse headerを使ってください。CSPはHTMLをsanitizeせず、
-Node関数をauthorizeしません。
-既定のinline style許可も互換性上のtradeoffであり、XSS安全性の保証ではありません。
-引き続き`dangerouslySetInnerHTML`を避け、user-authored HTMLをsanitizeし、third-party codeを
-固定してください。
+一部のdirectiveはresponse headerでしか有効になりません。browserは`<meta>`tag内の
+`frame-ancestors`や`sandbox`を無視し、`report-to` / `report-uri`もreporting endpointを
+紐付けるための実HTTP responseを必要とします。そのためMurasakiはこれらのdirectiveを
+meta向けpolicyから自動的に取り除き(engineによっては無視したdirectiveへconsole警告を
+出すため)、headerだけに残します。これによりmeta tagはspec的にcleanなまま、headerは
+policy全体を運びます。既定policyに`frame-ancestors 'none'`を含めているのはこのためで、
+developmentでもpackaged appでもheaderによって強制されます。meta tagはこれらの
+directiveを強制できないままfallbackとして残り、live HTTP responseではなくbuild済みの
+`file://`出力を直接検査するtooling向けに有用です。CSPはHTMLをsanitizeせず、Node関数を
+authorizeしません。既定のinline style許可も互換性上のtradeoffであり、XSS安全性の保証
+ではありません。引き続き`dangerouslySetInnerHTML`を避け、user-authored HTMLをsanitizeし、
+third-party codeを固定してください。
 
 ## 実ネットワークサービスを公開する場合
 

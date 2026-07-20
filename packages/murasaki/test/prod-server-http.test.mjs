@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import test from 'node:test'
 import { parseWire, stringifyWire, WIRE_CONTENT_TYPE } from '../dist/runtime/wire.js'
 import { deriveWindowToken } from '../dist/runtime/window-auth.js'
+import { DEFAULT_PRODUCTION_CSP } from '../dist/vite-plugin/shell.js'
 
 const packageDir = resolve(import.meta.dirname, '..')
 const RUNTIME_TOKEN = 'a'.repeat(64)
@@ -27,6 +28,82 @@ async function copyMainRuntimeFixture(root) {
     copyFile(join(packageDir, 'dist/main/crash-reports.js'), join(mainDir, 'crash-reports.js')),
     writeFile(join(runtimeRoot, 'package.json'), '{"private":true,"type":"module"}\n'),
   ])
+}
+
+/**
+ * Minimal prod-server.mjs fixture (no server actions/routes exercised) —
+ * used by the CSP header tests below, which only care about the metadata →
+ * response-header plumbing (`murasaki-meta.json`'s `csp` field, written by
+ * cli/bundle.ts's metaJson() from the same resolveContentSecurityPolicy()
+ * the dev middleware and the meta tag use). A real bundle always writes this
+ * key, so the default here mirrors that — never omit it.
+ */
+async function startMinimalProdServer(t, { csp = DEFAULT_PRODUCTION_CSP, omitCsp = false } = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'murasaki-prod-csp-'))
+  const clientDir = join(root, 'client')
+  const serverDir = join(root, 'server')
+  await mkdir(clientDir)
+  await mkdir(serverDir)
+  await writeFile(join(clientDir, 'index.html'), '<!doctype html><title>csp test</title>')
+  await writeFile(join(clientDir, 'app.js'), 'export {}\n')
+  await writeFile(join(serverDir, 'actions.mjs'), 'export const registry = {}\n')
+  await writeFile(join(serverDir, 'main-actions.mjs'), 'export const registry = {}\n')
+  await writeFile(join(serverDir, 'routes.mjs'), 'export const routes = []\n')
+  await writeFile(join(serverDir, 'main.mjs'), 'export default {}\n')
+  await copyFile(join(packageDir, 'assets/prod-server.mjs'), join(root, 'prod-server.mjs'))
+  await copyFile(join(packageDir, 'dist/runtime/updater.js'), join(root, 'updater-engine.mjs'))
+  await copyFile(join(packageDir, 'dist/runtime/wire.js'), join(root, 'wire.mjs'))
+  await copyMainRuntimeFixture(root)
+  await writeFile(join(root, 'murasaki-meta.json'), JSON.stringify({
+    appId: 'dev.murasaki.prod-csp-test',
+    productName: 'Production CSP test',
+    windows: [{ label: 'main', backendCapabilities: [] }],
+    ...(omitCsp ? {} : { csp }),
+  }))
+
+  const child = spawn(
+    process.execPath,
+    [
+      join(root, 'prod-server.mjs'),
+      '--client', clientDir,
+      '--registry', join(serverDir, 'actions.mjs'),
+      '--main-registry', join(serverDir, 'main-actions.mjs'),
+      '--routes', join(serverDir, 'routes.mjs'),
+      '--main', join(serverDir, 'main.mjs'),
+      '--port', '0',
+    ],
+    {
+      cwd: root,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        NODE_ENV: '',
+        HOME: root,
+        XDG_DATA_HOME: join(root, 'xdg-data'),
+        XDG_CACHE_HOME: join(root, 'xdg-cache'),
+        XDG_STATE_HOME: join(root, 'xdg-state'),
+        MURASAKI_RUNTIME_TOKEN: RUNTIME_TOKEN,
+      },
+    },
+  )
+  t.after(async () => {
+    child.kill('SIGTERM')
+    await Promise.race([once(child, 'exit'), new Promise((resolveOk) => setTimeout(resolveOk, 1000))])
+    await rm(root, { recursive: true, force: true })
+  })
+
+  const rl = createInterface({ input: child.stdout })
+  const port = await new Promise((resolveOk, reject) => {
+    const timeout = setTimeout(() => reject(new Error('server did not report a port')), 5000)
+    rl.on('line', (line) => {
+      const match = /^MURASAKI_PORT=(\d+)$/.exec(line)
+      if (!match) return
+      clearTimeout(timeout)
+      resolveOk(Number(match[1]))
+    })
+    child.once('exit', (code) => reject(new Error(`server exited early (${code})`)))
+  })
+  return port
 }
 
 test('production API server streams requests/responses and preserves HTTP semantics', async (t) => {
@@ -532,4 +609,34 @@ export const routes = [{
     body: JSON.stringify({ reason: 'app-quit' }),
   })
   assert.deepEqual(await shutdown.json(), { cancelled: false, timedOut: false })
+})
+
+test('production server sets the resolved production CSP header, incl. frame-ancestors, on served HTML only', async (t) => {
+  const port = await startMinimalProdServer(t)
+  const html = await fetch(`http://127.0.0.1:${port}/`)
+  assert.equal(html.headers.get('content-security-policy'), DEFAULT_PRODUCTION_CSP)
+  assert.match(DEFAULT_PRODUCTION_CSP, /frame-ancestors 'none'/)
+
+  // Subresources don't need CSP — same doc-only gate as the dev middleware.
+  const asset = await fetch(`http://127.0.0.1:${port}/app.js`)
+  assert.equal(asset.headers.get('content-security-policy'), null)
+})
+
+test('production server suppresses the CSP header when security.csp resolved to false at bundle time', async (t) => {
+  const port = await startMinimalProdServer(t, { csp: false })
+  const html = await fetch(`http://127.0.0.1:${port}/`)
+  assert.equal(html.headers.get('content-security-policy'), null)
+})
+
+test('production server emits a user-supplied CSP override delivered through murasaki-meta.json byte-identical', async (t) => {
+  const custom = "default-src 'none'; connect-src https://api.example.test"
+  const port = await startMinimalProdServer(t, { csp: custom })
+  const html = await fetch(`http://127.0.0.1:${port}/`)
+  assert.equal(html.headers.get('content-security-policy'), custom)
+})
+
+test('production server sends no CSP header when murasaki-meta.json has no csp field (standalone run, not a real bundle)', async (t) => {
+  const port = await startMinimalProdServer(t, { omitCsp: true })
+  const html = await fetch(`http://127.0.0.1:${port}/`)
+  assert.equal(html.headers.get('content-security-policy'), null)
 })
