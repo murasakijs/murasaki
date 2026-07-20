@@ -5,7 +5,7 @@
     {
       "id": "file-routing",
       "category": "web-framework",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -32,7 +32,7 @@
     {
       "id": "server-actions",
       "category": "web-framework",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -40,7 +40,7 @@
       },
       "limitations": [
         "Actions execute in the bundled local Node runtime; they are not Next.js Server Actions and are not a remotely hosted RPC service.",
-        "The versioned wire format has explicit value and payload limits and may change before Murasaki 1.0."
+        "The versioned wire format is frozen at wire version 1: 1.x decoders always accept v1, explicit value and payload limits are contractual, and any future extension negotiates a higher version with v1 fallback."
       ],
       "apiSymbols": [
         "defineAction",
@@ -57,7 +57,7 @@
     {
       "id": "api-routes",
       "category": "web-framework",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -79,7 +79,7 @@
     {
       "id": "navigation-middleware",
       "category": "web-framework",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -102,7 +102,7 @@
     {
       "id": "route-metadata",
       "category": "web-framework",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -117,13 +117,15 @@
         "GenerateMetadata",
         "applyMetadata"
       ],
-      "testEvidence": [],
+      "testEvidence": [
+        "packages/murasaki/test/react-metadata.test.mjs"
+      ],
       "docsSlug": "/docs/guides/metadata"
     },
     {
       "id": "node-main-lifecycle",
       "category": "application-model",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -153,7 +155,7 @@
     {
       "id": "native-window",
       "category": "native-integration",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -188,7 +190,7 @@
     {
       "id": "application-menu",
       "category": "native-integration",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -212,7 +214,7 @@
     {
       "id": "context-menu",
       "category": "native-integration",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -237,11 +239,11 @@
     {
       "id": "native-utilities",
       "category": "native-integration",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
-        "macos": "partial",
-        "windows": "partial",
-        "linux": "partial"
+        "macos": "supported",
+        "windows": "supported",
+        "linux": "supported"
       },
       "limitations": [
         "Dialogs, clipboard, notifications, shell helpers, secure storage, and window controls are exposed to trusted renderer code through the same-origin native bridge and a per-window allowlist.",
@@ -271,7 +273,7 @@
     {
       "id": "login-autostart",
       "category": "native-integration",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -296,16 +298,16 @@
     {
       "id": "secure-storage",
       "category": "security",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "String values are stored in macOS Keychain, Windows Credential Manager, or (Linux) the freedesktop.org Secret Service D-Bus API under a SHA-256-derived appId/key namespace; missing keys return null, inputs and IPC are bounded, and there is no plaintext fallback on any platform.",
-        "Linux requires a running Secret Service provider (e.g. gnome-keyring, KWallet's ksecretsservice, or KeePassXC); if none is reachable every operation fails with a structured error instead of a plaintext fallback.",
-        "get, set, and delete have independent deny-by-default per-window capabilities, but grants are command-level rather than per-key; renderer compromise can use every granted secure-storage operation within that app namespace."
+        "Linux stores values through the freedesktop.org Secret Service D-Bus API, provided by default on GNOME (gnome-keyring) and KDE (KWallet); if no provider is reachable every operation fails closed with a structured error — there is never a plaintext fallback.",
+        "get, set, and delete have independent deny-by-default per-window capabilities, and grants support per-key allow/deny scoping (exact keys and trailing-prefix patterns) in addition to command-level grants; an unscoped grant still exposes every key in the app namespace to that window."
       ],
       "apiSymbols": [
         "murasaki/native.secureStorage"
@@ -321,11 +323,11 @@
     {
       "id": "auto-update",
       "category": "distribution",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "Signed manifests (with pinned-key rotation and a keyId hint), bounded downloads, SHA-256 payload verification, manifest freshness/anti-replay checks, staged percentage rollout, and staged handoff/relaunch are implemented for packaged macOS, Windows (x64 and arm64), and Linux AppImage apps.",
@@ -349,11 +351,11 @@
     {
       "id": "application-packaging",
       "category": "distribution",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today. Installer creation fails closed when no platform installer is produced. Windows updater builds require per-user NSIS and skip MSI; MSI is generated only with the built-in updater disabled.",
@@ -375,11 +377,11 @@
     {
       "id": "code-signing",
       "category": "distribution",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",
@@ -401,7 +403,7 @@
     {
       "id": "loopback-endpoint-protection",
       "category": "security",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -450,7 +452,7 @@
     {
       "id": "multi-window",
       "category": "application-model",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -480,7 +482,7 @@
     {
       "id": "tray-and-global-shortcuts",
       "category": "native-integration",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -512,7 +514,7 @@
     {
       "id": "system-permissions",
       "category": "native-integration",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "partial",
@@ -548,11 +550,11 @@
     {
       "id": "single-instance-and-deep-links",
       "category": "application-model",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "Packaged macOS apps and installed Windows apps register declared URL schemes and file associations, preserve the per-user single-instance lock, and deliver normalized startup, second-instance, and system open requests to src/main.ts.",
@@ -579,7 +581,7 @@
     {
       "id": "capability-permissions",
       "category": "security",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -609,7 +611,7 @@
     {
       "id": "diagnostics-and-logging",
       "category": "operations",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -685,7 +687,7 @@
     {
       "id": "build-time-plugin-sdk",
       "category": "tooling",
-      "status": "experimental",
+      "status": "stable",
       "platforms": {
         "macos": "supported",
         "windows": "supported",
@@ -711,11 +713,11 @@
     {
       "id": "linux-distribution",
       "category": "distribution",
-      "status": "partial",
+      "status": "stable",
       "platforms": {
         "macos": "unsupported",
         "windows": "unsupported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "AppDir/AppImage/deb artifact assembly (see the application-packaging capability) and the native launcher runtime both work end to end: window/webview creation, single-instance locking, cold-start deep links (argv from the .desktop Exec line) and second-instance forwarding, graceful shutdown, and native crash reporting all run from the packaged AppImage or .deb, verified under Xvfb + a private D-Bus session in Docker and in app-package-linux.yml.",
