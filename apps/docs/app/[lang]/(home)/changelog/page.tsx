@@ -1,3 +1,4 @@
+import { Rss } from "lucide-react";
 import type { Metadata } from "next";
 import { ChangelogTimeline } from "@/components/home/px-changelog";
 import { SiteFooter } from "@/components/home/site-footer";
@@ -31,7 +32,11 @@ export default async function ChangelogPage(
   return (
     <div
       lang={lang}
-      className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#f4f2ed]`}
+      // Same root as the landing page: the ink-dark site shell. The paper
+      // background comes from each section itself, and SiteFooter — which is
+      // themed with foreground/muted tokens — must sit on this shell (not on
+      // forced paper) to stay readable in dark mode, exactly like the LP.
+      className={`${lpFontVariables} lp-sans flex flex-1 flex-col bg-[#0e0e10]`}
     >
       <section className="bg-[#f4f2ed] pt-24 pb-4 text-[#111014] sm:pt-32">
         <div className="mx-auto w-full max-w-3xl px-6">
@@ -44,6 +49,13 @@ export default async function ChangelogPage(
           <p className="lp-sans mt-5 max-w-2xl text-base leading-relaxed text-[#111014]/55 sm:text-lg">
             {copy.intro}
           </p>
+          <a
+            href="/changelog.xml"
+            className="lp-mono mt-6 inline-flex items-center gap-2 text-xs tracking-[0.2em] text-[#111014]/50 uppercase transition-colors hover:text-[#7c3aed]"
+          >
+            <Rss aria-hidden="true" className="size-3.5" />
+            RSS
+          </a>
         </div>
       </section>
 

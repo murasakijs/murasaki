@@ -89,6 +89,26 @@ function isBlank(line: string): boolean {
   return line.trim() === "";
 }
 
+// Kana, han, and compatibility ideographs — CJK "word" characters.
+const CJK_LETTER_RE = /[぀-ヿ㐀-䶿一-鿿豈-﫿]/;
+// CJK symbols/punctuation (、。「」…) and fullwidth forms (()：etc.).
+const CJK_PUNCT_RE = /[　-〿！-･]/;
+
+/** Joins a hard-wrapped source line onto the text accumulated so far.
+ * English wrapping needs the space back; Japanese wrapping must NOT gain
+ * one — a space between two CJK letters, or around CJK punctuation, renders
+ * as a visible gap mid-sentence (e.g. "署名に よる", "Papelle、 Oscilla").
+ * A CJK-letter/latin boundary keeps the space, matching how the Japanese
+ * files space around inline latin terms. */
+function joinWrappedLine(previous: string, next: string): string {
+  if (previous === "") return next;
+  const a = previous[previous.length - 1];
+  const b = next[0];
+  if (CJK_PUNCT_RE.test(a) || CJK_PUNCT_RE.test(b)) return previous + next;
+  if (CJK_LETTER_RE.test(a) && CJK_LETTER_RE.test(b)) return previous + next;
+  return `${previous} ${next}`;
+}
+
 /** Parses one version's body (the lines between its `## ` heading and the
  * next one): optional intro paragraphs, then either bare bullets or
  * `### Category` sections, then optional outro paragraphs. */
@@ -106,17 +126,17 @@ function parseBody(
   };
 
   const readParagraph = (): string => {
-    const parts: string[] = [];
+    let paragraph = "";
     while (
       i < n &&
       !isBlank(lines[i]) &&
       !lines[i].startsWith("### ") &&
       !lines[i].startsWith("- ")
     ) {
-      parts.push(lines[i].trim());
+      paragraph = joinWrappedLine(paragraph, lines[i].trim());
       i++;
     }
-    return parts.join(" ");
+    return paragraph;
   };
 
   const readBulletList = (): string[] => {
@@ -128,7 +148,10 @@ function parseBody(
         i++;
       } else if (items.length > 0 && !isBlank(line) && /^\s/.test(line)) {
         // Continuation of the previous bullet (an indented source line).
-        items[items.length - 1] += ` ${line.trim()}`;
+        items[items.length - 1] = joinWrappedLine(
+          items[items.length - 1],
+          line.trim(),
+        );
         i++;
       } else {
         break;
