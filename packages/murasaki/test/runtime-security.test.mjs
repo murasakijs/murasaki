@@ -171,6 +171,66 @@ test('dev middleware sets the full default CSP header when index.html has no CSP
   }
 })
 
+/**
+ * Like `runDevMiddleware`, but calls `configureServer` ONCE and returns a
+ * function to invoke the resulting middleware repeatedly against the SAME
+ * instance — for exercising a live dev session across multiple requests
+ * (e.g. index.html changing mid-session without a server restart).
+ */
+function startDevMiddleware(options, root) {
+  let middleware
+  const plugin = runtimeSecurityPlugin([], options)
+  plugin.configureServer({
+    config: { root },
+    middlewares: { use: (fn) => { middleware = fn } },
+  })
+  return (req) => {
+    const headers = {}
+    let nextCalled = false
+    const res = {
+      statusCode: 200,
+      setHeader: (name, value) => { headers[name.toLowerCase()] = value },
+      end: () => {},
+    }
+    middleware(req, res, () => { nextCalled = true })
+    return { res, headers, nextCalled }
+  }
+}
+
+test('dev middleware CSP header tracks a live index.html edit within the same server session, not just at startup', () => {
+  const root = mkdtempSync(join(tmpdir(), 'murasaki-runtime-security-live-edit-'))
+  const indexHtmlPath = join(root, 'index.html')
+  try {
+    writeFileSync(indexHtmlPath, '<!doctype html><html><head><title>App</title></head><body></body></html>')
+    // One middleware instance, built once — configureServer runs exactly
+    // once here, exactly as it does for the life of a real dev server.
+    const send = startDevMiddleware({}, root)
+
+    // Request 1: no user CSP meta tag yet — the full default header.
+    const first = send(htmlGetRequest('/'))
+    assert.equal(first.headers['content-security-policy'], DEFAULT_DEVELOPMENT_CSP)
+
+    // The user edits index.html mid-session — Vite live-reloads this without
+    // restarting the dev server (so configureServer never reruns) — adding
+    // their own CSP meta tag.
+    writeFileSync(
+      indexHtmlPath,
+      '<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src \'self\'"></head><body></body></html>',
+    )
+    const second = send(htmlGetRequest('/'))
+    assert.equal(second.headers['content-security-policy'], undefined)
+    assert.equal(second.headers['permissions-policy'], DEFAULT_PERMISSIONS_POLICY)
+
+    // Removing the tag again brings the default header back — this isn't a
+    // one-way invalidation, it always mirrors the file's current content.
+    writeFileSync(indexHtmlPath, '<!doctype html><html><head><title>App</title></head><body></body></html>')
+    const third = send(htmlGetRequest('/'))
+    assert.equal(third.headers['content-security-policy'], DEFAULT_DEVELOPMENT_CSP)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('backend authority resources are stable and grants are exact or trailing-prefix only', () => {
   const encoded = encodeURIComponent('src/backend/workspace.ts')
   assert.equal(

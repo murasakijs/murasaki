@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import {
@@ -48,20 +48,56 @@ export function runtimeSecurityPlugin(
     name: 'murasaki:runtime-security',
     apply: 'serve',
     configureServer(server) {
-      // Resolved once here (not per request) rather than at plugin
-      // construction, since it needs `server.config.root` — authoritative
-      // only once Vite has merged inline/user/plugin config, which
-      // configureServer runs after. This plugin only ever runs in dev
-      // (`apply: 'serve'` above), so `resolveHeaderContentSecurityPolicy`
-      // always resolves against DEFAULT_DEVELOPMENT_CSP (or the user's full
-      // override, or `false` for the opt-out) — never the production policy.
-      // If `security.csp` is unconfigured and the project's index.html
-      // declares its own CSP meta tag, this resolves to `false`: the app
-      // shell defers to that user-owned tag (see shell.ts), so emitting the
-      // framework default here too would enforce both cumulatively.
+      // `server.config.root` is authoritative only once Vite has merged
+      // inline/user/plugin config, which configureServer runs after — so
+      // this path is captured here rather than at plugin construction, even
+      // though the root itself is stable for the life of the dev server.
       const indexHtmlPath = resolve(server.config.root, 'index.html')
-      const indexHtml = existsSync(indexHtmlPath) ? readFileSync(indexHtmlPath, 'utf8') : null
-      const cspHeader = resolveHeaderContentSecurityPolicy(options.csp, 'serve', indexHtml)
+
+      // When `security.csp` is explicitly configured (a string, or `false`
+      // for the opt-out), the header never depends on index.html — resolve
+      // it once here, with no per-request file IO. `indexHtml` is passed as
+      // `null` because resolveHeaderContentSecurityPolicy only ever reads it
+      // when `configured === undefined`, which isn't this branch.
+      const staticCspHeader = options.csp === undefined
+        ? undefined
+        : resolveHeaderContentSecurityPolicy(options.csp, 'serve', null)
+
+      // When `security.csp` is unconfigured, whether the header is suppressed
+      // depends on whether index.html currently declares a user-owned CSP
+      // meta tag (see shell.ts's applyContentSecurityPolicy/
+      // resolveHeaderContentSecurityPolicy) — and index.html can change
+      // mid-session: Vite live-reloads an edited index.html without
+      // restarting the dev server (so configureServer never reruns), and the
+      // meta-tag transform itself (appShellPlugin's transformIndexHtml)
+      // already re-evaluates index.html on every request. This header must
+      // therefore track the file live too, or the two delivery mechanisms
+      // can drift out of sync mid-session until a restart. Cached by mtime so
+      // a request against an unchanged file skips re-reading + re-scanning
+      // it, while a request right after an edit still recomputes.
+      // Keyed on mtime *and* size (both come free from the same stat call) —
+      // size alone changes on almost every real edit (adding/removing a meta
+      // tag changes the byte length), which keeps this correct even on
+      // filesystems with coarse mtime resolution where two edits could land
+      // in the same tick.
+      let cachedStatKey: string | null | undefined
+      let cachedCspHeader: string | false = false
+      const currentCspHeader = (): string | false => {
+        if (staticCspHeader !== undefined) return staticCspHeader
+        let statKey: string | null
+        try {
+          const stat = statSync(indexHtmlPath)
+          statKey = `${stat.mtimeMs}:${stat.size}`
+        } catch {
+          statKey = null
+        }
+        if (statKey === cachedStatKey) return cachedCspHeader
+        const indexHtml = statKey === null ? null : readFileSync(indexHtmlPath, 'utf8')
+        cachedStatKey = statKey
+        cachedCspHeader = resolveHeaderContentSecurityPolicy(undefined, 'serve', indexHtml)
+        return cachedCspHeader
+      }
+
       server.middlewares.use((req, res, next) => {
         const pathname = new URL(req.url ?? '/', 'http://murasaki.local').pathname
         const privileged = pathname === '/api'
@@ -100,6 +136,7 @@ export function runtimeSecurityPlugin(
           res.setHeader('permissions-policy', DEFAULT_PERMISSIONS_POLICY)
           // security.csp: false opts out of the header too, not just the meta
           // tag applyContentSecurityPolicy injects into the served HTML.
+          const cspHeader = currentCspHeader()
           if (cspHeader !== false) res.setHeader('content-security-policy', cspHeader)
         }
         next()
