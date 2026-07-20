@@ -95,6 +95,11 @@ export const DEFAULT_PRODUCTION_CSP = [
   "base-uri 'none'",
   "object-src 'none'",
   "frame-src 'none'",
+  // Header-only: a browser ignores frame-ancestors in a <meta> tag, so this
+  // only takes effect via the Content-Security-Policy response header (see
+  // applyContentSecurityPolicy/stripHeaderOnlyDirectives below). Nothing
+  // embeds a murasaki window in another document, so deny it outright.
+  "frame-ancestors 'none'",
   "script-src 'self'",
   "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline'",
@@ -112,6 +117,10 @@ export const DEFAULT_DEVELOPMENT_CSP = [
   "base-uri 'none'",
   "object-src 'none'",
   "frame-src 'none'",
+  // See the production policy's comment above: header-only, harmless (and
+  // ignored) in the meta tag. Vite HMR doesn't use iframes, so denying
+  // framing is consistent with production here too.
+  "frame-ancestors 'none'",
   // Vite and React Refresh inject inline module preambles in development.
   "script-src 'self' 'unsafe-inline'",
   "script-src-attr 'none'",
@@ -126,6 +135,34 @@ export const DEFAULT_DEVELOPMENT_CSP = [
   "manifest-src 'self'",
   "form-action 'self'",
 ].join('; ')
+
+// Directives the CSP spec requires delivery via the HTTP response header —
+// a <meta http-equiv="Content-Security-Policy"> carrying them is silently
+// ignored (frame-ancestors, sandbox) or unsupported by meta delivery
+// (report-to/report-uri, which need a real response to attach a reporting
+// endpoint to). resolveContentSecurityPolicy() is the single source of truth
+// for the *header* policy; stripHeaderOnlyDirectives() derives the meta
+// variant from it so the two consumers can never drift apart on the
+// directives they share, while the meta tag doesn't carry directives it
+// can't enforce (and that engines may warn about).
+const HEADER_ONLY_DIRECTIVES = new Set([
+  'frame-ancestors',
+  'sandbox',
+  'report-uri',
+  'report-to',
+])
+
+/** Derives the meta-tag-safe policy from a resolved header policy — see `HEADER_ONLY_DIRECTIVES`. */
+export function stripHeaderOnlyDirectives(policy: string): string {
+  return policy
+    .split(';')
+    .map((directive) => directive.trim())
+    .filter((directive) => {
+      const name = directive.split(/\s+/, 1)[0]?.toLowerCase()
+      return !!name && !HEADER_ONLY_DIRECTIVES.has(name)
+    })
+    .join('; ')
+}
 
 export interface AppShellOptions {
   csp?: string | false
@@ -147,6 +184,11 @@ export function applyContentSecurityPolicy(
 ): string {
   const policy = resolveContentSecurityPolicy(configured, command)
   if (policy === false) return html
+  // The header (set by runtime-security.ts in dev and prod-server.mjs in
+  // prod from this same resolved `policy`) carries the full policy;
+  // header-only directives are stripped for the meta tag here — see
+  // `HEADER_ONLY_DIRECTIVES`.
+  const metaPolicy = stripHeaderOnlyDirectives(policy)
 
   const existing = findContentSecurityPolicyMetaTags(html)
   if (existing.length > 0) {
@@ -160,7 +202,7 @@ export function applyContentSecurityPolicy(
       if (existing.length === 1 && existing[0].frameworkOwned) {
         const withoutExisting =
           html.slice(0, existing[0].start) + html.slice(existing[0].end)
-        return insertAtHeadStart(withoutExisting, frameworkContentSecurityPolicyTag(policy))
+        return insertAtHeadStart(withoutExisting, frameworkContentSecurityPolicyTag(metaPolicy))
       }
       throw new TypeError(
         'security.csp conflicts with a Content-Security-Policy meta tag in index.html; configure the policy in one place',
@@ -178,7 +220,7 @@ export function applyContentSecurityPolicy(
     return insertAtHeadStart(withoutExisting, existing.map((match) => match.tag).join('\n    '))
   }
 
-  return insertAtHeadStart(html, frameworkContentSecurityPolicyTag(policy))
+  return insertAtHeadStart(html, frameworkContentSecurityPolicyTag(metaPolicy))
 }
 
 function frameworkContentSecurityPolicyTag(policy: string): string {

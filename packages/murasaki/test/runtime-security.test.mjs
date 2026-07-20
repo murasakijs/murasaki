@@ -5,12 +5,15 @@ import {
   backendResourceForRequest,
   DEFAULT_PERMISSIONS_POLICY,
   isAuthorizedNativeRequest,
+  runtimeSecurityPlugin,
+  runtimeToken,
 } from '../dist/vite-plugin/runtime-security.js'
 import {
   createWindowAuthInitScript,
   deriveWindowToken,
   isBackendCapabilityAllowed,
 } from '../dist/runtime/window-auth.js'
+import { DEFAULT_DEVELOPMENT_CSP } from '../dist/vite-plugin/shell.js'
 
 const TOKEN = 'a'.repeat(64)
 
@@ -67,6 +70,64 @@ test('native control requests require the separate private native header', () =>
     ...base,
     'x-murasaki-native-token': 'b'.repeat(64),
   }), TOKEN), false)
+})
+
+/** Extracts the plugin's dev middleware and runs it against a fake req/res pair. */
+function runDevMiddleware(options, req) {
+  let middleware
+  const plugin = runtimeSecurityPlugin([], options)
+  plugin.configureServer({ middlewares: { use: (fn) => { middleware = fn } } })
+  const headers = {}
+  let nextCalled = false
+  const res = {
+    statusCode: 200,
+    setHeader: (name, value) => { headers[name.toLowerCase()] = value },
+    end: () => {},
+  }
+  middleware(req, res, () => { nextCalled = true })
+  return { res, headers, nextCalled }
+}
+
+function htmlGetRequest(url, extraHeaders = {}) {
+  return { method: 'GET', url, headers: { accept: 'text/html', ...extraHeaders } }
+}
+
+test('dev middleware sets the development Content-Security-Policy header on HTML document GETs', () => {
+  const { headers, nextCalled } = runDevMiddleware({}, htmlGetRequest('/'))
+  assert.equal(headers['content-security-policy'], DEFAULT_DEVELOPMENT_CSP)
+  assert.equal(nextCalled, true)
+})
+
+test('dev middleware omits the CSP header on privileged and non-HTML requests', () => {
+  // Unauthenticated: rejected (403) before the CSP-setting code even runs.
+  const privileged = runDevMiddleware({}, htmlGetRequest('/api/items'))
+  assert.equal(privileged.res.statusCode, 403)
+  assert.equal(privileged.headers['content-security-policy'], undefined)
+
+  // Authenticated as native: request is allowed through (next() called), but
+  // privileged loopback endpoints still never get the document CSP header.
+  const authorizedPrivileged = runDevMiddleware({}, htmlGetRequest('/api/items', {
+    host: '127.0.0.1:5178',
+    'x-murasaki-native-token': runtimeToken(),
+  }))
+  assert.equal(authorizedPrivileged.nextCalled, true)
+  assert.equal(authorizedPrivileged.headers['content-security-policy'], undefined)
+
+  const jsonRequest = { method: 'GET', url: '/main.js', headers: { accept: 'application/javascript' } }
+  const { headers } = runDevMiddleware({}, jsonRequest)
+  assert.equal(headers['content-security-policy'], undefined)
+})
+
+test('dev middleware suppresses the CSP header when security.csp is false', () => {
+  const { headers } = runDevMiddleware({ csp: false }, htmlGetRequest('/'))
+  assert.equal(headers['content-security-policy'], undefined)
+  assert.equal(headers['permissions-policy'], DEFAULT_PERMISSIONS_POLICY)
+})
+
+test('dev middleware emits a user-supplied CSP override byte-identical to the configured string', () => {
+  const custom = "default-src 'none'; connect-src https://api.example.test"
+  const { headers } = runDevMiddleware({ csp: custom }, htmlGetRequest('/'))
+  assert.equal(headers['content-security-policy'], custom)
 })
 
 test('backend authority resources are stable and grants are exact or trailing-prefix only', () => {

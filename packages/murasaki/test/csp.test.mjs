@@ -11,6 +11,7 @@ import {
   DEFAULT_DEVELOPMENT_CSP,
   DEFAULT_PRODUCTION_CSP,
   resolveContentSecurityPolicy,
+  stripHeaderOnlyDirectives,
 } from '../dist/vite-plugin/shell.js'
 
 const frameworkHtml = '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>'
@@ -24,6 +25,7 @@ function cspMetaCount(html) {
 
 test('default production CSP is strict while allowing remote HTTPS/WSS backends', () => {
   assert.equal(resolveContentSecurityPolicy(undefined, 'build'), DEFAULT_PRODUCTION_CSP)
+  assert.match(DEFAULT_PRODUCTION_CSP, /frame-ancestors 'none'/)
   const html = applyContentSecurityPolicy(frameworkHtml, undefined, 'build')
   assert.equal(cspMetaCount(html), 1)
   assert.match(html, /script-src 'self';/)
@@ -33,15 +35,55 @@ test('default production CSP is strict while allowing remote HTTPS/WSS backends'
   assert.match(html, /frame-src 'none'/)
   assert.match(html, /style-src 'self' 'unsafe-inline'/)
   assert.match(html, /connect-src 'self' https: wss:/)
+  // frame-ancestors is header-only (ignored by browsers in a meta tag), so
+  // the meta variant omits it — the header carries the full policy instead.
+  assert.doesNotMatch(html, /frame-ancestors/)
 })
 
 test('default development CSP permits only the inline/HMR additions development needs', () => {
   assert.equal(resolveContentSecurityPolicy(undefined, 'serve'), DEFAULT_DEVELOPMENT_CSP)
+  assert.match(DEFAULT_DEVELOPMENT_CSP, /frame-ancestors 'none'/)
   const html = applyContentSecurityPolicy(frameworkHtml, undefined, 'serve')
   assert.equal(cspMetaCount(html), 1)
   assert.match(html, /script-src 'self' 'unsafe-inline'/)
   assert.doesNotMatch(html, /unsafe-eval/)
   assert.match(html, /connect-src 'self' https: ws: wss:/)
+  assert.doesNotMatch(html, /frame-ancestors/)
+})
+
+test('stripHeaderOnlyDirectives derives the meta-safe policy from the resolved header policy', () => {
+  assert.equal(
+    stripHeaderOnlyDirectives(DEFAULT_PRODUCTION_CSP),
+    DEFAULT_PRODUCTION_CSP.split('; ').filter((d) => !d.startsWith('frame-ancestors')).join('; '),
+  )
+  assert.equal(
+    stripHeaderOnlyDirectives("default-src 'self'; sandbox allow-scripts; report-to csp-endpoint"),
+    "default-src 'self'",
+  )
+  // Directives that ARE meta-safe pass through unchanged, in order.
+  assert.equal(
+    stripHeaderOnlyDirectives("default-src 'self'; script-src 'self'"),
+    "default-src 'self'; script-src 'self'",
+  )
+})
+
+test('the resolved header policy and the meta policy agree on every directive except the header-only ones', () => {
+  for (const command of ['serve', 'build']) {
+    const header = resolveContentSecurityPolicy(undefined, command)
+    const html = applyContentSecurityPolicy(frameworkHtml, undefined, command)
+    const [, metaContent] = /data-murasaki-csp[^>]*content="([^"]*)"/.exec(html)
+    assert.equal(metaContent, stripHeaderOnlyDirectives(header))
+  }
+})
+
+test('a custom CSP carrying header-only directives keeps them for the header but strips them from the meta tag', () => {
+  const custom = "default-src 'self'; frame-ancestors 'self' https://embed.example.test; sandbox allow-forms"
+  assert.equal(resolveContentSecurityPolicy(custom, 'build'), custom)
+  const html = applyContentSecurityPolicy(frameworkHtml, custom, 'build')
+  assert.equal(cspMetaCount(html), 1)
+  assert.doesNotMatch(html, /frame-ancestors/)
+  assert.doesNotMatch(html, /sandbox/)
+  assert.match(html, /content="default-src 'self'"/)
 })
 
 test('a custom CSP completely overrides the framework default and is attribute-escaped', () => {

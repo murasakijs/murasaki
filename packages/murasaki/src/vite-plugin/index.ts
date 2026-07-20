@@ -46,7 +46,7 @@ export function murasaki(opts: MurasakiPluginOptions): PluginOption[] {
     // still resolve to a URL.
     svgr(),
     fileRouterPlugin({ srcDir: opts.srcDir }),
-    runtimeSecurityPlugin(windows),
+    runtimeSecurityPlugin(windows, { csp: config.security?.csp }),
     mainEventsPlugin(),
     mainModulesPlugin({ srcDir: opts.srcDir }),
     serverActionsPlugin({ srcDir: opts.srcDir }),

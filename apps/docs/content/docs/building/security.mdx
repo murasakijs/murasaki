@@ -270,13 +270,17 @@ validated value through the Main event API.
 ## Content Security Policy
 
 Murasaki sets `X-Content-Type-Options: nosniff` and `Referrer-Policy:
-no-referrer` on the document and injects one CSP meta tag into framework-owned
-and user-owned HTML. The production default uses `script-src 'self'`, blocks
-objects, frames, base URL changes, inline script attributes, and form posts to
-other origins, while allowing remote-backed applications to connect over
-HTTPS/WSS. Images, fonts, and media support the common HTTPS/data/blob sources.
-`style-src 'self' 'unsafe-inline'` remains for React style attributes and
-runtime CSS compatibility.
+no-referrer` on the document, and delivers the resolved CSP two ways: as a
+`Content-Security-Policy` response header on every served HTML document (dev's
+Vite middleware and the packaged app's Node server both set it), and as a CSP
+meta tag injected into framework-owned and user-owned HTML. Both come from the
+same resolved policy, so they cannot drift apart. The production default uses
+`script-src 'self'`, blocks objects, frames, base URL changes, inline script
+attributes, and form posts to other origins, denies framing this app's
+documents (`frame-ancestors 'none'`), while allowing remote-backed
+applications to connect over HTTPS/WSS. Images, fonts, and media support the
+common HTTPS/data/blob sources. `style-src 'self' 'unsafe-inline'` remains for
+React style attributes and runtime CSS compatibility.
 
 Development uses a separate policy: it additionally permits inline scripts
 inserted by Vite/React Refresh and `ws:` connections for HMR. It does not add
@@ -289,20 +293,21 @@ export default defineConfig({
   appId: 'com.example.notes',
   productName: 'Notes',
   security: {
-    csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.example.com; object-src 'none'; base-uri 'none'; frame-src 'none'",
+    csp: "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' https://api.example.com; object-src 'none'; base-uri 'none'; frame-src 'none'; frame-ancestors 'none'",
   },
 })
 
-// Disable only Murasaki's injection:
+// Disable both the header and the meta tag:
 // security: { csp: false }
 ```
 
-A string is a complete override, not a directive merge. If a user-owned
-`index.html` already has a CSP meta tag, Murasaki keeps it and moves it to the
-beginning of `<head>`. Setting both that tag and a `security.csp` string is a
-build error instead of silently choosing one. Use the browser console's CSP
-violation to identify a blocked source, then add only that source or move the
-resource to the app origin.
+A string is a complete override, not a directive merge, and it applies to
+both delivery mechanisms identically. If a user-owned `index.html` already has
+a CSP meta tag, Murasaki keeps it and moves it to the beginning of `<head>`.
+Setting both that tag and a `security.csp` string is a build error instead of
+silently choosing one. Use the browser console's CSP violation to identify a
+blocked source, then add only that source or move the resource to the app
+origin.
 
 When migrating an existing app, move production inline scripts into external
 modules. Remote scripts and frames are blocked by default and must be enabled
@@ -310,15 +315,21 @@ with an explicit override. HTTPS/WSS backends work with the default;
 plain-HTTP remote backends need an override (same-origin loopback calls remain
 allowed).
 
-Meta-delivered CSP has browser-defined limits. It begins applying where the
-tag is parsed (Murasaki prepends or moves it to `<head>`), and directives such
-as `frame-ancestors`, `sandbox`, and reporting are not fully supported from a
-meta tag. They are therefore not included in the default. Use response headers
-for a real network service that needs those protections. CSP also does not
-sanitize HTML or authorize Node functions, and
-the default inline-style allowance is a compatibility tradeoff rather than an
-XSS guarantee. Continue to avoid `dangerouslySetInnerHTML`, sanitize
-user-authored HTML, and pin third-party code.
+Some directives only ever take effect through the response header — a browser
+ignores `frame-ancestors` and `sandbox` in a `<meta>` tag, and `report-to`/
+`report-uri` need a real HTTP response to attach a reporting endpoint to.
+Murasaki therefore strips those directives out of the meta variant
+automatically (some engines log console noise for a directive they ignore)
+and keeps them only in the header, so the meta tag stays spec-clean while the
+header carries the full policy. `frame-ancestors 'none'` is part of the
+default policy for exactly this reason: it is enforced by the header, in both
+dev and packaged apps. The meta tag remains as a fallback for the directives
+it can enforce, useful for tooling that inspects the built `file://` output
+directly rather than a live HTTP response. CSP also does not sanitize HTML or
+authorize Node functions, and the default inline-style allowance is a
+compatibility tradeoff rather than an XSS guarantee. Continue to avoid
+`dangerouslySetInnerHTML`, sanitize user-authored HTML, and pin third-party
+code.
 
 ## Exposing a real network service
 

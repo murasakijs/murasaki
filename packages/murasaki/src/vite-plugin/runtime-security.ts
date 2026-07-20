@@ -4,6 +4,7 @@ import {
   authenticateWindowRequest,
   isBackendCapabilityAllowed,
 } from '../runtime/window-auth.js'
+import { resolveContentSecurityPolicy } from './shell.js'
 
 const PRIVILEGED_PREFIXES = ['/api/', '/__murasaki/']
 const NATIVE_ONLY_PATHS = new Set([
@@ -29,10 +30,22 @@ export function runtimeToken(): string {
   return resolvedRuntimeToken
 }
 
+export interface RuntimeSecurityOptions {
+  /** Same `security.csp` value the app-shell plugin resolves the meta tag from — kept as one resolver (shell.ts's `resolveContentSecurityPolicy`) so dev's header and meta tag never drift. */
+  csp?: string | false
+}
+
 /** Protect dev loopback endpoints with native-issued, per-window authority. */
-export function runtimeSecurityPlugin(windows: readonly WindowAuthority[]): Plugin {
+export function runtimeSecurityPlugin(
+  windows: readonly WindowAuthority[],
+  options: RuntimeSecurityOptions = {},
+): Plugin {
   const token = runtimeToken()
   const grants = new Map(windows.map((window) => [window.label, window.backendCapabilities]))
+  // This plugin only ever runs in dev (`apply: 'serve'` below), so the
+  // resolved policy is always the DEFAULT_DEVELOPMENT_CSP one (or the user's
+  // full override, or `false` for the opt-out) — never the production policy.
+  const cspHeader = resolveContentSecurityPolicy(options.csp, 'serve')
   return {
     name: 'murasaki:runtime-security',
     apply: 'serve',
@@ -73,6 +86,9 @@ export function runtimeSecurityPlugin(windows: readonly WindowAuthority[]): Plug
           // per-window native permission callback is available, deny these
           // high-impact Web APIs at the document boundary for every renderer.
           res.setHeader('permissions-policy', DEFAULT_PERMISSIONS_POLICY)
+          // security.csp: false opts out of the header too, not just the meta
+          // tag applyContentSecurityPolicy injects into the served HTML.
+          if (cspHeader !== false) res.setHeader('content-security-policy', cspHeader)
         }
         next()
       })
