@@ -194,6 +194,41 @@ export interface WindowConfig {
   backendCapabilities?: BackendCapability[]
 }
 
+/** A labelled value shown in the configurable native About panel. */
+export interface AboutDetailConfig {
+  label: string
+  value: string
+  /** Optional external destination opened when the value is activated. */
+  href?: string
+}
+
+/** An external-action button shown at the bottom of the About panel. */
+export interface AboutButtonConfig {
+  label: string
+  href: string
+}
+
+/**
+ * Opts into Murasaki's configurable About panel. When omitted, each platform
+ * keeps using its compact standard About dialog.
+ */
+export interface AboutConfig {
+  /** Display name inside the panel. Defaults to `productName`. */
+  name?: string
+  /** Content width in logical pixels. Default 480; accepted range 360-900. */
+  width?: number
+  /** Content height in logical pixels. Auto-sized when omitted; range 320-1000. */
+  height?: number
+  /** Separate body paragraphs. Falls back to top-level `description`. */
+  paragraphs?: string[]
+  /** Vertical spacing between body paragraphs. Default 12; range 0-48. */
+  paragraphSpacing?: number
+  /** Label/value metadata rows such as Build and Commit. */
+  details?: AboutDetailConfig[]
+  /** Ordered external links rendered as native push buttons. */
+  buttons?: AboutButtonConfig[]
+}
+
 /** A declaratively-created non-primary application window. */
 export type SecondaryWindowConfig = Omit<WindowConfig, 'console'> & {
   /** Create this window during application launch. Defaults to true. */
@@ -469,6 +504,9 @@ export interface MurasakiConfig {
 
   /** Author names shown in the native "About <app>" panel (Windows/Linux only). */
   authors?: string[]
+
+  /** Optional custom About panel layout, details, size, and external buttons. */
+  about?: AboutConfig
 
   window?: WindowConfig
 
@@ -836,6 +874,7 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
     validateSemanticVersion(candidate.version, 'version')
   }
   validateMainConfig((config as { main?: unknown }).main)
+  validateAboutConfig((config as { about?: unknown }).about)
   validateBundleConfig((config as { bundle?: unknown }).bundle, 'bundle')
   validatePlugins((config as { plugins?: unknown }).plugins)
   validateWebviewConfig((config as { webview?: unknown }).webview)
@@ -848,6 +887,100 @@ export function validateConfig(config: unknown): asserts config is MurasakiConfi
   validateInstallerConfig(candidate.installer, candidate.updater)
   validateSignConfig(candidate.sign)
   resolveWindowDeclarations(candidate)
+}
+
+function validateAboutConfig(value: unknown): void {
+  if (value === undefined) return
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('about must be an object')
+  }
+  const about = value as Record<string, unknown>
+  rejectUnknownFields(
+    about,
+    ['name', 'width', 'height', 'paragraphs', 'paragraphSpacing', 'details', 'buttons'],
+    'about',
+  )
+
+  if (about.name !== undefined) validateAboutText(about.name, 'about.name', 128)
+  validateAboutDimension(about.width, 'about.width', 360, 900)
+  validateAboutDimension(about.height, 'about.height', 320, 1_000)
+  validateAboutDimension(about.paragraphSpacing, 'about.paragraphSpacing', 0, 48)
+
+  if (about.paragraphs !== undefined) {
+    if (!Array.isArray(about.paragraphs) || about.paragraphs.length > 8) {
+      throw new TypeError('about.paragraphs must be an array of at most 8 strings')
+    }
+    about.paragraphs.forEach((paragraph, index) => {
+      validateAboutText(paragraph, `about.paragraphs[${index}]`, 512)
+    })
+  }
+
+  if (about.details !== undefined) {
+    if (!Array.isArray(about.details) || about.details.length > 12) {
+      throw new TypeError('about.details must be an array of at most 12 rows')
+    }
+    about.details.forEach((entry, index) => {
+      const path = `about.details[${index}]`
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new TypeError(`${path} must be an object`)
+      }
+      const detail = entry as Record<string, unknown>
+      rejectUnknownFields(detail, ['label', 'value', 'href'], path)
+      validateAboutText(detail.label, `${path}.label`, 64)
+      validateAboutText(detail.value, `${path}.value`, 256)
+      if (detail.href !== undefined) validateAboutHref(detail.href, `${path}.href`)
+    })
+  }
+
+  if (about.buttons !== undefined) {
+    if (!Array.isArray(about.buttons) || about.buttons.length > 6) {
+      throw new TypeError('about.buttons must be an array of at most 6 buttons')
+    }
+    about.buttons.forEach((entry, index) => {
+      const path = `about.buttons[${index}]`
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new TypeError(`${path} must be an object`)
+      }
+      const button = entry as Record<string, unknown>
+      rejectUnknownFields(button, ['label', 'href'], path)
+      validateAboutText(button.label, `${path}.label`, 64)
+      validateAboutHref(button.href, `${path}.href`)
+    })
+  }
+}
+
+function validateAboutDimension(
+  value: unknown,
+  path: string,
+  minimum: number,
+  maximum: number,
+): void {
+  if (value === undefined) return
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new TypeError(`${path} must be an integer between ${minimum} and ${maximum}`)
+  }
+}
+
+function validateAboutText(value: unknown, path: string, maximum: number): void {
+  if (typeof value !== 'string'
+    || value.trim().length === 0
+    || value.length > maximum
+    || /[\0-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(value)) {
+    throw new TypeError(`${path} must be a non-empty string of at most ${maximum} characters`)
+  }
+}
+
+function validateAboutHref(value: unknown, path: string): void {
+  validateAboutText(value, path, 2_048)
+  let parsed: URL
+  try {
+    parsed = new URL(value as string)
+  } catch {
+    throw new TypeError(`${path} must be an absolute URL`)
+  }
+  if (!['http:', 'https:', 'mailto:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+    throw new TypeError(`${path} supports only credential-free http, https, and mailto URLs`)
+  }
 }
 
 function validateInstallerConfig(value: unknown, updater: MurasakiConfig['updater']): void {

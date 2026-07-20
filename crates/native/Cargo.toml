@@ -1,6 +1,6 @@
 [package]
 name = "murasaki-native"
-version = "0.43.1"
+version = "0.43.2"
 edition = "2021"
 license = "MIT"
 description = "Native binding for murasaki (Rust wry + tao + muda), exposed to Node via napi-rs"
@@ -59,7 +59,7 @@ window-vibrancy = "0.6"
 security-framework = "3.7"
 security-framework-sys = "2.17"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSVisualEffectView", "NSView", "NSWindow", "NSImage", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", features = ["NSVisualEffectView", "NSView", "NSWindow", "NSImage", "NSWorkspace", "NSApplication", "NSButton", "NSCell", "NSColor", "NSControl", "NSFont", "NSImageView", "NSText", "NSTextField"] }
 objc2-foundation = "0.3"
 block2 = "0.6"
 objc2-av-foundation = { version = "0.3", default-features = false, features = ["std", "AVCaptureDevice", "AVMediaFormat", "block2"] }

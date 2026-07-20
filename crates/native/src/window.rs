@@ -1354,6 +1354,7 @@ mod tests {
                 copyright: None,
                 homepage: None,
                 authors: None,
+                about: None,
                 menu_labels: None,
                 decorations: None,
                 title_bar_style: None,
@@ -1408,6 +1409,7 @@ mod tests {
                 copyright: None,
                 homepage: None,
                 authors: None,
+                custom: None,
             },
         }
     }

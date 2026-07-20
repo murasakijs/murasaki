@@ -3221,6 +3221,11 @@ fn handle_native_menu_event(
 ) -> MenuPollOutcome {
     use crate::menu::native_menu_ids as ids;
     match id {
+        ids::ABOUT => {
+            #[cfg(target_os = "macos")]
+            crate::about::show();
+            MenuPollOutcome::default()
+        }
         ids::QUIT => MenuPollOutcome {
             quit: true,
             close: false,

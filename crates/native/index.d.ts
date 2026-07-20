@@ -79,6 +79,27 @@ export declare class Webview {
   dispose(): void
 }
 
+export interface AboutButtonOptions {
+  label: string
+  href: string
+}
+
+export interface AboutDetailOptions {
+  label: string
+  value: string
+  href?: string
+}
+
+export interface AboutPanelOptions {
+  name?: string
+  width?: number
+  height?: number
+  paragraphs?: Array<string>
+  paragraphSpacing?: number
+  details?: Array<AboutDetailOptions>
+  buttons?: Array<AboutButtonOptions>
+}
+
 /**
  * `clipboard.readImage`'s result shape — decoded clipboard pixels
  * re-encoded as a PNG and base64-wrapped for the wire (see
@@ -347,6 +368,8 @@ export interface WindowOptions {
   homepage?: string
   /** Populates the authors field of the native "About <app>" panel. */
   authors?: Array<string>
+  /** Opts into Murasaki's configurable About panel. */
+  about?: AboutPanelOptions
   /**
    * Localized labels for the standard menu bar — macOS's App/Edit/Window
    * (see `crate::menu::build_default_app_menu`) and Windows's/Linux's

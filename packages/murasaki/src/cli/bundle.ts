@@ -844,6 +844,7 @@ export function metaJson(
       copyright: config.copyright,
       homepage: config.homepage,
       authors: config.authors,
+      about: config.about,
       locales: config.locales,
       title: primaryWindow.title,
       width: primaryWindow.width,

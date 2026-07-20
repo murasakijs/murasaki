@@ -28,6 +28,27 @@ export interface MenuLabels {
   zoom?: string
 }
 
+export interface AboutDetailOptions {
+  label: string
+  value: string
+  href?: string
+}
+
+export interface AboutButtonOptions {
+  label: string
+  href: string
+}
+
+export interface AboutPanelOptions {
+  name?: string
+  width?: number
+  height?: number
+  paragraphs?: string[]
+  paragraphSpacing?: number
+  details?: AboutDetailOptions[]
+  buttons?: AboutButtonOptions[]
+}
+
 export interface WindowOptions {
   /** Stable declarative window label (`main` for the primary window). */
   label?: string
@@ -65,6 +86,8 @@ export interface WindowOptions {
   homepage?: string
   /** Populates the authors field of the native "About <app>" panel. */
   authors?: string[]
+  /** Opts into the configurable About panel. */
+  about?: AboutPanelOptions
   /** Localized labels for the standard menu bar (macOS App/Edit/Window,
    * Windows File/Edit/Window). */
   menuLabels?: MenuLabels

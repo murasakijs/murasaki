@@ -20,15 +20,15 @@ test('builds immutable release asset names', () => {
   )
   assert.equal(
     demoAssetName(DEMO_SPECS.papelle, 'darwin-arm64'),
-    'Papelle-0.55.5-darwin-arm64.dmg',
+    'Papelle-0.55.6-darwin-arm64.dmg',
   )
   assert.equal(
     demoAssetName(DEMO_SPECS.oscilla, 'darwin-x64'),
-    'Oscilla-0.55.5-darwin-x64.dmg',
+    'Oscilla-0.55.6-darwin-x64.dmg',
   )
   assert.equal(
     demoAssetName(DEMO_SPECS.orglia, 'darwin-arm64'),
-    'Orglia-0.55.5-darwin-arm64.dmg',
+    'Orglia-0.55.6-darwin-arm64.dmg',
   )
   assert.deepEqual(Object.keys(DEMO_SPECS), ['default', 'papelle', 'oscilla', 'orglia'])
 })

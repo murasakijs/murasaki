@@ -38,6 +38,7 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `copyright` | `string?` | Copyright notice shown in the About panel. |
 | `homepage` | `string?` | Homepage URL shown in the About panel. |
 | `authors` | `string[]?` | Author names shown in the About panel (Windows/Linux only). |
+| `about` | `AboutConfig?` | Opt into a configurable macOS About panel with custom size, paragraphs, detail rows, and external-link buttons — see [below](#about). |
 | `window` | `WindowConfig?` | Window shape — see [below](#window). |
 | `windows` | `Record<string, SecondaryWindowConfig>?` | Secondary windows keyed by stable label — see [below](#windows). |
 | `webview` | `WebviewConfig?` | Application-wide User-Agent, private session, and unauthenticated proxy settings — see [below](#webview). |
@@ -58,6 +59,52 @@ declarative window labels/routes synchronously. There is nothing to await.
 | `fileAssociations` | `FileAssociationConfig[]?` | Document extensions registered by packaged macOS apps and Windows installers — see [below](#fileassociations). |
 | `installer` | `object?` | macOS DMG and Windows installer options — see [below](#installer). |
 | `sign` | `object?` | macOS Developer ID and Windows Authenticode signing — see [below](#sign). |
+
+## `about`
+
+Omit `about` to keep the operating system's compact standard About dialog. On
+macOS, declaring it opts into a native, customizable AppKit panel. Windows and
+Linux currently continue to use their standard metadata dialog.
+
+```ts title="murasaki.config.ts"
+about: {
+  name: 'My App',
+  width: 520,
+  height: 680,
+  paragraphs: [
+    'A focused desktop workspace.',
+    'Built with Murasaki.',
+  ],
+  paragraphSpacing: 16,
+  details: [
+    { label: 'Build', value: '15212' },
+    {
+      label: 'Commit',
+      value: '332b2aefc',
+      href: 'https://github.com/example/app/commit/332b2aefc',
+    },
+  ],
+  buttons: [
+    { label: 'Docs', href: 'https://docs.example.com' },
+    { label: 'GitHub', href: 'https://github.com/example/app' },
+  ],
+},
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `string?` | Panel heading. Defaults to `productName`. |
+| `width` | `number?` | Content width in logical pixels, 360–900. Default 480. |
+| `height` | `number?` | Content height in logical pixels, 320–1000. Auto-sized when omitted. |
+| `paragraphs` | `string[]?` | Up to 8 centered body paragraphs. Falls back to `description`. |
+| `paragraphSpacing` | `number?` | Gap between paragraphs in logical pixels, 0–48. Default 12. |
+| `details` | `{ label, value, href? }[]?` | Up to 12 label/value rows. A Version row is added automatically unless supplied. |
+| `buttons` | `{ label, href }[]?` | Up to 6 ordered native buttons at the bottom. |
+
+External destinations are restricted to absolute, credential-free `http`,
+`https`, and `mailto` URLs. The application icon is resolved by macOS from the
+installed bundle, so the About panel uses the same masked icon as Finder and
+the Dock.
 
 ## `window`
 
