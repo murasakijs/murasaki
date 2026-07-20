@@ -9,7 +9,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Page, layout, loading, error, not-found, route-group, single dynamic segments, and catch-all/optional catch-all page segments ([...slug], [[...slug]]) ship today.",
@@ -36,7 +36,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Actions execute in the bundled local Node runtime; they are not Next.js Server Actions and are not a remotely hosted RPC service.",
@@ -61,7 +61,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Routes are served by the app-local Node process and are not intended to expose a public network service.",
@@ -83,7 +83,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Middleware runs in the renderer before client navigation and only receives the pathname and query string being navigated to.",
@@ -106,7 +106,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Document title, description, favicon, and a small Open Graph subset are applied in the renderer; the title is additionally mirrored onto the native window title (best-effort, requires the window:setTitle capability).",
@@ -127,7 +127,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, typed live events to renderers, and declared-window management in development and packaged apps.",
@@ -157,7 +157,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "partial"
       },
       "limitations": [
         "Configured secondary templates can be created, destroyed, and recreated from trusted Node Main, with generation-scoped lifecycle events; renderers remain limited to showing and managing live declared windows and cannot supply runtime URLs or capability policies.",
@@ -165,7 +165,8 @@
         "No parent/child or modal window relationship — tao has no cross-platform support for it, so every declared window is an independent top-level window.",
         "Only borderless fullscreen is supported; there is no exclusive/dedicated-video-mode fullscreen.",
         "titleBarStyle: 'hidden' is macOS only (transparent titlebar + hidden title + full-size content view); Windows and Linux accept and ignore it.",
-        "getMonitors() geometry (position, size) is reported in physical pixels, not logical/CSS pixels."
+        "getMonitors() geometry (position, size) is reported in physical pixels, not logical/CSS pixels.",
+        "On Linux, creating, destroying, and then recreating a secondary window at runtime is not yet stable: the destroy→recreate path crashes the packaged process with an X11 BadWindow error (tracked). The primary window and launch-time-declared secondary windows work; only the runtime recreate path is affected."
       ],
       "apiSymbols": [
         "App",
@@ -379,11 +380,12 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",
-        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Linux package signing is not implemented; ad-hoc macOS signatures do not establish user trust."
+        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Linux package signing is not implemented; ad-hoc macOS signatures do not establish user trust.",
+        "Linux: `murasaki installer --sign` produces detached, armored GPG signatures (<artifact>.sig) for the .AppImage, the .deb, and a combined SHA256SUMS, and opportunistically embeds a Debian-native signature via dpkg-sig when it is on PATH. The signing key is selected via $MURASAKI_GPG_KEY or sign.linux.gpgKey; the passphrase comes only from $MURASAKI_GPG_PASSPHRASE or the gpg-agent. There is no distro-repository trust-store or apt/dnf keyring integration, and no rpm."
       ],
       "apiSymbols": [
         "MurasakiConfig.sign",
@@ -430,7 +432,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Murasaki injects environment-specific default CSP into framework and user-owned HTML, supports a complete security.csp override or explicit opt-out, and normalizes a user-owned CSP tag to the beginning of head.",
@@ -458,7 +460,8 @@
       "limitations": [
         "Windows must be declared in configuration. Secondary templates may opt out of launch-time creation and trusted Node Main can create, destroy, and recreate them; arbitrary runtime URLs, native policies, and undeclared labels are rejected.",
         "Secondary OS/self close hides for later reopening, while Node Main destroy releases native resources and increments the generation when recreated; the application menu remains process-global and primary-owned.",
-        "Each native window has an isolated browser profile so Service Workers, SharedWorkers, cookies, and storage cannot inherit another window's backend authority. Secondary profiles persist on Windows/Linux and macOS 14+; macOS 11-13 uses a separate non-persistent WebKit store."
+        "Each native window has an isolated browser profile so Service Workers, SharedWorkers, cookies, and storage cannot inherit another window's backend authority. Secondary profiles persist on Windows/Linux and macOS 14+; macOS 11-13 uses a separate non-persistent WebKit store.",
+        "Linux is unsupported: dynamically recreating a secondary window (destroy then create again) crashes the packaged process with an X11 BadWindow error. Launch-time-declared secondary windows work, but the runtime recreate lifecycle multi-window depends on does not; tracked as a known issue."
       ],
       "apiSymbols": [
         "MurasakiConfig.windows",
@@ -582,7 +585,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Renderer native commands are deny-by-default and granted through a runtime-validated per-window capability allowlist; sender origin and command names are validated in Rust. Renderer-to-Node resources are separately deny-by-default through label-bound backendCapabilities.",
@@ -612,7 +615,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Node Main provides structured JSONL logging, bounded rotation, secret-looking field redaction, shutdown flushing, and opt-in bounded diagnostic reports with application/runtime metadata and log tails.",
@@ -648,7 +651,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "partial"
       },
       "limitations": [
         "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
@@ -658,7 +661,8 @@
         "webview:dragDrop reports file drag-and-drop events (dragover throttled to 20/sec) without ever blocking the OS default, so file inputs keep working regardless of the grant. webview.initScripts injects trusted, config-owned JavaScript before page load and is not capability-gated.",
         "webview:zoom bounds page zoom to 0.25-5.0 and is available on macOS 11+/iOS 14+ only; webview.hotkeysZoom (config, not a capability) enables OS zoom hotkeys/gestures on Windows only. webview:print opens the platform print dialog; there is no find-in-page API because Wry exposes none.",
         "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete and support structured URL scopes. Scoped reads require an explicit URL; writes are checked against the effective cookie path, and domain overrides must exactly match the URL host. The reserved legacy murasaki_runtime name is filtered out of reads and rejected from writes/deletes as defense in depth, although runtime authentication no longer relies on a cookie. deleteCookie matches by name, the URL host as domain, and the default / path only.",
-        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead."
+        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead.",
+        "On Linux, webview.deleteCookie() resolves but the deletion is not reliably reflected by a subsequent webview.readCookies() (a WebKitGTK/libsoup cookie-manager nuance); cookie set/read and the custom User-Agent work. Verified on packaged Linux."
       ],
       "apiSymbols": [
         "MurasakiConfig.webview",
@@ -687,7 +691,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Trusted build-time plugins can contribute Vite PluginOptions, deterministic bundle dependencies/resources, and serial dev/build/bundle lifecycle hooks with runtime-validated stable names.",

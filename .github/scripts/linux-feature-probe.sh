@@ -247,6 +247,8 @@ if [[ -n "$PORT" ]]; then
   # finish well before this loop's own deadline, so stopping at the first
   # still-missing marker would misreport every feature queued behind it.
   echo 'Waiting for renderer self-test markers ...'
+  # REQUIRED: the features Murasaki claims as supported/partial on packaged
+  # Linux. A missing marker here hard-fails the job.
   FEATURE_MARKERS=(
     'file-routing:PROBE:file-routing:PASS'
     'navigation-middleware:PROBE:navigation-middleware:PASS'
@@ -257,6 +259,15 @@ if [[ -n "$PORT" ]]; then
     'webview-session-network:PROBE:webview-session-network:PASS'
     'content-security-policy:PROBE:content-security-policy:PASS'
     'capability-permissions:PROBE:capability-permissions:PASS'
+  )
+  # KNOWN-FAILING (xfail): runtime secondary-window destroy→recreate crashes
+  # the packaged process on Linux with an X11 BadWindow error (see capabilities
+  # .json — native-window is 'partial', multi-window is 'unsupported' on Linux,
+  # both citing this). Reported for visibility but NON-blocking, so CI stays a
+  # true signal for the 9 features above without being permanently red for a
+  # gap we already declare. If either UNEXPECTEDLY passes, that's surfaced
+  # below so the label can be promoted.
+  XFAIL_MARKERS=(
     'native-window:PROBE:native-window:PASS'
     'multi-window:PROBE:multi-window:PASS'
   )
@@ -278,6 +289,18 @@ if [[ -n "$PORT" ]]; then
       record_pass "$feature"
     else
       record_fail "$feature" "marker never observed: $marker"
+    fi
+  done
+
+  # xfail features: expected to fail on Linux today. Non-blocking, but if one
+  # unexpectedly passes we announce it loudly so the label can be revisited.
+  for entry in "${XFAIL_MARKERS[@]}"; do
+    feature=${entry%%:*}
+    marker=${entry#*:}
+    if grep -Fqx -- "$marker" "$RUN1_STDOUT"; then
+      echo "  ::warning::xfail feature '$feature' UNEXPECTEDLY passed on Linux — its capability label may now be promotable."
+    else
+      echo "  (xfail) '$feature' did not pass, as expected on Linux (known X11 recreate crash — tracked)."
     fi
   done
 
