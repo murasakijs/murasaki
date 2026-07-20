@@ -10,6 +10,7 @@ on:
       - 'packages/murasaki/**'
       - 'packages/create-murasaki/**'
       - 'packages/ui/**'
+      - 'examples/linux-parity-probe/**'
       - 'pnpm-lock.yaml'
   push:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - 'packages/murasaki/**'
       - 'packages/create-murasaki/**'
       - 'packages/ui/**'
+      - 'examples/linux-parity-probe/**'
       - 'pnpm-lock.yaml'
 
 permissions:
@@ -147,4 +149,43 @@ jobs:
           path: |
             ${{ runner.temp }}/murasaki-linux-installer-e2e/**
             examples/linux-package-app/dist/**
+          if-no-files-found: warn
+
+      # examples/linux-parity-probe is a committed (not CI-generated) app —
+      # already part of the workspace from checkout, already covered by the
+      # "Install workspace dependencies" step above.
+      - name: Build and bundle the Linux feature-parity probe
+        working-directory: examples/linux-parity-probe
+        run: |
+          pnpm exec murasaki build
+          pnpm exec murasaki bundle --target linux-${{ matrix.arch }}
+
+      - name: Locate the feature-parity probe AppDir and AppImage
+        id: parity-probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPDIR=$(find "examples/linux-parity-probe/dist/bundle" -maxdepth 1 -type d -name '*.AppDir' -print -quit)
+          APPIMAGE=$(find "examples/linux-parity-probe/dist/bundle" -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          test -n "$APPDIR"
+          test -n "$APPIMAGE"
+          printf 'appDir=%s\n' "$APPDIR" >> "$GITHUB_OUTPUT"
+          printf 'appImage=%s\n' "$APPIMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Verify platform-agnostic feature parity on packaged Linux
+        shell: bash
+        run: >-
+          bash .github/scripts/linux-feature-probe.sh
+          "${{ steps.parity-probe.outputs.appImage }}"
+          "${{ steps.parity-probe.outputs.appDir }}"
+          "$RUNNER_TEMP/murasaki-linux-feature-probe"
+          90
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: linux-${{ matrix.arch }}-feature-probe-failure
+          path: |
+            ${{ runner.temp }}/murasaki-linux-feature-probe/**
+            examples/linux-parity-probe/dist/bundle/**
           if-no-files-found: warn
