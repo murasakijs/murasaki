@@ -226,14 +226,39 @@ export const routes = [{
   const launchFile = join(root, 'launch.json')
   await writeFile(launchFile, JSON.stringify({ argv: ['--no-sample-data'], cwd: '/fixture-cwd' }))
 
-  // Hold the requested port to verify that packaged launches recover from an
-  // unrelated app choosing the same deterministic origin. The native launcher
+  // Hold the requested port and several deterministic fallback candidates to
+  // verify that packaged launches escape a contiguous Windows excluded range
+  // without accumulating stale EventEmitter listeners. The native launcher
   // persists the reported fallback for subsequent stable-origin launches.
   const occupied = createServer()
   occupied.listen(0, '127.0.0.1')
   await once(occupied, 'listening')
   const occupiedPort = occupied.address().port
-  t.after(() => occupied.close())
+  const occupiedPorts = new Set([occupiedPort])
+  const occupiedServers = [occupied]
+  const nextPrivatePort = (current) => {
+    const first = 49_152
+    const count = 16_384
+    const offset = current >= first && current < first + count ? current - first : 0
+    return first + ((offset + 521) % count)
+  }
+  let candidate = occupiedPort
+  for (let attempt = 0; attempt < 11; attempt += 1) {
+    candidate = nextPrivatePort(candidate)
+    occupiedPorts.add(candidate)
+    const blocker = createServer()
+    const bound = await new Promise((resolveOk, reject) => {
+      blocker.once('error', (error) => {
+        if (error?.code === 'EADDRINUSE' || error?.code === 'EACCES') resolveOk(false)
+        else reject(error)
+      })
+      blocker.listen(candidate, '127.0.0.1', () => resolveOk(true))
+    })
+    if (bound) occupiedServers.push(blocker)
+  }
+  t.after(() => {
+    for (const server of occupiedServers) server.close()
+  })
 
   const child = spawn(
     process.execPath,
@@ -246,7 +271,7 @@ export const routes = [{
       '--main', join(serverDir, 'main.mjs'),
       '--launch-file', launchFile,
       '--port', String(occupiedPort),
-      '--port-attempts', '4',
+      '--port-attempts', '16',
     ],
     {
       cwd: root,
@@ -262,6 +287,9 @@ export const routes = [{
       },
     },
   )
+  let childStderr = ''
+  child.stderr.setEncoding('utf8')
+  child.stderr.on('data', (chunk) => { childStderr += chunk })
   t.after(async () => {
     child.kill('SIGTERM')
     await Promise.race([once(child, 'exit'), new Promise((resolveOk) => setTimeout(resolveOk, 1000))])
@@ -280,7 +308,8 @@ export const routes = [{
     child.once('exit', (code) => reject(new Error(`server exited early (${code})`)))
   })
   const url = `http://127.0.0.1:${port}/api/stream`
-  assert.notEqual(port, occupiedPort)
+  assert.equal(occupiedPorts.has(port), false)
+  assert.doesNotMatch(childStderr, /MaxListenersExceededWarning/)
   const bootstrap = await fetch(`http://127.0.0.1:${port}/`)
   assert.deepEqual(bootstrap.headers.getSetCookie(), [])
   assert.equal(

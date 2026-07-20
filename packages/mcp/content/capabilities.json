@@ -381,7 +381,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "supported"
+        "linux": "partial"
       },
       "limitations": [
         "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",

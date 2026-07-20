@@ -1026,7 +1026,16 @@ function listenWithFallback(initialPort, maxAttempts) {
 
   const attempt = () => {
     attempts += 1
+    const onListening = () => {
+      server.off('error', onError)
+      listeningPort = server.address().port
+      process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
+    }
     const onError = (error) => {
+      // A failed listen never emits `listening`, so remove this attempt's
+      // one-shot listener before trying another candidate. Leaving it attached
+      // accumulates stale callbacks and eventually triggers MaxListeners.
+      server.off('listening', onListening)
       // Windows reports EACCES, rather than EADDRINUSE, when the deterministic
       // private port falls inside an OS-excluded range (commonly reserved by
       // Hyper-V/WinNAT). On a first launch both conditions mean this candidate
@@ -1045,11 +1054,8 @@ function listenWithFallback(initialPort, maxAttempts) {
     }
 
     server.once('error', onError)
-    server.listen(candidate, '127.0.0.1', () => {
-      server.off('error', onError)
-      listeningPort = server.address().port
-      process.stdout.write(`MURASAKI_PORT=${listeningPort}\n`)
-    })
+    server.once('listening', onListening)
+    server.listen(candidate, '127.0.0.1')
   }
 
   attempt()
@@ -1059,7 +1065,13 @@ function nextPrivatePort(current) {
   const first = 49_152
   const count = 16_384
   const offset = current >= first && current < first + count ? current - first : 0
-  return first + ((offset + 1) % count)
+  // Windows excluded ranges are commonly contiguous blocks hundreds of ports
+  // wide. Advancing by one can exhaust every bounded first-launch attempt
+  // inside the same reserved block. An odd stride is coprime with the 2^14
+  // private-range size, so retries deterministically spread across the entire
+  // range while still visiting every candidate before repeating.
+  const stride = 521
+  return first + ((offset + stride) % count)
 }
 
 let processShutdown
