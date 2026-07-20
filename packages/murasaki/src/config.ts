@@ -366,6 +366,12 @@ export interface WindowsSigningConfig {
   }
 }
 
+/** Linux GPG signing settings used by `bundle --sign` and `installer --sign`. */
+export interface LinuxSigningConfig {
+  /** `gpg --local-user` selector: key id, fingerprint, or email. */
+  gpgKey?: string
+}
+
 /**
  * `true` enables the updater with every default inferred (GitHub repo from
  * `package.json#repository`, public key from `.murasaki/update-key.pub`,
@@ -661,6 +667,14 @@ export interface MurasakiConfig {
     /** Windows Authenticode signing for the application executable, portable ZIP payload,
      * NSIS setup executable, and MSI installer. */
     windows?: WindowsSigningConfig
+    /**
+     * Linux GPG signing identity for the `.AppImage` and `.deb` (and their
+     * `SHA256SUMS`) produced by `bundle --sign`/`installer --sign` — a key
+     * id, fingerprint, or email passed to `gpg --local-user`.
+     * `$MURASAKI_GPG_KEY` overrides this at build time. The passphrase (if
+     * the key has one) is never configured here — only read from
+     * `$MURASAKI_GPG_PASSPHRASE`, falling back to gpg-agent when unset. */
+    linux?: LinuxSigningConfig
   }
 }
 
@@ -1549,6 +1563,18 @@ function validateSignConfig(value: unknown): void {
         + 'use the default hardened-runtime signing until a separately sandboxed helper is available',
     )
   }
+
+  if (sign.linux !== undefined) {
+    if (!sign.linux || typeof sign.linux !== 'object' || Array.isArray(sign.linux)) {
+      throw new TypeError('sign.linux must be an object')
+    }
+    const linux = sign.linux as Record<string, unknown>
+    if (linux.gpgKey !== undefined
+      && (typeof linux.gpgKey !== 'string' || linux.gpgKey.trim().length === 0)) {
+      throw new TypeError('sign.linux.gpgKey must be a non-empty string')
+    }
+  }
+
   if (sign.windows === undefined) return
   if (!sign.windows || typeof sign.windows !== 'object' || Array.isArray(sign.windows)) {
     throw new TypeError('sign.windows must be an object')
