@@ -154,18 +154,20 @@ impl ProcessWebContext {
     }
 
     /// Drop the per-window WebContext for a destroyed secondary window so a
-    /// later window with the same label builds a fresh one.
+    /// later window with the same label builds a fresh one. **Linux only.**
     ///
     /// The context is keyed by window label and, on Linux (WebKitGTK), a stale
     /// `WebContext` whose `WebView` has been destroyed still references that
-    /// view's X resources; reusing it to build the recreated window's `WebView`
-    /// operates on a freed XID and aborts the process with an X11 `BadWindow`
-    /// error. macOS (`WKWebsiteDataStore`) and Windows (WebView2 environments)
-    /// are designed to be reused, so this only mattered on Linux — but dropping
-    /// the context on destroy everywhere keeps the lifecycle uniform. The
-    /// on-disk profile directory is unaffected, so a recreated window resumes
-    /// the same persisted storage. Must be called only after the window's
-    /// `WebView` has been dropped (a live `WebView` borrows its `WebContext`).
+    /// view's resources; reusing it to build the recreated window's `WebView`
+    /// misbehaves. macOS (`WKWebsiteDataStore`) and Windows (WebView2
+    /// environments) are, by contrast, *designed* to be reused across a
+    /// window's destroy/recreate — dropping and rebuilding the store there
+    /// breaks the recreated window, so this is gated to Linux where reuse is
+    /// the problem rather than the contract. The on-disk profile directory is
+    /// unaffected, so a recreated Linux window resumes the same persisted
+    /// storage. Must be called only after the window's `WebView` has been
+    /// dropped (a live `WebView` borrows its `WebContext`).
+    #[cfg(target_os = "linux")]
     pub(crate) fn release_context(&mut self, label: &str) {
         self.contexts.remove(label);
     }

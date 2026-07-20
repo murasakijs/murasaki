@@ -1000,15 +1000,16 @@ impl RuntimeWindowManager {
         if transparent_webview {
             webview_options.transparent = Some(true);
         }
-        // Safety net for same-label recreation: drop any WebContext left over
-        // from a previous window with this label before building the new
-        // WebView. destroy_known already releases it on an explicit destroy,
-        // but an OS/self close routed through the event loop
-        // (prepare_close_secondary + drop_closed_window) does not — so this
-        // guarantees no destroy path can leave a stale, freed-resource context
-        // to be reused here (a freed-XID X11 BadWindow abort on Linux). No
-        // live window holds this label at this point (validate_registration
+        // Linux only: drop any WebContext left over from a previous window
+        // with this label before building the new WebView. destroy_known
+        // releases it on an explicit destroy, but an OS/self close routed
+        // through the event loop (prepare_close_secondary + drop_closed_window)
+        // does not — so this guarantees no destroy path leaves a stale,
+        // freed-resource context to be reused here. macOS/Windows deliberately
+        // reuse the context (see release_context's docs), so this is Linux-
+        // gated. No live window holds this label here (validate_registration
         // above rejects a duplicate), so the drop is safe.
+        #[cfg(target_os = "linux")]
         self.web_context.borrow_mut().release_context(label);
         let webview = match Webview::new_unregistered(
             shared_window.clone(),
@@ -1066,12 +1067,13 @@ impl RuntimeWindowManager {
         }
         let resources = self.registry.borrow_mut().prepare_close_secondary(label)?;
         drop_closed_window(resources);
-        // The window's WebView is now dropped; release its per-window
-        // WebContext so a same-label recreate builds a fresh one instead of
-        // reusing a context that still references the destroyed view's
-        // resources (a freed X11 window on Linux/WebKitGTK — see
+        // Linux only: the window's WebView is now dropped; release its
+        // per-window WebContext so a same-label recreate builds a fresh one
+        // instead of reusing a context that still references the destroyed
+        // view's resources on WebKitGTK. macOS/Windows reuse it by design (see
         // ProcessWebContext::release_context). Order matters: this must run
         // after drop_closed_window, never before.
+        #[cfg(target_os = "linux")]
         self.web_context.borrow_mut().release_context(label);
         Ok(())
     }
