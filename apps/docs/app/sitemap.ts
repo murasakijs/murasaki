@@ -1,6 +1,11 @@
 import type { MetadataRoute } from "next";
 import { i18n } from "@/lib/i18n";
-import { absoluteUrl, localizedDocsPath, localizedHomePath } from "@/lib/seo";
+import {
+  absoluteUrl,
+  localizedChangelogPath,
+  localizedDocsPath,
+  localizedHomePath,
+} from "@/lib/seo";
 import { source } from "@/lib/source";
 
 // Page metadata already publishes the equivalent hreflang links. Keep this
@@ -21,5 +26,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     })),
   );
 
-  return [...homes, ...docsPages];
+  const changelog: MetadataRoute.Sitemap = i18n.languages.map((lang) => ({
+    url: absoluteUrl(localizedChangelogPath(lang)),
+    changeFrequency: "weekly",
+    priority: 0.7,
+  }));
+
+  return [...homes, ...docsPages, ...changelog];
 }

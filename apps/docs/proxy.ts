@@ -44,9 +44,10 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
 export const config = {
   // Run on everything except: Next.js internals, the API route (its own
   // locale-less `/api/search`), and the top-level asset/metadata routes that
-  // live outside `app/[lang]/**` (favicons, robots/sitemap, `llms*.txt`, the
-  // llms.mdx and OG image routes) — none should be rewritten under a locale.
+  // live outside `app/[lang]/**` (favicons, robots/sitemap, the changelog RSS
+  // feed, `llms*.txt`, the llms.mdx and OG image routes) — none should be
+  // rewritten under a locale.
   matcher: [
-    "/((?!_next/static|_next/image|api|favicon\\.ico|icon\\.svg|apple-icon|opengraph-image|robots\\.txt|sitemap\\.xml|llms\\.txt|llms-full\\.txt|llms-api\\.txt|llms\\.mdx|og/).*)",
+    "/((?!_next/static|_next/image|api|favicon\\.ico|icon\\.svg|apple-icon|opengraph-image|robots\\.txt|sitemap\\.xml|changelog\\.xml|llms\\.txt|llms-full\\.txt|llms-api\\.txt|llms\\.mdx|og/).*)",
   ],
 };

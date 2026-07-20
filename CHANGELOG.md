@@ -4,7 +4,45 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
-## 0.55.5 — Linux feature parity
+## 0.55.6 — the stability declaration (2026-07-20)
+
+Every one of the 26 features in the capability manifest is now `status: stable`
+— a compatibility commitment for the current release line backed by cited test
+evidence, not a label change. Platform labels stay honest where an OS-level gap
+is real.
+
+### Added
+
+- **Configurable About panels.** An `about` config opts into a native About
+  panel with custom body paragraphs, label/value detail rows (Build, Commit, …),
+  external-link buttons, and size control on macOS, Windows, and Linux. When
+  omitted, each platform keeps its compact standard About dialog.
+- **CSP delivered as a response header.** The resolved Content Security Policy
+  now ships as an HTTP `Content-Security-Policy` response header (dev middleware
+  and the packaged production server) in addition to the meta tag, from a single
+  resolver — so header-only directives such as the new default
+  `frame-ancestors 'none'` are actually enforced. A user-owned CSP meta tag in
+  `index.html` stays authoritative: Murasaki then sends no header and defers
+  entirely to the tag, re-checking the live file per request in dev.
+
+### Fixed
+
+- **Linux cookie deletion.** On WebKitGTK, `webview.deleteCookie()` resolved
+  but the cookie was never removed: WebKit matches the cookie to delete by full
+  equality including its value, which the caller doesn't have. A vendored wry
+  patch looks the stored cookie up by name, domain, and path — like macOS and
+  Windows — so deletion now reflects on the next read (`@murasakijs/native`
+  0.43.2, verified in a packaged AppImage).
+- Orglia sample form styling polish.
+
+### Notes
+
+- `webview-session-network` is now `supported` on Linux. The remaining honest
+  platform gaps: system permissions stay `unsupported` on Linux and `partial`
+  on Windows (no OS equivalent of macOS TCC prompts), and the Linux tray still
+  needs an AppIndicator host with global shortcuts requiring X11/XWayland.
+
+## 0.55.5 — Linux feature parity (2026-07-20)
 
 Linux moves onto the same footing as macOS and Windows for every feature that
 is not blocked by an OS-level gap. 16 of 26 capabilities are now `supported` on
@@ -50,32 +88,32 @@ Linux (up from 2), each verified end to end in a packaged AppImage.
   is no OS-level equivalent of macOS TCC prompts.
 - No feature is `planned` on any platform anymore.
 
-## 0.55.4 — zero-dependency scaffolder
+## 0.55.4 — zero-dependency scaffolder (2026-07-20)
 
 - Removes the scaffolder's runtime dependency tree in favor of Node's built-in prompt and spinner
   primitives, preventing package-store link failures before the CLI can start.
 - Guarantees the unattended `--yes --skip-install` path runs directly from the packed tarball with
   no installed dependencies.
 
-## 0.55.3 — reusable dependency verification
+## 0.55.3 — reusable dependency verification (2026-07-20)
 
 - Lets the release gate reuse an already-published workspace package only when its published git
   commit is an ancestor and the package directory is unchanged through the current release.
 - Keeps strict integrity, provenance, and current-commit checks for packages published by the tag.
 
-## 0.55.2 — reliable fresh scaffolds
+## 0.55.2 — reliable fresh scaffolds (2026-07-20)
 
 - Makes the default Biome setup use its installed schema and the current recommended-rule preset.
 - Pins the scaffolded Biome CLI so a newly generated app remains lint-clean over time.
 - Verifies a fresh packed scaffold with lint, type-check, and production build in CI.
 
-## 0.55.1 — release verification hardening
+## 0.55.1 — release verification hardening (2026-07-20)
 
 - Makes npm payload inspection work from the pnpm workspace root.
 - Waits for npm registry propagation between dependency-ordered publishes.
 - Runs final integrity, git-head, and SLSA provenance verification correctly on Node.js 24.
 
-## 0.55.0 — production-candidate foundations
+## 0.55.0 — production-candidate foundations (2026-07-20)
 
 ### Added
 
@@ -128,3 +166,12 @@ Linux (up from 2), each verified end to end in a packaged AppImage.
 
 Full migration steps: [English](https://murasaki.ichi10.com/docs/building/migration-0.55) ·
 [日本語](https://murasaki.ichi10.com/ja/docs/building/migration-0.55)
+
+## 0.54.0 — first public release (2026-07-18)
+
+The first npm release of the framework: file routing, Server Actions, API
+routes, and typed `'use main'` calls on React 19 + Vite; native window, menu,
+tray, global shortcut, dialog, clipboard, notification, and WebView APIs behind
+default-deny capability policies; macOS system-permission (TCC) requests and
+Windows elevation; `.dmg`, NSIS, and MSI packaging with Ed25519-signed
+automatic updates; and the Papelle, Oscilla, and Orglia sample applications.

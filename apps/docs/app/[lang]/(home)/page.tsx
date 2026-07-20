@@ -2,6 +2,7 @@ import { codeToHtml } from "shiki";
 import { LpMotion } from "@/components/home/lp-motion";
 import { PxArtifacts } from "@/components/home/px-artifacts";
 import { PxAscii } from "@/components/home/px-ascii";
+import { PxChangelogSection } from "@/components/home/px-changelog";
 import { PxConverge } from "@/components/home/px-converge";
 import { PxCta } from "@/components/home/px-cta";
 import { PxExamples } from "@/components/home/px-examples";
@@ -16,10 +17,16 @@ import { PxShowcase } from "@/components/home/px-showcase";
 import { PxVersus } from "@/components/home/px-versus";
 import { SiteFooter } from "@/components/home/site-footer";
 import { JsonLd } from "@/components/json-ld";
+import { getChangelog } from "@/lib/changelog";
 import { appMenuSample } from "@/lib/code-samples";
 import { homeContent, lpExtra } from "@/lib/home-content";
 import { lpFontVariables } from "@/lib/lp-fonts";
-import { absoluteUrl, localizedDocsPath, localizedHomePath } from "@/lib/seo";
+import {
+  absoluteUrl,
+  localizedChangelogPath,
+  localizedDocsPath,
+  localizedHomePath,
+} from "@/lib/seo";
 
 const githubUrl = "https://github.com/murasakijs/murasaki";
 const installCommand = "pnpm create murasaki@latest my-app";
@@ -59,6 +66,10 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
     "getting-started",
     "quick-start",
   ]);
+  const changelogEntries = getChangelog(lang === "ja" ? "ja" : "en").slice(
+    0,
+    3,
+  );
   const pageUrl = absoluteUrl(localizedHomePath(lang));
   const creatorId = `${absoluteUrl("/")}#creator`;
   const websiteId = `${absoluteUrl("/")}#website`;
@@ -178,6 +189,18 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
         <DitherDivider from={PAPER} to={INKFIELD} />
 
         <PxAscii {...x.asciiButterfly} />
+
+        <DitherDivider from={INKFIELD} to={PAPER} />
+
+        <PxChangelogSection
+          eyebrow={t.changelog.eyebrow}
+          heading={t.changelog.heading}
+          viewAllLabel={t.changelog.viewAll}
+          viewAllHref={localizedChangelogPath(lang)}
+          entries={changelogEntries}
+        />
+
+        <DitherDivider from={PAPER} to={INKFIELD} />
 
         <PxCta
           quickstart={t.quickStart}

@@ -111,6 +111,12 @@ export interface HomeContent {
     heading: string;
     paragraph: string;
   };
+  /** Compact latest-3 timeline section, just before the CTA band. */
+  changelog: {
+    eyebrow: string;
+    heading: string;
+    viewAll: string;
+  };
   /** Rich, columned footer. */
   footer: {
     columns: {
@@ -336,6 +342,11 @@ const en: HomeContent = {
     heading: "Build your first native app.",
     paragraph:
       "React 19, file-based routing, and server actions — in a real native window. No Rust required.",
+  },
+  changelog: {
+    eyebrow: "Changelog",
+    heading: "Shipped, dated, honest.",
+    viewAll: "View full changelog",
   },
   footer: {
     columns: [
@@ -593,6 +604,11 @@ const ja: HomeContent = {
     heading: "最初のデスクトップアプリを作りましょう。",
     paragraph:
       "React 19、ファイルベースルーティング、Server Actions を OS のウィンドウで。Rust を書く必要はありません。",
+  },
+  changelog: {
+    eyebrow: "Changelog",
+    heading: "出荷した。日付入りで、正直に。",
+    viewAll: "更新履歴をすべて見る",
   },
   footer: {
     columns: [
