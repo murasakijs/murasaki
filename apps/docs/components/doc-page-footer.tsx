@@ -1,6 +1,7 @@
 import { buttonVariants } from "fumadocs-ui/components/ui/button";
 import { GitPullRequestArrow } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { formatDocDate } from "@/lib/format-doc-date.mjs";
 
 // The open-source colophon under each doc page — sits above fumadocs'
 // auto-generated prev/next pagination. A "contribute on GitHub" button (edit
@@ -36,13 +37,7 @@ export function DocPageFooter({
   isoDate?: string;
 }) {
   const t = COPY[lang as keyof typeof COPY] ?? COPY.en;
-  const formatted = isoDate
-    ? new Intl.DateTimeFormat(lang === "ja" ? "ja-JP" : "en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      }).format(new Date(isoDate))
-    : null;
+  const formatted = isoDate ? formatDocDate(isoDate, lang) : null;
 
   return (
     <div className="mt-10 flex flex-col gap-3 border-t pt-6 text-sm sm:flex-row sm:items-center sm:justify-between">
