@@ -46,7 +46,7 @@ tray-icon = "0.24"
 arboard = "3"
 notify-rust = "4"
 open = "5"
-png = "0.17"
+png = "0.18"
 url = "2"
 # clipboard.readImage/writeImage's PNG<->base64 wire encoding (see clipboard.rs).
 base64 = "0.22"
