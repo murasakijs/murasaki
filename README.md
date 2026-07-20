@@ -320,10 +320,6 @@ Rust toolchain.
   you. A new publisher may still see SmartScreen prompts while reputation grows.
 - **macOS signing and notarization need your own paid Apple Developer ID** — see
   [Signing & distribution](#signing--distribution). Unsigned is the default.
-- **Runtime multi-window recreate is unsupported on Linux.** Destroying and
-  then recreating a secondary window at runtime crashes the packaged process
-  with an X11 `BadWindow` error (tracked). Launch-time-declared secondary
-  windows work fine — only the runtime destroy→recreate path is affected.
 - **`mandatory` in the update manifest is advisory.** murasaki hands the flag to
   your app; it does not force the update on the user's behalf.
 

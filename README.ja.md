@@ -312,11 +312,6 @@ single-instance、deep link、crash reporting)。
   reputationが蓄積するまでSmartScreen警告が表示される場合があります。
 - **macOS の署名と notarization には、ご自身の有料 Apple Developer ID が必要です** —
   [署名と配布](#署名と配布) を参照してください。既定は未署名です。
-- **Linux では runtime でのマルチウィンドウ再生成に対応していません。**
-  secondary window を runtime で破棄してから再生成すると、packaged process が
-  X11 の `BadWindow` エラーでクラッシュします(追跡中)。起動時に宣言した
-  secondary window は問題なく動作します — 影響があるのは runtime での
-  destroy→recreate の経路のみです。
 - **更新マニフェストの `mandatory` は助言的なフラグです。** murasaki はこのフラグを
   アプリに渡すだけで、ユーザーに更新を強制することはしません。
 

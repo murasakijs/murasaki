@@ -160,7 +160,6 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "borderless fullscreenのみ対応しており、exclusive/dedicated video mode fullscreenはありません。",
     "titleBarStyle: 'hidden'はmacOS専用です(transparentなtitlebar + hidden title + full-size content view)。Windows / Linuxはこのoptionを受け取っても無視します。",
     "getMonitors()が返すgeometry(position、size)はphysical pixelで、logical/CSS pixelではありません。",
-    "Linuxでは、runtimeにsecondary windowを生成・破棄したのち再度生成する操作はまだ安定していません: destroy→recreateの経路はpackaged processをX11のBadWindow errorでクラッシュさせます(追跡中)。primary windowと起動時に宣言されたsecondary windowは問題なく動作し、影響を受けるのはruntimeでのrecreate経路のみです。",
   ],
   "application-menu": [
     "native application menuはmacOS、Windows、Linux(GTK、muda経由)で利用できます。差し替えはprocess-globalでprimary rendererに限定され、menu:applicationと各privileged roleのcapabilityが必要です。",
@@ -206,7 +205,6 @@ const JA_LIMITATIONS: Record<string, string[]> = {
     "windowはconfigでの宣言が必須です。secondary templateは起動時生成をopt outでき、trusted Node Mainから生成・破棄・再生成できます。任意のruntime URL、native policy、未宣言のlabelは拒否されます。",
     "secondaryのOS/self closeは再openできるようhideし、Node Mainからのdestroyはnative resourceを解放し、再生成時にgenerationをincrementします。application menuはprocess-globalでprimary所有のままです。",
     "各native windowは独立したbrowser profileを持つため、Service Worker、SharedWorker、cookie、storageが他windowのbackend authorityを引き継ぐことはありません。secondary profileはWindows/LinuxおよびmacOS 14+では永続化され、macOS 11-13では別の非永続WebKit storeを使用します。",
-    "Linuxは未対応です: secondary windowをruntimeで破棄してから再生成する操作はpackaged processをX11のBadWindow errorでクラッシュさせます。起動時に宣言されたsecondary windowは動作しますが、multi-windowが前提とするruntimeでのrecreate lifecycleは動作しません(既知のissueとして追跡中)。",
   ],
   "tray-and-global-shortcuts": [
     "macOS status item / Windows system-tray iconはprocess-wideで1つ、tooltip、click event、native nested menu、menu-item event、動的なicon/menu差し替えを備えます。最後に成功したcreateが以前のownerを置き換えます。",

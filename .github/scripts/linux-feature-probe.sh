@@ -20,10 +20,10 @@
 #
 # Launches the packaged AppImage TWICE, not once:
 #   RUN 1 exercises every renderer-driven feature, including multi-window's
-#   create/destroy/recreate sequence. On Linux that sequence can itself crash
-#   the whole packaged process (see src/api/probe/window/route.ts's comment)
-#   — if that happens, RUN 1 simply ends early; every marker already observed
-#   still counts, and every marker never reached is recorded as a failure.
+#   create/destroy/recreate sequence (which now runs cleanly on Linux — see
+#   the vendored wry is_child Drop fix in crates/native/vendor/wry/PATCH.md and
+#   the WebContext release in window.rs). Every marker is recorded; a marker
+#   never reached is a failure.
 #   RUN 2 is a fresh, independent launch dedicated to diagnostics-and-logging
 #   (intentionally crashing Node Main via src/api/probe/crash-node/route.ts,
 #   then checking the resulting crash-report + JSONL log). Keeping it in its

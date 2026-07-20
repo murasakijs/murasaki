@@ -157,7 +157,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "partial"
+        "linux": "supported"
       },
       "limitations": [
         "Configured secondary templates can be created, destroyed, and recreated from trusted Node Main, with generation-scoped lifecycle events; renderers remain limited to showing and managing live declared windows and cannot supply runtime URLs or capability policies.",
@@ -165,8 +165,7 @@
         "No parent/child or modal window relationship — tao has no cross-platform support for it, so every declared window is an independent top-level window.",
         "Only borderless fullscreen is supported; there is no exclusive/dedicated-video-mode fullscreen.",
         "titleBarStyle: 'hidden' is macOS only (transparent titlebar + hidden title + full-size content view); Windows and Linux accept and ignore it.",
-        "getMonitors() geometry (position, size) is reported in physical pixels, not logical/CSS pixels.",
-        "On Linux, creating, destroying, and then recreating a secondary window at runtime is not yet stable: the destroy→recreate path crashes the packaged process with an X11 BadWindow error (tracked). The primary window and launch-time-declared secondary windows work; only the runtime recreate path is affected."
+        "getMonitors() geometry (position, size) is reported in physical pixels, not logical/CSS pixels."
       ],
       "apiSymbols": [
         "App",
@@ -455,13 +454,12 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "supported"
       },
       "limitations": [
         "Windows must be declared in configuration. Secondary templates may opt out of launch-time creation and trusted Node Main can create, destroy, and recreate them; arbitrary runtime URLs, native policies, and undeclared labels are rejected.",
         "Secondary OS/self close hides for later reopening, while Node Main destroy releases native resources and increments the generation when recreated; the application menu remains process-global and primary-owned.",
-        "Each native window has an isolated browser profile so Service Workers, SharedWorkers, cookies, and storage cannot inherit another window's backend authority. Secondary profiles persist on Windows/Linux and macOS 14+; macOS 11-13 uses a separate non-persistent WebKit store.",
-        "Linux is unsupported: dynamically recreating a secondary window (destroy then create again) crashes the packaged process with an X11 BadWindow error. Launch-time-declared secondary windows work, but the runtime recreate lifecycle multi-window depends on does not; tracked as a known issue."
+        "Each native window has an isolated browser profile so Service Workers, SharedWorkers, cookies, and storage cannot inherit another window's backend authority. Secondary profiles persist on Windows/Linux and macOS 14+; macOS 11-13 uses a separate non-persistent WebKit store."
       ],
       "apiSymbols": [
         "MurasakiConfig.windows",

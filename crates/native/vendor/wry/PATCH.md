@@ -71,4 +71,12 @@ vendored tree minimal; none of them affect the build. `Cargo.toml`'s
 `version` field is intentionally left at `0.55.1` so `[patch.crates-io]`
 resolves against it.
 
-Upstream PR: (pending)
+## Upstreaming
+
+This bug is present on wry's `dev` branch too (0.55.1 is the latest published
+release), so the fix should be sent upstream and this vendored copy dropped
+once a fixed wry release ships. A ready-to-file PR — "fix(webkitgtk): only
+destroy the X11 window in `Drop for X11Data` when `is_child`" — describes the
+same root cause, a `GDK_SYNCHRONIZE=1` repro, and this one-block change.
+
+Upstream PR: (to file — tauri-apps/wry)
