@@ -4,6 +4,48 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
+## 0.55.5 — Linux feature parity
+
+Linux moves onto the same footing as macOS and Windows for every feature that
+is not blocked by an OS-level gap. 16 of 26 capabilities are now `supported` on
+Linux (up from 2), each verified end to end in a packaged AppImage.
+
+### Added
+
+- **Linux feature parity.** File routing, navigation middleware, route metadata,
+  server actions, API routes, the Node Main lifecycle, content security policy,
+  capability permissions, diagnostics/crash reports, the build-time plugin SDK,
+  native windows, and declarative multi-window are now `supported` on Linux,
+  proven by a packaged-AppImage feature probe running under Xvfb in CI.
+- **Linux code signing.** `murasaki installer --sign` produces detached, armored
+  GPG signatures for the `.AppImage`, the `.deb`, and a combined `SHA256SUMS`
+  (and opportunistically embeds a Debian-native signature via `dpkg-sig`). The
+  key is selected with `$MURASAKI_GPG_KEY` or `sign.linux.gpgKey`; the passphrase
+  comes only from `$MURASAKI_GPG_PASSPHRASE` or the gpg-agent.
+- `murasaki demo` gained one-command launch of the Papelle, Oscilla, and Orglia
+  sample previews.
+
+### Fixed
+
+- **Linux multi-window recreate crash.** Destroying and recreating a secondary
+  window at runtime aborted the packaged process with an X11 `BadWindow` error.
+  Two stacked causes are fixed: per-window `WebContext`s are now released on
+  destroy so a recreate builds a fresh one, and a vendored one-line wry patch
+  (`crates/native/vendor/wry`) stops `Drop for X11Data` from destroying the
+  parent window's X resource in the non-child embedding path.
+- Windows now retries an OS-excluded (`EACCES`) deterministic origin port during
+  a first-launch bind instead of failing to start.
+
+### Notes
+
+- Linux remains `partial` where an OS gap is real: secure storage needs a Secret
+  Service provider; `.deb` updates are package-manager-owned; there is no rpm or
+  distribution-repository trust integration; tray needs an AppIndicator host and
+  global shortcuts require X11/XWayland; `webview.deleteCookie()` is not reliably
+  reflected on WebKitGTK. System permissions stay `unsupported` on Linux — there
+  is no OS-level equivalent of macOS TCC prompts.
+- No feature is `planned` on any platform anymore.
+
 ## 0.55.4 — zero-dependency scaffolder
 
 - Removes the scaffolder's runtime dependency tree in favor of Node's built-in prompt and spinner
