@@ -23,6 +23,10 @@ export function localizedDocsPath(lang: string, slugs: readonly string[] = []) {
   return lang === i18n.defaultLanguage ? docsPath : `/${lang}${docsPath}`;
 }
 
+export function localizedChangelogPath(lang: string) {
+  return lang === i18n.defaultLanguage ? "/changelog" : `/${lang}/changelog`;
+}
+
 export function localizedAlternates(pathForLanguage: (lang: string) => string) {
   return {
     ...Object.fromEntries(

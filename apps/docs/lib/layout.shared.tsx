@@ -1,6 +1,10 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
-import { localizedDocsPath, localizedHomePath } from "./seo";
+import {
+  localizedChangelogPath,
+  localizedDocsPath,
+  localizedHomePath,
+} from "./seo";
 import { appName, gitConfig } from "./shared";
 
 export function baseOptions(
@@ -33,6 +37,12 @@ export function baseOptions(
             secondary: true,
             text: "Docs",
             url: localizedDocsPath(lang),
+          },
+          {
+            type: "button",
+            secondary: true,
+            text: "Changelog",
+            url: localizedChangelogPath(lang),
           },
         ]
       : undefined,
