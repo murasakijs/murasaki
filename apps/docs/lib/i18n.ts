@@ -2,9 +2,9 @@ import { defineI18nUI } from "fumadocs-ui/i18n";
 
 // `hideLocale: "default-locale"` hides the URL prefix for the default
 // language only: English lives at `/docs/...` (no `/en`), Japanese at
-// `/ja/docs/...`. This is a runtime rewrite/redirect done by the i18n
-// middleware in proxy.ts, which requires a real server — now that this app
-// is dynamically hosted (not `output: "export"`), that's available.
+// `/ja/docs/...`. English docs are a real unprefixed App Router route so
+// pathname-driven Fumadocs UI hydrates deterministically; proxy.ts handles
+// canonical redirects and the remaining locale rewrites.
 //
 // `defineI18nUI` bundles the routing config together with the language
 // switcher's display names, and its `.provider(lang)` builds the

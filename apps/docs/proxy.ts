@@ -14,8 +14,8 @@ const { rewrite: rewriteSuffix } = rewritePath(
 );
 
 // Next can run proxy again for an internal rewrite in development/standalone
-// mode. Mark that request so `/docs -> /en/docs` is not immediately treated as
-// a user-visible `/en/docs` request and redirected back to `/docs`.
+// mode. Mark locale rewrites (for example `/ -> /en`) so their internal target
+// is not mistaken for a user-visible default-locale URL and redirected back.
 const INTERNAL_LOCALE_REWRITE = "x-murasaki-internal-locale-rewrite";
 
 function handleLocale(request: NextRequest) {
@@ -65,10 +65,9 @@ function handleLocale(request: NextRequest) {
 }
 
 export default function proxy(request: NextRequest) {
-  // `docsRoute` (`/docs`) is the unprefixed — i.e. default-language — docs
-  // path, so this negotiation only needs to run before the i18n rewrite
-  // above ever touches the request, not after: it matches the same paths
-  // either way.
+  // Markdown negotiation uses the public, unprefixed English docs path. Run it
+  // before locale handling so `/docs/foo.md` and Accept: text/markdown keep
+  // resolving to the locale-neutral content endpoint.
   const result = rewriteSuffix(request.nextUrl.pathname);
   if (result) {
     return NextResponse.rewrite(new URL(result, request.nextUrl));
