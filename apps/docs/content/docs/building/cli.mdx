@@ -18,8 +18,9 @@ murasaki help        Show this help
 <Callout type="info">
   Development and packaging support macOS, Windows, and Linux. Linux bundles
   produce an AppDir and `.AppImage`; `installer` also produces a `.deb`.
-  Linux package signing, RPM packages, and repository metadata are not yet
-  implemented. An explicit Linux `--sign` request fails closed before output;
+  Linux `--sign` GPG-signs the `.AppImage`, `.deb`, and a combined
+  `SHA256SUMS`; RPM packages and repository metadata are not yet implemented.
+  An explicit `--sign` request fails closed before output on every platform;
   it never silently produces an unsigned artifact.
 </Callout>
 
@@ -53,10 +54,10 @@ murasaki bundle --no-build            # reuse an existing dist/client
 - **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — target arch /
   platform (defaults to the host). Targets include `darwin-arm64`,
   `darwin-x64`, `win32-x64`, `win32-arm64`, `linux-x64`, and `linux-arm64`.
-- **`--sign`** — Developer ID-sign the `.app` on macOS or Authenticode-sign
-  the app executable before the Windows portable ZIP is created. Windows
-  signing must run on Windows with SignTool. Linux rejects this flag until
-  built-in signing exists. See [Distribution](/docs/building/distribution#signing--notarization).
+- **`--sign`** — Developer ID-sign the `.app` on macOS, Authenticode-sign
+  the app executable before the Windows portable ZIP is created, or
+  GPG-sign the produced `.AppImage` on Linux. Windows signing must run on
+  Windows with SignTool. See [Distribution](/docs/building/distribution#signing--notarization).
 - **`--no-build`** — skip the Vite rebuild if `dist/client` already exists.
 
 ## `murasaki installer`
@@ -79,10 +80,11 @@ murasaki installer --no-build          # reuse an existing dist/bundle
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — forwarded to `bundle`.
-- **`--sign`** — macOS Developer ID or Windows Authenticode signing. On
-  Windows it signs and verifies the app executable and every generated
-  installer. Updater-enabled builds require per-user NSIS and skip MSI. Linux
-  rejects this flag until built-in signing exists.
+- **`--sign`** — macOS Developer ID, Windows Authenticode, or Linux GPG
+  signing. On Windows it signs and verifies the app executable and every
+  generated installer. Updater-enabled builds require per-user NSIS and skip
+  MSI. On Linux it GPG-signs the `.AppImage`, the `.deb`, and a combined
+  `SHA256SUMS` (see [Distribution](/docs/building/distribution#signing-gpg-detached-signatures)).
 - The command fails when the platform packaging tool produces no installer.
   Use `murasaki bundle` when a portable ZIP/AppImage is the intended output.
 - **`--notarize`** — macOS only; submits the signed `.dmg` to Apple's notary

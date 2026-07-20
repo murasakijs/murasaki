@@ -9,7 +9,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Page, layout, loading, error, not-found, route-group, single dynamic segments, and catch-all/optional catch-all page segments ([...slug], [[...slug]]) ship today.",
@@ -36,7 +36,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Actions execute in the bundled local Node runtime; they are not Next.js Server Actions and are not a remotely hosted RPC service.",
@@ -61,7 +61,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Routes are served by the app-local Node process and are not intended to expose a public network service.",
@@ -83,7 +83,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Middleware runs in the renderer before client navigation and only receives the pathname and query string being navigated to.",
@@ -106,7 +106,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Document title, description, favicon, and a small Open Graph subset are applied in the renderer; the title is additionally mirrored onto the native window title (best-effort, requires the window:setTitle capability).",
@@ -127,7 +127,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "The src/main.ts lifecycle covers ready, cancellable beforeQuit, bounded shutdown, second-launch delivery, app paths, an AbortSignal, typed live events to renderers, and declared-window management in development and packaged apps.",
@@ -157,7 +157,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Configured secondary templates can be created, destroyed, and recreated from trusted Node Main, with generation-scoped lifecycle events; renderers remain limited to showing and managing live declared windows and cannot supply runtime URLs or capability policies.",
@@ -357,7 +357,7 @@
       },
       "limitations": [
         "macOS .app/.dmg and Windows portable .zip, NSIS .exe, and WiX .msi outputs ship today. Installer creation fails closed when no platform installer is produced. Windows updater builds require per-user NSIS and skip MSI; MSI is generated only with the built-in updater disabled.",
-        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging, repository metadata, and code signing are not implemented. WiX is required for MSI and only runs on Windows."
+        "Linux AppDir/AppImage/deb artifact assembly is implemented (murasaki bundle/installer --target linux-x64|linux-arm64), built from the same resource layout as the macOS/Windows bundles and requiring mksquashfs (squashfs-tools) on the build host; the native launcher now runs the produced AppImage/.deb end to end (window, webview, single-instance, deep links, self-update for AppImage). rpm packaging and repository metadata are not implemented; code signing is available via detached GPG signatures (see the code-signing feature). WiX is required for MSI and only runs on Windows."
       ],
       "apiSymbols": [
         "murasaki bundle",
@@ -379,11 +379,12 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "planned"
+        "linux": "partial"
       },
       "limitations": [
         "Developer ID signing and Apple notarization are wired for macOS when the developer supplies credentials.",
-        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Linux package signing is not implemented; ad-hoc macOS signatures do not establish user trust."
+        "Windows Authenticode signs and verifies the application executable, portable ZIP payload, NSIS setup, and MSI through a developer-supplied PFX/store certificate or Microsoft Artifact Signing provider. Ad-hoc macOS signatures do not establish user trust.",
+        "Linux: `murasaki installer --sign` produces detached, armored GPG signatures (<artifact>.sig) for the .AppImage, the .deb, and a combined SHA256SUMS, and opportunistically embeds a Debian-native signature via dpkg-sig when it is on PATH. The signing key is selected via $MURASAKI_GPG_KEY or sign.linux.gpgKey; the passphrase comes only from $MURASAKI_GPG_PASSPHRASE or the gpg-agent. There is no distro-repository trust-store or apt/dnf keyring integration, and no rpm."
       ],
       "apiSymbols": [
         "MurasakiConfig.sign",
@@ -430,7 +431,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Murasaki injects environment-specific default CSP into framework and user-owned HTML, supports a complete security.csp override or explicit opt-out, and normalizes a user-owned CSP tag to the beginning of head.",
@@ -453,7 +454,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "unsupported"
+        "linux": "supported"
       },
       "limitations": [
         "Windows must be declared in configuration. Secondary templates may opt out of launch-time creation and trusted Node Main can create, destroy, and recreate them; arbitrary runtime URLs, native policies, and undeclared labels are rejected.",
@@ -582,7 +583,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Renderer native commands are deny-by-default and granted through a runtime-validated per-window capability allowlist; sender origin and command names are validated in Rust. Renderer-to-Node resources are separately deny-by-default through label-bound backendCapabilities.",
@@ -612,7 +613,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Node Main provides structured JSONL logging, bounded rotation, secret-looking field redaction, shutdown flushing, and opt-in bounded diagnostic reports with application/runtime metadata and log tails.",
@@ -648,7 +649,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "partial"
       },
       "limitations": [
         "Application-wide custom User-Agent, non-persistent/incognito sessions, and bounded unauthenticated HTTP CONNECT or SOCKSv5 proxy endpoints are runtime-validated and passed to Wry for development and packaged macOS/Windows WebViews.",
@@ -658,7 +659,8 @@
         "webview:dragDrop reports file drag-and-drop events (dragover throttled to 20/sec) without ever blocking the OS default, so file inputs keep working regardless of the grant. webview.initScripts injects trusted, config-owned JavaScript before page load and is not capability-gated.",
         "webview:zoom bounds page zoom to 0.25-5.0 and is available on macOS 11+/iOS 14+ only; webview.hotkeysZoom (config, not a capability) enables OS zoom hotkeys/gestures on Windows only. webview:print opens the platform print dialog; there is no find-in-page API because Wry exposes none.",
         "webview:readCookies/webview:writeCookies expose bounded cookie read/set/delete and support structured URL scopes. Scoped reads require an explicit URL; writes are checked against the effective cookie path, and domain overrides must exactly match the URL host. The reserved legacy murasaki_runtime name is filtered out of reads and rejected from writes/deletes as defense in depth, although runtime authentication no longer relies on a cookie. deleteCookie matches by name, the URL host as domain, and the default / path only.",
-        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead."
+        "Renderer camera, microphone, and geolocation Web APIs fail closed under a framework-owned Permissions-Policy header. Wry 0.55 has no cross-platform per-window permission callback, so these APIs cannot be enabled from config yet; use capability-checked native features instead.",
+        "On Linux, webview.deleteCookie() resolves but the deletion is not reliably reflected by a subsequent webview.readCookies() (a WebKitGTK/libsoup cookie-manager nuance); cookie set/read and the custom User-Agent work. Verified on packaged Linux."
       ],
       "apiSymbols": [
         "MurasakiConfig.webview",
@@ -687,7 +689,7 @@
       "platforms": {
         "macos": "supported",
         "windows": "supported",
-        "linux": "development-only"
+        "linux": "supported"
       },
       "limitations": [
         "Trusted build-time plugins can contribute Vite PluginOptions, deterministic bundle dependencies/resources, and serial dev/build/bundle lifecycle hooks with runtime-validated stable names.",
@@ -717,7 +719,7 @@
       },
       "limitations": [
         "AppDir/AppImage/deb artifact assembly (see the application-packaging capability) and the native launcher runtime both work end to end: window/webview creation, single-instance locking, cold-start deep links (argv from the .desktop Exec line) and second-instance forwarding, graceful shutdown, and native crash reporting all run from the packaged AppImage or .deb, verified under Xvfb + a private D-Bus session in Docker and in app-package-linux.yml.",
-        "AppImage self-update works (journaled single-file swap of the running .AppImage, relaunch via --appimage-extract-and-run, first-launch rollback on a failed health check); a .deb install or a bare/manually-extracted AppDir has no self-update (there is no single file to swap) and reports updates as managed by the system package manager instead. rpm packaging, repository metadata, and code signing are not implemented."
+        "AppImage self-update works (journaled single-file swap of the running .AppImage, relaunch via --appimage-extract-and-run, first-launch rollback on a failed health check); a .deb install or a bare/manually-extracted AppDir has no self-update (there is no single file to swap) and reports updates as managed by the system package manager instead. rpm packaging and repository metadata are not implemented; code signing is available via detached GPG signatures (see the code-signing feature)."
       ],
       "apiSymbols": [],
       "testEvidence": [

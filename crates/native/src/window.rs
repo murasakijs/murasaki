@@ -1000,6 +1000,16 @@ impl RuntimeWindowManager {
         if transparent_webview {
             webview_options.transparent = Some(true);
         }
+        // Safety net for same-label recreation: drop any WebContext left over
+        // from a previous window with this label before building the new
+        // WebView. destroy_known already releases it on an explicit destroy,
+        // but an OS/self close routed through the event loop
+        // (prepare_close_secondary + drop_closed_window) does not — so this
+        // guarantees no destroy path can leave a stale, freed-resource context
+        // to be reused here (a freed-XID X11 BadWindow abort on Linux). No
+        // live window holds this label at this point (validate_registration
+        // above rejects a duplicate), so the drop is safe.
+        self.web_context.borrow_mut().release_context(label);
         let webview = match Webview::new_unregistered(
             shared_window.clone(),
             webview_options,
@@ -1056,6 +1066,13 @@ impl RuntimeWindowManager {
         }
         let resources = self.registry.borrow_mut().prepare_close_secondary(label)?;
         drop_closed_window(resources);
+        // The window's WebView is now dropped; release its per-window
+        // WebContext so a same-label recreate builds a fresh one instead of
+        // reusing a context that still references the destroyed view's
+        // resources (a freed X11 window on Linux/WebKitGTK — see
+        // ProcessWebContext::release_context). Order matters: this must run
+        // after drop_closed_window, never before.
+        self.web_context.borrow_mut().release_context(label);
         Ok(())
     }
 }

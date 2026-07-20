@@ -18,6 +18,7 @@ export type {
   MurasakiPluginHookContext,
   MurasakiPluginHooks,
   FileAssociationConfig,
+  LinuxSigningConfig,
   MacOSCapturePermissionConfig,
   MacOSDeclarationOnlyPermissionConfig,
   MacOSLocationPermissionConfig,

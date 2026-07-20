@@ -149,5 +149,17 @@ codegen-units = 1
 # so pinning that repository revision makes released consumers such as ashpd
 # fail to compile. Keep the released scanner source/API in this small vendored
 # copy and change only its parser dependency to the fixed quick-xml 0.41 line.
+#
+# wry 0.55.1's `Drop for X11Data` (webkitgtk backend) unconditionally
+# XDestroyWindow()s + closes `x11_window`/`gtk_window`, which for every
+# webview Murasaki builds (the non-child embedding path) alias the PARENT
+# tao window rather than a wry-owned one. That races tao's own window
+# teardown into an X11 BadWindow that GDK's error handler turns into an
+# immediate `_exit(1)` — no panic, no crash report. Still present on wry's
+# `dev` branch and 0.55.1 is the latest release, so it can't be fixed by
+# upgrading. Vendor 0.55.1 unmodified except for guarding that Drop on
+# `is_child`, matching every other method in the same file. See
+# vendor/wry/PATCH.md for details.
 [patch.crates-io]
 wayland-scanner = { path = "vendor/wayland-scanner" }
+wry = { path = "vendor/wry" }

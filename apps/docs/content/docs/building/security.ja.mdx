@@ -343,8 +343,10 @@ notarization または Murasaki の Windows Authenticode `--sign` flow、更新�
   XSSは自身のwindowへgrantされたresourceを使えるため、handlerでuser/session/objectを認可する
 - incognitoはpersistent profileを使わないが、複数incognito windowが同じin-memory
   sessionを共有する保証はない
-- Linux package signing は未実装。Windows Authenticode には developer が用意した
-  certificate / Artifact Signing provider と Windows SDK SignTool が必要
+- Linux package signing(`murasaki installer --sign`)はGPGによるdetached署名で、
+  apt/dnf keyringやdistro-repositoryのtrust統合はない。Windows Authenticode には
+  developer が用意した certificate / Artifact Signing provider と Windows SDK
+  SignTool が必要
 - Linux の `.deb` は `.desktop` の `MimeType` を使ってプロトコルとファイル関連付けを登録する。展開しただけの AppDir / AppImage と Windows のポータブルアーカイブは、意図的に OS へ自己登録しない
 - renderer native APIは `src/main.ts` から直接呼べない
 

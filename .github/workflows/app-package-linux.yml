@@ -10,6 +10,7 @@ on:
       - 'packages/murasaki/**'
       - 'packages/create-murasaki/**'
       - 'packages/ui/**'
+      - 'examples/linux-parity-probe/**'
       - 'pnpm-lock.yaml'
   push:
     branches: [main]
@@ -20,6 +21,7 @@ on:
       - 'packages/murasaki/**'
       - 'packages/create-murasaki/**'
       - 'packages/ui/**'
+      - 'examples/linux-parity-probe/**'
       - 'pnpm-lock.yaml'
 
 permissions:
@@ -147,4 +149,185 @@ jobs:
           path: |
             ${{ runner.temp }}/murasaki-linux-installer-e2e/**
             examples/linux-package-app/dist/**
+          if-no-files-found: warn
+
+      # examples/linux-parity-probe is a committed (not CI-generated) app —
+      # already part of the workspace from checkout, already covered by the
+      # "Install workspace dependencies" step above.
+      - name: Build and bundle the Linux feature-parity probe
+        working-directory: examples/linux-parity-probe
+        run: |
+          pnpm exec murasaki build
+          pnpm exec murasaki bundle --target linux-${{ matrix.arch }}
+
+      - name: Locate the feature-parity probe AppDir and AppImage
+        id: parity-probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          APPDIR=$(find "examples/linux-parity-probe/dist/bundle" -maxdepth 1 -type d -name '*.AppDir' -print -quit)
+          APPIMAGE=$(find "examples/linux-parity-probe/dist/bundle" -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          test -n "$APPDIR"
+          test -n "$APPIMAGE"
+          printf 'appDir=%s\n' "$APPDIR" >> "$GITHUB_OUTPUT"
+          printf 'appImage=%s\n' "$APPIMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Verify platform-agnostic feature parity on packaged Linux
+        shell: bash
+        run: >-
+          bash .github/scripts/linux-feature-probe.sh
+          "${{ steps.parity-probe.outputs.appImage }}"
+          "${{ steps.parity-probe.outputs.appDir }}"
+          "$RUNNER_TEMP/murasaki-linux-feature-probe"
+          90
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: linux-${{ matrix.arch }}-feature-probe-failure
+          path: |
+            ${{ runner.temp }}/murasaki-linux-feature-probe/**
+            examples/linux-parity-probe/dist/bundle/**
+          if-no-files-found: warn
+
+  linux-sign-smoke:
+    name: Linux ${{ matrix.arch }} / --sign (GPG detached signatures)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+            napi_target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    env:
+      NODE_VERSION: '22.12.0'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      # gnupg ships preinstalled on GitHub's ubuntu-24.04 image; installed
+      # explicitly anyway so this step doesn't silently rely on that. Note:
+      # `dpkg-sig` (the opportunistic Debian-native embed — see
+      # embedDebSignatureIfAvailable) is NOT installed here — it was removed
+      # from the Debian/Ubuntu archives (confirmed absent from both
+      # ubuntu:24.04 and debian:12 during this feature's development; no
+      # `dpkg-sig` apt package exists for either), so that path is
+      # unavailable on this runner image too. It degrades to a warning (see
+      # linux-signing.test.mjs's coverage for that no-op path) — the detached
+      # `.sig` verified below is what `--sign` actually guarantees.
+      - name: Install native build dependencies + gpg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            libxdo-dev libssl-dev pkg-config squashfs-tools gnupg
+
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          targets: ${{ matrix.napi_target }}
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: crates/native
+          key: linux-sign-${{ matrix.arch }}
+
+      - name: Add a throwaway probe app to the workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p examples/linux-sign-probe
+          cp -R packages/create-murasaki/templates/default/. examples/linux-sign-probe/
+          node <<'NODE'
+          const fs = require('node:fs')
+          const manifestPath = 'examples/linux-sign-probe/package.json'
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+          manifest.name = 'linux-sign-probe'
+          manifest.dependencies.murasaki = 'workspace:*'
+          manifest.dependencies['@murasakijs/ui'] = 'workspace:*'
+          fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n')
+          fs.writeFileSync('examples/linux-sign-probe/murasaki.config.ts', `import { defineConfig } from 'murasaki'
+
+          export default defineConfig({
+            appId: 'app.murasaki.ci.linux.sign',
+            productName: 'Murasaki CI Linux Sign',
+            version: '1.0.0',
+            icon: 'src/assets/icon.png',
+            locales: ['en'],
+            window: { title: 'Murasaki Linux sign probe', width: 800, height: 600 },
+          })
+          `)
+          NODE
+
+      - name: Install workspace dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build framework packages
+        run: |
+          pnpm --filter @murasakijs/ui build
+          pnpm --filter murasaki build
+
+      - name: Build native binding and launcher
+        working-directory: crates/native
+        run: |
+          pnpm install --ignore-workspace
+          pnpm exec napi build --platform --release --target ${{ matrix.napi_target }}
+          cargo build --locked --release --bin murasaki-launcher --target ${{ matrix.napi_target }}
+          cp target/${{ matrix.napi_target }}/release/murasaki-launcher murasaki-launcher.linux-${{ matrix.arch }}-gnu
+
+      # An ephemeral key generated fresh on the runner and discarded with it —
+      # never a real publisher key, and never persisted anywhere. Mirrors
+      # ci.yml's "Generate ephemeral code-signing PFX" step for Windows.
+      - name: Generate an ephemeral GPG signing key
+        run: |
+          set -euo pipefail
+          gpg --batch --pinentry-mode loopback --passphrase '' \
+            --quick-generate-key 'Murasaki CI <ci@example.com>' default default never
+          echo "MURASAKI_GPG_KEY=ci@example.com" >> "$GITHUB_ENV"
+
+      - name: Build, bundle, and sign the AppImage + .deb + SHA256SUMS
+        working-directory: examples/linux-sign-probe
+        run: |
+          pnpm exec murasaki build
+          pnpm exec murasaki installer --target linux-${{ matrix.arch }} --sign
+
+      - name: Verify every detached signature, then confirm tampering breaks verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="examples/linux-sign-probe"
+          APPIMAGE=$(find "$APP_DIR/dist/bundle" -maxdepth 1 -name '*.AppImage' -print -quit)
+          DEB=$(find "$APP_DIR/dist" -maxdepth 1 -name '*.deb' -print -quit)
+          if [[ -z "$APPIMAGE" || -z "$DEB" ]]; then
+            echo "expected both an .AppImage and a .deb under $APP_DIR" >&2
+            exit 1
+          fi
+
+          for artifact in "$APPIMAGE" "$DEB" "$APP_DIR/dist/SHA256SUMS"; do
+            test -f "$artifact.sig"
+            gpg --verify "$artifact.sig" "$artifact"
+          done
+          (cd "$APP_DIR/dist" && sha256sum --check SHA256SUMS)
+
+          cp "$APPIMAGE" "$RUNNER_TEMP/tampered.AppImage"
+          printf 'x' | dd of="$RUNNER_TEMP/tampered.AppImage" bs=1 seek=64 count=1 conv=notrunc status=none
+          if gpg --verify "$APPIMAGE.sig" "$RUNNER_TEMP/tampered.AppImage" 2>/dev/null; then
+            echo '::error::gpg --verify unexpectedly succeeded against a tampered AppImage' >&2
+            exit 1
+          fi
+          echo 'Tamper check passed: gpg --verify correctly rejects a modified AppImage.'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: linux-sign-smoke-${{ matrix.arch }}-failure
+          path: examples/linux-sign-probe/dist/**
           if-no-files-found: warn

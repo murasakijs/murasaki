@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { gunzipSync, gzipSync } from 'node:zlib'
-import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,7 +8,7 @@ import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 
 import { readArArchive, readUstarTar, writeArArchive, writeUstarTar } from '../dist/cli/deb.js'
-import installer, { debControlFile, debMd5sumsFile, sanitizeDebName } from '../dist/cli/installer.js'
+import { debControlFile, debMd5sumsFile, sanitizeDebName } from '../dist/cli/installer.js'
 
 async function withTempDir(t) {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-linux-deb-'))
@@ -17,24 +16,15 @@ async function withTempDir(t) {
   return root
 }
 
-test('an explicit Linux .deb --sign request fails before producing an unsigned package', async (t) => {
-  const root = await withTempDir(t)
-  await writeFile(
-    join(root, 'murasaki.config.mjs'),
-    "export default { appId: 'dev.test.signing', productName: 'SigningFixture' }\n",
-  )
-  const previous = process.cwd()
-  process.chdir(root)
-  try {
-    await assert.rejects(
-      installer(['--target', 'linux-x64', '--sign']),
-      /Linux \.deb signing is not implemented.*Refusing to emit an unsigned package/,
-    )
-  } finally {
-    process.chdir(previous)
-  }
-  assert.equal(existsSync(join(root, 'dist')), false)
-})
+// `murasaki installer --sign --target linux-*` used to hard-refuse
+// unconditionally (see git history). `--sign` is now implemented as GPG
+// detach-signing of both the .AppImage and this .deb (see linux-signing.ts) —
+// `installerLinux` needs a real bundled AppDir to build a `.deb` from, so its
+// signing step isn't re-exercised against a bare fixture here; see
+// linux-signing.test.mjs for the sign-command construction / key-selection
+// precedence / config validation coverage, and CI's `linux-sign-smoke` job
+// (.github/workflows/app-package-linux.yml) plus this feature's Docker
+// verification for the real end-to-end .deb signing + gpg --verify path.
 
 // ── sanitizeDebName ─────────────────────────────────────────────────────
 

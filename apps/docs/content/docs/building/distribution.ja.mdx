@@ -15,7 +15,7 @@ FUSE に関する注意点は、下記の「Linux: AppImage と .deb」セクシ
 | --- | --- | --- | --- |
 | macOS arm64 / x64 | `.app` + `.app.zip` | `.dmg` | Developer ID + notarization を組み込み対応 |
 | Windows x64 / arm64 | portable folder + `.zip` | NSIS `.exe`、Windows 上で WiX `.msi` | SignTool Authenticode を組み込み対応 |
-| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | 未実装(未署名) |
+| Linux x64 / arm64 | AppDir + `.AppImage` | `.deb` | `--sign` で GPG detached 署名(distro-repo/keyring trust には非対応) |
 
 <Callout type="warn">
   ファイルが生成されたことは distribution-ready を意味しません。clean machine で
@@ -304,9 +304,10 @@ base64)、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_ID`、`APPLE_TEAM_ID`、
 <Callout type="info">
   ネイティブランチャーは生成した AppDir / `.AppImage` / `.deb` を実際に動かします
   — window、webview、single-instance ロック、deep link、graceful shutdown、
-  crash reporting はすべて macOS/Windows と同じように動作します。signing、
-  `.rpm`、repository metadata はまだ実装されていません — 下記の
-  「まだ実装されていないこと」を参照してください。
+  crash reporting はすべて macOS/Windows と同じように動作します。
+  `murasaki installer --sign` は成果物を GPG で署名します — 下記の
+  「GPG detached 署名」を参照してください。`.rpm` と repository metadata は
+  まだ実装されていません — 下記の「まだ実装されていないこと」も参照してください。
 </Callout>
 
 ```bash
@@ -368,11 +369,48 @@ FUSE 不要になりますが、起動は遅くなります。Murasaki 自身の
   パッケージマネージャが管理しています」という構造化された結果を返します
   — エラーにはなりません。
 
+### GPG detached 署名
+
+<Callout type="info">
+  こちらも signing orchestration を提供するのは Murasaki の役割で、GPG鍵を
+  代わりに生成・保管することはありません。既存の鍵を用意してください。
+  `--sign` は署名できなければ、未署名成果物を黙って出力せずfail-closedで停止します。
+</Callout>
+
+```bash
+pnpm exec murasaki installer --target linux-x64 --sign
+```
+
+`--sign` は、`.AppImage`、`.deb`、そして両者のchecksumをまとめた`SHA256SUMS`
+ファイルに対して、detachedかつASCII-armored形式のGPG署名(`<artifact>.sig`)を
+生成します。受け取る側はfile単位の署名かchecksum manifestのどちらでも検証
+できます。`dpkg-sig`がPATH上にあれば、Murasakiは`.deb`へDebianネイティブの
+署名も追加で埋め込みます(opportunistic)。これはbest-effortで、`dpkg-sig`が
+無くても`--sign`自体は止まりません。
+
+署名鍵は`$MURASAKI_GPG_KEY`(ローカルの`gpg` keyringが知っているkey ID、
+fingerprint、またはemail)、次に`murasaki.config.ts`の`sign.linux.gpgKey`の
+順で解決されます。passphraseは`$MURASAKI_GPG_PASSPHRASE`か、すでに
+unlock済みの`gpg-agent`から**のみ**取得します——設定やfileからは読み取りません。
+
+受け取る側は自分の`gpg`で検証します。
+
+```bash
+gpg --verify MyApp-1.0.0-linux-x64.AppImage.sig MyApp-1.0.0-linux-x64.AppImage
+gpg --verify SHA256SUMS.sig SHA256SUMS
+```
+
+これはartifactがその鍵で署名された内容と一致することを証明しますが、鍵自体が
+信頼できることまでは示しません——受け取る側は、keyserverや公式サイト、
+release noteなどout-of-bandな経路で公開鍵を入手し、自分自身でその判断を
+下す必要があります。
+
 ### まだ実装されていないこと
 
 - `.rpm` や repository metadata(apt/dnf repo index)はありません。
-- built-in Linux code signing(`debsign` / AppImage signing)はありません。`--sign`を
-  渡すと、未署名artifactを成功扱いで出力せずpackaging前にfail-closedで停止します。
+- 上記のGPG署名にはapt/dnf keyringやdistro-repositoryのtrust統合が
+  ありません——証明するのはartifactの整合性であり、repositoryの信頼では
+  ありません。
 - `.deb` や手動展開した bare AppDir の self-update はありません —
   swap できるファイルを持つのは `.AppImage` だけです(上記参照)。
 
@@ -383,7 +421,8 @@ FUSE 不要になりますが、起動は遅くなります。Murasaki 自身の
 - 公開する全 platform / architecture の clean target で install / update / uninstall
 - 設定した URL scheme / file association を cold start と primary app 起動中の両方で確認
 - Node Main shutdown、offline startup、network failure を確認
-- macOS signing / notarization と Windows Authenticode signature を検証
+- macOS signing / notarization、Windows Authenticode signature、Linux GPG
+  signature を検証
 - 最終 payload が immutable になってから Murasaki update manifest を生成・署名
 - payload、`latest.json`、`latest.json.sig` を同時公開
 - signing credential / `MURASAKI_UPDATE_KEY` は CI secret に保存し、
