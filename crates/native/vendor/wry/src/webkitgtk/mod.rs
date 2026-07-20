@@ -1092,6 +1092,28 @@ impl InnerWebView {
   }
 
   pub fn delete_cookie(&self, cookie: &cookie::Cookie<'_>) -> Result<()> {
+    // `webkit_cookie_manager_delete_cookie()` matches the cookie to remove by
+    // full SoupCookie equality -- including `value` -- not by the RFC 6265
+    // identity triple (name, domain, path) that every other wry backend
+    // (WKHTTPCookieStore on macOS, WebView2 on Windows) uses to identify a
+    // cookie for deletion. A caller that only knows which name/domain/path it
+    // wants gone -- the overwhelmingly common case, since callers deleting a
+    // cookie usually don't also have its current value on hand -- and passes
+    // a placeholder/empty `value` gets no error back (the async completion
+    // still reports success) but nothing is actually removed. Look up the
+    // currently-stored cookie with the same identity first and, if one
+    // exists, delete *that* (value, attributes and all) instead of the
+    // caller-supplied stand-in, so this behaves like every other platform:
+    // addressed by (name, domain, path), independent of `cookie`'s value.
+    let identity_match = self.cookies().ok().and_then(|cookies| {
+      cookies.into_iter().find(|stored| {
+        stored.name() == cookie.name()
+          && stored.domain() == cookie.domain()
+          && stored.path() == cookie.path()
+      })
+    });
+    let cookie = identity_match.as_ref().unwrap_or(cookie);
+
     let (tx, rx) = std::sync::mpsc::channel();
     if let Some(cookies_manager) = self
       .webview
