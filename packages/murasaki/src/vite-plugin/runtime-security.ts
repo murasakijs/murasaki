@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { Connect, Plugin } from 'vite'
 import {
@@ -64,38 +64,28 @@ export function runtimeSecurityPlugin(
         : resolveHeaderContentSecurityPolicy(options.csp, 'serve', null)
 
       // When `security.csp` is unconfigured, whether the header is suppressed
-      // depends on whether index.html currently declares a user-owned CSP
+      // depends on whether index.html *currently* declares a user-owned CSP
       // meta tag (see shell.ts's applyContentSecurityPolicy/
       // resolveHeaderContentSecurityPolicy) — and index.html can change
       // mid-session: Vite live-reloads an edited index.html without
       // restarting the dev server (so configureServer never reruns), and the
       // meta-tag transform itself (appShellPlugin's transformIndexHtml)
       // already re-evaluates index.html on every request. This header must
-      // therefore track the file live too, or the two delivery mechanisms
-      // can drift out of sync mid-session until a restart. Cached by mtime so
-      // a request against an unchanged file skips re-reading + re-scanning
-      // it, while a request right after an edit still recomputes.
-      // Keyed on mtime *and* size (both come free from the same stat call) —
-      // size alone changes on almost every real edit (adding/removing a meta
-      // tag changes the byte length), which keeps this correct even on
-      // filesystems with coarse mtime resolution where two edits could land
-      // in the same tick.
-      let cachedStatKey: string | null | undefined
-      let cachedCspHeader: string | false = false
+      // track the file live too, or the two delivery mechanisms drift apart
+      // mid-session until a restart. So read the file fresh on each request
+      // rather than caching a decision: a stat/mtime/size cache key can miss
+      // an equal-length edit that swaps a meta tag in or out within a single
+      // coarse mtime tick, and this branch only runs on the (infrequent) HTML
+      // navigations the gate below allows, where one small read is negligible.
       const currentCspHeader = (): string | false => {
         if (staticCspHeader !== undefined) return staticCspHeader
-        let statKey: string | null
+        let indexHtml: string | null
         try {
-          const stat = statSync(indexHtmlPath)
-          statKey = `${stat.mtimeMs}:${stat.size}`
+          indexHtml = readFileSync(indexHtmlPath, 'utf8')
         } catch {
-          statKey = null
+          indexHtml = null
         }
-        if (statKey === cachedStatKey) return cachedCspHeader
-        const indexHtml = statKey === null ? null : readFileSync(indexHtmlPath, 'utf8')
-        cachedStatKey = statKey
-        cachedCspHeader = resolveHeaderContentSecurityPolicy(undefined, 'serve', indexHtml)
-        return cachedCspHeader
+        return resolveHeaderContentSecurityPolicy(undefined, 'serve', indexHtml)
       }
 
       server.middlewares.use((req, res, next) => {

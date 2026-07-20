@@ -231,6 +231,36 @@ test('dev middleware CSP header tracks a live index.html edit within the same se
   }
 })
 
+test('dev middleware detects an equal-byte-length index.html edit that flips CSP-meta ownership', () => {
+  // The header decision hinges only on whether index.html declares its own CSP
+  // meta tag. Swapping that meta tag for a same-length HTML comment changes the
+  // decision without changing the file's byte size, so a stat/size cache key
+  // could not distinguish the two versions (and coarse mtime resolution could
+  // let both writes share a tick). Reading the file fresh each request detects
+  // it regardless — this guards against reintroducing such a cache.
+  const root = mkdtempSync(join(tmpdir(), 'murasaki-runtime-security-equal-size-'))
+  const indexHtmlPath = join(root, 'index.html')
+  try {
+    const metaTag = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'">`
+    const filler = `<!--${' '.repeat(metaTag.length - 7)}-->` // "<!--" + "-->" = 7 fixed chars
+    const withMeta = `<!doctype html><html><head>${metaTag}</head><body></body></html>`
+    const withoutMeta = `<!doctype html><html><head>${filler}</head><body></body></html>`
+    assert.equal(Buffer.byteLength(withMeta), Buffer.byteLength(withoutMeta))
+
+    writeFileSync(indexHtmlPath, withoutMeta)
+    const send = startDevMiddleware({}, root)
+    assert.equal(send(htmlGetRequest('/')).headers['content-security-policy'], DEFAULT_DEVELOPMENT_CSP)
+
+    writeFileSync(indexHtmlPath, withMeta) // identical byte length, now declares a user CSP meta tag
+    assert.equal(send(htmlGetRequest('/')).headers['content-security-policy'], undefined)
+
+    writeFileSync(indexHtmlPath, withoutMeta) // identical byte length again
+    assert.equal(send(htmlGetRequest('/')).headers['content-security-policy'], DEFAULT_DEVELOPMENT_CSP)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('backend authority resources are stable and grants are exact or trailing-prefix only', () => {
   const encoded = encodeURIComponent('src/backend/workspace.ts')
   assert.equal(
