@@ -36,6 +36,9 @@ focus 管理、keyboard 操作、選択、overlay の挙動は Radix UI や `cmd
   style を移してください。
 - `asChild` は Murasaki 独自の互換 Slot で引き続き利用できます。
   `@radix-ui/react-slot` はインストールされません。
+- documentation application を Next.js 16.2.11、shadcn 4.14.1、および
+  修正版の `sharp` / `fast-uri` resolution へ更新しました。release の
+  security gate で high / critical の npm advisory は 0 件です。
 
 ## 0.55.6 — 安定性の宣言 (2026-07-20)
 
