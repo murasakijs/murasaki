@@ -1,9 +1,9 @@
-import { ChevronDown } from 'lucide-react'
-import { forwardRef } from 'react'
-import type { SelectHTMLAttributes } from 'react'
-import { cn } from '../lib/cn.js'
+import { ChevronDown } from "lucide-react";
+import type { SelectHTMLAttributes } from "react";
+import { forwardRef } from "react";
+import { cn } from "../lib/cn.js";
 
-export type NativeSelectProps = SelectHTMLAttributes<HTMLSelectElement>
+export type NativeSelectProps = SelectHTMLAttributes<HTMLSelectElement>;
 
 export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(
   ({ className, ...props }, ref) => (
@@ -12,7 +12,7 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(
         ref={ref}
         data-slot="native-select"
         className={cn(
-          'flex h-10 w-full appearance-none rounded-md border border-input bg-background py-2 pl-3 pr-8 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+          "flex h-10 w-full appearance-none rounded-md border border-input bg-background py-2 pl-3 pr-8 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
         {...props}
@@ -23,5 +23,5 @@ export const NativeSelect = forwardRef<HTMLSelectElement, NativeSelectProps>(
       />
     </div>
   ),
-)
-NativeSelect.displayName = 'NativeSelect'
+);
+NativeSelect.displayName = "NativeSelect";

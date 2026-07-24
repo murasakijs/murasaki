@@ -3,6 +3,8 @@ title: Command
 description: A searchable command menu for keyboard-first actions.
 ---
 
+<ComponentPlayground name="command" />
+
 ## Usage
 
 ```tsx
@@ -25,4 +27,5 @@ import {
 Use `CommandDialog` for a modal command palette and control its open state with
 the exported dialog props. A displayed shortcut is documentation only; register
 the keyboard handler separately. Commands must also remain reachable without a
-shortcut. `Command` is powered by `cmdk` and forwards its filtering props.
+shortcut. `Command` uses React Aria's ComboBox and ListBox behavior for
+filtering, focus, and item selection.

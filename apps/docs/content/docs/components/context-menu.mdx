@@ -3,6 +3,8 @@ title: Context Menu
 description: Displays contextual actions when the user right-clicks or invokes the keyboard menu key.
 ---
 
+<ComponentPlayground name="context-menu" />
+
 ## Usage
 
 ```tsx
@@ -24,7 +26,7 @@ import {
 ```
 
 Every action must also be reachable without a pointer. The trigger supports
-the browser and operating system keyboard conventions provided by Radix UI.
+the keyboard and focus conventions provided by React Aria.
 Nested, checkbox, and radio items are available through the corresponding
 `ContextMenuSub*`, `ContextMenuCheckboxItem`, and `ContextMenuRadio*` exports.
 

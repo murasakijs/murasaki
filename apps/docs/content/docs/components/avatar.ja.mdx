@@ -43,5 +43,5 @@ import { Avatar, AvatarFallback, AvatarImage } from "@murasakijs/ui";
 | `AvatarImage` | 画像です。読み込みに成功するまでは何もレンダリングしません。`src`・`alt`・`onLoadingStatusChange` を受け取ります。 |
 | `AvatarFallback` | 画像の読み込み中、または読み込み失敗時に表示されます。`delayMs` でレンダリングを遅延できます。 |
 
-すべてのサブコンポーネントは Radix UI の [`Avatar`](https://www.radix-ui.com/primitives/docs/components/avatar)
-プリミティブをラップし、それ以外の props はすべてそのまま渡されます。
+画像の読み込み状態とフォールバックは、外部のヘッドレスプリミティブに依存せず
+Murasaki が管理します。

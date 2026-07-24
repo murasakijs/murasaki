@@ -3,6 +3,8 @@ title: Auto-update
 description: Signed, self-verifying app updates from GitHub Releases or your own server — no IPC, no third-party update service.
 ---
 
+import { UpdaterPlayground } from '@/components/updater-playground'
+
 Murasaki apps can check for, download, and install updates themselves. There's
 no update service to run — the manifest is a JSON file next to your release
 artifacts (GitHub Releases by default, or any static host you control), and
@@ -62,6 +64,22 @@ the whole trust model is a single Ed25519 keypair you generate once.
 
 That covers the app side. Publishing signed releases is
 [below](#publishing-releases).
+
+## Playground
+
+Explore every state returned by `useUpdate()` and the update flow presented by
+`<UpdateButton />`. This playground never connects to an update server,
+downloads a file, quits the app, or restarts it.
+
+<ComponentPreview
+  code={`import { UpdateButton } from "murasaki";
+
+export function Settings() {
+  return <UpdateButton />;
+}`}
+>
+  <UpdaterPlayground locale="en" />
+</ComponentPreview>
 
 ## How it works
 

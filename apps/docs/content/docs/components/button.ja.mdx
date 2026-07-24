@@ -66,6 +66,6 @@ export function ButtonVariantsDemo() {
 | `size` | `"default"` \| `"sm"` \| `"lg"` \| `"icon"` | `"default"` |
 | `asChild` | `boolean` | `false` |
 
-`asChild` を指定すると、`Button` は `<button>` の代わりに(Radix の `Slot` 経由で)
-子要素をレンダリングします — 例えば `Link` にボタンのスタイルを適用したい場合に使い
-ます。それ以外の props はすべて、内部の `<button>` 要素にそのまま渡されます。
+`Button` の押下と focus-visible の挙動は React Aria が提供します。`asChild` を指定すると、
+`<button>` の代わりに子要素をレンダリングするため、ルーターの `Link` などにも
+ボタンスタイルを適用できます。

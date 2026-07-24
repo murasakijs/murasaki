@@ -1,27 +1,30 @@
-import * as SeparatorPrimitive from '@radix-ui/react-separator'
-import { forwardRef } from 'react'
-import type { ComponentPropsWithoutRef, ElementRef } from 'react'
-import { cn } from '../lib/cn.js'
+import { forwardRef } from "react";
+import {
+  Separator as AriaSeparator,
+  type SeparatorProps as AriaSeparatorProps,
+} from "react-aria-components";
+import { cn } from "../lib/cn.js";
 
-export const Separator = forwardRef<
-  ElementRef<typeof SeparatorPrimitive.Root>,
-  ComponentPropsWithoutRef<typeof SeparatorPrimitive.Root>
->(
+export interface SeparatorProps extends AriaSeparatorProps {
+  decorative?: boolean;
+}
+
+export const Separator = forwardRef<HTMLElement, SeparatorProps>(
   (
-    { className, orientation = 'horizontal', decorative = true, ...props },
+    { className, orientation = "horizontal", decorative = true, ...props },
     ref,
   ) => (
-    <SeparatorPrimitive.Root
+    <AriaSeparator
       ref={ref}
-      decorative={decorative}
       orientation={orientation}
+      aria-hidden={decorative || undefined}
       className={cn(
-        'shrink-0 bg-border',
-        orientation === 'horizontal' ? 'h-[1px] w-full' : 'h-full w-[1px]',
+        "shrink-0 bg-border",
+        orientation === "horizontal" ? "h-px w-full" : "h-full w-px",
         className,
       )}
       {...props}
     />
   ),
-)
-Separator.displayName = SeparatorPrimitive.Root.displayName
+);
+Separator.displayName = "Separator";

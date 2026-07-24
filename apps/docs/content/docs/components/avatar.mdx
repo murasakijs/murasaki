@@ -43,5 +43,5 @@ import { Avatar, AvatarFallback, AvatarImage } from "@murasakijs/ui";
 | `AvatarImage` | The image; renders nothing until it loads successfully. Accepts `src`, `alt`, `onLoadingStatusChange`. |
 | `AvatarFallback` | Shown while the image is loading or if it fails to load. Accepts `delayMs` to defer rendering. |
 
-All subcomponents wrap Radix UI's [`Avatar`](https://www.radix-ui.com/primitives/docs/components/avatar)
-primitives and forward every other prop.
+The image load state and fallback are managed by Murasaki without an external
+headless primitive.

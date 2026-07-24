@@ -3,6 +3,8 @@ title: 自動更新
 description: GitHub Releases、またはあなた自身のサーバーからの、署名付き・自己検証型のアプリ更新 — IPC もサードパーティの更新サービスも不要です。
 ---
 
+import { UpdaterPlayground } from '@/components/updater-playground'
+
 Murasaki アプリは、更新の確認・ダウンロード・インストールを自分自身で行えます。専用の
 更新サービスを立てる必要はありません — マニフェストはリリース成果物の隣に置かれる
 単なる JSON ファイル(デフォルトでは GitHub Releases、またはあなたが管理する任意の静的
@@ -62,6 +64,22 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
 
 アプリ側はこれで完了です。署名済みリリースの公開については、[下記](#publishing-releases)
 を参照してください。
+
+## Playground
+
+`useUpdate()` が返す各状態と、`<UpdateButton />` が提示する更新フローを操作できます。
+この Playground は更新サーバーへの接続、ファイルのダウンロード、アプリの終了、再起動
+を行いません。
+
+<ComponentPreview
+  code={`import { UpdateButton } from "murasaki";
+
+export function Settings() {
+  return <UpdateButton />;
+}`}
+>
+  <UpdaterPlayground locale="ja" />
+</ComponentPreview>
 
 ## 仕組み
 

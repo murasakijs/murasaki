@@ -1,12 +1,12 @@
-import * as LabelPrimitive from '@radix-ui/react-label'
-import { type VariantProps, cva } from 'class-variance-authority'
-import { forwardRef } from 'react'
+import { cva, type VariantProps } from "class-variance-authority";
 import type {
   ComponentPropsWithoutRef,
   ElementRef,
   HTMLAttributes,
-} from 'react'
-import { cn } from '../lib/cn.js'
+} from "react";
+import { forwardRef } from "react";
+import { cn } from "../lib/cn.js";
+import { Label } from "./label.js";
 
 export const FieldGroup = forwardRef<
   HTMLDivElement,
@@ -15,26 +15,26 @@ export const FieldGroup = forwardRef<
   <div
     ref={ref}
     data-slot="field-group"
-    className={cn('flex w-full flex-col gap-6', className)}
+    className={cn("flex w-full flex-col gap-6", className)}
     {...props}
   />
-))
-FieldGroup.displayName = 'FieldGroup'
+));
+FieldGroup.displayName = "FieldGroup";
 
 const fieldVariants = cva(
-  'flex w-full gap-3 data-[invalid=true]:text-destructive',
+  "flex w-full gap-3 data-[invalid=true]:text-destructive",
   {
     variants: {
       orientation: {
-        vertical: 'flex-col',
-        horizontal: 'flex-row items-center',
+        vertical: "flex-col",
+        horizontal: "flex-row items-center",
       },
     },
     defaultVariants: {
-      orientation: 'vertical',
+      orientation: "vertical",
     },
   },
-)
+);
 
 export interface FieldProps
   extends HTMLAttributes<HTMLDivElement>,
@@ -49,24 +49,24 @@ export const Field = forwardRef<HTMLDivElement, FieldProps>(
       {...props}
     />
   ),
-)
-Field.displayName = 'Field'
+);
+Field.displayName = "Field";
 
 export const FieldLabel = forwardRef<
-  ElementRef<typeof LabelPrimitive.Root>,
-  ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
+  ElementRef<typeof Label>,
+  ComponentPropsWithoutRef<typeof Label>
 >(({ className, ...props }, ref) => (
-  <LabelPrimitive.Root
+  <Label
     ref={ref}
     data-slot="field-label"
     className={cn(
-      'flex w-fit items-center gap-2 text-sm leading-snug font-medium select-none peer-disabled:cursor-not-allowed peer-disabled:opacity-50',
+      "flex w-fit items-center gap-2 text-sm leading-snug font-medium select-none peer-disabled:cursor-not-allowed peer-disabled:opacity-50",
       className,
     )}
     {...props}
   />
-))
-FieldLabel.displayName = LabelPrimitive.Root.displayName
+));
+FieldLabel.displayName = "FieldLabel";
 
 export const FieldDescription = forwardRef<
   HTMLParagraphElement,
@@ -76,20 +76,20 @@ export const FieldDescription = forwardRef<
     ref={ref}
     data-slot="field-description"
     className={cn(
-      'text-muted-foreground text-sm leading-normal font-normal',
+      "text-muted-foreground text-sm leading-normal font-normal",
       className,
     )}
     {...props}
   />
-))
-FieldDescription.displayName = 'FieldDescription'
+));
+FieldDescription.displayName = "FieldDescription";
 
 export const FieldError = forwardRef<
   HTMLDivElement,
   HTMLAttributes<HTMLDivElement>
 >(({ className, children, ...props }, ref) => {
   if (!children) {
-    return null
+    return null;
   }
 
   return (
@@ -97,11 +97,11 @@ export const FieldError = forwardRef<
       ref={ref}
       role="alert"
       data-slot="field-error"
-      className={cn('text-destructive text-sm font-normal', className)}
+      className={cn("text-destructive text-sm font-normal", className)}
       {...props}
     >
       {children}
     </div>
-  )
-})
-FieldError.displayName = 'FieldError'
+  );
+});
+FieldError.displayName = "FieldError";

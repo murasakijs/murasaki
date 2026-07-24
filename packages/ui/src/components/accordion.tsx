@@ -1,53 +1,128 @@
-import * as AccordionPrimitive from '@radix-ui/react-accordion'
-import { ChevronDown } from 'lucide-react'
-import { forwardRef } from 'react'
-import type { ComponentPropsWithoutRef, ElementRef } from 'react'
-import { cn } from '../lib/cn.js'
+import { ChevronDown } from "lucide-react";
+import { forwardRef } from "react";
+import type { Key } from "react-aria-components";
+import {
+  Button,
+  type ButtonProps,
+  Disclosure,
+  DisclosureGroup,
+  type DisclosureGroupProps,
+  DisclosurePanel,
+  type DisclosurePanelProps,
+  type DisclosureProps,
+  Heading,
+} from "react-aria-components";
+import { ariaClassName } from "../lib/react-aria.js";
 
-export const Accordion = AccordionPrimitive.Root
+export interface AccordionProps
+  extends Omit<
+    DisclosureGroupProps,
+    | "expandedKeys"
+    | "defaultExpandedKeys"
+    | "onExpandedChange"
+    | "allowsMultipleExpanded"
+  > {
+  type?: "single" | "multiple";
+  value?: string | string[];
+  defaultValue?: string | string[];
+  onValueChange?: (value: string | string[]) => void;
+  collapsible?: boolean;
+}
 
-export const AccordionItem = forwardRef<
-  ElementRef<typeof AccordionPrimitive.Item>,
-  ComponentPropsWithoutRef<typeof AccordionPrimitive.Item>
->(({ className, ...props }, ref) => (
-  <AccordionPrimitive.Item
-    ref={ref}
-    className={cn('border-b', className)}
-    {...props}
-  />
-))
-AccordionItem.displayName = 'AccordionItem'
+export const Accordion = forwardRef<HTMLDivElement, AccordionProps>(
+  (
+    {
+      type = "single",
+      value,
+      defaultValue,
+      onValueChange,
+      collapsible: _collapsible,
+      ...props
+    },
+    ref,
+  ) => {
+    const toKeys = (input?: string | string[]) =>
+      input === undefined
+        ? undefined
+        : new Set(Array.isArray(input) ? input : [input]);
 
-export const AccordionTrigger = forwardRef<
-  ElementRef<typeof AccordionPrimitive.Trigger>,
-  ComponentPropsWithoutRef<typeof AccordionPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Header className="flex">
-    <AccordionPrimitive.Trigger
+    return (
+      <DisclosureGroup
+        ref={ref}
+        allowsMultipleExpanded={type === "multiple"}
+        expandedKeys={toKeys(value)}
+        defaultExpandedKeys={toKeys(defaultValue)}
+        onExpandedChange={(keys) => {
+          const values = [...keys].map(String);
+          onValueChange?.(type === "multiple" ? values : (values[0] ?? ""));
+        }}
+        {...props}
+      />
+    );
+  },
+);
+Accordion.displayName = "Accordion";
+
+export interface AccordionItemProps extends Omit<DisclosureProps, "id"> {
+  value: string;
+}
+
+export const AccordionItem = forwardRef<HTMLDivElement, AccordionItemProps>(
+  ({ className, value, ...props }, ref) => (
+    <Disclosure
       ref={ref}
-      className={cn(
-        'flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline [&[data-state=open]>svg]:rotate-180',
-        className,
-      )}
+      id={value as Key}
+      className={ariaClassName("border-b", className)}
       {...props}
-    >
-      {children}
-      <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200" />
-    </AccordionPrimitive.Trigger>
-  </AccordionPrimitive.Header>
-))
-AccordionTrigger.displayName = AccordionPrimitive.Trigger.displayName
+    />
+  ),
+);
+AccordionItem.displayName = "AccordionItem";
+
+export const AccordionTrigger = forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, children, ...props }, ref) => (
+    <Heading className="flex">
+      <Button
+        ref={ref}
+        slot="trigger"
+        className={ariaClassName(
+          "group flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline",
+          className,
+        )}
+        {...props}
+      >
+        {typeof children === "function" ? (
+          (values) => (
+            <>
+              {children(values)}
+              <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[expanded]:rotate-180" />
+            </>
+          )
+        ) : (
+          <>
+            {children}
+            <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[expanded]:rotate-180" />
+          </>
+        )}
+      </Button>
+    </Heading>
+  ),
+);
+AccordionTrigger.displayName = "AccordionTrigger";
 
 export const AccordionContent = forwardRef<
-  ElementRef<typeof AccordionPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof AccordionPrimitive.Content>
+  HTMLDivElement,
+  DisclosurePanelProps
 >(({ className, children, ...props }, ref) => (
-  <AccordionPrimitive.Content
+  <DisclosurePanel
     ref={ref}
-    className="overflow-hidden text-sm data-[state=closed]:animate-accordion-up data-[state=open]:animate-accordion-down"
+    className={ariaClassName(
+      "overflow-hidden text-sm data-[entering]:animate-accordion-down data-[exiting]:animate-accordion-up",
+      className,
+    )}
     {...props}
   >
-    <div className={cn('pb-4 pt-0', className)}>{children}</div>
-  </AccordionPrimitive.Content>
-))
-AccordionContent.displayName = AccordionPrimitive.Content.displayName
+    <div className="pb-4 pt-0">{children}</div>
+  </DisclosurePanel>
+));
+AccordionContent.displayName = "AccordionContent";

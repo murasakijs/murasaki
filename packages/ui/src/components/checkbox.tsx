@@ -1,26 +1,65 @@
-import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
-import { Check } from 'lucide-react'
-import { forwardRef } from 'react'
-import type { ComponentPropsWithoutRef, ElementRef } from 'react'
-import { cn } from '../lib/cn.js'
+import { Check, Minus } from "lucide-react";
+import type { ReactNode } from "react";
+import { forwardRef } from "react";
+import {
+  Checkbox as AriaCheckbox,
+  type CheckboxProps as AriaCheckboxProps,
+} from "react-aria-components";
+import { ariaClassName } from "../lib/react-aria.js";
 
-export const Checkbox = forwardRef<
-  ElementRef<typeof CheckboxPrimitive.Root>,
-  ComponentPropsWithoutRef<typeof CheckboxPrimitive.Root>
->(({ className, ...props }, ref) => (
-  <CheckboxPrimitive.Root
-    ref={ref}
-    className={cn(
-      'peer h-4 w-4 shrink-0 rounded-sm border border-primary shadow focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
+export interface CheckboxProps
+  extends Omit<
+    AriaCheckboxProps,
+    "isSelected" | "defaultSelected" | "onChange" | "children"
+  > {
+  checked?: boolean | "indeterminate";
+  defaultChecked?: boolean | "indeterminate";
+  onCheckedChange?: (checked: boolean) => void;
+  disabled?: boolean;
+  children?: ReactNode;
+}
+
+export const Checkbox = forwardRef<HTMLLabelElement, CheckboxProps>(
+  (
+    {
       className,
-    )}
-    {...props}
-  >
-    <CheckboxPrimitive.Indicator
-      className={cn('flex items-center justify-center text-current')}
+      checked,
+      defaultChecked,
+      onCheckedChange,
+      disabled,
+      children,
+      ...props
+    },
+    ref,
+  ) => (
+    <AriaCheckbox
+      ref={ref}
+      isSelected={checked === "indeterminate" ? undefined : checked}
+      defaultSelected={
+        defaultChecked === "indeterminate" ? undefined : defaultChecked
+      }
+      isIndeterminate={
+        checked === "indeterminate" || defaultChecked === "indeterminate"
+      }
+      onChange={onCheckedChange}
+      isDisabled={disabled}
+      className={ariaClassName(
+        "peer inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-primary text-primary-foreground shadow-sm outline-none transition-colors data-[focus-visible]:ring-1 data-[focus-visible]:ring-ring data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[selected]:bg-primary data-[indeterminate]:bg-primary",
+        className,
+      )}
+      {...props}
     >
-      <Check className="h-4 w-4" />
-    </CheckboxPrimitive.Indicator>
-  </CheckboxPrimitive.Root>
-))
-Checkbox.displayName = CheckboxPrimitive.Root.displayName
+      {({ isIndeterminate, isSelected }) => (
+        <>
+          {isIndeterminate ? (
+            <Minus className="size-3.5" aria-hidden="true" />
+          ) : isSelected ? (
+            <Check className="size-3.5" aria-hidden="true" />
+          ) : null}
+          {children}
+        </>
+      )}
+    </AriaCheckbox>
+  ),
+);
+Checkbox.displayName = "Checkbox";

@@ -66,6 +66,6 @@ export function ButtonVariantsDemo() {
 | `size` | `"default"` \| `"sm"` \| `"lg"` \| `"icon"` | `"default"` |
 | `asChild` | `boolean` | `false` |
 
-`asChild` renders `Button` as its child element (via Radix `Slot`) instead of a
-`<button>`, so you can apply button styles to e.g. a `Link`. All other props
-are forwarded to the underlying `<button>` element.
+`Button` uses React Aria's press and focus-visible behavior. `asChild` renders
+the child element instead of a `<button>`, so button styles can be applied to
+e.g. a router `Link`.

@@ -65,5 +65,5 @@ import { Label, RadioGroup, RadioGroupItem } from "@murasakijs/ui";
 | `value` | `string` | — (必須) |
 | `disabled` | `boolean` | `false` |
 
-どちらも Radix UI の [`RadioGroup.Root`](https://www.radix-ui.com/primitives/docs/components/radio-group)
-と `RadioGroup.Item` をレンダリングし、それ以外の props はすべてそのまま渡されます。
+どちらも React Aria のラジオグループ状態、キーボード操作、ラベル付けを利用しながら、
+`value` / `onValueChange` API を維持します。

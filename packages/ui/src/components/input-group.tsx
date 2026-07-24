@@ -1,39 +1,39 @@
-import { type VariantProps, cva } from 'class-variance-authority'
-import { forwardRef } from 'react'
-import type { HTMLAttributes, InputHTMLAttributes } from 'react'
-import { cn } from '../lib/cn.js'
-import { Button, type ButtonProps } from './button.js'
+import { cva, type VariantProps } from "class-variance-authority";
+import type { HTMLAttributes, InputHTMLAttributes } from "react";
+import { forwardRef } from "react";
+import { cn } from "../lib/cn.js";
+import { Button, type ButtonProps } from "./button.js";
 
 export const InputGroup = forwardRef<
   HTMLDivElement,
   HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      data-slot="input-group"
+  <div
+    ref={ref}
+    data-slot="input-group"
     className={cn(
-      'relative flex w-full items-center rounded-md border border-input bg-background transition-[color,box-shadow] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background has-[input:disabled]:opacity-50',
+      "relative flex w-full items-center rounded-md border border-input bg-background transition-[color,box-shadow] focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background has-[input:disabled]:opacity-50",
       className,
     )}
     {...props}
   />
-))
-InputGroup.displayName = 'InputGroup'
+));
+InputGroup.displayName = "InputGroup";
 
 export const inputGroupAddonVariants = cva(
   "flex items-center gap-2 text-muted-foreground [&>svg:not([class*='size-'])]:size-4 [&>kbd]:rounded-sm",
   {
     variants: {
       align: {
-        'inline-start': 'pl-3',
-        'inline-end': 'pr-3',
+        "inline-start": "pl-3",
+        "inline-end": "pr-3",
       },
     },
     defaultVariants: {
-      align: 'inline-start',
+      align: "inline-start",
     },
   },
-)
+);
 
 export interface InputGroupAddonProps
   extends HTMLAttributes<HTMLDivElement>,
@@ -48,10 +48,10 @@ export const InputGroupAddon = forwardRef<HTMLDivElement, InputGroupAddonProps>(
       {...props}
     />
   ),
-)
-InputGroupAddon.displayName = 'InputGroupAddon'
+);
+InputGroupAddon.displayName = "InputGroupAddon";
 
-export type InputGroupInputProps = InputHTMLAttributes<HTMLInputElement>
+export type InputGroupInputProps = InputHTMLAttributes<HTMLInputElement>;
 
 export const InputGroupInput = forwardRef<
   HTMLInputElement,
@@ -62,13 +62,13 @@ export const InputGroupInput = forwardRef<
     type={type}
     data-slot="input-group-input"
     className={cn(
-      'flex h-10 w-full bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed',
+      "flex h-10 w-full bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none disabled:cursor-not-allowed",
       className,
     )}
     {...props}
   />
-))
-InputGroupInput.displayName = 'InputGroupInput'
+));
+InputGroupInput.displayName = "InputGroupInput";
 
 export const InputGroupText = forwardRef<
   HTMLSpanElement,
@@ -78,24 +78,24 @@ export const InputGroupText = forwardRef<
     ref={ref}
     data-slot="input-group-text"
     className={cn(
-      'text-muted-foreground flex items-center gap-2 text-sm',
+      "text-muted-foreground flex items-center gap-2 text-sm",
       className,
     )}
     {...props}
   />
-))
-InputGroupText.displayName = 'InputGroupText'
+));
+InputGroupText.displayName = "InputGroupText";
 
 export const InputGroupButton = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'ghost', size = 'sm', ...props }, ref) => (
+  ({ className, variant = "ghost", size = "sm", ...props }, ref) => (
     <Button
       ref={ref}
       data-slot="input-group-button"
       variant={variant}
       size={size}
-      className={cn('text-sm shadow-none', className)}
+      className={cn("text-sm shadow-none", className)}
       {...props}
     />
   ),
-)
-InputGroupButton.displayName = 'InputGroupButton'
+);
+InputGroupButton.displayName = "InputGroupButton";

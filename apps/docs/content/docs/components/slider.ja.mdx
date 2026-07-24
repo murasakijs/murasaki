@@ -3,6 +3,8 @@ title: Slider
 description: 指定した範囲から1つ以上の数値を選択します。
 ---
 
+<ComponentPlayground name="slider" />
+
 ## 使い方
 
 ```tsx
@@ -12,7 +14,7 @@ import { Slider } from '@murasakijs/ui'
 ```
 
 `value`, `defaultValue`, `min`, `max`, `step`, `orientation`,
-`onValueChange` など、Radix Slider のルート props を受け取ります。
+`onValueChange` など、React Aria Slider を配列値 API に合わせた props を受け取ります。
 値の数だけつまみが表示されます。表示ラベルか `aria-label` で、必ず操作の
 名前を伝えてください。範囲選択で最小間隔が必要なら
 `minStepsBetweenThumbs` を指定します。

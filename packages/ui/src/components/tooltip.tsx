@@ -1,33 +1,110 @@
-import * as TooltipPrimitive from '@radix-ui/react-tooltip'
-import { forwardRef } from 'react'
-import type { ComponentPropsWithoutRef, ElementRef } from 'react'
-import { cn } from '../lib/cn.js'
+import type { HTMLAttributes, ReactNode } from "react";
+import { createContext, forwardRef, useContext } from "react";
+import {
+  Tooltip as AriaTooltip,
+  type TooltipProps as AriaTooltipProps,
+  TooltipTrigger as AriaTooltipTrigger,
+  Button,
+  type ButtonProps,
+  type TooltipTriggerComponentProps,
+} from "react-aria-components";
+import { ariaClassName } from "../lib/react-aria.js";
+import { Slot } from "../lib/slot.js";
 
-export const TooltipProvider = TooltipPrimitive.Provider
+const TooltipSettingsContext = createContext<{
+  delay?: number;
+  closeDelay?: number;
+}>({});
 
-export const Tooltip = TooltipPrimitive.Root
+export interface TooltipProviderProps extends HTMLAttributes<HTMLDivElement> {
+  delayDuration?: number;
+  skipDelayDuration?: number;
+  children?: ReactNode;
+}
 
-export const TooltipTrigger = TooltipPrimitive.Trigger
+export function TooltipProvider({
+  delayDuration,
+  skipDelayDuration,
+  children,
+}: TooltipProviderProps) {
+  return (
+    <TooltipSettingsContext.Provider
+      value={{
+        delay: delayDuration,
+        closeDelay: skipDelayDuration,
+      }}
+    >
+      {children}
+    </TooltipSettingsContext.Provider>
+  );
+}
 
-export const TooltipPortal = TooltipPrimitive.Portal
+export interface TooltipProps
+  extends Omit<TooltipTriggerComponentProps, "children"> {
+  children?: ReactNode;
+}
 
-export const TooltipContent = forwardRef<
-  ElementRef<typeof TooltipPrimitive.Content>,
-  ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
->(({ className, sideOffset = 8, ...props }, ref) => (
-  // Portal so the tooltip escapes any ancestor `overflow`/`transform` context
-  // (otherwise it can be clipped or mispositioned). A slightly larger default
-  // sideOffset keeps it from crowding the trigger since we render no arrow.
-  <TooltipPrimitive.Portal>
-    <TooltipPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn(
-        'z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2',
-        className,
-      )}
-      {...props}
-    />
-  </TooltipPrimitive.Portal>
-))
-TooltipContent.displayName = TooltipPrimitive.Content.displayName
+export function Tooltip({ children, ...props }: TooltipProps) {
+  const settings = useContext(TooltipSettingsContext);
+  return (
+    <AriaTooltipTrigger {...settings} {...props}>
+      {children}
+    </AriaTooltipTrigger>
+  );
+}
+
+interface TooltipTriggerProps extends Omit<ButtonProps, "children"> {
+  asChild?: boolean;
+  children?: ReactNode;
+}
+
+export const TooltipTrigger = forwardRef<
+  HTMLButtonElement,
+  TooltipTriggerProps
+>(({ asChild, children, ...props }, ref) =>
+  asChild ? (
+    <Slot ref={ref} {...(props as Record<string, unknown>)}>
+      {children}
+    </Slot>
+  ) : (
+    <Button ref={ref} {...props}>
+      {children}
+    </Button>
+  ),
+);
+TooltipTrigger.displayName = "TooltipTrigger";
+
+export const TooltipPortal = ({ children }: { children?: ReactNode }) =>
+  children;
+
+export interface TooltipContentProps
+  extends Omit<AriaTooltipProps, "offset" | "placement"> {
+  side?: "top" | "right" | "bottom" | "left";
+  align?: "start" | "center" | "end";
+  sideOffset?: number;
+}
+
+export const TooltipContent = forwardRef<HTMLDivElement, TooltipContentProps>(
+  (
+    { className, side = "top", align = "center", sideOffset = 8, ...props },
+    ref,
+  ) => {
+    const placement = (
+      align === "center" ? side : `${side} ${align}`
+    ) as NonNullable<AriaTooltipProps["placement"]>;
+
+    return (
+      <AriaTooltip
+        ref={ref}
+        placement={placement}
+        offset={sideOffset}
+        className={ariaClassName(
+          "z-50 overflow-hidden rounded-md border bg-popover px-3 py-1.5 text-sm text-popover-foreground shadow-md data-[entering]:animate-in data-[entering]:fade-in-0 data-[entering]:zoom-in-95 data-[exiting]:animate-out data-[exiting]:fade-out-0 data-[exiting]:zoom-out-95",
+          className,
+        )}
+        {...props}
+      />
+    );
+  },
+);
+TooltipContent.displayName = "TooltipContent";
