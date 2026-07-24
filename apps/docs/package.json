@@ -51,7 +51,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.185.1",
     "postcss": "^8.5.15",
-    "tailwindcss": "^4.3.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3"
   }
 }
