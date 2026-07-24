@@ -25,14 +25,14 @@
     "@murasakijs/ui": "workspace:*",
     "lucide-react": "1.25.0",
     "murasaki": "workspace:*",
-    "pg": "8.16.3",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "pg": "8.22.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
-    "@types/pg": "8.15.5",
-    "@types/react": "19.2.7",
+    "@types/pg": "8.20.0",
+    "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "typescript": "5.9.3",
     "vite": "^7.3.6",
