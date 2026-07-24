@@ -13,7 +13,7 @@ export interface UpdateButtonProps extends Omit<ButtonProps, 'onClick' | 'childr
  *  - "Restart to update" (click to install + relaunch) once `ready`.
  *
  * Unstyled opinions live in `useUpdate()`; this component is the
- * shadcn-style, restyleable presentation layer — override via `className`
+ * React Aria-based, restyleable presentation layer — override via `className`
  * or fork it, same as any other component in `@murasakijs/ui`.
  */
 export function UpdateButton({ className, ...props }: UpdateButtonProps) {

@@ -7,6 +7,7 @@ const componentsDir = resolve(
   import.meta.dirname,
   "../content/docs/components",
 );
+const docsDir = resolve(import.meta.dirname, "../content/docs");
 
 async function json(name) {
   return JSON.parse(await readFile(resolve(componentsDir, name), "utf8"));
@@ -92,5 +93,25 @@ test("every component detail page includes an interactive preview", async () => 
       previewPattern,
       `Japanese ${slug} page must include an interactive preview`,
     );
+  }
+});
+
+test("framework UI guidance identifies React Aria as the current foundation", async () => {
+  const [englishStyling, japaneseStyling, englishIndex, japaneseIndex] =
+    await Promise.all([
+      readFile(resolve(docsDir, "guides/styling.mdx"), "utf8"),
+      readFile(resolve(docsDir, "guides/styling.ja.mdx"), "utf8"),
+      readFile(resolve(docsDir, "index.mdx"), "utf8"),
+      readFile(resolve(docsDir, "index.ja.mdx"), "utf8"),
+    ]);
+
+  for (const content of [
+    englishStyling,
+    japaneseStyling,
+    englishIndex,
+    japaneseIndex,
+  ]) {
+    assert.match(content, /React Aria/);
+    assert.doesNotMatch(content, /\bRadix\b/);
   }
 });

@@ -1,14 +1,16 @@
 ---
 title: Styling
-description: Tailwind CSS + @murasakijs/ui, a shadcn-style component library.
+description: Tailwind CSS + @murasakijs/ui, an accessible React Aria component library.
 ---
 
 import { ButtonDemo } from "@/components/ui-demos/button-demo"
 
 The scaffold ships Tailwind CSS and [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) — a
-shadcn/ui-style component library built on Radix primitives, styled with the
-same `cn()` + `class-variance-authority` conventions shadcn/ui users already
-know. Every component it ships is documented, live, in the
+React Aria-based component library styled with the familiar `cn()` +
+`class-variance-authority` conventions. React Aria provides accessible
+interaction, focus management, keyboard navigation, and overlay positioning;
+Murasaki supplies the visual system and compatibility API. Every component it
+ships is documented, live, in the
 [Components](/docs/components) section — this guide only covers how the
 library is wired into a scaffolded app.
 
@@ -76,16 +78,16 @@ The package currently ships:
 
 `Button` supports `variant` (`default` / `secondary` / `outline` / `ghost` /
 `destructive` / `link`) and `size` (`default` / `sm` / `lg` / `icon`) props,
-plus `asChild` to render as a different element (Radix `Slot`) — the same
-pattern as the rest of the library.
+plus `asChild` to render as a different element through Murasaki's local
+compatibility slot — the same pattern as the rest of the library.
 
 Every one of these is documented on its own page under
 [Components](/docs/components), with a live, interactive preview and the full
 prop table — not just the short list above.
 
 <Callout type="info">
-  `@murasakijs/ui` is not required — it's Tailwind + Radix under the hood, so
-  you can swap in your own components or another library instead.
+  `@murasakijs/ui` is optional. It is Tailwind + React Aria under the hood, and
+  you can replace it with your own components or another library.
 </Callout>
 
 ## Next

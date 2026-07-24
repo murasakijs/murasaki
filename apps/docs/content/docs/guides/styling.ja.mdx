@@ -1,15 +1,16 @@
 ---
 title: スタイリング
-description: Tailwind CSS + @murasakijs/ui、shadcn スタイルのコンポーネントライブラリ。
+description: Tailwind CSS + @murasakijs/ui、React Aria ベースのアクセシブルなコンポーネントライブラリ。
 ---
 
 import { ButtonDemo } from "@/components/ui-demos/button-demo"
 
 スキャフォールドには Tailwind CSS と
 [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) が同梱されています —
-Radix プリミティブの上に構築された shadcn/ui スタイルのコンポーネントライブラリで、
-shadcn/ui ユーザーがすでに知っている `cn()` + `class-variance-authority` の慣習でスタ
-イリングされています。それが提供するすべてのコンポーネントは、
+React Aria を基盤とし、`cn()` + `class-variance-authority` の慣習でスタイリングされた
+コンポーネントライブラリです。アクセシブルな操作、フォーカス管理、キーボード操作、
+オーバーレイ配置を React Aria が提供し、Murasaki がビジュアルシステムと互換 API を
+提供します。すべてのコンポーネントは、
 [Components](/docs/components) セクションでライブに文書化されています — このガイド
 では、ライブラリがスキャフォールドされたアプリにどう組み込まれているかだけを扱います。
 
@@ -81,16 +82,16 @@ function Example() {
 
 `Button` は `variant`(`default` / `secondary` / `outline` / `ghost` /
 `destructive` / `link`）と `size`（`default` / `sm` / `lg` / `icon`）の props に加え
-て、別の要素としてレンダーするための `asChild`（Radix の `Slot`）をサポートしています
-— ライブラリの他の部分と同じパターンです。
+て、Murasaki 独自の互換 Slot を通じて別の要素としてレンダーする `asChild` を
+サポートしています — ライブラリの他の部分と同じパターンです。
 
 これらすべては、[Components](/docs/components) の下でそれぞれ専用ページとして文書化
 されており、上のリストだけでなく、ライブでインタラクティブなプレビューと完全な props
 テーブルが用意されています。
 
 <Callout type="info">
-  `@murasakijs/ui` は必須ではありません — その正体は Tailwind + Radix なので、代わりに
-  自分のコンポーネントや別のライブラリに差し替えることもできます。
+  `@murasakijs/ui` は必須ではありません。内部は Tailwind + React Aria で構成されており、
+  自作コンポーネントや別のライブラリへ差し替えることもできます。
 </Callout>
 
 ## 次へ

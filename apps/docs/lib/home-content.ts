@@ -200,7 +200,7 @@ const en: HomeContent = {
     {
       title: "UI kit",
       description:
-        "@murasakijs/ui — a shadcn-style component library built for Murasaki apps.",
+        "@murasakijs/ui — an accessible React Aria component library built for Murasaki apps.",
     },
     {
       title: "Signed distribution",
