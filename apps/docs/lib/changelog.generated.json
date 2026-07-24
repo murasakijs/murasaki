@@ -1,6 +1,35 @@
 {
   "en": [
     {
+      "version": "0.55.7",
+      "date": "2026-07-24",
+      "title": "React Aria UI foundation",
+      "intro": [
+        "Murasaki's default UI foundation now uses React Aria Components throughout. The public `@murasakijs/ui` component names and familiar value-based props stay available, while focus management, keyboard interaction, selection, and overlay behavior no longer depend on Radix UI or `cmdk`."
+      ],
+      "sections": [
+        {
+          "kind": "added",
+          "label": "Added",
+          "items": [
+            "**React Aria component foundation.** `@murasakijs/ui` 0.3.0 removes every direct Radix UI and `cmdk` dependency. Interactive controls and overlays use React Aria Components; primitives without a direct React Aria equivalent use small accessible Murasaki adapters rather than carrying Radix internally.",
+            "**Framework and scaffold integration.** `murasaki`'s ready-made `UpdateButton` and newly generated applications consume the React Aria-based UI package by default.",
+            "**Live component documentation.** Every component detail page now includes an interactive playground. The updater guide includes a stateful playground covering unavailable, available, downloading, ready, and error states.",
+            "**AI-facing documentation.** The generated MCP documentation corpus and framework guidance now identify React Aria as the current UI foundation."
+          ]
+        },
+        {
+          "kind": "notes",
+          "label": "Notes",
+          "items": [
+            "Existing imports from `@murasakijs/ui` should continue to work. Applications that targeted undocumented Radix DOM structure, Radix-specific data attributes, or `cmdk` internals must move those styles and selectors to the documented Murasaki component API.",
+            "`asChild` remains available through Murasaki's local compatibility slot; it no longer installs `@radix-ui/react-slot`."
+          ]
+        }
+      ],
+      "outro": []
+    },
+    {
       "version": "0.55.6",
       "date": "2026-07-20",
       "title": "the stability declaration",
@@ -200,6 +229,35 @@
     }
   ],
   "ja": [
+    {
+      "version": "0.55.7",
+      "date": "2026-07-24",
+      "title": "React Aria UI 基盤",
+      "intro": [
+        "Murasaki の標準 UI 基盤を全面的に React Aria Components へ移行しました。`@murasakijs/ui` の公開 component 名と従来の value ベース props は維持しつつ、focus 管理、keyboard 操作、選択、overlay の挙動は Radix UI や `cmdk` に依存しなくなりました。"
+      ],
+      "sections": [
+        {
+          "kind": "added",
+          "label": "追加",
+          "items": [
+            "**React Aria component 基盤。** `@murasakijs/ui` 0.3.0 から Radix UI と `cmdk` の直接依存をすべて削除しました。interactive control と overlay は React Aria Components を使用し、React Aria に直接対応する primitive がない場合は、Radix を内部に残さず、小さくアクセシブルな Murasaki adapter を使用します。",
+            "**framework と scaffold の統合。** `murasaki` の完成済み `UpdateButton` と、新しく生成される application は、React Aria ベースの UI package を既定で使用します。",
+            "**live component documentation。** すべての component 詳細 page に interactive playground を追加しました。updater guide には unavailable、available、downloading、ready、error の各状態を確認できる stateful playground も追加しています。",
+            "**AI 向け documentation。** 生成される MCP documentation corpus と framework guide を、React Aria が現在の UI 基盤である内容へ同期しました。"
+          ]
+        },
+        {
+          "kind": "notes",
+          "label": "補足",
+          "items": [
+            "`@murasakijs/ui` からの既存 import はそのまま利用できます。未文書化の Radix DOM 構造、Radix 固有の data attribute、`cmdk` 内部実装を直接参照していた application は、文書化された Murasaki component API に selector と style を移してください。",
+            "`asChild` は Murasaki 独自の互換 Slot で引き続き利用できます。`@radix-ui/react-slot` はインストールされません。"
+          ]
+        }
+      ],
+      "outro": []
+    },
     {
       "version": "0.55.6",
       "date": "2026-07-20",

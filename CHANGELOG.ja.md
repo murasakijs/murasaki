@@ -4,6 +4,39 @@ Murasaki は 1.0 に達するまで semantic versioning に従います。minor 
 破壊的変更が記載される場合があります。production application を更新する前に、
 対応する migration guide を確認してください。
 
+## 0.55.7 — React Aria UI 基盤 (2026-07-24)
+
+Murasaki の標準 UI 基盤を全面的に React Aria Components へ移行しました。
+`@murasakijs/ui` の公開 component 名と従来の value ベース props は維持しつつ、
+focus 管理、keyboard 操作、選択、overlay の挙動は Radix UI や `cmdk` に
+依存しなくなりました。
+
+### 追加
+
+- **React Aria component 基盤。** `@murasakijs/ui` 0.3.0 から Radix UI と
+  `cmdk` の直接依存をすべて削除しました。interactive control と overlay は
+  React Aria Components を使用し、React Aria に直接対応する primitive がない
+  場合は、Radix を内部に残さず、小さくアクセシブルな Murasaki adapter を
+  使用します。
+- **framework と scaffold の統合。** `murasaki` の完成済み `UpdateButton` と、
+  新しく生成される application は、React Aria ベースの UI package を既定で
+  使用します。
+- **live component documentation。** すべての component 詳細 page に
+  interactive playground を追加しました。updater guide には unavailable、
+  available、downloading、ready、error の各状態を確認できる stateful
+  playground も追加しています。
+- **AI 向け documentation。** 生成される MCP documentation corpus と
+  framework guide を、React Aria が現在の UI 基盤である内容へ同期しました。
+
+### 補足
+
+- `@murasakijs/ui` からの既存 import はそのまま利用できます。未文書化の
+  Radix DOM 構造、Radix 固有の data attribute、`cmdk` 内部実装を直接参照して
+  いた application は、文書化された Murasaki component API に selector と
+  style を移してください。
+- `asChild` は Murasaki 独自の互換 Slot で引き続き利用できます。
+  `@radix-ui/react-slot` はインストールされません。
+
 ## 0.55.6 — 安定性の宣言 (2026-07-20)
 
 capability manifest にある 26 個の機能すべてが `status: stable` になりました
