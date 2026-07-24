@@ -24,6 +24,7 @@
           "items": [
             "Existing imports from `@murasakijs/ui` should continue to work. Applications that targeted undocumented Radix DOM structure, Radix-specific data attributes, or `cmdk` internals must move those styles and selectors to the documented Murasaki component API.",
             "`asChild` remains available through Murasaki's local compatibility slot; it no longer installs `@radix-ui/react-slot`.",
+            "Hover cards are non-modal and keep focus on their trigger. Moving the pointer from the trigger into the card cancels its delayed close, preventing the open/close oscillation that could occur after the React Aria migration.",
             "The documentation application now uses Next.js 16.2.11, shadcn 4.14.1, and patched `sharp`/`fast-uri` resolutions. The release security gate reports no high or critical npm advisories."
           ]
         }
@@ -254,6 +255,7 @@
           "items": [
             "`@murasakijs/ui` からの既存 import はそのまま利用できます。未文書化の Radix DOM 構造、Radix 固有の data attribute、`cmdk` 内部実装を直接参照していた application は、文書化された Murasaki component API に selector と style を移してください。",
             "`asChild` は Murasaki 独自の互換 Slot で引き続き利用できます。`@radix-ui/react-slot` はインストールされません。",
+            "Hover Card を非 modal にし、focus を trigger に維持するようにしました。trigger から card 内へ pointer を移すと遅延 close が取り消されるため、React Aria 移行後に発生し得た表示・非表示の反復を防ぎます。",
             "documentation application を Next.js 16.2.11、shadcn 4.14.1、および修正版の `sharp` / `fast-uri` resolution へ更新しました。release の security gate で high / critical の npm advisory は 0 件です。"
           ]
         }

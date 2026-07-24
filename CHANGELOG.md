@@ -34,6 +34,9 @@ overlay behavior no longer depend on Radix UI or `cmdk`.
   documented Murasaki component API.
 - `asChild` remains available through Murasaki's local compatibility slot; it
   no longer installs `@radix-ui/react-slot`.
+- Hover cards are non-modal and keep focus on their trigger. Moving the pointer
+  from the trigger into the card cancels its delayed close, preventing the
+  open/close oscillation that could occur after the React Aria migration.
 - The documentation application now uses Next.js 16.2.11, shadcn 4.14.1, and
   patched `sharp`/`fast-uri` resolutions. The release security gate reports no
   high or critical npm advisories.

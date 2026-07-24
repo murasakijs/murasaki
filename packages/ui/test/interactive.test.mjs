@@ -187,6 +187,82 @@ test("Dialog portals content, closes on Escape, and restores trigger focus", asy
   assert.equal(document.activeElement, trigger);
 });
 
+test("HoverCard stays open without stealing focus and tolerates pointer travel", async (t) => {
+  const view = await mount(
+    h(
+      "div",
+      null,
+      h("button", { type: "button" }, "Outside"),
+      h(
+        UI.HoverCard,
+        { openDelay: 0, closeDelay: 40 },
+        h(UI.HoverCardTrigger, null, "Murasaki Docs"),
+        h(
+          UI.HoverCardContent,
+          null,
+          "Guides, API references, and examples.",
+        ),
+      ),
+    ),
+  );
+  t.after(() => view.unmount());
+
+  const [outside, trigger] = view.container.querySelectorAll("button");
+  const findCard = () =>
+    [...document.body.querySelectorAll("[data-rac]")].find(
+      (element) =>
+        element.textContent?.trim() ===
+        "Guides, API references, and examples.",
+    );
+
+  await act(async () => trigger.focus());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  assert.ok(findCard(), "hover card must open when its trigger receives focus");
+  assert.equal(
+    document.activeElement,
+    trigger,
+    "hover card must not move focus away from its trigger",
+  );
+
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  const card = findCard();
+  assert.ok(card, "hover card must not oscillate between open and closed");
+  assert.equal(document.activeElement, trigger);
+
+  await act(async () => {
+    trigger.dispatchEvent(
+      new MouseEvent("mouseout", {
+        bubbles: true,
+        relatedTarget: card,
+      }),
+    );
+    card.dispatchEvent(
+      new MouseEvent("mouseover", {
+        bubbles: true,
+        relatedTarget: trigger,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  assert.ok(
+    findCard(),
+    "hover card must remain open while the pointer travels into its content",
+  );
+
+  await act(async () => {
+    card.dispatchEvent(
+      new MouseEvent("mouseout", {
+        bubbles: true,
+        relatedTarget: outside,
+      }),
+    );
+    outside.focus();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  assert.equal(findCard(), undefined);
+  assert.equal(document.activeElement, outside);
+});
+
 test("DropdownMenu supports keyboard open, item activation, and focus restoration", async (t) => {
   let selected = 0;
   const view = await mount(

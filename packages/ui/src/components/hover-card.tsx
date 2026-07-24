@@ -6,8 +6,15 @@ import type {
   ReactNode,
   RefObject,
 } from "react";
-import { createContext, forwardRef, useContext, useRef, useState } from "react";
-import { Dialog, Popover, type PopoverProps } from "react-aria-components";
+import {
+  createContext,
+  forwardRef,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { Popover, type PopoverProps } from "react-aria-components";
 import { ariaClassName } from "../lib/react-aria.js";
 import { Slot } from "../lib/slot.js";
 
@@ -55,6 +62,14 @@ export function HoverCard({
       next ? openDelay : closeDelay,
     );
   };
+
+  useEffect(
+    () => () => {
+      if (openTimer.current) clearTimeout(openTimer.current);
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    },
+    [],
+  );
 
   return (
     <HoverCardContext.Provider
@@ -134,6 +149,8 @@ export const HoverCardContent = forwardRef<HTMLElement, HoverCardContentProps>(
       side = "bottom",
       sideOffset = 4,
       children,
+      onMouseEnter,
+      onMouseLeave,
       ...props
     },
     ref,
@@ -151,17 +168,24 @@ export const HoverCardContent = forwardRef<HTMLElement, HoverCardContentProps>(
         triggerRef={context?.triggerRef}
         placement={placement}
         offset={sideOffset}
+        onMouseEnter={(event) => {
+          onMouseEnter?.(event);
+          context?.setOpen(true);
+        }}
+        onMouseLeave={(event) => {
+          onMouseLeave?.(event);
+          context?.setOpen(false);
+        }}
         className={ariaClassName(
           "z-50 w-64 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none data-[entering]:animate-in data-[exiting]:animate-out data-[exiting]:fade-out-0 data-[entering]:fade-in-0 data-[exiting]:zoom-out-95 data-[entering]:zoom-in-95",
           className,
         )}
         {...props}
+        isNonModal
       >
-        {(values) => (
-          <Dialog className="outline-none">
-            {typeof children === "function" ? children(values) : children}
-          </Dialog>
-        )}
+        {(values) =>
+          typeof children === "function" ? children(values) : children
+        }
       </Popover>
     );
   },
