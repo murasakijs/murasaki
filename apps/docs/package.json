@@ -52,6 +52,6 @@
     "@types/three": "^0.185.1",
     "postcss": "^8.5.22",
     "tailwindcss": "^4.3.1",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
