@@ -64,7 +64,7 @@
   "dependencies": {
     "@murasakijs/native": "workspace:^",
     "@murasakijs/ui": "workspace:^",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "^6.0.4",
     "openpgp": "6.3.1",
     "picocolors": "^1.1.0",
     "png-to-ico": "^3.0.2",
