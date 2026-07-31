@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@murasakijs/ui": "workspace:*",
-    "lucide-react": "1.25.0",
+    "lucide-react": "1.27.0",
     "murasaki": "workspace:*",
     "pg": "8.22.0",
     "react": "19.2.8",
