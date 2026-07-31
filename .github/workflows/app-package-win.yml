@@ -179,7 +179,7 @@ jobs:
         shell: pwsh
         run: .github/scripts/win-smoke-test.ps1 -ExePath "${{ steps.locate.outputs.exePath }}" -TimeoutSeconds 60
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: win32-bundle-${{ matrix.arch }}
@@ -432,7 +432,7 @@ jobs:
             -SetupV1 "${{ steps.copy-v1.outputs.setupV1Path }}" `
             -SetupV2 "${{ steps.locate-installers.outputs.setupPath }}"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
           name: win32-updater-e2e-log-${{ matrix.arch }}
@@ -440,7 +440,7 @@ jobs:
           if-no-files-found: warn
 
       # Full set: both installers + the portable zip (whichever exist).
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: win32-installers-${{ matrix.arch }}
@@ -452,7 +452,7 @@ jobs:
 
       # Lean artifact: just the two installers, for a quick download while
       # iterating on Windows behavior (skips the ~200MB raw bundle + portable zip).
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: win32-setup-msi-${{ matrix.arch }}
