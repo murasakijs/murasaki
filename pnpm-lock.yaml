@@ -77,8 +77,8 @@ importers:
         specifier: ^4.3.1
         version: 4.3.1
       tailwind-merge:
-        specifier: ^2.6.1
-        version: 2.6.1
+        specifier: ^3.6.0
+        version: 3.6.0
       three:
         specifier: ^0.185.1
         version: 0.185.1
@@ -373,14 +373,14 @@ importers:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
       tailwind-merge:
-        specifier: ^2.6.1
-        version: 2.6.1
+        specifier: ^3.6.0
+        version: 3.6.0
       tailwindcss:
         specifier: ^3.4.0
         version: 3.4.19(yaml@2.9.0)
       tailwindcss-animate:
         specifier: ^1.0.7
-        version: 1.0.7
+        version: 1.0.7(tailwindcss@3.4.19(yaml@2.9.0))
     devDependencies:
       '@types/react':
         specifier: ^19.2.17
@@ -4921,9 +4921,6 @@ packages:
     engines: {node: '>=8.0.0'}
     os: [darwin, linux, win32, freebsd, openbsd, netbsd, sunos, android]
     hasBin: true
-
-  tailwind-merge@2.6.1:
-    resolution: {integrity: sha512-Oo6tHdpZsGpkKG88HJ8RR1rg/RdnEkQEfMoEk2x1XRI3F1AxeU+ijRXpiVUF4UbLfcxxRGw6TbUINKYdWVsQTQ==}
 
   tailwind-merge@3.6.0:
     resolution: {integrity: sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==}
@@ -10019,11 +10016,11 @@ snapshots:
 
   systeminformation@5.31.13: {}
 
-  tailwind-merge@2.6.1: {}
-
   tailwind-merge@3.6.0: {}
 
-  tailwindcss-animate@1.0.7: {}
+  tailwindcss-animate@1.0.7(tailwindcss@3.4.19(yaml@2.9.0)):
+    dependencies:
+      tailwindcss: 3.4.19(yaml@2.9.0)
 
   tailwindcss@3.4.19(yaml@2.9.0):
     dependencies:
