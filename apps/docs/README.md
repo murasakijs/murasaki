@@ -34,6 +34,28 @@ A `source.config.ts` config file has been included, you can customise different 
 
 Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
 
+## Anonymous CLI measurement operations
+
+`POST /api/telemetry/v1/events` accepts the documented opt-in CLI events. The
+Dokploy/VPS deployment persists aggregates with Node 24's built-in SQLite.
+Configure these server-only environment variables:
+
+- `MURASAKI_TELEMETRY_DB_PATH` — an absolute path on a persistent volume,
+  recommended: `/data/murasaki-telemetry.sqlite`.
+- `MURASAKI_TELEMETRY_ADMIN_TOKEN` — a separate random bearer token used only
+  to read the aggregate summary.
+
+Mount a persistent Dokploy volume at `/data`; otherwise a container replacement
+will discard the database. Without `MURASAKI_TELEMETRY_DB_PATH`, the route writes only the already-sanitized event
+to the hosting log. It never exposes that fallback as a successful persistent
+aggregate. With SQLite configured, daily counters, dimensions, and hashed
+installation identifiers expire after 90 days. Read the private 30-day view:
+
+```bash
+curl -H "Authorization: Bearer $MURASAKI_TELEMETRY_ADMIN_TOKEN" \
+  'https://murasaki.ichi10.com/api/telemetry/v1/summary?days=30'
+```
+
 ## Learn More
 
 To learn more about Next.js and Fumadocs, take a look at the following
