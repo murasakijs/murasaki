@@ -1,23 +1,13 @@
 ---
 title: WebView コンテンツ機能
-description: ネイティブ WebView のダウンロード、ファイルドラッグ&ドロップ、init script、zoom、印刷、cookie。
+description: ネイティブ WebView のダウンロード、ファイルドラッグ&ドロップ、初期化スクリプト、ズーム、印刷、Cookie。
 ---
 
-session/network 設定(User-Agent、incognito、proxy — [Configuration](/docs/building/configuration#webview)
-参照)に加えて、Murasaki は 6 つの WebView コンテンツ機能を提供します: ダウンロード、
-ファイルドラッグ&ドロップ、信頼済み init script、page zoom、印刷、cookie です。
-init script 以外は、それぞれ専用の deny-by-default な `webview:*` capability で
-ゲートされています。
+セッション / ネットワーク設定（User-Agent、シークレットモード、プロキシ — 詳細は[Configuration](/docs/building/configuration#webview)を参照）に加えて、Murasaki は 6 つの WebView コンテンツ機能を提供します。ダウンロード、ファイルのドラッグ&ドロップ、信頼済みの初期化スクリプト、ページズーム、印刷、Cookie です。初期化スクリプトを除くすべての機能は、それぞれ専用の、デフォルトで拒否する `webview:*` ケイパビリティでゲートされています。
 
 ## ダウンロード
 
-`webview:download` を許可すると、native の `with_download_started_handler` が
-インストールされます。許可しない場合、すべてのダウンロードは拒否されます(既定挙動は
-変わりません)。提案されたファイル名はportableなbasenameへサニタイズされます(directory
-部分・制御文字・先頭dot・Windows禁止文字/予約device名・末尾dot/spaceを処理し、UTF-8で
-240 byteまで。空になった場合は`download`)。最終的なpathは
-設定した directory の内側に閉じ込められます — 名前が衝突した場合は Wry 自身の挙動と
-同様、拡張子の前に ` (n)` が付与されます。
+`webview:download` を許可すると、ネイティブの `with_download_started_handler` がインストールされます。許可しない場合、すべてのダウンロードは拒否されます（デフォルトの挙動は変わりません）。提案されたファイル名は、可搬性のあるベース名へサニタイズされます（ディレクトリ部分、制御文字、先頭のドット、Windows で禁止されている文字 / 予約デバイス名、末尾のドットやスペースを処理し、UTF-8 で 240 バイトまでに制限します。空になった場合は `download` になります）。最終的なパスは、設定したディレクトリの内側に閉じ込められます — 名前が衝突した場合は、Wry 自身の挙動と同様に、拡張子の前に ` (n)` が付与されます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -29,9 +19,7 @@ export default defineConfig({
 })
 ```
 
-`downloads.directory` は任意で、絶対パスである必要があります。省略した場合は OS の
-ユーザー Downloads フォルダに解決されます。両方のライフサイクルイベントを 1 つの型付き
-ヘルパーで購読できます。
+`downloads.directory` は任意で、絶対パスである必要があります。省略した場合は、OS のユーザーダウンロードフォルダに解決されます。両方のライフサイクルイベントを 1 つの型付きヘルパーで購読できます。
 
 ```tsx
 import { subscribeDownloads } from 'murasaki'
@@ -43,18 +31,12 @@ const unsubscribe = subscribeDownloads((event) => {
 ```
 
 <Callout type="warning">
-  `started` イベントとその後に続く `completed` イベントを結び付ける信頼できる id は
-  ありません — Wry の completed handler は url/path/success しか報告せず、id は
-  報告しないためです。そのため同一 URL の同時ダウンロードは `completed` だけからでは
-  区別が曖昧になり得ます。macOS では `completed` の `path` は常に `null` です
-  (upstream の WebKit API の制約です)。
+  `started` イベントと、その後に続く `completed` イベントを結び付ける信頼できる id はありません — Wry の completed ハンドラーが報告するのは url / path / success だけで、id は報告されないためです。そのため、同一 URL への同時ダウンロードは、`completed` だけからでは区別が曖昧になることがあります。macOS では、`completed` の `path` は常に `null` になります（上流の WebKit API の制約によるものです）。
 </Callout>
 
 ## ファイルドラッグ&ドロップ
 
-`webview:dragDrop` を許可すると、window にドラッグされたファイルのイベントを受け取れ
-ます。native handler は常に OS の default 処理を通します — 決してブロックしません —
-そのため、この capability の有無に関わらず `<input type="file">` は動作し続けます。
+`webview:dragDrop` を許可すると、ウィンドウにドラッグされたファイルのイベントを受け取れます。ネイティブハンドラーは常に OS のデフォルト処理を通します — 決してブロックしません — そのため、このケイパビリティの有無に関わらず `<input type="file">` は動作し続けます。
 
 ```tsx
 import { useFileDrop } from 'murasaki'
@@ -65,8 +47,7 @@ function Dropzone() {
 }
 ```
 
-`drop` に加えて `enter` / `over` / `leave` も使う場合は `subscribeFileDrops` を
-使ってください。
+`drop` に加えて `enter` / `over` / `leave` も使う場合は `subscribeFileDrops` を使ってください。
 
 ```ts
 import { subscribeFileDrops } from 'murasaki'
@@ -77,8 +58,7 @@ const unsubscribe = subscribeFileDrops((event) => {
 })
 ```
 
-`over` は毎秒最大 20 回までスロットルされます — OS は drop-target のハイライトを
-再配置するのに必要な頻度よりもずっと高い頻度で drag-move を報告してくるためです。
+`over` は毎秒最大 20 回までスロットルされます — OS はドロップターゲットのハイライトを再配置するのに必要な頻度よりもずっと高い頻度でドラッグの移動を報告してくるためです。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -87,12 +67,9 @@ export default defineConfig({
 })
 ```
 
-## 信頼済み init script
+## 信頼済みの初期化スクリプト
 
-`webview.initScripts` は、すべてのページ読み込み前に project 側が書いた JavaScript を
-実行します — config 側が所有する信頼済みコードなので、このページの他の機能と違い
-capability は不要です。path は project root からの相対パスで、内容は dev / bundle 時に
-読み込まれて埋め込まれ、宣言順に適用されます。
+`webview.initScripts` は、すべてのページ読み込みの前に、プロジェクト側が書いた JavaScript を実行します — 設定側が所有する信頼済みのコードであるため、このページで扱う他の機能と異なり、ケイパビリティは不要です。パスはプロジェクトルートからの相対パスで指定し、内容は開発時 / バンドル時に読み込まれて埋め込まれ、宣言した順序で適用されます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -103,14 +80,11 @@ export default defineConfig({
 })
 ```
 
-各ファイルは 256 KiB、合計では 1 MiB を上限とし、project 読み込み時に検証されます
-(ファイルが見つからない場合やサイズ超過の場合は、`murasaki dev` / `murasaki bundle`
-コマンドが黙って無視するのではなく、明確なエラーで失敗します)。
+各ファイルは 256 KiB、合計では 1 MiB を上限とし、プロジェクトの読み込み時に検証されます（ファイルが見つからない場合やサイズを超過した場合は、`murasaki dev` / `murasaki bundle` コマンドが黙って無視するのではなく、明確なエラーで失敗します）。
 
-## Page zoom
+## ページズーム
 
-`webview.setZoom({ factor })` は page zoom level を設定します(0.25 から 5.0 まで)。
-`webview:zoom` がこの呼び出しをゲートします。
+`webview.setZoom({ factor })` は、ページズームのレベルを設定します（0.25 から 5.0 まで）。`webview:zoom` がこの呼び出しをゲートします。
 
 ```ts
 import { webview } from 'murasaki/native'
@@ -119,11 +93,7 @@ await webview.setZoom(1.25)
 ```
 
 <Callout type="info">
-  zoom が使えるのは macOS 11+ と iOS 14+ のみです(古い macOS では呼び出しが黙って
-  失敗し、rejected な Promise として現れます)。Android は unsupported です。
-  別途 `webview.hotkeysZoom`(capability ではなく config)は OS の zoom hotkey /
-  ジェスチャーを有効にします — 効果があるのは Windows(WebView2)のみで、
-  macOS / Linux では no-op です。
+  ズームが使えるのは macOS 11 以降と iOS 14 以降のみです（古い macOS では呼び出しが黙って失敗し、reject された Promise として現れます）。Android では利用できません。別途 `webview.hotkeysZoom`（ケイパビリティではなく設定）は OS のズームホットキー / ジェスチャーを有効にします — 効果があるのは Windows(WebView2)のみで、macOS / Linux では何も行いません。
 </Callout>
 
 ```ts title="murasaki.config.ts"
@@ -136,8 +106,7 @@ export default defineConfig({
 
 ## 印刷
 
-`webview.print()` は現在のページに対して platform 標準の印刷ダイアログを開きます。
-`webview:print` が必要です。
+`webview.print()` は、現在のページに対してプラットフォーム標準の印刷ダイアログを開きます。`webview:print` が必要です。
 
 ```ts
 import { webview } from 'murasaki/native'
@@ -146,14 +115,12 @@ await webview.print()
 ```
 
 <Callout type="info">
-  find-in-page API はありません — Wry 側に該当 API が存在しないためです。upstream に
-  API ができるまでスコープ外とします。
+  find-in-page API はありません — Wry 側に該当する API が存在しないためです。上流に API が実装されるまでは対応範囲外とします。
 </Callout>
 
 ## Cookie
 
-`webview:readCookies` は `webview.getCookies()` を、`webview:writeCookies` は
-`webview.setCookie()` と `webview.deleteCookie()` の両方をゲートします。
+`webview:readCookies` は `webview.getCookies()` を、`webview:writeCookies` は `webview.setCookie()` と `webview.deleteCookie()` の両方をゲートします。
 
 ```ts
 import { webview } from 'murasaki/native'
@@ -168,22 +135,13 @@ await webview.setCookie({
 await webview.deleteCookie({ url: 'https://example.com/', name: 'theme' })
 ```
 
-`getCookies()` は最大 1000 件を返し、各 `value` は 4 KiB で truncate されます。
-`setCookie` / `deleteCookie` は cookie name を RFC 6265 の token 文字集合で検証し、
-`value` を 4 KiB に制限し、`url` が `http` / `https` であることを要求します。
-`deleteCookie` は name・URL の host を domain として・既定の `/` path で一致判定を
-行うため、既定以外の `path` で設定された cookie は `deleteCookie` からはアドレス
-できません。
+`getCookies()` は最大 1000 件を返し、各 `value` は 4 KiB で切り詰められます。`setCookie` / `deleteCookie` は、Cookie 名を RFC 6265 のトークン文字集合で検証し、`value` を 4 KiB に制限し、`url` が `http` / `https` であることを要求します。`deleteCookie` は、名前・URL のホストをドメインとして、デフォルトの `/` パスで一致判定を行うため、デフォルト以外の `path` で設定された Cookie は `deleteCookie` から指定できません。
 
 <Callout type="warning">
-  **セキュリティ:** runtime認証はcookieを使用しません。defense in depthとして、legacyの
-  予約名`murasaki_runtime`はこのAPIから引き続き不可視・変更不可です。read結果から除外し、
-  write / deleteはgrantされたcapabilityに関係なく構造化errorで拒否します。
+  **セキュリティ:** ランタイム認証には Cookie を使用しません。defense in depth（多層防御）として、レガシーな予約名 `murasaki_runtime` は、この API から引き続き不可視かつ変更不可です。読み取り結果からは除外され、書き込み / 削除は、付与されたケイパビリティに関係なく構造化エラーで拒否されます。
 </Callout>
 
-cookie accessにはstructured URL scopeを推奨します。scopeされたreadでは明示的な`url`が必須で、
-URLなしの`getCookies()`はlegacy string grantでだけ利用できます。writeは実際のcookie pathで
-照合され、rendererは`domain`で親domainやsibling domainへcookieを設定できません。
+Cookie へのアクセスには、構造化された URL スコープの使用を推奨します。スコープされた読み取りでは明示的な `url` が必須であり、URL なしの `getCookies()` は、レガシーな文字列形式の許可でのみ利用できます。書き込みは実際の Cookie パスと照合され、レンダラーは `domain` を使って親ドメインや兄弟ドメインへ Cookie を設定することはできません。
 
 ```ts title="murasaki.config.ts"
 capabilities: [
@@ -199,17 +157,14 @@ export default defineConfig({
 })
 ```
 
-## In-page permission requests
+## ページ内の許可リクエスト
 
-page の JavaScript からの `getUserMedia()` / `geolocation` 呼び出しは、現時点では
-Murasaki によって intercept されません — 詳しい説明と macOS TCC との関係は
-[Security](/docs/building/security#in-page-permission-requestsgetusermedia-geolocation)
-を参照してください。
+ページの JavaScript からの `getUserMedia()` / `geolocation` 呼び出しは、現時点では Murasaki によってインターセプトされません — 詳しい説明と macOS TCC との関係については、[Security](/docs/building/security#in-page-permission-requests-getusermedia-geolocation)を参照してください。
 
 ## 次へ
 
 <Cards>
-  <Card title="Native APIs" href="/docs/guides/native-apis" description="dialog、clipboard、notification、shell、tray など。" />
-  <Card title="Configuration" href="/docs/building/configuration" description="アプリ全体の WebView session / network 設定。" />
-  <Card title="Security" href="/docs/building/security" description="trust boundary と既知の gap。" />
+  <Card title="Native APIs" href="/docs/guides/native-apis" description="ダイアログ、クリップボード、通知、シェル、トレイなど。" />
+  <Card title="Configuration" href="/docs/building/configuration" description="アプリ全体の WebView セッション / ネットワーク設定。" />
+  <Card title="Security" href="/docs/building/security" description="信頼境界と既知の課題。" />
 </Cards>

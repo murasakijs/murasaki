@@ -5,22 +5,13 @@ description: GitHub Releases、またはあなた自身のサーバーからの�
 
 import { UpdaterPlayground } from '@/components/updater-playground'
 
-Murasaki アプリは、更新の確認・ダウンロード・インストールを自分自身で行えます。専用の
-更新サービスを立てる必要はありません — マニフェストはリリース成果物の隣に置かれる
-単なる JSON ファイル(デフォルトでは GitHub Releases、またはあなたが管理する任意の静的
-ホスティング)であり、信頼モデル全体は一度だけ生成する Ed25519 の鍵ペア1つに集約され
-ます。
+Murasaki アプリは、更新の確認・ダウンロード・インストールを自分自身で行えます。専用の更新サービスを立てる必要はありません — マニフェストはリリース成果物の隣に置かれる単なる JSON ファイル（デフォルトでは GitHub Releases、またはあなたが管理する任意の静的ホスティング）であり、信頼モデル全体は一度だけ生成する Ed25519 の鍵ペア1つに集約されます。
 
 <Callout type="info">
-  macOS、Windows、そして Linux の **AppImage** ビルドに対応しています。`.deb`
-  でインストールした場合や手動展開した bare AppDir には swap できる
-  self-contained なファイルが無いため、`check()` は manifest を確認する代わりに
-  「update はシステムのパッケージマネージャが管理しています」という構造化された
-  結果を返します — エラーにはなりません。Linux パッケージングの詳細は
-  [配布](/ja/docs/building/distribution#linux-appimage-and-deb) を参照してください。
+  macOS、Windows、そして Linux の **AppImage** ビルドに対応しています。`.deb` でインストールした場合や、手動展開しただけの AppDir には置き換え可能な自己完結型のファイルが存在しないため、`check()` はマニフェストを確認する代わりに「アップデートはシステムのパッケージマネージャーが管理しています」という構造化された結果を返します — エラーにはなりません。Linux パッケージングの詳細は[配布](/ja/docs/building/distribution#linux-appimage-and-deb)を参照してください。
 </Callout>
 
-## クイックスタート
+## クイックスタート [#quick-start]
 
 1. プロジェクトルートで、一度だけ署名鍵を生成します:
 
@@ -28,10 +19,7 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
    murasaki release --keygen
    ```
 
-   これにより `.murasaki/update-key.pub`(コミットしてください)と
-   `.murasaki/update-key`(mode `0600`、自動的にgitignore)が書き出されます。秘密鍵は
-   表示されません。コマンド出力の通り、stdin経由で`MURASAKI_UPDATE_KEY`というGitHub
-   secretへ登録してください:
+   これにより `.murasaki/update-key.pub`（コミットしてください）と `.murasaki/update-key`（モード `0600`、自動的に gitignore されます）が書き出されます。秘密鍵は表示されません。コマンド出力の通り、stdin 経由で `MURASAKI_UPDATE_KEY` という GitHub シークレットへ登録してください:
 
    ```bash
    gh secret set MURASAKI_UPDATE_KEY < .murasaki/update-key
@@ -46,11 +34,7 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
    })
    ```
 
-   `true` は完全な設定です: GitHub リポジトリは `package.json` の `repository`
-   フィールドから、公開鍵は `.murasaki/update-key.pub` から推論されます。updaterを
-   有効にするとprimary windowへ内部の `app:quit` permissionも付与され、検証済みinstallの
-   graceful restartを完了できます。更新UIをsecondary windowへ置く場合は、そのwindowへ
-   `app:quit` を明示してください。
+   `true` は完全な設定です: GitHub リポジトリは `package.json` の `repository` フィールドから、公開鍵は `.murasaki/update-key.pub` から推論されます。アップデーターを有効にすると、プライマリウィンドウに内部の `app:quit` 権限も自動的に付与されます。これは、検証済みのインストールが正常に再起動を完了できるようにするためです。更新用の UI をセカンダリウィンドウに置く場合は、そのウィンドウへ `app:quit` を明示的に付与してください。
 
 3. ボタンを配置します:
 
@@ -62,14 +46,11 @@ Murasaki アプリは、更新の確認・ダウンロード・インストー�
    }
    ```
 
-アプリ側はこれで完了です。署名済みリリースの公開については、[下記](#publishing-releases)
-を参照してください。
+アプリ側はこれで完了です。署名済みリリースの公開については、[下記](#publishing-releases)を参照してください。
 
 ## Playground
 
-`useUpdate()` が返す各状態と、`<UpdateButton />` が提示する更新フローを操作できます。
-この Playground は更新サーバーへの接続、ファイルのダウンロード、アプリの終了、再起動
-を行いません。
+`useUpdate()` が返す各状態と、`<UpdateButton />` が示す更新フローを、実際に操作しながら確認できます。このプレイグラウンドは更新サーバーへの接続、ファイルのダウンロード、アプリの終了、再起動のいずれも行いません。
 
 <ComponentPreview
   code={`import { UpdateButton } from "murasaki";
@@ -83,12 +64,7 @@ export function Settings() {
 
 ## 仕組み
 
-`useUpdate()` の確認/ダウンロード/検証ロジックは **Node** 上で動作し、コンテキストメ
-ニューやアプリメニューが使うネイティブの IPC ブリッジではなく、アプリの他の部分をすで
-に配信しているのと同じローカル HTTP サーバー(Server Actions や API Routes と同じ仕組
-み)経由でページから到達します。最後の「終了してから適用する」ステップだけがネイティ
-ブランチャーに触れます — アプリのプロセスが終了したあとも動き続ける必要があるためで
-す。
+`useUpdate()` の確認/ダウンロード/検証ロジックは **Node** 上で動作し、コンテキストメニューやアプリメニューが使うネイティブの IPC ブリッジではなく、アプリの他の部分をすでに配信しているのと同じローカル HTTP サーバー（Server Actions や API Routes と同じ仕組み）経由でページから到達します。最後の「終了してから適用する」ステップだけがネイティブランチャーに触れます — アプリのプロセスが終了したあとも動き続ける必要があるためです。
 
 ```tsx
 import { useUpdate } from 'murasaki'
@@ -96,18 +72,13 @@ import { useUpdate } from 'murasaki'
 const { status, latest, notes, progress, check, download, install, dismiss } = useUpdate()
 ```
 
-`status` は `idle → checking → available → downloading → ready`(または
-`not-available` / `error`)と遷移します:
+`status` は `idle → checking → available → downloading → ready`（または `not-available` / `error`）と遷移します:
 
 - **`check()`** — マニフェストを取得し、署名を検証し、バージョンを比較します。
-- **`download()`** — プラットフォームに一致するアセットをディスクにストリーミング
-  し、その SHA-256 を検証します。
-- **`install()`** — 検証済みのペイロードをネイティブランチャーに渡し、アプリを終了し
-  ます。ランチャーが更新を適用して再起動します。
+- **`download()`** — プラットフォームに一致するアセットをディスクにストリーミングし、その SHA-256 を検証します。
+- **`install()`** — 検証済みのペイロードをネイティブランチャーに渡し、アプリを終了します。ランチャーが更新を適用して再起動します。
 
-`useUpdate()` はヘッドレスです — 描画もスタイリングの意見も持ちません。
-`<UpdateButton />`(こちらも `murasaki` から、`@murasakijs/ui` でスタイリング)は、
-それをラップしたすぐに使える表示レイヤーです:
+`useUpdate()` はヘッドレスです — 描画もスタイリングの意見も持ちません。`<UpdateButton />`（こちらも `murasaki` から、`@murasakijs/ui` でスタイリング）は、それをラップしたすぐに使える表示レイヤーです:
 
 - `idle` / `checking` / `not-available` / `error` の間は何も描画しません。
 - `available` になると **「Update to vX」** — クリックでダウンロードを開始します。
@@ -116,32 +87,16 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
 - マウント時に、自分自身で一度だけチェックを行います。
 
 <Callout type="info">
-  `<UpdateButton />` は `error` のとき何も描画しません — 失敗を自分の UI に表示したい
-  場合は、`useUpdate()` から `update.error` を自分で読み取ってください。同様に、マニ
-  フェストの `mandatory` フラグは `useUpdate()` の状態として渡されますが、
-  `<UpdateButton />` はそれを特別扱いしません(強制的で閉じられないフローはありませ
-  ん)— そうしたものが必要な場合は、`update.mandatory` を使って自分で UI を組み立て
-  てください。
+  `<UpdateButton />` は `error` のとき何も描画しません — 失敗を自分の UI に表示したい場合は、`useUpdate()` から `update.error` を自分で読み取ってください。同様に、マニフェストの `mandatory` フラグは `useUpdate()` の状態として渡されますが、`<UpdateButton />` はそれを特別扱いしません（強制的で閉じられないフローは用意されていません）— そうしたものが必要な場合は、`update.mandatory` を使って自分で UI を組み立ててください。
 </Callout>
 
-`channel` は、どのマニフェスト URL が解決されるかを変えます(
-[マニフェストのセルフホスティング](#self-hosting-the-manifest)を参照)。
-`checkOnStart` と `checkInterval` は updater engine の scheduler を動かします。既定では
-起動時に 1 回、その後 6 時間ごとに確認し、重複する check は 1 つにまとめられます。
-`<UpdateButton />` も mount 時に確認しますが、scheduled check の実行中なら新規処理を
-開始せず同じ処理に合流します。完全に手動にするには `checkOnStart: false` と
-`checkInterval: false` を設定してください。
+`channel` は、どのマニフェスト URL が解決されるかを変更します（[マニフェストのセルフホスティング](#self-hosting-the-manifest)を参照）。`checkOnStart` と `checkInterval` は、アップデーターエンジンのスケジューラーを制御します。デフォルトでは起動時に 1 回、その後 6 時間ごとにチェックし、重複するチェックは 1 つにまとめられます。`<UpdateButton />` もマウント時にチェックを行いますが、実行中のスケジュールされたチェックがある場合は新しい処理を開始せず、それに合流します。完全に手動でチェックしたい場合は `checkOnStart: false` と `checkInterval: false` を設定してください。
 
-開発時には `check()` は動作します — フルバンドルなしでマニフェストと鍵の組を検証でき
-ます — が、`download()` / `install()` は `status: 'error'` と
-`error: 'Updates only apply to a bundled app. Run \`murasaki bundle\` first.'`
-で即座に失敗します: 更新を適用する対象の、パッケージ化されたアプリやランチャーバイナ
-リがまだ存在しないためです。
+開発時には `check()` は動作します — フルバンドルなしでマニフェストと鍵の組を検証できます — が、`download()` / `install()` は `status: 'error'` と `error: 'Updates only apply to a bundled app. Run \`murasaki bundle\` first.'` で即座に失敗します: 更新を適用する対象の、パッケージ化されたアプリやランチャーバイナリがまだ存在しないためです。
 
 ## マニフェスト
 
-`murasaki release --manifest` は `dist/latest.json` を書き出し、常に検出署名
-`dist/latest.json.sig` と一緒に公開されます:
+`murasaki release --manifest` は `dist/latest.json` を書き出し、常に分離署名 `dist/latest.json.sig` と一緒に公開されます:
 
 ```json title="latest.json"
 {
@@ -161,27 +116,17 @@ const { status, latest, notes, progress, check, download, install, dismiss } = u
 }
 ```
 
-`assets` のキーは `<platform>-<arch>` で、実行中のアプリの `process.platform` /
-`process.arch` に一致します。実行中のプラットフォームに対応するキーが無い場合は、エラ
-ーではなく「あなた向けの更新はありません」を意味します — アプリは、マニフェストが本来
-カバーしうる範囲より少ないプラットフォーム向けに出荷されることもあります。
+`assets` のキーは `<platform>-<arch>` で、実行中のアプリの `process.platform` / `process.arch` に一致します。実行中のプラットフォームに対応するキーが無い場合は、エラーではなく「あなた向けの更新はありません」を意味します — アプリは、マニフェストが本来カバーしうる範囲より少ないプラットフォーム向けに出荷されることもあります。
 
-`latest.json.sig` は、`latest.json` の**そのままの生バイト列**に対する検出 Ed25519
-署名の base64 です。クライアントは、それを JSON としてパースする前に、必ずそのバイト
-列を検証します — 逆ではありません。そのため JSON の正規化に関する曖昧さを心配する必要
-はありません。
+`latest.json.sig` は、`latest.json` の**そのままの生バイト列**に対する分離 Ed25519 署名の base64 です。クライアントは、それを JSON としてパースする前に、必ずそのバイト列を検証します — 逆ではありません。そのため JSON の正規化に関する曖昧さを心配する必要はありません。
 
-clientでは`generatedAt`が必須で、`rollout`と`keyId`はoptionalです。いずれも署名された
-byte列に含まれるため、同じ署名でカバーされます:
+クライアント側では `generatedAt` が必須で、`rollout` と `keyId` は任意です。いずれも署名されたバイト列に含まれているため、同じ署名でカバーされます:
 
-- **`generatedAt`** — anti-freeze/replay guardです。下記の
-  [マニフェストの鮮度](#manifest-freshness)を参照してください。
-- **`rollout`** — 0〜100 の staged rollout percentageです。下記の
-  [段階的ロールアウト](#staged-rollout)を参照してください。
-- **`keyId`** — key rotationのヒントです。下記の
-  [鍵のローテーション](#key-rotation)を参照してください。
+- **`generatedAt`** — マニフェストの固定化やリプレイ攻撃を防ぐガードです。下記の[マニフェストの鮮度](#manifest-freshness)を参照してください。
+- **`rollout`** — 0〜100 の段階的ロールアウト率です。下記の[段階的ロールアウト](#staged-rollout)を参照してください。
+- **`keyId`** — 鍵のローテーションのヒントです。下記の[鍵のローテーション](#key-rotation)を参照してください。
 
-## リリースの公開
+## リリースの公開 [#publishing-releases]
 
 ```bash
 murasaki release --keygen [--force]
@@ -189,32 +134,15 @@ murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--man
 murasaki release --sign
 ```
 
-- **`--keygen`** — Ed25519 の鍵ペアを生成します([クイックスタート](#quick-start)参
-  照)。`--force` を指定しない限り既存の鍵を上書きしません — 鍵をローテーションする
-  と、古い公開鍵をまだ持っている既存のアプリからの信頼が失われます(先に両方の鍵を
-  pinしておけば失われません — [鍵のローテーション](#key-rotation)参照)。
-- **`--manifest`** — `dist/` 配下からこのバージョンの成果物(`murasaki bundle` が生
-  成する macOS の `.app.zip`、`murasaki installer` が生成する Windows の
-  `-setup-<arch>.exe`。arch suffixが付く前に公開された win32-x64 の資産のために、
-  suffixなしの旧 `-setup.exe` という名前も引き続き認識します)を探してハッシュ化し、
-  `generatedAt` タイムスタンプ付きで `dist/latest.json` を書き出します。見つからない
-  ターゲットはエラーではなくスキップされます — 何も見つからなかった場合のみエラーで
-  す。`--rollout <0-100>` は、任意の段階的ロールアウト率(%)を書き込みます
-  ([段階的ロールアウト](#staged-rollout)参照)。
-- **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成しま
-  す。秘密鍵は `$MURASAKI_UPDATE_KEY` から、なければ `.murasaki/update-key` から読み
-  込まれます。`.murasaki/update-key.pub` が存在する場合、署名前にマニフェストへ
-  `keyId` ヒントも書き込みます([鍵のローテーション](#key-rotation)参照)。
+- **`--keygen`** — Ed25519 の鍵ペアを生成します（[クイックスタート](#quick-start)参照）。`--force` を指定しない限り既存の鍵を上書きしません — 鍵をローテーションすると、古い公開鍵をまだ持っている既存のアプリからの信頼が失われます（先に両方の鍵をピン留めしておけば失われません — [鍵のローテーション](#key-rotation)参照）。
+- **`--manifest`** — `dist/` 配下からこのバージョンの成果物（`murasaki bundle` が生成する macOS の `.app.zip`、`murasaki installer` が生成する Windows の `-setup-<arch>.exe`。アーキテクチャのサフィックスが付く前に公開された win32-x64 の資産のために、サフィックスなしの旧 `-setup.exe` という名前も引き続き認識します）を探してハッシュ化し、`generatedAt` タイムスタンプ付きで `dist/latest.json` を書き出します。見つからないターゲットはエラーではなくスキップされます — 何も見つからなかった場合のみエラーになります。`--rollout <0-100>` は、任意の段階的ロールアウト率（%）を書き込みます（[段階的ロールアウト](#staged-rollout)参照）。
+- **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成します。秘密鍵は `$MURASAKI_UPDATE_KEY` から、なければ `.murasaki/update-key` から読み込まれます。`.murasaki/update-key.pub` が存在する場合、署名前にマニフェストへ `keyId` ヒントも書き込みます（[鍵のローテーション](#key-rotation)参照）。
 
-(`--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作しま
-す。)
+（`--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作します。）
 
 ### GitHub Actions
 
-リリースワークフローがすべきことは、各プラットフォーム向けの更新ペイロードをビルドし、
-マニフェストを生成・署名し、それらすべてを同じ GitHub Release にアップロードすること
-です — そうすることで、デフォルトの `updater: true` が使う URL
-(`releases/latest/download/latest.json`)が実際にそれらを解決できます:
+リリースワークフローがすべきことは、各プラットフォーム向けの更新ペイロードをビルドし、マニフェストを生成・署名し、それらすべてを同じ GitHub Release にアップロードすることです — そうすることで、デフォルトの `updater: true` が使う URL（`releases/latest/download/latest.json`）が実際にそれらを解決できます:
 
 ```yaml title=".github/workflows/release.yml"
 name: Release
@@ -289,88 +217,39 @@ jobs:
             dist/latest.json.sig
 ```
 
-`MURASAKI_UPDATE_KEY`をprivate key fileからrepository secretへ追加してください。
-shell引数へ鍵を貼り付けないでください。これはコード署名とは独立したものです — Developer ID で署名・公証さ
-れた `.dmg` も欲しい場合は[配布](/docs/building/distribution#signing--notarization)
-を参照してください。同じ `macos` ジョブにそのステップを追加しても構いません。
+`MURASAKI_UPDATE_KEY` を秘密鍵ファイルからリポジトリシークレットとして追加してください。シェルの引数に鍵を直接貼り付けないでください。これはコード署名とは別の話です — Developer ID で署名・公証された `.dmg` も必要な場合は[配布](/ja/docs/building/distribution#signing--notarization)を参照してください。同じ `macos` ジョブにそのステップを追加しても構いません。
 
 <Callout type="info">
-  この例は `win32-x64` のみを公開しますが、`win32-arm64` も対応しています(下記の
-  [プラットフォーム対応状況](#platform-support)参照)— `windows` ジョブをもう1つ
-  (またはmatrixのlegを1つ)追加し、`murasaki bundle --target win32-arm64` /
-  `murasaki installer --target win32-arm64` を実行して、その `-setup-arm64.exe` を
-  x64 のものと一緒にアップロードしてください。arch suffix付きのファイル名なので、同じ
-  `dist/` に置いても衝突しません。
+  この例は `win32-x64` のみを公開しますが、`win32-arm64` にも対応しています（下記の[プラットフォーム対応状況](#platform-support)参照）— `windows` ジョブをもう1つ（またはビルドマトリクスの1エントリ）追加し、`murasaki bundle --target win32-arm64` / `murasaki installer --target win32-arm64` を実行して、その `-setup-arm64.exe` を x64 のものと一緒にアップロードしてください。アーキテクチャのサフィックス付きファイル名なので、同じ `dist/` に置いても衝突しません。
 </Callout>
 
-## Apply transactionと初回起動rollback
+## 適用トランザクションと初回起動時のロールバック
 
-native launcherは、new installが動くことを期待してcurrent installを先に削除しません。
-installed appの隣にowner-only journalをatomic replaceで書き、current installを同一volumeの
-backupへrenameし、検証済みpayloadをinstallして、そのbackupをrelaunch後も保持します。
+ネイティブランチャーは、新しいインストールが正しく動作することを期待して、現在のインストールを先に削除するようなことはしません。インストール済みアプリの隣に所有者専用のジャーナルをアトミックに書き込み、現在のインストールを同一ボリューム上のバックアップへリネームしたうえで、検証済みのペイロードをインストールし、そのバックアップは再起動後も保持し続けます。
 
-new versionがhealthをACKするのは、packaged Node serverがlistenし、primary-instance
-endpointをpublishし、`createOnLaunch: true`のnative window / WebViewをすべて作成できた
-後です。dormant templateはmetadataとして検証されますが、この初回起動checkpointの対象外
-です。swap中に
-update helperが停止した場合や、new launcherの初回起動がcheckpoint前に終了した場合、
-次回起動はinstall target外へrecovery helperをcopyし、旧versionをrestoreしてrelaunch
-します。PID owner確認、exclusive journal lock、app namespace内の単一component backup名に
-より、別processやpath traversalがtransactionを奪えないようにしています。
+新しいバージョンが正常性を確認済みと判断されるのは、パッケージ化された Node サーバーがリッスンを開始し、プライマリインスタンスのエンドポイントが公開され、`createOnLaunch: true` のネイティブウィンドウ / WebView がすべて作成された後です。休止状態のテンプレートはメタデータとして検証されますが、この初回起動チェックポイントの対象には含まれません。入れ替え処理の途中でアップデートヘルパーが停止した場合や、新しいランチャーの初回起動がこのチェックポイントに到達する前に終了した場合、次回の起動時にインストール先の外へリカバリーヘルパーがコピーされ、旧バージョンを復元して再起動します。PID の所有権確認、排他的なジャーナルロック、アプリスコープの単一コンポーネントバックアップ名により、別プロセスやパストラバーサルによってこのトランザクションが乗っ取られることを防いでいます。
 
 <Callout type="warn">
-  rollback対象は初回起動checkpointまでのapplication fileです。それ以降のcrashや、NSISが
-  変更したWindows registry / shortcutはfile transactionの対象外です。recovery rename
-  自体の瞬間に電源断すると手動修復が必要な場合もあります。new version側の永続migration
-  checkpointが完了するまでは、app data migrationを旧versionと後方互換にしてください。
+  ロールバックの対象は、初回起動チェックポイントまでのアプリケーションファイルです。それ以降のクラッシュや、NSIS が変更する Windows のレジストリ / ショートカットは、このファイルトランザクションの対象外です。リカバリーのリネーム処理そのものの最中に電源が失われた場合は、手動での修復が必要になることもあります。新しいバージョン側で独自の永続的なマイグレーションチェックポイントが確立されるまでは、アプリのデータマイグレーションを旧バージョンと後方互換に保ってください。
 </Callout>
 
-## セキュリティモデル
+## セキュリティモデル [#security-model]
 
-署名検証は**必須です — それを無効化する設定オプションはありません。** すべての
-`check()` は `latest.json` と `latest.json.sig` を取得し、マニフェストの生バイト列に
-対する Ed25519 署名をアプリの公開鍵で検証し、失敗した場合はそのマニフェストを信頼する
-ことを拒否します。すべての `download()` は、(すでに検証済みの)マニフェスト内のハッ
-シュに対して、ペイロードの SHA-256 を個別に再検証します。
+署名検証は**必須です — それを無効化する設定オプションはありません。** すべての `check()` は `latest.json` と `latest.json.sig` を取得し、マニフェストの生バイト列に対する Ed25519 署名をアプリの公開鍵で検証し、失敗した場合はそのマニフェストを信頼することを拒否します。すべての `download()` は、（すでに検証済みの）マニフェスト内のハッシュに対して、ペイロードの SHA-256 を個別に再検証します。
 
-この組み合わせにより、ファイルホストだけを制御できる攻撃者(侵害された CDN、MITM され
-たミラー、セルフホストの `dist/` バケットへの悪意ある PR など)は、秘密鍵も同時に握っ
-ていない限り、偽の更新を送り込むことはできません — 秘密鍵は `.murasaki/update-key` /
-あなたの CI シークレットの外に出ることはありません。
+この組み合わせにより、ファイルホストだけを制御できる攻撃者（侵害された CDN、MITM されたミラー、セルフホストの `dist/` バケットへの悪意ある PR など）は、秘密鍵も同時に握っていない限り、偽の更新を送り込むことはできません — 秘密鍵は `.murasaki/update-key` / あなたの CI シークレットの外に出ることはありません。
 
 <Callout type="warn">
-  manifest signature に加えて `murasaki installer --target win32-x64 --sign` で
-  Authenticode を使用してください —
-  [配布](/ja/docs/building/distribution#signing--notarization)を参照してください。
-  `--sign` がなければ Windows update の真正性保証は Ed25519 だけです。
+  マニフェストの署名に加えて、`murasaki installer --target win32-x64 --sign` で Authenticode を使用してください — [配布](/ja/docs/building/distribution#signing--notarization)を参照してください。`--sign` がなければ、Windows における更新の真正性保証は Ed25519 だけになります。
 </Callout>
 
-`.murasaki/update-key` はバージョン管理の外に置いてください(`--keygen` が自動的に
-gitignore します)。`MURASAKI_UPDATE_KEY` は、他のリリース署名用シークレットと同様に
-扱ってください。
+`.murasaki/update-key` はバージョン管理の外に置いてください（`--keygen` が自動的に gitignore します）。`MURASAKI_UPDATE_KEY` は、他のリリース署名用シークレットと同様に扱ってください。
 
-セルフホストの `updater.endpoint` は `https:` である必要があります — `http:` は
-loopback host(`127.0.0.1`、`localhost`、`[::1]`)に対してのみ、ローカルテスト用に
-許可されます。これはconfigのロード時と、fetch時の両方で強制されるため、何らかの理由で
-validationを迂回したconfigであっても、平文のendpointを指すことはできません。GitHub
-ホストのマニフェストは常に `https:` で取得されるため、これは `endpoint` を設定した場合
-にのみ関係します([マニフェストのセルフホスティング](#self-hosting-the-manifest)参
-照)。
+セルフホストの `updater.endpoint` は `https:` である必要があります — `http:` はループバックホスト（`127.0.0.1`、`localhost`、`[::1]`）に対してのみ、ローカルテスト用に許可されます。これは設定の読み込み時と取得時の両方で強制されるため、何らかの理由で検証を迂回した設定であっても、平文のエンドポイントを指すことはできません。GitHub ホストのマニフェストは常に `https:` で取得されるため、これは `endpoint` を設定した場合にのみ関係します（[マニフェストのセルフホスティング](#self-hosting-the-manifest)参照）。
 
-## マニフェストの鮮度
+## マニフェストの鮮度 [#manifest-freshness]
 
-すべてのmanifestに`generatedAt`タイムスタンプ(`murasaki release --manifest`が自動生成)
-が必要で、他の何よりも先に鮮度を確認します。`updater.maxManifestAgeDays`
-(デフォルト90、最小1)より古いマニフェストは、frozenまたはreplayされた可能性がある
-ものとして拒否されます — これがないと、一度validに署名された古いマニフェストを手に
-入れた攻撃者が、それを永遠に配信し続け、既知の脆弱なバージョンにfleetを固定できてしま
-います。24時間より未来の日付が付いたマニフェストも、clock skew/tamperingの兆候として
-拒否されます(この許容範囲は固定で、設定不可です)。`generatedAt`が無いmanifestは
-fail-closedで拒否します。移行時だけ`allowLegacyManifestsWithoutGeneratedAt: true`で一時的に
-許可できますが、warningを記録しreplay保護を弱めるため、可能な限りmanifestを再生成・再署名してください。
-packaged appはchannelごとに、認証済みの最高`generatedAt`とversionをOSのapp-data
-directoryへ永続化します。後から届いたmanifestがどちらかを巻き戻す場合、署名とageが
-validでも拒否します。
+すべてのマニフェストには `generatedAt` タイムスタンプ（`murasaki release --manifest` が自動生成）が必要で、他の何よりも先にこの値で鮮度を確認します。`updater.maxManifestAgeDays`（デフォルト 90、最小 1）より古いマニフェストは、固定化されたか、あるいはリプレイされた可能性があるものとして拒否されます。この仕組みがないと、一度正しく署名された古いマニフェストを手に入れた攻撃者が、それを永遠に配信し続けることで、既知の脆弱なバージョンに配布済みのアプリ全体を固定してしまうおそれがあります。24 時間より未来の日付が付いたマニフェストも、時刻のずれや改ざんの兆候として拒否されます（この許容範囲は固定で、設定はできません）。`generatedAt` が無いマニフェストは、安全側に倒して拒否されます。移行期間中に限り `allowLegacyManifestsWithoutGeneratedAt: true` で一時的に許可できますが、警告がログに記録され、リプレイ保護も弱まるため、可能な限りマニフェストを再生成・再署名してください。パッケージ化されたアプリは、チャンネルごとに認証済みの最新の `generatedAt` とバージョンを OS のアプリデータディレクトリへ永続化します。後から届いたマニフェストがそのどちらかを巻き戻す場合、署名と経過時間が有効であっても拒否されます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -382,12 +261,9 @@ export default defineConfig({
 })
 ```
 
-## 鍵のローテーション
+## 鍵のローテーション [#key-rotation]
 
-`publicKeys` で複数の Ed25519 公開鍵を pin する(`publicKey` を含め合計最大4つ)こと
-で、既にshipされたアプリを壊さずに鍵をローテーションできます: 検証はpinされたすべての
-鍵を、成功するまで順に試すため、旧鍵と新鍵のどちらを持つアプリでも、どちらの鍵で署名さ
-れたマニフェストも信頼し続けます。
+`publicKeys` で複数の Ed25519 公開鍵をピン留めする（`publicKey` を含め合計最大 4 つ）ことで、既に出荷済みのアプリを壊さずに鍵をローテーションできます。検証はピン留めされたすべての鍵を成功するまで順に試すため、旧鍵と新鍵のどちらを持つアプリでも、いずれの鍵で署名されたマニフェストも信頼し続けます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -399,69 +275,38 @@ export default defineConfig({
 })
 ```
 
-`murasaki release --sign` は、`.murasaki/update-key.pub` が利用可能な場合、署名の隣
-に `keyId`(生の公開鍵の sha256 の最初の8バイト、hex)もマニフェストへ書き込みます。
-クライアントは `keyId` を、どのpinned keyを最初に試すかのヒントとしてのみ使用します —
-常にpinされたすべての鍵を試すフォールバックを行うため、ヒントが欠けていたり古かったり
-しても、誤って拒否されることはありません。
+`murasaki release --sign` は、`.murasaki/update-key.pub` が利用可能な場合、署名の隣に `keyId`（生の公開鍵の sha256 の最初の8バイト、hex）もマニフェストへ書き込みます。クライアントは `keyId` を、ピン留めされた鍵のうちどれを最初に試すかのヒントとしてのみ使用します — 常にピン留めされたすべての鍵を試すフォールバックを行うため、ヒントが欠けていたり古かったりしても、誤って拒否されることはありません。
 
-**ローテーションの手順**(3回のリリースにわたって):
+**ローテーションの手順**（3回のリリースにわたって）:
 
-1. **バージョン N** — `[旧鍵, 新鍵]` の両方を pin してshipします。署名はまだ旧鍵で行い
-   ます。N をインストールまたは更新したすべてのアプリは、これで両方の鍵を信頼するよう
-   になります。
-2. **バージョン N+1** — `murasaki release --keygen --force`(または別の方法で新しい鍵
-   に差し替え)を実行し、新しい鍵で署名します。N(またはそれ以降)にいるアプリは既に
-   それを信頼しています。まだ N より前のアプリは、まず N に更新するまでそれを拒否しま
-   す。
-3. **バージョン N+2** — `publicKeys`/`publicKey` から旧鍵を外し、新しい鍵だけを pin し
-   ます。この時点で、追随しているすべてのアプリは、旧鍵しか知らなかったバージョンを
-   とうに過ぎています。
+1. **バージョン N** — `[旧鍵, 新鍵]` の両方をピン留めして出荷します。署名はまだ旧鍵で行います。N をインストールまたは更新したすべてのアプリは、これで両方の鍵を信頼するようになります。
+2. **バージョン N+1** — `murasaki release --keygen --force`（または別の方法で新しい鍵に差し替え）を実行し、新しい鍵で署名します。N（またはそれ以降）にいるアプリは既にそれを信頼しています。まだ N より前のバージョンのアプリは、まず N に更新するまでその鍵を拒否します。
+3. **バージョン N+2** — `publicKeys` / `publicKey` から旧鍵を外し、新しい鍵だけをピン留めします。この時点で、追随しているすべてのアプリは、旧鍵しか知らなかったバージョンをとうに通り過ぎています。
 
-## 段階的ロールアウト
+## 段階的ロールアウト [#staged-rollout]
 
-`murasaki release --manifest --rollout <0-100>` は、任意の `rollout` 率(%)
-をマニフェストへ書き込みます。未設定(または `100`)の場合、今まで通りすべてのクライ
-アントが即座に更新を確認できます。
+`murasaki release --manifest --rollout <0-100>` は、任意の `rollout` 率（%）をマニフェストへ書き込みます。未設定（または `100`）の場合、今まで通りすべてのクライアントが即座に更新を確認できます。
 
-100 未満の場合、インストール済みの各アプリは、最初にチェックした時に永続化された
-ランダムな id(`update-client-id`。MainのOS標準`context.paths.data` directoryに保存)から
-安定したbucketを計算します。可変なrollout stateを署名済み/read-onlyのapp resourcesへは
-書き込まず、そこに置くのは1回限りの`.murasaki-apply.json` launcher handoffだけです。
-bucketは`sha256(id)` の最初のバイトを 100 で
-割った余りです。bucket が `>= rollout` のクライアントは、そのチェックで「あなた向けの
-プラットフォーム用の更新はありません」と全く同じ `not-available` を受け取ります: エラー
-にもリトライの嵐にもならず、次回の定期チェックでまた試すだけです — その頃にはpercentage
-を上げているかもしれません。これは distribution の調整用のノブであってセキュリティ境界
-ではありません — クライアントが何をinstallできるかは変えず、いつ提供されるかだけを変え
-ます。
+100 未満の場合、インストール済みの各アプリは、最初にチェックした際に永続化されたランダムな ID（`update-client-id`。Main の OS 標準 `context.paths.data` ディレクトリに保存）から安定したバケットを計算します。可変なロールアウトの状態を、署名済み・読み取り専用のアプリリソースへ書き込むことはなく、そこに置かれるのは 1 回限りの `.murasaki-apply.json` というランチャーへの引き渡しデータだけです。バケットは `sha256(id)` の最初のバイトを 100 で割った余りです。バケットが `>= rollout` のクライアントは、そのチェックで「対応プラットフォーム向けの更新はありません」の場合と全く同じ `not-available` を受け取ります。エラーにもリトライの嵐にもならず、次回の定期チェックでまた試すだけです — その頃には割合を上げているかもしれません。これは配布を調整するためのノブであり、セキュリティ境界ではありません — クライアントが何をインストールできるかは変わらず、いつ提供されるかだけが変わります。
 
-## プラットフォーム対応状況
+## プラットフォーム対応状況 [#platform-support]
 
 | プラットフォーム | 更新ペイロード | 状態 |
 | --- | --- | --- |
-| macOS(arm64） | `<productName>-darwin-arm64.app.zip` | 対応 |
-| macOS(x64） | `<productName>-darwin-x64.app.zip` | 対応 |
-| Windows(x64） | `<productName>-<version>-setup-x64.exe` | 対応 |
-| Windows(arm64） | `<productName>-<version>-setup-arm64.exe` | 対応 |
-| Linux AppImage(x64 / arm64） | `<productName>-<version>-linux-{x64,arm64}.AppImage` | 対応 |
-| Linux `.deb` / bare AppDir | — | 対象外 — `check()` は「system package manager が管理」と返します |
+| macOS (arm64) | `<productName>-darwin-arm64.app.zip` | 対応 |
+| macOS (x64) | `<productName>-darwin-x64.app.zip` | 対応 |
+| Windows (x64) | `<productName>-<version>-setup-x64.exe` | 対応 |
+| Windows (arm64) | `<productName>-<version>-setup-arm64.exe` | 対応 |
+| Linux AppImage (x64 / arm64) | `<productName>-<version>-linux-{x64,arm64}.AppImage` | 対応 |
+| Linux `.deb` / 手動展開の AppDir | — | 対象外 — `check()` は「システムのパッケージマネージャーが管理」と返します |
 
-Windows self-updateは意図的に**per-user NSIS** installと結び付けています。`updater`を設定
-すると、`murasaki installer`はNSISを必須とし、MSIをskipし、
-`installer.windows.installMode: 'perMachine'`を拒否します。MSIはbuilt-in updaterを無効にした
-場合だけ使えるsystem-managed deploymentです。Murasaki update engineではなく、MSI major
-upgradeまたは組織のsoftware management systemで更新してください。
+Windows の自己更新は、意図的に **ユーザー単位の NSIS** インストールと結び付けられています。`updater` を設定すると、`murasaki installer` は NSIS を必須とし、MSI をスキップし、`installer.windows.installMode: 'perMachine'` を拒否します。MSI は、組み込みのアップデーターを無効にした場合にのみ使える、システム管理型のデプロイ方式です。この場合は Murasaki のアップデートエンジンではなく、MSI のメジャーアップグレードか、組織のソフトウェア管理システムで更新してください。
 
-`murasaki installer` は NSIS インストーラーの名前に arch suffix を付けるため、x64 と
-arm64 のビルドが同じ `dist/` に置かれても衝突しません。`murasaki release --manifest`
-は、suffixなしの旧 `-setup.exe` という名前も引き続き認識するため、この変更より前に公開
-された資産も `win32-x64` として解決され続けます。
+`murasaki installer` は NSIS インストーラーの名前にアーキテクチャのサフィックスを付けるため、x64 と arm64 のビルドが同じ `dist/` に置かれても衝突しません。`murasaki release --manifest` は、サフィックスなしの旧 `-setup.exe` という名前も引き続き認識するため、この変更より前に公開された資産も `win32-x64` として解決され続けます。
 
-## マニフェストのセルフホスティング
+## マニフェストのセルフホスティング [#self-hosting-the-manifest]
 
-GitHub Releases を使わない場合は、`repo` の代わりに `endpoint` を、`latest.json` を
-配信する任意の URL に向けてください(`latest.json.sig` も同じ場所に置きます):
+GitHub Releases を使わない場合は、`repo` の代わりに `endpoint` を、`latest.json` を配信する任意の URL に向けてください（`latest.json.sig` も同じ場所に置きます）:
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -472,17 +317,9 @@ export default defineConfig({
 })
 ```
 
-`repo` と `endpoint` は互いに排他的です — 両方が設定されていると、`murasaki` は
-ビルド時/開発時にエラーになります。`endpoint` は `https:` である必要があります(ローカ
-ルテスト用の loopback 例外については、上記の[セキュリティモデル](#security-model)を参
-照してください)。`murasaki release --manifest --base-url
-https://updates.example.com` を実行し、`dist/latest.json` + `dist/latest.json.sig`
-+ 各ペイロードを、その URL が解決する場所にアップロードしてください。
+`repo` と `endpoint` は互いに排他的です — 両方が設定されていると、`murasaki` はビルド時/開発時にエラーになります。`endpoint` は `https:` である必要があります（ローカルテスト用のループバック例外については、上記の[セキュリティモデル](#security-model)を参照してください）。`murasaki release --manifest --base-url https://updates.example.com` を実行し、`dist/latest.json` + `dist/latest.json.sig` + 各ペイロードを、その URL が解決する場所にアップロードしてください。
 
-GitHub 上で `stable` 以外のチャンネルを使う場合、Murasaki は
-`releases/latest/download/…` の代わりに `releases/download/<channel>/latest.json`
-を参照します — そのチャンネル向けにリリースのたびに push し直す、移動するタグです
-(例: beta チャンネル向けの `beta` タグ)。
+GitHub 上で `stable` 以外のチャンネルを使う場合、Murasaki は `releases/latest/download/…` の代わりに `releases/download/<channel>/latest.json` を参照します — そのチャンネル向けにリリースのたびにプッシュし直す、移動するタグです（例: ベータチャンネル向けの `beta` タグ）。
 
 ## 次へ
 

@@ -3,10 +3,7 @@ title: トラブルシューティング
 description: 開発、パッケージング、署名、起動、更新に関する問題を切り分けます。
 ---
 
-まず、レンダラー、Node Main、ネイティブホストのどこで失敗しているかを切り分けます。
-`murasaki dev` で再現を確認した後、実際の配布物をビルドして起動してください。Vite の
-ビルドが成功しても、パッケージング、コード署名、実行時に見つけるリソース、別のマシンの
-信頼設定まで正しく動作するとは限りません。
+まず、レンダラー、Node Main、ネイティブホストのどこで失敗しているかを切り分けます。`murasaki dev` で再現を確認した後、実際の配布物をビルドして起動してください。Vite のビルドが成功しても、パッケージング、コード署名、実行時に見つけるリソース、別のマシンの信頼設定まで正しく動作するとは限りません。
 
 ## 開発ウィンドウが開かない
 
@@ -16,27 +13,21 @@ description: 開発、パッケージング、署名、起動、更新に関す�
 pnpm exec murasaki dev
 ```
 
-Murasaki は `config.devPort`（既定 `5178`）を確認し、使用中なら次のポートへ進みます。
-それでも待ち続ける、または終了する場合は、次を確認してください。
+Murasaki は `config.devPort`（デフォルト `5178`）を確認し、使用中なら次のポートへ進みます。それでも待ち続ける、または終了する場合は、次を確認してください。
 
 1. `node --version` で Node.js 22.12 以上であることを確認する
-2. `murasaki.config.ts` が `appId` と `productName` を含むオブジェクトを export しているか確認する
+2. `murasaki.config.ts` が `appId` と `productName` を含むオブジェクトをエクスポートしているか確認する
 3. `src/main.ts` の名前を一時的に変えるか、`main: false` を指定して Node Main の起動処理を切り分ける
 4. 選択されたポートを使用している古い開発プロセスを終了する
 5. 現在の OS とアーキテクチャ向けに依存パッケージを入れ直す
 
-`main.ready()` が完了するまで、レンダラーは意図的に開きません。ネットワーク初期化には
-タイムアウトを設け、起動時に確保する各リソースの前後でログを記録してください。
+`main.ready()` が完了するまで、レンダラーは意図的に開きません。ネットワーク初期化にはタイムアウトを設け、起動時に確保する各リソースの前後でログを記録してください。
 
 ## HMR は動くが Main の変更で再起動しない
 
-設定した Node Main の**エントリーファイル**を変更すると、ライフサイクルが再読み込みされます。
-リソースの所有処理をエントリーへ集め、`shutdown()` は複数回呼ばれても安全な実装にします。
-深く import したヘルパーだけを変更して再起動が必要な場合は、エントリーファイルも保存して
-ください。モジュール直下で作成したソケット、タイマー、子プロセスは、ライフサイクル内で
-作成・終了しないと残る場合があります。
+設定した Node Main の**エントリーファイル**を変更すると、ライフサイクルが再読み込みされます。リソースの所有処理をエントリーへ集め、`shutdown()` は複数回呼ばれても安全な実装にしてください。深くインポートしたヘルパーだけを変更して再起動が必要な場合は、エントリーファイルも保存してください。モジュール直下で作成したソケット、タイマー、子プロセスは、ライフサイクル内で作成・終了しないと残ってしまう場合があります。
 
-## dev では動くが bundle 後に動かない
+## 開発時は動作するがバンドル後に動作しない
 
 インストーラーを作る前に、アプリバンドルをテストします。
 
@@ -48,19 +39,17 @@ open "dist/bundle/My App.app"                 # macOS
 
 主な原因:
 
-- Node dependency が bundler の検出できない file を動的 load する
-- native addon に target architecture 用 binary がない
-- `MainContext.paths.data` ではなく executable の隣に書き込む
-- `process.cwd()` を project root と仮定する
-- dev にだけ secret / `.env` があり installed app に provision されていない
+- Node の依存パッケージが、バンドラーが検出できないファイルを動的に読み込んでいる
+- ネイティブアドオンに対象アーキテクチャ向けのバイナリが含まれていない
+- コードが `MainContext.paths.data` ではなく実行ファイルの隣に書き込んでいる
+- コードが `process.cwd()` をプロジェクトルートだと仮定している
+- 開発時にはあったシークレットや `.env` ファイルが、インストール後のアプリには配置されていない
 
-リソースのパスを明示し、クリーンな仮想マシンまたはユーザーアカウントでテストしてください。
-現在の Node.js 依存パッケージの同梱処理は、あらゆるネイティブアドオンや実行時リソースの
-配置において Electron Forge や Tauri のバンドラーと同等というわけではありません。
+リソースのパスを明示し、クリーンな仮想マシンまたはユーザーアカウントでテストしてください。現在の Node.js 依存パッケージの同梱処理は、あらゆるネイティブアドオンや実行時リソースの配置において Electron Forge や Tauri のバンドラーと同等というわけではありません。
 
 ## macOS で「壊れている」「検証できない」と表示される
 
-まず artifact を分類します。
+まず、成果物を分類します。
 
 ```bash
 codesign -dvvv --entitlements :- "dist/bundle/My App.app"
@@ -69,90 +58,70 @@ spctl -a -vv "dist/bundle/My App.app"
 xattr -l "dist/bundle/My App.app"
 ```
 
-- `--sign` なしの `murasaki bundle` は **ad-hoc signature** を作る。ローカル bundle
-  integrity は確認するが、信頼された developer identity にはならない
-- `murasaki bundle --sign` は Developer ID + hardened runtime
-- `murasaki installer --sign --notarize` は DMG の submit / staple も実行
+- `--sign` を指定しない `murasaki bundle` は **ad-hoc 署名** を作成します。ローカルでのバンドルの整合性は確認できますが、信頼できる開発者であることは証明されません
+- `murasaki bundle --sign` は Developer ID と hardened runtime を使用します
+- `murasaki installer --sign --notarize` は、さらに Gatekeeper 向けに DMG を提出してステープルまで行います
 
-自分の開発 / test artifact に限り quarantine attribute を外して再試行できます。
+自分の開発用 / テスト用の成果物に限り、隔離属性を外して再試行できます。
 
 ```bash
 xattr -dr com.apple.quarantine "dist/bundle/My App.app"
 ```
 
-これを public installation flow として案内しないでください。警告なしの macOS 公開
-配布には Developer ID と notarization が必要で、ad-hoc signing では代替できません。
+これを一般公開のインストール手順として案内しないでください。警告なしで macOS に一般公開するには Developer ID と公証が必要であり、ad-hoc 署名では代替できません。
 
-## macOS の architecture が違う
+## macOS でアーキテクチャが一致しない
 
-launcher と同梱 Node を確認します。
+ランチャーと同梱された Node を確認します。
 
 ```bash
 file "dist/bundle/My App.app/Contents/MacOS/My App"
 file "dist/bundle/My App.app/Contents/Resources/node/bin/node"
 ```
 
-Apple Silicon は `--arch arm64`、Intel は `--arch x64` で rebuild します。アプリ内の
-すべての native addon も target と一致する必要があります。cross-arch packaging は
-third-party native module を変換しません。
+Apple Silicon 向けには `--arch arm64`、Intel 向けには `--arch x64` でリビルドします。アプリ内のすべてのネイティブアドオンも、対象のアーキテクチャに合わせる必要があります。クロスアーキテクチャでのパッケージングは、サードパーティ製のネイティブモジュールを自動的に変換するものではありません。
 
-## Windows installer が生成されない
+## Windows のインストーラーが生成されない
 
-bundle が成功すれば `murasaki bundle --target win32-x64` は portable directory / `.zip`
-を生成します。installer format には外部 tool が必要です。
+バンドルが成功すれば、`murasaki bundle --target win32-x64` は常にポータブルディレクトリと `.zip` を生成します。インストーラー形式の生成には外部ツールが必要です。
 
-- `.exe`: NSIS (`makensis`)。macOS / Windows から compile 可能
-- `.msi`: WiX v4。Windows 上で実行
+- `.exe`: NSIS（`makensis`）。macOS / Windows でコンパイル可能です
+- `.msi`: WiX v4。Windows 上で実行します
 
-どちらも `PATH` にない場合、installer は未生成と表示されます。portable zip を使うか
-必要 tool を install してください。`--sign` は Windows SDK SignTool も必要で、Windows
-上で実行します。失敗する場合は PFX / store / Artifact Signing source が1つだけ選択され、
-timestamp service へ接続でき、`signtool verify /pa /v /tw <artifact>` が成功するか確認します。
+どちらも `PATH` にない場合、`murasaki installer` はインストーラーが生成されなかったと報告します。ポータブル ZIP を使うか、必要なツールをインストールしてください。`--sign` には Windows SDK の SignTool も必要で、Windows 上で実行する必要があります。署名に失敗する場合は、PFX / store / Artifact Signing のいずれか1つの署名ソースだけが選択されていること、タイムスタンプサービスに接続できること、`signtool verify /pa /v /tw <artifact>` が成功することを確認してください。
 
-## Shutdown が止まる / 途中で切られる
+## シャットダウンが止まる、または途中で打ち切られる
 
-`shutdown()` の既定期限は 10 秒です。新規処理の受付を止め、`context.signal` で pending
-request を abort し、queue を待つ前に server を close します。計測済み要件がある場合
-だけ上限を増やします。
+`shutdown()` のデフォルトのタイムアウトは 10 秒です。新規リクエストの受付を停止し、`context.signal` で保留中のリクエストを中断してから、キューの完了を待つ前にサーバーをクローズします。計測に基づく明確な要件がある場合のみ、上限を増やしてください。
 
 ```ts
 main: { shutdownTimeoutMs: 20_000 }
 ```
 
-shutdown 内で無制限 retry をしないでください。強制終了は `beforeQuit()` のキャンセルを
-無視します。
+`shutdown()` の中で無制限にリトライしないでください。強制終了する場合、`beforeQuit()` によるキャンセルは無視されます。
 
 ## Backend call が 403
 
-`/api/*`と`/__murasaki/*`はapp-local protected endpointです。通常のbrowser tab、curl、
-external clientはnative windowのHMAC-derived identityを持たず、`403`が正しい挙動です。
-API routeは、そのexact resourceを`backendCapabilities`で許可したapp rendererから呼びます。
-public/local integration serverが必要ならNode
-Main で別 listener を作り、独自に保護してください。
+`/api/*` と `/__murasaki/*` は、アプリ内部に閉じた保護対象のエンドポイントです。通常のブラウザタブや curl コマンド、外部クライアントはネイティブウィンドウが持つ HMAC 由来の識別情報を持たないため、`403` が返るのは正しい挙動です。API Routes は、`backendCapabilities` でその正確なリソースへのアクセスを許可されたアプリのレンダラーから呼び出してください。公開用またはローカル用の連携サーバーが必要な場合は、Node Main 内に別のリスナーを作成し、独自に保護してください。
 
-app renderer自体が`403`になる場合、`backendCapabilities`とrelative URLを確認し、nativeの
-document-start scriptが提供する`fetch` / XHR / EventSource wrapperを置換しないでください。
-`Host` / `Origin`もapplication originのままである必要があります。
+アプリのレンダラー自体が `403` になる場合は、`backendCapabilities` を確認し、相対 URL を使用し、ネイティブの document-start スクリプトが提供する `fetch` / XHR / EventSource のラッパーを置き換えないようにしてください。`Host` ヘッダーと `Origin` ヘッダーが、アプリケーションのオリジンのままであることも確認してください。
 
-## Update check が失敗する
+## アップデートの確認が失敗する
 
 次の順で確認します。
 
-1. `latest.json` と `latest.json.sig` が隣接 URL にある
-2. embedded `publicKey` と CI の private key が対になっている
-3. manifest signature が upload 済み JSON の exact bytes を対象にしている
-4. 現在の `<platform>-<arch>` asset key がある
-5. payload URL に到達でき、SHA-256 が一致する
-6. download / install を dev ではなく bundle から実行している
+1. `latest.json` と `latest.json.sig` が隣接する URL に置かれているか
+2. 埋め込まれた `publicKey` が CI で使われている秘密鍵と対になっているか
+3. マニフェストの署名が、アップロード済み JSON の正確なバイト列を対象にしているか
+4. 現在の `<platform>-<arch>` に対応するアセットキーが存在するか
+5. ペイロード URL に到達でき、SHA-256 が一致するか
+6. ダウンロードとインストールを、開発時ではなくバンドルから実行しているか
 
-診断のために signature verification を無効化しないでください。代わりに test keypair と
-manifest を作ります。[自動更新](/ja/docs/guides/auto-update)も参照してください。
+リリースを診断するために署名検証を無効化しないでください。代わりに、テスト用の鍵ペアとマニフェストを新しく作成してください。[自動更新](/ja/docs/guides/auto-update)も参照してください。
 
 ## 解決しない場合
 
-Murasaki version、OS version、architecture、exact command、最初の error、minimal repro を
-添えてください。通常の bug は public GitHub issue、脆弱性は [private Security
-Advisory](https://github.com/murasakijs/murasaki/security/advisories/new)を使います。
+Murasaki のバージョン、OS のバージョン、アーキテクチャ、実行した正確なコマンド、最初に出たエラー、そして最小限の再現手順を添えてください。通常のバグは公開の GitHub Issue、脆弱性は[非公開の Security Advisory](https://github.com/murasakijs/murasaki/security/advisories/new)を使用してください。
 
 ## 次へ
 

@@ -3,8 +3,7 @@ title: API Routes
 description: src/api 配下の、Next.js 風のファイルベース HTTP エンドポイント。
 ---
 
-`src/api/<path>/route.ts` ファイルは HTTP メソッドごとに1つの関数をエクスポートし、
-`/api/<path>` として提供されます:
+`src/api/<path>/route.ts` ファイルは HTTP メソッドごとに1つの関数をエクスポートし、`/api/<path>` として提供されます:
 
 ```ts title="src/api/hello/route.ts"
 // GET /api/hello
@@ -20,14 +19,9 @@ export const POST: RouteHandler = async (request) => {
 }
 ```
 
-`RouteHandler` は Web の `Request` と、`params` を含む `context` を受け取り、Web の
-`Response` を返します — `Response.json(...)`、`new Response(...)`、ステータスコード、
-ヘッダーなど、すべて標準的なものです。
+`RouteHandler` は Web の `Request` と、`params` を含む `context` を受け取り、Web の `Response` を返します — `Response.json(...)`、`new Response(...)`、ステータスコード、ヘッダーなど、すべて標準的なものです。
 
-`GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD`、`OPTIONS` のうち、ルートに必要なもの
-をいくつでもエクスポートできます。モジュールがエクスポートしていないメソッドへのリクエ
-ストは `405` になり、`/api/` 配下でどのルートにもマッチしないリクエストは、アプリの
-HTML にフォールバックするのではなく `404` になります。
+`GET`、`POST`、`PUT`、`PATCH`、`DELETE`、`HEAD`、`OPTIONS` のうち、ルートに必要なものをいくつでもエクスポートできます。モジュールがエクスポートしていないメソッドへのリクエストは `405` になり、`/api/` 配下でどのルートにもマッチしないリクエストは、アプリの HTML にフォールバックするのではなく `404` になります。
 
 ## 動的セグメント
 
@@ -42,9 +36,7 @@ export const GET: RouteHandler = async (_request, { params }) => {
 }
 ```
 
-キャッチオール(`[...path]`)とオプショナルキャッチオール(`[[...path]]`)フォルダにも
-対応しています。値はデコード済みのパスセグメント配列になり、省略されたオプショナル
-キャッチオールは `undefined` です:
+キャッチオール(`[...path]`)とオプショナルキャッチオール(`[[...path]]`)フォルダにも対応しています。値はデコード済みのパスセグメント配列になり、省略されたオプショナルキャッチオールは `undefined` です:
 
 ```ts title="src/api/files/[[...path]]/route.ts"
 import type { RouteHandler } from 'murasaki'
@@ -61,21 +53,14 @@ const res = await fetch('/api/hello')
 const data = await res.json()
 ```
 
-ハンドラは開発時(Vite ミドルウェア)・本番時(バンドルされた Node サーバー)のいずれ
-でもサーバー上で実行されるため、ファイルシステム、データベース、シークレットなどにアク
-セスできます。
+ハンドラは開発時（Vite ミドルウェア）・本番時（バンドルされた Node サーバー）のいずれでもサーバー上で実行されるため、ファイルシステムやデータベース、シークレットなどにアクセスできます。
 
 ## API ルート vs. サーバーアクション
 
-どちらもサーバー上で実行されます — 形状で使い分けます:
+どちらもサーバー上で実行されます — 使い分けの基準は形です:
 
-- **APIルート**はrendererとNode Main向けのapp-local HTTP endpointです。開発時とpackage版の
-  両方で、呼び出し元native windowのderived identityと一致する
-  `api:METHOD:/path` `backendCapabilities` grantが必要なため、public webhook endpointでは
-  ありません。
-- **サーバーアクション**([ガイド](/docs/guides/server-actions))は、React 19 のフォー
-  ム / `useAction` フローに組み込まれた、型付きの RPC です — URL も `fetch` の定型コー
-  ドも不要です。
+- **API ルート**は、レンダラーと Node Main 向けのアプリ内 HTTP エンドポイントです。開発時・パッケージ済みアプリのいずれでも、呼び出し元のネイティブウィンドウから導出された識別情報と一致する `api:METHOD:/path` の `backendCapabilities` 許可が必要なため、一般公開の Webhook エンドポイントとしては使えません。
+- **サーバーアクション**（[ガイド](/docs/guides/server-actions)）は、React 19 のフォーム / `useAction` フローに組み込まれた、型付きの RPC です — URL も `fetch` の定型コードも不要です。
 
 両者は同じアプリの中で共存できます。
 

@@ -3,9 +3,7 @@ title: ウィンドウと権限
 description: 複数のネイティブウィンドウを宣言し、各レンダラーへ必要最小限のコマンドだけを許可する。
 ---
 
-Murasaki のウィンドウは `murasaki.config.ts` で宣言します。既存の `window` が primary
-window で、label は常に `main` です。追加ウィンドウは安定したlabelをkeyにして
-`windows` へ記述します。
+Murasaki のウィンドウは `murasaki.config.ts` で宣言します。既存の `window` がプライマリウィンドウで、ラベルは常に `main` です。追加のウィンドウは、安定したラベルをキーとして `windows` に記述します。
 
 ```ts title="murasaki.config.ts"
 import { defineConfig } from 'murasaki'
@@ -45,31 +43,17 @@ export default defineConfig({
 })
 ```
 
-宣言windowの`createOnLaunch`は既定`true`です。起動時に作成するsecondaryは
-`visible: true`を指定しない限り非表示で開始します。`createOnLaunch: false`にすると、
-信頼されたNode Mainが`windows.create(label)`を呼ぶまで宣言をdormantにできます。
-secondaryで`capabilities`を省略するとdeny-allであり、top-level listを継承しません。
-primaryは常に起動時に作成され、
-`window.capabilities ?? capabilities ?? []` の順に権限を解決します。
+宣言されたウィンドウの `createOnLaunch` はデフォルトで `true` です。起動時に作成されるセカンダリウィンドウは、`visible: true` を指定しない限り非表示で開始します。`createOnLaunch: false` にすると、信頼された Node Main が `windows.create(label)` を呼ぶまで、その宣言を休止状態のままにできます。セカンダリウィンドウで `capabilities` を省略すると、すべての権限が拒否された状態になり、トップレベルのリストは継承されません。プライマリウィンドウは常に起動時に作成され、`window.capabilities ?? capabilities ?? []` の順に権限を解決します。
 
-非表示secondaryは、通常 `main` など表示中のrendererから開いてください。WebKitや
-WebView2は非表示のままrendererを実行する場合も、表示後までJavaScriptを遅延する場合も
-あります。どちらのtimingにも依存せず、非表示renderer自身が `windows.open()` で自分を
-開く設計にはしないでください。native visibilityはOS event loopで反映されるため、
-`windows.list()` でopen後の状態を確認する必要がある場合は、最初のreadがcompositorと
-同期していると仮定せず、`visible` が `true` になるまで待ってください。
+非表示のセカンダリウィンドウは、通常 `main` のような表示中のレンダラーから開いてください。WebKit や WebView2 は、非表示のままレンダラーを実行する場合もあれば、表示されるまで JavaScript の実行を遅延させる場合もあります。どちらのタイミングにも依存せず、非表示のレンダラー自身に `windows.open()` で自分自身を開かせる設計にはしないでください。ネイティブの可視性は OS のイベントループを通じて反映されるため、`windows.list()` でオープン後の状態を確認する必要がある場合は、最初の読み取りがコンポジターと同期していると仮定せず、`visible` が `true` になるまで待ってください。
 
-Windows backendの `console` optionはapplication backend console全体を制御するため、
-primary専用です。secondary declarationへ `console` を書くと設定解決時に拒否されます。
+Windows バックエンドの `console` オプションは、アプリケーションバックエンドコンソール全体を制御するため、プライマリウィンドウ専用です。セカンダリウィンドウの宣言に `console` を書くと、設定解決時に拒否されます。
 
-label は1〜64文字で、先頭は英数字、残りは英数字・`.`・`_`・`-`だけを利用できます。
-`main` は予約済みです。`route` は `/` で始まるsame-origin pathだけを受け付け、完全URL、
-protocol-relative URL、backslashは設定解決時に拒否されます。
+ラベルは 1〜64 文字で、先頭は英数字、残りは英数字・`.`・`_`・`-` だけを利用できます。`main` は予約済みです。`route` は `/` で始まる同一オリジンのパスだけを受け付け、完全な URL、プロトコル相対 URL、バックスラッシュは設定解決時に拒否されます。
 
 ## ウィンドウを識別・操作する
 
-レンダラー自身のwindowには `appWindow`、labelで指定する宣言済みwindowには `windows`
-を使います。
+レンダラー自身のウィンドウには `appWindow` を、ラベルで指定する宣言済みのウィンドウには `windows` を使います。
 
 ```tsx
 'use client'
@@ -100,30 +84,22 @@ interface WindowInfo {
 }
 ```
 
-| API | Capability | 動作 |
+| API | ケイパビリティ | 動作 |
 | --- | --- | --- |
-| `appWindow.getLabel()` | `window:getLabel` | 現在のrendererのlabelを返す。 |
-| `windows.open(label)` | `window:open` | 生存中の宣言windowを表示・復元・focusする。 |
-| `windows.list()` | `window:list` | 生存中の全宣言windowのstateを返す。 |
-| `windows.show(label)` / `hide(label)` / `focus(label)` / `close(label)` | `window:manage` | 別の宣言済みwindowを操作する。 |
+| `appWindow.getLabel()` | `window:getLabel` | 現在のレンダラーのラベルを返す。 |
+| `windows.open(label)` | `window:open` | 生存中の宣言済みウィンドウを表示・復元してフォーカスする。 |
+| `windows.list()` | `window:list` | 生存中の宣言済みウィンドウすべての状態を返す。 |
+| `windows.show(label)` / `hide(label)` / `focus(label)` / `close(label)` | `window:manage` | 別の宣言済みウィンドウを操作する。 |
 
-設定にないlabelは利用できません。任意のrouteやruntime windowを動的生成するAPIでは
-ありません。`windows.open(label)`はshow-onlyであり、dormantまたは破棄済みの宣言では
-rejectします。先にNode Mainのwindow managerでその宣言を作成してください。
+設定にないラベルは利用できません。任意のルートや実行時のウィンドウを動的に生成する API ではありません。`windows.open(label)` は表示のみを行う API であり、休止状態または破棄済みの宣言に対しては拒否されます。先に Node Main のウィンドウマネージャーでその宣言を作成してください。
 
 <Callout type="warn">
-  OSのclose controlと `appWindow.close()` はsecondaryをhideするため、
-  `windows.open(label)` で同じ宣言済みwindowを再表示できます。一方、
-  `windows.close(label)` はsecondary targetを明示的に破棄します。破棄したsecondaryは
-  信頼されたNode Mainからだけ再生成できます。`main` のcloseは引き続きapp quit requestです。
-  [Node Main](/ja/docs/guides/node-main#node-mainから宣言windowを操作する)も参照してください。
+  OS の close コントロールと `appWindow.close()` はセカンダリウィンドウを非表示にするため、`windows.open(label)` で同じ宣言済みウィンドウを再表示できます。一方、`windows.close(label)` はセカンダリウィンドウのターゲットを明示的に破棄します。破棄したセカンダリウィンドウは、信頼された Node Main からだけ再生成できます。`main` のクローズは、引き続きアプリの終了リクエストとして扱われます。[Node Main](/ja/docs/guides/node-main#node-mainから宣言windowを操作する)も参照してください。
 </Callout>
 
 ## フレームレスウィンドウとカスタムタイトルバー
 
-`decorations: false`を指定すると、全platformでOS window chromeを取り除けます。
-macOSの`titleBarStyle: 'hidden'`はtraffic light buttonsを残したままtitle text
-を隠し、WebViewをその下まで広げます。
+`decorations: false` を指定すると、すべてのプラットフォームで OS のウィンドウ枠を取り除けます。macOS の `titleBarStyle: 'hidden'` は、信号機ボタンを残したままタイトルテキストだけを隠し、WebView をその下まで広げます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -137,8 +113,7 @@ export default defineConfig({
 })
 ```
 
-native titlebarがないと、OS側にwindowをdragするための領域がなくなります。
-`useWindowDrag()`でregionをdrag可能にしてください。
+ネイティブのタイトルバーがないと、OS 側にウィンドウをドラッグするための領域がなくなります。`useWindowDrag()` で、任意の領域をドラッグ可能にしてください。
 
 ```tsx
 'use client'
@@ -159,28 +134,20 @@ function Titlebar() {
 }
 ```
 
-`useWindowDrag()`はprimary buttonのpointerdownでnative dragを開始します。
-interactive target(`button`、`input`、`a`、`select`、`textarea`、または
-`data-murasaki-no-drag`が付いた要素)はskipするため、draggable region内の
-titlebar controlも問題なく動作します。native renderer外や、OSがdragを拒否
-した場合(例: mouse-down中でない場合)は何もしません。
+`useWindowDrag()` は、プライマリボタンの `pointerdown` でネイティブドラッグを開始します。インタラクティブなターゲット（`button`、`input`、`a`、`select`、`textarea`、または `data-murasaki-no-drag` が付いた要素）はスキップするため、ドラッグ可能な領域の内側にあるタイトルバーのコントロールも問題なく動作します。ネイティブレンダラーの外や、OS がドラッグを拒否した場合（例: マウスボタンが押されていない場合）は何もしません。
 
-## Fullscreen、max size、monitors
+## フルスクリーン、最大サイズ、モニター
 
-| API | Capability | 動作 |
+| API | ケイパビリティ | 動作 |
 | --- | --- | --- |
-| `appWindow.startDragging()` | `window:manage` | OS window dragを開始する。上記`useWindowDrag()`を参照。 |
-| `appWindow.setFullscreen(bool)` / `isFullscreen()` | `window:manage` | windowの現在のmonitorでborderless fullscreenを開始・終了する。専用video modeのexclusive fullscreenは未対応。 |
-| `appWindow.setMaxSize({ width?, height? })` | `window:manage` | maximum inner sizeを設定する。両方省略または`null`でclear。片方だけの指定はrejectされ、両方またはどちらも指定しない必要がある。 |
-| `appWindow.getMonitors()` | `window:manage` | windowから見える全OS displayを**physical pixels**で返す。 |
+| `appWindow.startDragging()` | `window:manage` | OS のウィンドウドラッグを開始する。上記の `useWindowDrag()` を参照。 |
+| `appWindow.setFullscreen(bool)` / `isFullscreen()` | `window:manage` | ウィンドウの現在のモニターでボーダーレスフルスクリーンを開始・終了する。専用ビデオモードによる排他的フルスクリーンには未対応。 |
+| `appWindow.setMaxSize({ width?, height? })` | `window:manage` | 最大の内側サイズを設定する。両方省略、または `null` を指定するとクリアされる。片方だけの指定は拒否され、両方指定するか、どちらも指定しない必要がある。 |
+| `appWindow.getMonitors()` | `window:manage` | ウィンドウから見えるすべての OS ディスプレイを**物理ピクセル**で返す。 |
 
-これらは呼び出したrenderer自身のwindowを操作するため、`window:manage`はgrant
-の有無だけで判定します。上記の`windows.show/hide/focus/close(label)`と異なり、
-scoped grantが適用対象とする別windowの`label`引数がありません。
+これらは呼び出したレンダラー自身のウィンドウを操作するため、`window:manage` は許可の有無だけで判定します。上記の `windows.show/hide/focus/close(label)` と異なり、スコープ付きの許可が適用対象とする別ウィンドウの `label` 引数はありません。
 
-`window.fullscreen`(`windows.<label>`配下も同様)は起動時のinitial stateを
-設定します。`window.maxWidth`/`maxHeight`はinitialなmaximum sizeを設定し、
-両方指定した場合は`minWidth`/`minHeight`以上である必要があります。
+`window.fullscreen`（`windows.<label>` 配下も同様）は、起動時の初期状態を設定します。`window.maxWidth` / `maxHeight` は初期の最大サイズを設定し、両方指定した場合は `minWidth` / `minHeight` 以上である必要があります。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -190,7 +157,7 @@ export default defineConfig({
 })
 ```
 
-`getMonitors()`は`{ monitors: WindowMonitorInfo[] }`をresolveします。
+`getMonitors()` は `{ monitors: WindowMonitorInfo[] }` を resolve します。
 
 ```ts
 interface WindowMonitorInfo {
@@ -205,26 +172,17 @@ interface WindowMonitorInfo {
 }
 ```
 
-## Primary closeとアプリライフサイクル
+## プライマリウィンドウのクローズとアプリのライフサイクル
 
-secondaryでOSのclose controlまたは `appWindow.close()` を使うと、そのwindowだけが
-hideされます。`main` のcloseはアプリのquit requestであり、`beforeQuit()` が実行され、
-そこでcancel可能です。その後、上限付き `shutdown()` を経てnative hostが終了します。
-window別close hookはまだありません。
+セカンダリウィンドウで OS のクローズコントロールまたは `appWindow.close()` を使うと、そのウィンドウだけが非表示になります。`main` のクローズはアプリの終了リクエストであり、`beforeQuit()` が実行され、その中でキャンセルできます。その後、時間上限付きの `shutdown()` を経て、ネイティブホストが終了します。ウィンドウ別のクローズフックは、今のところ用意されていません。
 
-## Session分離
+## セッション分離
 
-WebContext / profileはwindow labelごとに分離するため、起動時作成・動的作成したlabel間で
-cookie、Web Storage、Service Worker、SharedWorkerを共有しません。同じlabelをprocess内で
-再作成した場合はcontextを再利用します。Windowsではpersistent labelごとのprofileをapp専用の
-WebView2 data directory以下へ保存します。`webview.incognito: true`では全labelが
-non-persistent contextを使用します。
+WebContext / プロファイルはウィンドウのラベルごとに分離されるため、起動時に作成されたラベルと動的に作成されたラベルの間で、cookie、Web Storage、Service Worker、SharedWorker が共有されることはありません。同じラベルをプロセス内で再作成した場合は、コンテキストが再利用されます。Windows では、永続的なラベルごとのプロファイルを、アプリ専用の WebView2 データディレクトリ以下に保存します。`webview.incognito: true` では、すべてのラベルが非永続的なコンテキストを使用します。
 
-## Window別の最小権限
+## ウィンドウ別の最小権限
 
-権限はcallを行うrendererごとに評価されます。React stateだけを編集するsettingsには
-`capabilities: []`、clipboardを読むpreviewには `clipboard:readText` だけを付与できます。
-window管理権限は通常、信頼するprimary rendererだけに置きます。
+権限は呼び出しを行うレンダラーごとに評価されます。React の状態だけを編集する設定用のウィンドウには `capabilities: []` を、クリップボードを読み取るプレビュー用のウィンドウには `clipboard:readText` だけを付与できます。ウィンドウ管理権限は、通常、信頼するプライマリレンダラーだけに置きます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -246,30 +204,14 @@ export default defineConfig({
 })
 ```
 
-window別capability listは、侵害されたrendererが呼べるnative command名を制限します。
-structured `window:open` / `window:manage` grantでは完全一致するtarget labelも限定でき、
-`deny`は`allow`より優先します。dialog defaultなど他のcommand argumentはまだscope
-できません。権限を持つrendererにremote contentや
-実行可能なuser-authored contentを読み込まず、広い操作のapp-level intentも検証して
-ください。
+ウィンドウ別のケイパビリティ一覧は、侵害されたレンダラーが呼び出せるネイティブコマンド名を制限します。構造化された `window:open` / `window:manage` の許可では、完全一致するターゲットラベルも限定でき、`deny` は `allow` より優先されます。ダイアログのデフォルト値など、他のコマンド引数はまだスコープできません。権限を持つレンダラーにリモートコンテンツや実行可能なユーザー作成コンテンツを読み込ませず、広範な操作についてはアプリケーションレベルの意図も検証してください。
 
-native allowlistとbackend allowlistは別の境界を保護します。各native windowはlabel-bound
-HMAC identityを受け取り、`backendCapabilities`がServer Action、`'use main'`、API route、
-updater route、event、diagnosticsを制限します。secondary windowは既定でbackend grantを
-持ちません。routeは同じHTTP originを使いますが、browser profileはwindowごとに分離される
-ため、あるwindowのService Worker、SharedWorker、cookie、storageが別windowのbackend
-authorityを引き継ぐことはありません。primaryは従来のapplication profileを維持します。
-secondary profileはWindows/LinuxとmacOS 14+で永続化され、custom persistent WebKit storeを
-使えないmacOS 11–13ではwindow別のnon-persistent storeへfail closedします。ただし完全な
-renderer sandboxではなく、XSSは自身のwindowにgrantされたresourceをすべて利用できます。
-handler内でもuser/session/object単位の認証・認可を行い、untrusted executable contentを
-application windowへ読み込まないでください。複数windowで共有する永続stateはbrowser
-storageではなくMain/API handlerを経由させてください。
+ネイティブの許可リストとバックエンドの許可リストは、それぞれ別の境界を保護します。各ネイティブウィンドウはラベルに紐づく HMAC アイデンティティを受け取り、`backendCapabilities` が Server Actions、`'use main'`、API Routes、アップデーターのルート、イベント、診断を制限します。セカンダリウィンドウは、デフォルトでバックエンドの許可を持ちません。ルートは同じ HTTP オリジンを使いますが、ブラウザプロファイルはウィンドウごとに分離されるため、あるウィンドウの Service Worker、SharedWorker、cookie、ストレージが、別のウィンドウのバックエンド権限を引き継ぐことはありません。プライマリウィンドウは、従来のアプリケーションプロファイルを維持します。セカンダリウィンドウのプロファイルは Windows / Linux と macOS 14+ で永続化され、カスタムの永続的な WebKit ストアを使えない macOS 11–13 では、ウィンドウ別の非永続的なストアへ安全側に倒れます。ただし、これは完全なレンダラーサンドボックスではなく、XSS は自身のウィンドウに許可されたリソースをすべて利用できます。ハンドラー内でもユーザー / セッション / オブジェクト単位の認証・認可を行い、信頼できない実行可能なコンテンツをアプリケーションウィンドウへ読み込まないでください。複数のウィンドウで共有する永続的な状態は、ブラウザストレージではなく Main / API ハンドラーを経由させてください。
 
 ## 次へ
 
 <Cards>
-  <Card title="ネイティブAPI" href="/ja/docs/guides/native-apis" description="renderer向けdialog、shell、tray、window操作。" />
+  <Card title="ネイティブAPI" href="/ja/docs/guides/native-apis" description="レンダラー向けの `dialog`、`shell`、`tray`、ウィンドウ操作 API。" />
   <Card title="セキュリティ" href="/ja/docs/building/security" description="信頼境界と最小権限。" />
-  <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" description="primary close、Main、shutdown順序。" />
+  <Card title="プロセスモデル" href="/ja/docs/core-concepts/process-model" description="プライマリウィンドウのクローズ、Main、シャットダウンの順序。" />
 </Cards>

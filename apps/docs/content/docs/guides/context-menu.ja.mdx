@@ -3,24 +3,17 @@ title: コンテキストメニュー
 description: useContextMenu で本物の OS コンテキストメニューを宣言する — HTML ポップアップは一切関与しません。
 ---
 
-Murasaki のコンテキストメニューは、マークアップではなくフックで宣言するため、あなたの
-state のすぐ隣で使えます — その `action` は `useState` のセッターをクロージャできます。
-HTML は一切レンダーされません。項目は Rust 側に投げられ、本物の OS メニュー(macOS で
-は `NSMenu`、Windows では `HMENU`)がポップアップします。宣言する各rendererへ
-`menu:context` を付与します。
+Murasaki のコンテキストメニューはマークアップではなくフックとして宣言するため、状態のすぐそばに書けます — `action` の中で `useState` のセッターをクロージャとして扱えます。HTML は一切レンダーされません。項目は Rust 側に投げられ、本物の OS メニュー（macOS では `NSMenu`、Windows では `HMENU`）がポップアップします。宣言する各レンダラーに `menu:context` を付与します。
 
 ```ts title="murasaki.config.ts"
 window: { capabilities: ['menu:context', 'clipboard:writeText'] }
 ```
 
-native roleには対応するcapabilityも必要です。この例の `clipboard:writeText` は
-`<Action.Copy />` 用で、plain custom callbackなら `menu:context` だけで足ります。
+ネイティブロールには、それぞれ対応するケイパビリティも必要です。この例では `<Action.Copy />` のために `clipboard:writeText` を付与しています。単純なカスタムコールバックであれば `menu:context` だけで十分です。
 
 ## ウィンドウ全体のメニュー
 
-id を指定せずに `useContextMenu` を呼び出すと、デフォルトメニューが宣言されます —
-スコープ付きメニューに占有されていない場所であれば、ユーザーがどこを右クリックしても開
-きます:
+id を指定せずに `useContextMenu` を呼び出すと、デフォルトメニューが宣言されます — スコープ付きメニューに占有されていない場所であれば、ユーザーがどこを右クリックしても開きます:
 
 ```tsx title="src/app/layout.tsx"
 import { useContextMenu, Action } from 'murasaki'
@@ -34,8 +27,7 @@ useContextMenu([
 
 ## スコープ付きメニュー
 
-メニューに id を与え、対応する `<ContextMenuTrigger>` で領域にタグ付けします —
-その領域だけがそのメニューを開き、ウィンドウのデフォルトメニューより優先されます:
+メニューに id を与え、対応する `<ContextMenuTrigger>` で領域にタグ付けします — その領域だけがそのメニューを開き、ウィンドウのデフォルトメニューより優先されます:
 
 ```tsx
 import { useContextMenu, ContextMenuTrigger } from 'murasaki'
@@ -56,9 +48,7 @@ function Counter() {
 }
 ```
 
-`<ContextMenuTrigger>` は、子要素がちょうど1つの場合はデフォルトでそれをクローンしま
-す(ラッパーノードなし)。複数の子要素がある場合など、代わりに `display: contents` の
-`<span>` ラッパーを強制するには `asChild={false}` を渡します。
+`<ContextMenuTrigger>` は、子要素がちょうど1つの場合はデフォルトでそれをクローンします（ラッパーノードなし）。複数の子要素がある場合など、代わりに `display: contents` の `<span>` ラッパーを強制するには `asChild={false}` を渡します。
 
 ## 項目の形
 
@@ -76,41 +66,30 @@ interface ContextMenuEntry {
 type ContextMenuItemSpec = ContextMenuEntry | { separator: true }
 ```
 
-`shortcut` は、メニューのネイティブなアクセラレータラベルを設定すると同時に
-`keydown` ハンドラを登録するため、メニューが開いていなくても発火します。
+`shortcut` は、メニューのネイティブなアクセラレーターラベルを設定すると同時に `keydown` ハンドラを登録するため、メニューが開いていなくても発火します。
 
 ## Actions
 
-`action` には、あなた自身の関数か、組み込みの `<Action.*/>` 要素のいずれかを指定でき
-ます — ネイティブ OS のロール(`Copy`、`Paste`、`Cut`、`SelectAll`、`Undo`、`Redo`、
-`Quit`)、またはクライアントの挙動(`Reload`、`Navigate`、`Run`)です。全リストは
-[Native APIs](/docs/guides/native-apis#built-in-menu-actions)を参照してください。
+`action` には、あなた自身の関数か、組み込みの `<Action.*/>` 要素のいずれかを指定できます — ネイティブ OS のロール(`Copy`、`Paste`、`Cut`、`SelectAll`、`Undo`、`Redo`、`Quit`)、またはクライアントの挙動(`Reload`、`Navigate`、`Run`)です。全リストは[Native APIs](/docs/guides/native-apis#built-in-menu-actions)を参照してください。
 
-native context menuには常に`menu:context`が必要です。native role actionには、直接native
-APIを呼ぶ場合と同じpermissionも必要です。
+ネイティブのコンテキストメニューには、常に `menu:context` が必要です。ネイティブロールのアクションには、対応するネイティブ API を直接呼ぶ場合と同じ許可も必要です。
 
-| action | 追加で必要なcapability |
+| アクション | 追加で必要なケイパビリティ |
 | --- | --- |
 | `Copy`, `Cut` | `clipboard:writeText` |
 | `Paste` | `clipboard:readText` |
 | `Quit` | `app:quit` |
 | `SelectAll`, `Undo`, `Redo` | `menu:context` 以外は不要 |
 
-必要なrole capabilityが欠ける場合、Murasakiはmenu payload全体を拒否します。client
-behaviorと自作callbackには追加のnative capabilityは不要です。
+必要なロールのケイパビリティが欠けている場合、Murasaki はメニューのペイロード全体を拒否します。クライアント側の挙動や自作のコールバックには、追加のネイティブケイパビリティは不要です。
 
 <Callout type="warn">
-  Linux では `Copy`/`Cut`/`Paste`/`SelectAll` は X11 キーイベントの合成によって実現され
-  ます(Wayland では XWayland が必要)。一方 `Undo`/`Redo` はメニューから静かに省かれま
-  す — muda/GTK 側の既知の制約です。Linux でこれらが必要な場合は、独自の `action` 関数
-  を指定してください。
+  Linux では `Copy`/`Cut`/`Paste`/`SelectAll` は X11 キーイベントの合成によって実現されます（Wayland では XWayland が必要）。一方 `Undo`/`Redo` はメニューから静かに省かれます — muda/GTK 側の既知の制約です。Linux でこれらが必要な場合は、独自の `action` 関数を指定してください。
 </Callout>
 
 ## `createActions` による再利用可能な Actions
 
-アプリの actions を(典型的には `src/lib/action.ts` に、store に裏打ちされた形で)一度
-だけ定義すれば、どこからでも呼び出せます — そして `<Action.name />` として、どのメニュ
-ーにも組み込めます:
+アプリのアクションを一度だけ定義すれば（典型的には `src/lib/action.ts` に、ストアに裏打ちされた形で）、どこからでも呼び出せます — そして `<Action.name />` として、どのメニューにも組み込めます:
 
 ```ts title="src/lib/action.ts"
 import { createActions } from 'murasaki'
@@ -131,14 +110,10 @@ useContextMenu('card', [
 ])
 ```
 
-`createActions` が返すオブジェクトには組み込みの action(`Action.Copy`、
-`Action.Reload` など)も含まれるため、1つのファイルで `Action` を import するだけです
-べてをまかなえます。
+`createActions` が返すオブジェクトには組み込みのアクション（`Action.Copy`、`Action.Reload` など）も含まれるため、1つのファイルで `Action` をインポートするだけですべてをまかなえます。
 
 <Callout type="info">
-  ウィンドウ全体のメニュー(id なしの `useContextMenu(items)`)は、同時に1つだけマウン
-  トされるべきです — 2つ目をマウントすると開発時に警告がログに出力され、最後にマウント
-  されたものが優先されます。
+  ウィンドウ全体のメニュー（id なしの `useContextMenu(items)`）は、同時に1つだけマウントされるべきです — 2つ目をマウントすると開発時に警告がログに出力され、最後にマウントされたものが優先されます。
 </Callout>
 
 ## 次へ

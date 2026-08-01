@@ -1,6 +1,6 @@
 ---
 title: Field
-description: ラベル、入力、補足、入力エラーを一つのフォーム項目として構成します。
+description: ラベル、コントロール、補足、入力エラーを一つのフォーム項目として構成します。
 ---
 
 <ComponentPlayground name="field" />
@@ -18,13 +18,10 @@ import { Field, FieldDescription, FieldError, FieldLabel, Input } from '@murasak
 </Field>
 ```
 
-`Field` が提供するのはレイアウトとエラー時のスタイルです。ID や ARIA の関連付けは自動では
-行いません。例のようにラベル、補足、エラーを入力要素へ明示的に関連付けてください。
-`FieldError` は子要素があるときだけ表示されます。複数項目の間隔には `FieldGroup`、
-横並びのフォームには `orientation="horizontal"` を使えます。
+`Field` が提供するのはレイアウトとエラー時のスタイルです。ID や ARIA の関連付けは自動では行いません。例のようにラベル、補足、エラーを入力要素へ明示的に関連付けてください。`FieldError` は子要素があるときだけ表示されます。複数項目の間隔には `FieldGroup`、横並びのフォームには `orientation="horizontal"` を使えます。
 
 ## API
 
-| Prop | 型 | 既定値 |
+| Prop | 型 | デフォルト値 |
 | --- | --- | --- |
 | `orientation` | `"vertical" \| "horizontal"` | `"vertical"` |

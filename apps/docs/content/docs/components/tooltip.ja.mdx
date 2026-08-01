@@ -1,6 +1,6 @@
 ---
 title: Tooltip
-description: 要素がキーボードフォーカスを受け取ったとき、またはマウスがホバーしたときに、関連情報を表示するポップアップです。
+description: 要素にキーボードフォーカスが当たったとき、またはマウスでホバーしたときに、関連情報を表示するポップアップです。
 ---
 
 import { TooltipDemo } from "@/components/ui-demos/tooltip-demo";
@@ -58,11 +58,10 @@ import {
 
 | コンポーネント | 説明 |
 | --- | --- |
-| `TooltipProvider` | ツールチップを使うツリーをラップします。少なくとも1箇所(例えばアプリのルート付近)に必要で、共有の `delayDuration` などを設定します。 |
+| `TooltipProvider` | ツールチップを使うツリーをラップします。少なくとも1箇所（例えばアプリのルート付近）に必要で、共有の `delayDuration` などを設定します。 |
 | `Tooltip` | 1つのツールチップのルートプリミティブ。`open`・`defaultOpen`・`onOpenChange`・`delayDuration` を受け取ります。 |
 | `TooltipTrigger` | ツールチップが紐づく要素です。`asChild` に対応しています。 |
-| `TooltipContent` | ポップアップの内容。`sideOffset`(デフォルト `8`)を受け取ります。 |
+| `TooltipContent` | ポップアップの内容。`sideOffset`（デフォルト `8`）を受け取ります。 |
 | `TooltipPortal` | コンテンツを `document.body` にポータルします。`TooltipContent` が内部的に使用します。 |
 
-ホバー・フォーカスでの表示、閉じる操作、配置は React Aria Components が
-提供します。
+ホバー・フォーカスでの表示、閉じる操作、配置は React Aria Components が提供します。

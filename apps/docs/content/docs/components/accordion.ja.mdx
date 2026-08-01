@@ -1,6 +1,6 @@
 ---
 title: Accordion
-description: それぞれがコンテンツのセクションを開閉する、縦に並んだインタラクティブな見出しの集合です。
+description: 見出しごとにコンテンツを開閉できる、縦に並んだアコーディオンコンポーネントです。
 ---
 
 import { AccordionDemo } from "@/components/ui-demos/accordion-demo";
@@ -69,18 +69,17 @@ import {
 
 | Prop | 型 | デフォルト |
 | --- | --- | --- |
-| `type` | `"single"` \| `"multiple"` | — (必須) |
-| `collapsible` | `boolean`(`type="single"` のときのみ) | `false` |
-| `value` / `defaultValue` | `string`(single)または `string[]`(multiple) | — |
+| `type` | `"single"` \| `"multiple"` | — （必須） |
+| `collapsible` | `boolean`（`type="single"` のときのみ） | `false` |
+| `value` / `defaultValue` | `string`（`single`）または `string[]`（`multiple`） | — |
 | `onValueChange` | `(value) => void` | — |
 
 ### その他のサブコンポーネント
 
 | コンポーネント | 説明 |
 | --- | --- |
-| `AccordionItem` | 開閉可能な1つのセクションです。`value`(必須)を受け取ります。 |
+| `AccordionItem` | 開閉可能な1つのセクションです。`value`（必須）を受け取ります。 |
 | `AccordionTrigger` | クリック可能な見出しで、回転するシェブロンを自動的にレンダリングします。 |
 | `AccordionContent` | CSS でアニメーションしながら開閉するパネルです。 |
 
-開閉状態、キーボード操作、ARIA の関連付けは React Aria Components が提供します。
-Murasaki は従来の `value` ベース API を維持しています。
+開閉状態、キーボード操作、ARIA の関連付けは React Aria Components が提供します。Murasaki は従来の `value` ベース API を維持しています。

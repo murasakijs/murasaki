@@ -3,8 +3,7 @@ title: 設定
 description: murasaki.config.ts の完全なリファレンス。
 ---
 
-プロジェクトルートの `murasaki.config.ts`(または `.js` / `.mjs`)は、アプリの識別情
-報、ウィンドウ、ビルド設定を記述します:
+プロジェクトルートの `murasaki.config.ts`（または `.js` / `.mjs`）は、アプリの識別情報、ウィンドウ、ビルド設定を記述します。
 
 ```ts title="murasaki.config.ts"
 import { defineConfig } from 'murasaki'
@@ -24,47 +23,44 @@ export default defineConfig({
 })
 ```
 
-`defineConfig` は型推論用に同じobjectを返し、宣言windowのlabel / routeを同期的に
-検証します。awaitは不要です。
+`defineConfig` は型推論のために受け取ったオブジェクトをそのまま返し、宣言されたウィンドウのラベルとルートを同期的に検証します。`await` は不要です。
 
 ## トップレベルのフィールド
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `appId` | `string` | **必須。** portableなreverse-DNS identifier(例: `com.example.my-app`、英数字・dot・hyphen)。macOSでは`CFBundleIdentifier`になります。 |
-| `productName` | `string` | **必須。** portableな1〜120文字の表示/file name。`.app` filename、Dock / menu bar label、DMG volume nameになります。path文字、Windows device name、前後空白、末尾dotは拒否します。 |
-| `version` | `string?` | 厳密なsemantic version(例: `1.2.3` / `1.2.3-beta.1`、`v` prefix不可)。native About panelとartifact filenameに使われます。defaultは`0.0.0`。 |
+| `appId` | `string` | **必須。** ポータブルな逆 DNS 形式の識別子（例: `com.example.my-app`。英数字・ドット・ハイフンが使用可能）。macOS では `CFBundleIdentifier` として使われます。 |
+| `productName` | `string` | **必須。** ポータブルな 1〜120 文字の表示名兼ファイル名で、`.app` のファイル名、Dock とメニューバーのラベル、DMG のボリューム名になります。パス区切り文字や Windows の予約デバイス名、前後の空白、末尾のドットは使用できません。 |
+| `version` | `string?` | 厳密なセマンティックバージョン（例: `1.2.3` / `1.2.3-beta.1`。`v` プレフィックスは不可）。ネイティブの About パネルとアーティファクトのファイル名に使われます。デフォルトは `0.0.0`。 |
 | `description` | `string?` | ネイティブの「About `<app>`」パネルに表示される短い説明。 |
 | `copyright` | `string?` | About パネルに表示される著作権表示。 |
 | `homepage` | `string?` | About パネルに表示されるホームページ URL。 |
-| `authors` | `string[]?` | About パネルに表示される作者名(Windows/Linux のみ)。 |
-| `about` | `AboutConfig?` | サイズ、段落、詳細行、外部リンクボタンを設定できるmacOS Aboutパネル — [下記](#about)を参照。 |
+| `authors` | `string[]?` | About パネルに表示される作者名（Windows/Linux のみ）。 |
+| `about` | `AboutConfig?` | サイズ、段落、詳細行、外部リンクボタンをカスタマイズできる macOS の About パネルを有効にします — [下記](#about)を参照。 |
 | `window` | `WindowConfig?` | ウィンドウの形 — [下記](#window)を参照。 |
-| `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したlabelをkeyにしたsecondary window — [下記](#windows)を参照。 |
-| `webview` | `WebviewConfig?` | app-wide User-Agent、private session、unauthenticated proxy設定 — [下記](#webview)を参照。 |
-| `capabilities` | `NativeCapabilityGrant[]?` | primary window向けnative grant。`window.capabilities`省略時だけ利用。既定deny-all。 |
-| `backendCapabilities` | `BackendCapability[]?` | primary window向けrenderer-to-Node/API grant。`window.backendCapabilities`省略時だけ利用。既定deny-all。 |
-| `systemPermissions` | `SystemPermissionsConfig?` | host OS同意とpackaged macOSの起動時prompt — [下記](#systempermissions)を参照。 |
-| `main` | `false \| object?` | 長寿命 Node Main entry と shutdown 上限 — [下記](#main)を参照。 |
-| `bundle` | `object?` | Node dependency と non-code resource packaging — [下記](#bundle)を参照。 |
-| `plugins` | `MurasakiPlugin[]?` | Vite、CLI hook、dependency、resourceを拡張するtrusted build-time extension — [下記](#plugins)を参照。 |
-| `build` | `object?` | pre-build command とclient公開env prefix — [下記](#build)を参照。 |
-| `security` | `object?` | rendererのContent Security Policy — [下記](#security)を参照。 |
+| `windows` | `Record<string, SecondaryWindowConfig>?` | 安定したラベルをキーにしたセカンダリウィンドウの定義 — [下記](#windows)を参照。 |
+| `webview` | `WebviewConfig?` | アプリ全体の User-Agent、プライベートセッション、認証なしプロキシの設定 — [下記](#webview)を参照。 |
+| `capabilities` | `NativeCapabilityGrant[]?` | プライマリウィンドウ向けのネイティブレンダラー許可。`window.capabilities` を省略した場合にのみ使用されます。デフォルトではすべて拒否。 |
+| `backendCapabilities` | `BackendCapability[]?` | プライマリウィンドウ向けの、レンダラーから Node / API への許可。`window.backendCapabilities` を省略した場合にのみ使用されます。デフォルトではすべて拒否。 |
+| `systemPermissions` | `SystemPermissionsConfig?` | ホスト OS の同意宣言と、パッケージ化された macOS アプリの起動時プロンプト — [下記](#systempermissions)を参照。 |
+| `main` | `false \| object?` | 長寿命な Node Main のエントリと、シャットダウンの上限 — [下記](#main)を参照。 |
+| `bundle` | `object?` | Node の依存関係と、コード以外のリソースのパッケージング — [下記](#bundle)を参照。 |
+| `plugins` | `MurasakiPlugin[]?` | Vite、CLI フック、依存関係、リソースを拡張する、信頼されたビルド時拡張機能 — [下記](#plugins)を参照。 |
+| `build` | `object?` | ビルド前コマンドと、クライアントに公開する環境変数のプレフィックス — [下記](#build)を参照。 |
+| `security` | `object?` | レンダラーの Content Security Policy — [下記](#security)を参照。 |
 | `updater` | `UpdaterConfig?` | 自動更新のソース — [下記](#updater)を参照。 |
-| `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語(例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、Murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは Murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
-| `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`(使用中なら自動インクリメント)。 |
+| `locales` | `string[]?` | アプリが対応する BCP-47 の UI 言語（例: `['en', 'ja']`）。macOS バンドルの `CFBundleLocalizations` に反映され、Murasaki のデフォルトのネイティブメニュー翻訳を制約します。デフォルトは Murasaki がメニュー翻訳を提供しているすべての言語: `en`、`ja`、`zh-Hans`、`ko`、`es`、`fr`、`de`。 |
+| `devPort` | `number?` | `murasaki dev` 実行時の Vite 開発サーバーのポート。デフォルトは `5178`（使用中なら自動インクリメント）。 |
 | `targets` | `Target[]?` | ビルドターゲット。デフォルトはホストプラットフォーム。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` のうち1つ以上。 |
-| `icon` | `string?` | 正方形のsource PNG(1024px推奨)へのpath。full XcodeがあるmacOSでは`Assets.car`をcompileして現在のmaskをOSに任せ、`.icns`をlegacy fallbackとして残します。Windows / Linux resourceも同じsourceから生成します。 |
-| `protocols` | `ProtocolConfig[]?` | packaged macOS app / Windows installer が登録する custom URL scheme — [下記](#protocols)を参照。 |
-| `fileAssociations` | `FileAssociationConfig[]?` | packaged macOS app / Windows installer が登録する document extension — [下記](#fileassociations)を参照。 |
-| `installer` | `object?` | macOS DMG / Windows installer option — [下記](#installer)を参照。 |
+| `icon` | `string?` | 正方形のソース PNG（1024px 推奨）へのパス。フル Xcode がある macOS では `Assets.car` をコンパイルして現在のマスクを OS に任せ、`.icns` をレガシーフォールバックとして残します。Windows / Linux 向けのリソースも同じソースから生成されます。 |
+| `protocols` | `ProtocolConfig[]?` | パッケージ化された macOS アプリや Windows インストーラーが登録するカスタム URL スキーム — [下記](#protocols)を参照。 |
+| `fileAssociations` | `FileAssociationConfig[]?` | パッケージ化された macOS アプリや Windows インストーラーが登録するドキュメントの拡張子 — [下記](#fileassociations)を参照。 |
+| `installer` | `object?` | macOS の DMG と Windows インストーラーのオプション — [下記](#installer)を参照。 |
 | `sign` | `object?` | macOS Developer ID / Windows Authenticode 署名 — [下記](#sign)を参照。 |
 
 ## `about`
 
-`about` を省略するとOS標準のコンパクトなAboutダイアログを維持します。macOSでは、
-宣言した場合だけカスタマイズ可能なネイティブAppKitパネルへ切り替わります。
-Windows / Linuxは現時点では標準のメタデータダイアログを使います。
+`about` を省略すると、OS 標準のコンパクトな About ダイアログがそのまま使われます。macOS では、これを宣言した場合だけカスタマイズ可能なネイティブ AppKit パネルに切り替わります。Windows / Linux では、現時点では標準のメタデータダイアログを使い続けます。
 
 ```ts title="murasaki.config.ts"
 about: {
@@ -93,16 +89,15 @@ about: {
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `name` | `string?` | パネルの見出し。既定は`productName`。 |
-| `width` | `number?` | 論理ピクセル単位の幅。360〜900、既定480。 |
-| `height` | `number?` | 論理ピクセル単位の高さ。320〜1000。省略時は内容から自動調整。 |
-| `paragraphs` | `string[]?` | 中央揃えの本文段落、最大8件。省略時は`description`。 |
-| `paragraphSpacing` | `number?` | 段落間の余白、0〜48。既定12。 |
-| `details` | `{ label, value, href? }[]?` | label/valueの詳細行、最大12件。Versionを指定しなければ自動追加。 |
-| `buttons` | `{ label, href }[]?` | 下端に並べるネイティブボタン、最大6件。 |
+| `name` | `string?` | パネルの見出し。デフォルトは `productName`。 |
+| `width` | `number?` | 論理ピクセル単位の幅。360〜900、デフォルトは 480。 |
+| `height` | `number?` | 論理ピクセル単位の高さ。320〜1000。省略した場合は内容に応じて自動調整されます。 |
+| `paragraphs` | `string[]?` | 中央揃えの本文段落。最大 8 件。省略した場合は `description` を使用します。 |
+| `paragraphSpacing` | `number?` | 段落間の余白。0〜48。デフォルトは 12。 |
+| `details` | `{ label, value, href? }[]?` | ラベルと値の詳細行。最大 12 件。Version 行を指定しなければ自動的に追加されます。 |
+| `buttons` | `{ label, href }[]?` | 下端に並べるネイティブボタン。最大 6 件。 |
 
-外部リンクはcredentialを含まない絶対`http` / `https` / `mailto` URLに限定されます。
-アイコンはmacOSがinstalled bundleから解決するため、Finder / Dockと同じmask済み表示になります。
+外部リンク先は、認証情報を含まない絶対 `http`、`https`、`mailto` の URL に限定されます。アプリアイコンは macOS がインストール済みのバンドルから解決するため、About パネルは Finder や Dock と同じマスク済みのアイコン表示になります。
 
 ## `window`
 
@@ -114,23 +109,19 @@ about: {
 | `resizable` | `boolean?` | ウィンドウをリサイズ可能にするかどうか。 |
 | `transparent` | `boolean?` | 透明なウィンドウ背景。 |
 | `vibrancy` | `'hud' \| 'sidebar' \| 'popover' \| null` | macOS の半透明なウィンドウビブランシー。 |
-| `console` | `boolean?` | Windows のみ: backend Node console window を表示。既定 `false`。 |
-| `route` | `string?` | windowに読み込むsame-origin path。既定`/`。完全URL / protocol-relative URLは拒否。 |
-| `visible` | `boolean?` | 初期表示。`main`は既定`true`、secondaryは既定`false`。 |
-| `capabilities` | `NativeCapabilityGrant[]?` | window別native grant。secondaryは既定deny-all。 |
-| `backendCapabilities` | `BackendCapability[]?` | window別Node Main、Server Action、API Route、updater、event、diagnostics grant。secondaryは既定deny-all。 |
+| `console` | `boolean?` | Windows のみ: バックエンドの Node コンソールウィンドウを表示します。デフォルトは `false`。 |
+| `route` | `string?` | このウィンドウに読み込む同一オリジンのパス。デフォルトは `/`。完全 URL やプロトコル相対 URL は拒否されます。 |
+| `visible` | `boolean?` | 初期表示状態。`main` はデフォルト `true`、セカンダリウィンドウはデフォルト `false`。 |
+| `capabilities` | `NativeCapabilityGrant[]?` | ウィンドウごとのネイティブ許可。セカンダリウィンドウはデフォルトではすべて拒否。 |
+| `backendCapabilities` | `BackendCapability[]?` | ウィンドウごとの Node Main、Server Action、API Route、アップデーター、イベント、診断機能に対する許可。セカンダリウィンドウはデフォルトではすべて拒否。 |
 
 <Callout type="info">
-  macOSでは`vibrancy`に対応するsemantic `NSVisualEffectView` materialを適用し、
-  native windowとWebViewを自動的に透明化します。materialを見せる領域ではrendererの
-  backgroundも透明にしてください。他platformではこのmacOS専用optionを無視します。
+  macOS では、`vibrancy` に対応するセマンティックな `NSVisualEffectView` マテリアルを適用し、ネイティブウィンドウと WebView を自動的に透明化します。マテリアルを見せたい領域では、レンダラーの背景も透明にしてください。他のプラットフォームでは、この macOS 専用のオプションは無視されます。
 </Callout>
 
 ## `windows`
 
-`window` は予約label `main` を持つprimaryです。secondaryは `windows` に宣言し、
-primary専用の `console` を除く同じshapeでroute、初期表示、command allowlistを
-個別設定します。
+`window` は、予約ラベル `main` を持つプライマリウィンドウです。セカンダリウィンドウは `windows` に宣言します。各エントリはプライマリ専用の `console` を除いて同じ形式を受け付け、ルート、初期表示、コマンドの許可リストをそれぞれ個別に設定できます。
 
 ```ts
 window: {
@@ -150,21 +141,15 @@ windows: {
 },
 ```
 
-labelは安全な1〜64文字で、`main`は予約済みです。secondaryの`createOnLaunch`は既定
-`true`で、非表示で作成されます。`false`にするとNode Mainが`windows.create(label)`を
-呼ぶまで宣言をdormantにできます。primaryは常に起動時に作成されます。secondaryは
-top-level permissionを継承しません。`console` はWindows backend console全体を制御する
-ため、secondaryに書くと拒否されます。lifecycle / renderer APIは
-[ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
+ラベルは安全な 1〜64 文字で、`main` は予約済みです。セカンダリウィンドウはデフォルトで `createOnLaunch: true` を使い、非表示の状態で作成されます。`false` にすると、Node Main が `windows.create(label)` を呼び出すまで宣言を休止状態にできます。プライマリウィンドウは常に起動時に作成されます。セカンダリウィンドウはトップレベルの権限を一切継承しません。`console` フィールドはアプリケーション全体の Windows バックエンドコンソールを制御するオプションのため、セカンダリで指定すると拒否されます。ライフサイクルとレンダラー API については、[ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
 
-| secondary専用field | 型 | 説明 |
+| セカンダリ専用フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `createOnLaunch` | `boolean?` | 起動時に宣言secondaryを作成する。既定`true`。`false`では信頼されたNode Main templateとして保持する。 |
+| `createOnLaunch` | `boolean?` | 起動時に、宣言されたセカンダリウィンドウを作成します。デフォルトは `true`。`false` にすると、信頼された Node Main のテンプレートとして保持されます。 |
 
 ## `webview`
 
-developmentとpackaged macOS / Windows appの全native WebViewへ適用します。
-window単位のoverrideはありません。
+これらの設定は、開発時およびパッケージ化された macOS / Windows アプリのすべてのネイティブ WebView に適用されます。ウィンドウ単位のオーバーライドはサポートされていません。
 
 ```ts title="murasaki.config.ts"
 webview: {
@@ -180,41 +165,25 @@ webview: {
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `userAgent` | `string?` | 完全なcustom User-Agent。trim済み・control characterなし・最大512 UTF-8 bytes。 |
-| `incognito` | `boolean?` | appのpersistent profileではなくWryのnon-persistent/private data storeを使用。既定`false`。 |
-| `proxy.protocol` | `'http' \| 'socks5'` | `http`はHTTP CONNECT、`socks5`はSOCKSv5。 |
-| `proxy.host` | `string` | 最大253 bytesのASCII DNS hostname、IPv4、またはbracket付きIPv6 literal。URLではない。 |
-| `proxy.port` | `number` | 1〜65535のinteger。 |
+| `userAgent` | `string?` | 完全なカスタム User-Agent の値。前後の空白を取り除き、制御文字を含まず、最大 512 UTF-8 バイトである必要があります。 |
+| `incognito` | `boolean?` | アプリの永続プロファイルの代わりに、Wry の非永続／プライベートなデータストアを使用します。デフォルトは `false`。 |
+| `proxy.protocol` | `'http' \| 'socks5'` | `http` は HTTP CONNECT プロキシ、`socks5` は SOCKSv5 を表します。 |
+| `proxy.host` | `string` | ASCII の DNS ホスト名、IPv4 アドレス、または角括弧付き IPv6 リテラルで、最大 253 バイト。URL ではありません。 |
+| `proxy.port` | `number` | 1〜65535 の整数。 |
 
-proxy URLとauthentication fieldは意図的に非対応です。scheme、path、`user@host`、
-username、password、未知のproxy fieldはconfig validationで拒否します。認証が必要なら
-Murasaki外で設定するか、local unauthenticated forwarding proxyを使用してください。
-設定はWryのnative WebKit / WebView2 builderへ渡し、Rust hostでも再検証します。
+プロキシの URL や認証用フィールドは意図的にサポートしていません。スキーム、パス、`user@host`、ユーザー名、パスワード、未知のプロキシフィールドは設定の検証で拒否されます。認証が必要なプロキシを使う場合は、Murasaki の外側で設定するか、認証なしのローカル転送プロキシを使用してください。設定は Wry のネイティブ WebKit / WebView2 ビルダーへ渡され、Rust ホスト側でも再検証されます。
 
-platform制約:
+プラットフォームごとの制約は次のとおりです。
 
-- macOS proxyはWryの`mac-proxy` featureを使い、macOS 14以降が必要です。古いmacOSで
-  proxyを設定するとWebView startupを明示的に失敗させます。private sessionはWebKitの
-  non-persistent data storeを使います。
-- Windows proxyはWebView2 browser argumentを使います。custom User-AgentはWebView2
-  86.0.616.0以降、private modeは101.0.1210.39以降が必要で、古いruntimeではWebView2が
-  設定を無視します。
-- Linux では、開発時と AppDir / AppImage / `.deb` の配布ビルドのどちらでも、これらの設定を
-  Wry / WebKitGTK へ渡します。実際の挙動は、対象ディストリビューションに含まれる
-  WebKitGTK のバージョンでも確認してください。
+- macOS のプロキシ機能は Wry の `mac-proxy` 機能を使用し、macOS 14 以降が必要です。古い macOS でプロキシを設定すると、WebView の起動が明示的に失敗します。プライベートセッションには WebKit の非永続データストアを使用します。
+- Windows のプロキシ機能は WebView2 のブラウザ引数を使用します。カスタム User-Agent には WebView2 86.0.616.0 以降、プライベートモードには 101.0.1210.39 以降が必要で、古いランタイムでは WebView2 がこれらの設定を無視します。
+- Linux では、開発時と AppDir / AppImage / `.deb` の配布ビルドのどちらでも、これらの設定を Wry / WebKitGTK へ渡します。実際の挙動は、対象ディストリビューションに含まれる WebKitGTK のバージョンでも確認してください。
 
-incognitoが制御するのはlocal WebView persistenceだけです。network anonymity、proxy / server
-からのclient秘匿、app-level Node dataのprivate化は提供しません。Murasakiはnative windowごとに
-browser profileを分離し、cookie / storage / workerがwindow別backend authorityをまたがないように
-します。primaryは従来のapp profileを維持し、secondary profileはWindows / LinuxとmacOS 14+で
-永続化されます。macOS 11–13では分離されたnon-persistent storeを使用します。このためwindow間の
-session共有は意図的にサポートされません。共有stateはMain / APIを使って明示的に同期してください。
-[セキュリティ](/ja/docs/building/security#webview-network-and-private-sessions)も参照してください。
+incognito が制御するのは、ローカルの WebView の永続化だけです。ネットワークの匿名化、プロキシ／サーバーからのクライアントの秘匿、アプリレベルの Node データのプライベート化は行いません。Murasaki はネイティブウィンドウごとにブラウザプロファイルを分離するため、cookie、ストレージ、ワーカーがウィンドウ別のバックエンド権限をまたぐことはありません。プライマリウィンドウは従来どおりのアプリプロファイルを維持し、セカンダリウィンドウのプロファイルは Windows / Linux と macOS 14 以降では永続化されます。macOS 11〜13 では分離された非永続ストアを使用します。そのため、ウィンドウ間でのセッション共有は意図的にサポートされていません。状態を共有したい場合は、Main / API を使って明示的に同期してください。[セキュリティ](/ja/docs/building/security#webview-network-and-private-sessions)も参照してください。
 
 ## `capabilities`
 
-レンダラー向けネイティブAPIはデフォルトですべて拒否されます。アプリが実際に使う
-コマンドだけを追加してください。未知のpermissionは何も許可しません。
+レンダラー向けのネイティブ API は、デフォルトですべて拒否されます。アプリが実際に使うコマンドだけを追加してください。未知の権限は何も許可しません。
 
 ```ts
 capabilities: [
@@ -230,18 +199,9 @@ capabilities: [
 ]
 ```
 
-完全な型付き一覧は `NativeCapability` です。primaryは
-`window.capabilities ?? capabilities ?? []`、secondaryは自身のlistまたは`[]`を使い、
-call元rendererごとに評価します。別originのページはnative bridgeを利用できません。
-window管理では `window:getLabel`、`window:open`、`window:list`、`window:manage` を使います。
-applicationのprogrammatic shutdownには `app:quit` が必要です。built-in updaterを有効に
-すると、検証済みrestart handshake用としてprimary windowへ自動付与されます。
-ログイン時自動起動はread / write権限を分離しています。`status()`だけを使うwindowには
-`autostart:read`を付与し、`enable()` / `disable()`を呼ぶ設定画面にだけ
-`autostart:write`を付与してください。
+完全な型付き一覧は `NativeCapability` です。プライマリウィンドウは `window.capabilities ?? capabilities ?? []` を使い、各セカンダリウィンドウは自身のリストまたは `[]` を使います。許可は呼び出し元のレンダラーごとに評価され、別オリジンのページはネイティブブリッジを利用できません。ウィンドウ管理には `window:getLabel`、`window:open`、`window:list`、`window:manage` を使います。アプリケーションのプログラムによるシャットダウンには `app:quit` が必要です。組み込みのアップデーターを有効にすると、検証済みの再起動ハンドシェイク用としてプライマリウィンドウへ自動的に付与されます。ログイン時の自動起動は、読み取りと書き込みの権限が分離されています。`status()` だけを呼ぶウィンドウには `autostart:read` を、`enable()` や `disable()` を呼ぶ設定画面には `autostart:write` を付与してください。
 
-target-bearing commandを限定する場合はstructured `NativeCapabilityGrant`を使います。
-`deny`は`allow`より優先し、wildcardは末尾`/**`だけです。
+ターゲットを持つコマンドを制限したい場合は、構造化された `NativeCapabilityGrant` を使います。`deny` は `allow` より優先され、ワイルドカードとして使えるのは末尾の `/**` だけです。
 
 ```ts
 capabilities: [
@@ -254,14 +214,11 @@ capabilities: [
 ]
 ```
 
-互換性のためstring grantはtarget無制限です。URL、path、key、window、OS permissionのscopeは
-config load時に検証し、Rust hostでも再度強制します。
+互換性のため、文字列形式の許可はターゲットに制限がありません。URL、パス、キー、ウィンドウ、OS 権限のスコープは、設定の読み込み時に検証され、Rust ホスト側でも再度強制されます。
 
 ## `backendCapabilities`
 
-rendererからlocal Node resourceへのアクセスも別にdeny-by-defaultです。primaryは
-`window.backendCapabilities ?? backendCapabilities ?? []`、secondaryは何も継承せず、
-自身のlistまたは`[]`を使います。
+レンダラーからローカルの Node リソースへのアクセスも、別途デフォルトですべて拒否されます。プライマリウィンドウは `window.backendCapabilities ?? backendCapabilities ?? []` を使い、セカンダリウィンドウは何も継承せず、自身のリストまたは `[]` を使います。
 
 ```ts
 backendCapabilities: [
@@ -274,16 +231,11 @@ backendCapabilities: [
 ]
 ```
 
-末尾に1つの`*`があるgrantだけprefix wildcardとなり、それ以外は完全一致です。API resource
-には大文字のmethodを含めます。`main:*`、`action:*`、`api:*`、`updater:*`、`events:*`も
-有効ですが、本番ではexact resourceの方が安全です。native shutdown、activation、window
-control endpointはrendererへgrantできません。
-[セキュリティ](/ja/docs/building/security#backend-resourceを明示的に許可する)も参照してください。
+末尾に 1 つだけ `*` が付いた許可はプレフィックスワイルドカードとして扱われ、それ以外は完全一致になります。API リソースには大文字のメソッドを含めます。`main:*`、`action:*`、`api:*`、`updater:*`、`events:*` のような広い許可も有効ですが、本番環境では厳密なリソース指定の方が安全です。ネイティブのシャットダウン、アクティベーション、ウィンドウ制御のエンドポイントはレンダラーへ許可できません。[セキュリティ](/ja/docs/building/security#backend-resourceを明示的に許可する)も参照してください。
 
 ## `systemPermissions`
 
-これは信頼するrenderer commandではなく、host OSの同意を宣言するconfigです。packaged
-macOS appでは用途説明を`Info.plist`へ書き込み、ほとんどの権限を起動時に要求できます。
+この設定が表すのは、信頼するレンダラーコマンドではなく、ホスト OS の同意です。パッケージ化された macOS アプリでは、用途説明を `Info.plist` に書き込み、ほとんどの権限を起動時に要求できます。
 
 ```ts
 systemPermissions: {
@@ -317,49 +269,31 @@ systemPermissions: {
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `macOS.camera` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSCameraUsageDescription`を書き込み、任意でpackaged launch時にprompt。 |
-| `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSMicrophoneUsageDescription`を書き込み、任意でpackaged launch時にprompt。 |
-| `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にscreen capture同意を要求。 |
-| `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にmacOS accessibility trust promptを表示。 |
-| `macOS.inputMonitoring` | `{ requestOnLaunch?: boolean }` | 任意でpackaged launch時にInput Monitoring(HID listen event)同意を要求。 |
-| `macOS.location` | `{ usageDescription: string; mode?: 'whenInUse' \| 'always'; requestOnLaunch?: boolean }` | `NSLocationWhenInUseUsageDescription`を書き込み(`mode: 'always'`では`NSLocationAlwaysAndWhenInUseUsageDescription`も追加)、任意でpackaged launch時にprompt。 |
-| `macOS.fullDiskAccess` | `{ requestOnLaunch?: boolean }` | guidance-only — TCC request APIが存在しないため、`requestOnLaunch`はstatusが`granted`でない場合、in-app promptの代わりにSystem SettingsのFull Disk Accessペインを開きます。 |
-| `macOS.photos` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSPhotoLibraryUsageDescription`を書き込み(read-writeのlibraryアクセス)。 |
-| `macOS.contacts` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSContactsUsageDescription`を書き込み。 |
-| `macOS.calendar` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSCalendarsUsageDescription`と`NSCalendarsFullAccessUsageDescription`を書き込み(常に両方書き込むことで、1つのbuildがmacOS 11から14+まで正しく動作します)。 |
-| `macOS.reminders` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSRemindersUsageDescription`と`NSRemindersFullAccessUsageDescription`を書き込み(`calendar`と同じ理由)。 |
-| `macOS.speechRecognition` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSSpeechRecognitionUsageDescription`を書き込み。 |
-| `macOS.bluetooth` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSBluetoothAlwaysUsageDescription`を書き込み。CoreBluetoothには明示的なrequest呼び出しがなく、central managerが最初に作成された時点で暗黙的に同意が確定します。 |
-| `macOS.appleEvents` | `{ usageDescription: string }` | `NSAppleEventsUsageDescription`を書き込み。declaration-only — `requestOnLaunch`はありません。automationの同意は対象appごとに付与されるため、`status()`は常に`unknown`を返し、`request()`はguidanceとしてSystem SettingsのAutomation paneを開くだけです。 |
-| `macOS.localNetwork` | `{ usageDescription: string }` | `NSLocalNetworkUsageDescription`を書き込み。declaration-only — query/request APIは一切存在せず、macOSは最初のlocal networkアクセス時に自動的にpromptします。 |
+| `macOS.camera` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSCameraUsageDescription` を書き込みます。任意で、パッケージ化されたアプリの起動時にプロンプトを表示します。 |
+| `macOS.microphone` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSMicrophoneUsageDescription` を書き込みます。任意で、パッケージ化されたアプリの起動時にプロンプトを表示します。 |
+| `macOS.screenRecording` | `{ requestOnLaunch?: boolean }` | 任意で、パッケージ化されたアプリの起動時に画面収録の同意を要求します。 |
+| `macOS.accessibility` | `{ requestOnLaunch?: boolean }` | 任意で、パッケージ化されたアプリの起動時に macOS のアクセシビリティ信頼プロンプトを開きます。 |
+| `macOS.inputMonitoring` | `{ requestOnLaunch?: boolean }` | 任意で、パッケージ化されたアプリの起動時に入力監視（HID リッスンイベント）の同意を要求します。 |
+| `macOS.location` | `{ usageDescription: string; mode?: 'whenInUse' \| 'always'; requestOnLaunch?: boolean }` | `NSLocationWhenInUseUsageDescription` を書き込みます（`mode: 'always'` の場合は `NSLocationAlwaysAndWhenInUseUsageDescription` も追加）。任意で、パッケージ化されたアプリの起動時にプロンプトを表示します。 |
+| `macOS.fullDiskAccess` | `{ requestOnLaunch?: boolean }` | ガイダンスのみです。TCC のリクエスト API が存在しないため、ステータスがすでに `granted` でない限り、`requestOnLaunch` はアプリ内プロンプトの代わりにシステム設定の「フルディスクアクセス」ペインを開きます。 |
+| `macOS.photos` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSPhotoLibraryUsageDescription` を書き込みます（読み書き両方のライブラリアクセス）。 |
+| `macOS.contacts` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSContactsUsageDescription` を書き込みます。 |
+| `macOS.calendar` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSCalendarsUsageDescription` と `NSCalendarsFullAccessUsageDescription` を書き込みます（常に両方を書き込むことで、1 つのビルドが macOS 11 から 14 以降まで正しく動作します）。 |
+| `macOS.reminders` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSRemindersUsageDescription` と `NSRemindersFullAccessUsageDescription` を書き込みます（`calendar` と同じ理由です）。 |
+| `macOS.speechRecognition` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSSpeechRecognitionUsageDescription` を書き込みます。 |
+| `macOS.bluetooth` | `{ usageDescription: string; requestOnLaunch?: boolean }` | `NSBluetoothAlwaysUsageDescription` を書き込みます。CoreBluetooth には明示的なリクエスト呼び出しがなく、central manager が最初に作成された時点で暗黙的に同意が確定します。 |
+| `macOS.appleEvents` | `{ usageDescription: string }` | `NSAppleEventsUsageDescription` を書き込みます。宣言のみで、`requestOnLaunch` はありません。オートメーションの同意は対象アプリごとに付与されるため、`status()` は常に `unknown` を返し、`request()` はガイダンスとしてシステム設定の「オートメーション」ペインを開くだけです。 |
+| `macOS.localNetwork` | `{ usageDescription: string }` | `NSLocalNetworkUsageDescription` を書き込みます。宣言のみで、照会・リクエスト用の API は一切存在せず、macOS は最初のローカルネットワークアクセス時に自動的にプロンプトを表示します。 |
 
-機能の必要性をuserが理解できる場合は、起動時promptより文脈に沿った
-`systemPermission.request()`を優先してください。runtime callにはrenderer capabilityの
-`systemPermission:status` / `systemPermission:request`も必要です。Windows unpackaged
-desktopの同意は利用時に発生するため、汎用的な起動時promptはありません。上記15種類は
-すべてmacOS専用です — WindowsとLinuxにはこれらTCC管理下promptに相当するOSレベルの機能が
-ありません。macOS TCCの実動作は`murasaki dev`のterminal / Node identityではなくpackaged
-appで確認してください。
+ユーザーが先に機能の必要性を理解できる場合は、起動時プロンプトよりも文脈に沿った `systemPermission.request()` を優先してください。実行時の呼び出しには、そのレンダラーのケイパビリティリストに `systemPermission:status` / `systemPermission:request` も必要です。Windows のアンパッケージ版デスクトップでの同意は利用時に発生するため、汎用的な起動時プロンプトはありません。上記の 15 種類はすべて macOS 専用です — Windows と Linux には、これらの TCC 管理下プロンプトに相当する OS レベルの機能がありません。macOS の TCC の実際の挙動は、`murasaki dev` のターミナルや Node のアイデンティティではなく、パッケージ化されたアプリで確認してください。
 
-### EntitlementsとApp Sandbox
+### Entitlements と App Sandbox
 
-Murasakiが現在対応しているのはhardened runtime署名であり、macOS App Sandboxではありません。
-`sign.appSandbox`をdefaultの`false`にした場合、camera、microphone、location、photos、
-contacts、calendar/reminders、Apple Eventsに必要なHardened Runtimeのresource-access
-entitlementを`systemPermissions.macOS`から生成します。署名buildにはこれらのhost
-entitlementと対応するInfo.plist用途説明の両方が必要です。このnon-sandbox構成では
-Bluetoothとspeech recognitionは用途説明だけを使用します。同梱Node helperだけにJIT用のhardened-runtime権限を付与し、native
-addonにはexecutable entitlementを付与しません。`sign.appSandbox: true`は、Appleの
-inherit helper規則と現在のNode/JIT構成を同時に満たせないため、fail-closedで拒否します。
-カスタムの`sign.entitlements` / `sign.helperEntitlements`はそのまま使い、
-指定pathが存在しない、または`plutil`検証に失敗した場合はbuildを停止します。種類ごとの完全な対応表は
-[Native APIs → EntitlementsとApp Sandbox](/ja/docs/guides/native-apis#entitlementsとapp-sandbox)
-を参照してください。
+Murasaki が現在対応しているのは Hardened Runtime による署名であり、macOS の App Sandbox ではありません。`sign.appSandbox` をデフォルトの `false` のままにした場合、Murasaki は camera、microphone、location、photos、contacts、calendar/reminders、Apple Events に必要な Hardened Runtime のリソースアクセス用エンタイトルメントを `systemPermissions.macOS` から生成します。署名済みビルドには、これらのホストエンタイトルメントと、対応する Info.plist の用途説明の両方が必要です。この非サンドボックス構成では、Bluetooth と音声認識は用途説明だけを使用します。同梱の Node ヘルパーのみが JIT 用の Hardened Runtime 権限を受け取り、ネイティブアドオンには実行可能エンタイトルメントは付与されません。`sign.appSandbox: true` は、Apple のヘルパー継承規則と現在の組み込み Node / JIT アーキテクチャが両立しないため、fail-closed で拒否されます。カスタムの `sign.entitlements` / `sign.helperEntitlements` はそのまま使用され、指定したパスが存在しないか `plutil` の検証に失敗した場合はビルドが停止します。種類ごとの完全な対応表は、[Native APIs → Entitlements と App Sandbox](/ja/docs/guides/native-apis#entitlements-と-app-sandbox)を参照してください。
 
 ## `main`
 
-`src/main.ts` が存在すると Murasaki が読み込みます。別 entry、graceful cleanup deadline、
-Main discovery の無効化を設定できます。
+`src/main.ts` が存在すると、Murasaki が自動的に読み込みます。`main` を使うと、別のエントリを指定したり、グレースフルシャットダウンの期限を変更したり、Main の自動検出を無効化したりできます。
 
 ```ts
 main: {
@@ -371,15 +305,14 @@ main: {
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `entry` | `string?` | project root からの相対 path。既定 `src/main.ts`。 |
-| `shutdownTimeoutMs` | `number?` | host exit前の `beforeQuit()` + `shutdown()` 全体の上限。既定 `10_000`。 |
+| `entry` | `string?` | プロジェクトルートからの相対パス。デフォルトは `src/main.ts`。 |
+| `shutdownTimeoutMs` | `number?` | ホストが終了する前の `beforeQuit()` と `shutdown()` を合わせた全体の上限。デフォルトは `10_000`。 |
 
-lifecycle hook と `'use main'` は [Node Main](/ja/docs/guides/node-main)を参照してください。
+ライフサイクルフックと `'use main'` については、[Node Main](/ja/docs/guides/node-main)を参照してください。
 
 ## `protocols`
 
-custom URL scheme を登録し、一致する URL を Node Main の `openRequested()` hook で
-受け取ります。
+カスタム URL スキームを登録すると、一致する URL を Node Main の `openRequested()` フックで受け取れます。
 
 ```ts
 protocols: [
@@ -389,18 +322,14 @@ protocols: [
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `scheme` | `string` | **必須。** `violet://open/42` の `violet` のような RFC 3986-style scheme。trim 後 lowercase に正規化。1〜63文字の有効な scheme character が必要。`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki` などのbrowser/OS schemeは予約済み。 |
-| `name` | `string?` | package metadata に使う human-readable handler name。既定は `` `${productName} URL` ``。 |
+| `scheme` | `string` | **必須。** `violet://open/42` の `violet` のような RFC 3986 形式のスキーム。前後の空白を除去し、小文字に正規化されます。有効なスキーム文字を 1〜63 文字含める必要があります。`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki` などのブラウザ／OS スキームは予約済みです。 |
+| `name` | `string?` | パッケージメタデータに使われる、人が読めるハンドラー名。デフォルトは `` `${productName} URL` ``。 |
 
-重複したスキームや不正なスキームがあると、ビルドは失敗します。macOS では `.app` の
-`Info.plist` に、Windows では NSIS / MSI インストーラーに登録情報を書き込みます。
-Linux では `.desktop` ファイルへ対応する `MimeType` を記録し、`.deb` のインストール時に
-デスクトップデータベースへ登録します。展開しただけの AppDir / AppImage と、ポータブルな
-Windows アーカイブは、OS への登録処理を行いません。
+重複したスキームや不正なスキームがあると、ビルドは失敗します。macOS では `.app` の `Info.plist` に、Windows では NSIS / MSI インストーラーに登録情報を書き込みます。Linux では `.desktop` ファイルへ対応する `MimeType` を記録し、`.deb` のインストール時にデスクトップデータベースへ登録します。展開しただけの AppDir / AppImage と、ポータブルな Windows アーカイブは、OS への登録処理を行いません。
 
 ## `fileAssociations`
 
-1つ以上の extension を document type として登録します。
+1 つ以上の拡張子をドキュメントタイプとして登録します。
 
 ```ts
 fileAssociations: [
@@ -416,26 +345,19 @@ fileAssociations: [
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `extensions` | `string[]` | **必須。** 1つ以上の extension。先頭のドットは指定しても削除され、lowercase に正規化。各値は1〜32文字の英数字、underscore、hyphenで、先頭は英数字。 |
-| `name` | `string?` | document type name。既定は `` `${productName} document` ``。 |
-| `description` | `string?` | package / Windows registration metadata に保存する説明。既定は `name`。 |
-| `role` | `'viewer' \| 'editor' \| 'shell' \| 'none'` | macOS document role。既定 `viewer`。 |
-| `mimeType` | `string?` | document metadata に保存する任意の MIME type。 |
+| `extensions` | `string[]` | **必須。** 1 つ以上の拡張子。先頭にドットを付けても削除され、小文字に正規化されます。各値は英数字・アンダースコア・ハイフンからなる 1〜32 文字で、先頭は英数字である必要があります。 |
+| `name` | `string?` | ドキュメントタイプ名。デフォルトは `` `${productName} document` ``。 |
+| `description` | `string?` | パッケージ／Windows の登録メタデータに保存する説明。デフォルトは `name`。 |
+| `role` | `'viewer' \| 'editor' \| 'shell' \| 'none'` | macOS のドキュメントロール。デフォルトは `viewer`。 |
+| `mimeType` | `string?` | ドキュメントメタデータに保存する任意の MIME タイプ。 |
 
-extension は全 entry 間で一意である必要があり、不正な extension / MIME type は build
-error になります。一致した file は Node Main の `openRequested()` hook に届きます。
-配布形式ごとの制約は `protocols` と同じです。macOS の `.app`、インストール済みの
-Windows NSIS / MSI、Linux の `.deb` は関連付けを登録します。ポータブルな Windows
-アーカイブ、展開しただけの AppDir / AppImage、`murasaki dev` は OS への関連付けを
-登録しません。
+拡張子はすべてのエントリ間で一意である必要があり、不正な拡張子や MIME タイプはビルドエラーになります。一致したファイルは Node Main の `openRequested()` フックに届きます。配布形式ごとの制約は `protocols` と同じです。パッケージ化された macOS の `.app`、インストール済みの Windows NSIS / MSI、インストール済みの Linux の `.deb` は関連付けを登録します。ポータブルな Windows アーカイブ、展開しただけの AppDir / AppImage、`murasaki dev` は OS への関連付けを登録しません。
 
-delivery semantics、testing、untrusted-input requirement は
-[Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
+配信の仕様、テスト方法、信頼できない入力の扱いについては、[Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
 
 ## `bundle`
 
-server / Main code は本番向けに compile されます。static bare npm import は自動検出・
-stage されます。runtime behavior を静的検出できない dependency / asset に次を使います。
+サーバー／Main のコードは本番向けにコンパイルされます。静的な bare npm import は自動的に検出・ステージングされます。実行時の挙動を静的に検出できない依存関係やアセットには、次のオプションを使用してください。
 
 ```ts
 bundle: {
@@ -451,18 +373,15 @@ bundle: {
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `external` | `string[]?` | app `node_modules` に stage。computed / dynamic package load を追加。native addon / runtime data を持つ package はこちらを優先。 |
-| `noExternal` | `string[]?` | compiled server bundle に強制的に含める。runtime asset のない JS-only package 向け。 |
-| `resources` | `Array<string \| { from: string; to?: string; executable?: boolean }>?` | packaged resources にfile / directoryをcopy。stringはsource basename、objectは相対destinationを指定。app所有の実行可能sidecarは必ず`executable: true`を付け、macOS/Windows署名でouter artifactより先にsealします。実行可能directoryは拒否します。 |
+| `external` | `string[]?` | アプリの `node_modules` にパッケージをステージングします。動的に算出されるパッケージの読み込みをここに追加します。ネイティブアドオンや実行時データを持つパッケージには、こちらを優先してください。 |
+| `noExternal` | `string[]?` | コンパイル済みのサーバーバンドルへ強制的に含めます。実行時アセットを持たない JS のみのパッケージ向けです。 |
+| `resources` | `Array<string \| { from: string; to?: string; executable?: boolean }>?` | ファイルやディレクトリをパッケージ化されたリソースへコピーします。文字列で指定した場合はソースのベース名を使用し、オブジェクトで指定した場合は相対的な配置先を指定できます。アプリが所有する実行可能なサイドカーには必ず `executable: true` を付けてください。これにより、macOS / Windows の署名で外側のアーティファクトより先に封印されます。実行可能なディレクトリは拒否されます。 |
 
-`resources` に secret を置かないでください。app bundle 内は user が読めます。native addon
-は全 target architecture でテストしてください。
+`resources` に秘密情報を置かないでください。アプリバンドル内のものはユーザーが読み取れます。ネイティブアドオンは、対象となるすべてのアーキテクチャでテストしてください。
 
 ## `plugins`
 
-`defineMurasakiPlugin` で trusted build-time extension を宣言します。plugin は
-`murasaki.config.ts` と同じ Node.js 権限で実行されるため、信頼できるcodeだけを
-installしてください。
+`defineMurasakiPlugin` を使うと、信頼されたビルド時拡張機能を宣言できます。プラグインは `murasaki.config.ts` と同じ Node.js 権限で実行されるため、信頼できるコードだけをインストールしてください。
 
 ```ts title="murasaki.config.ts"
 import { defineConfig, defineMurasakiPlugin } from 'murasaki'
@@ -494,18 +413,14 @@ export default defineConfig({
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `name` | `string` | 必須のstable lowercase identifier。重複nameはconfig validation error。 |
-| `vite` | `PluginOption?` | Murasaki core pluginの後へ追加するVite contribution。nested array / async optionはVite semanticsに従う。 |
-| `bundle` | `BundleConfig?` | `external`、`noExternal`、`resources`をplugin宣言順で追加。完全重複は除去し、同じpackageが両方にあれば`noExternal`を優先。 |
-| `hooks.before` / `hooks.after` | `(context) => void \| Promise<void>` | serial CLI hook。throw / rejectでcommandを停止しplugin nameを表示。`after`は成功後のみ実行。 |
+| `name` | `string` | 安定した小文字の識別子（必須）。名前が重複すると設定の検証エラーになります。 |
+| `vite` | `PluginOption?` | Murasaki のコアプラグインの後に追加される Vite の拡張。ネストした配列や非同期のオプションは、Vite のセマンティクスに従います。 |
+| `bundle` | `BundleConfig?` | `external`、`noExternal`、`resources` をプラグインの宣言順に追加します。完全に重複するものは除去され、同じパッケージが両方にある場合は `noExternal` が優先されます。 |
+| `hooks.before` / `hooks.after` | `(context) => void \| Promise<void>` | 直列に実行される CLI フック。throw または reject するとコマンドが停止し、プラグイン名が表示されます。`after` はコマンド成功後にのみ実行されます。 |
 
-hook contextには、plugin objectを除いたdeeply frozen config snapshot、absolute
-`projectRoot`、`command` (`dev` / `build` / `bundle`)、bundle時のconcrete `target`が
-入ります。plugin object / functionは`murasaki-meta.json`へserializeされません。
+フックのコンテキストには、プラグインオブジェクトを除いた深く凍結された設定のスナップショット、絶対パスの `projectRoot`、`command`（`dev` / `build` / `bundle`）、そして bundle コマンド時の具体的な `target` が含まれます。プラグインオブジェクトや関数は `murasaki-meta.json` へシリアライズされません。
 
-このSDKが拡張するのは **build pipelineだけ** です。native Rust ABI、dynamic library
-loader、renderer/runtime plugin sandboxではありません。native featureは引き続き
-Murasaki native hostとcapability modelへ実装します。
+この SDK が拡張するのは **ビルドパイプラインだけ** です。ネイティブの Rust ABI、動的ライブラリローダー、レンダラー／ランタイムのプラグインサンドボックスではありません。ネイティブ機能は、引き続き Murasaki のネイティブホストとケイパビリティモデルに実装してください。
 
 ## `build`
 
@@ -518,16 +433,14 @@ build: {
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `before` | `string?` | client / Node buildの前に一度実行するshell command。非0終了ならpackagingを停止。workspace prerequisiteやcode generation向け。 |
-| `envPrefix` | `string[]?` | renderer codeへ公開できるenv prefix。既定は`MURASAKI_PUBLIC_`。追加・置換する場合だけ指定します。 |
+| `before` | `string?` | クライアントと Node のビルドの前に一度だけ実行されるシェルコマンド。終了コードが 0 以外だとパッケージングが停止します。ワークスペースの前提条件やコード生成に使用します。 |
+| `envPrefix` | `string[]?` | レンダラーのコードに公開できる環境変数のプレフィックス。デフォルトは `MURASAKI_PUBLIC_`。プレフィックスを追加・置換したい場合にのみ指定します。 |
 
-prefix付き変数はclient公開用ですが、secretを置かないでください。Viteが値を配布JavaScriptへ
-埋め込みます。
+プレフィックスが付いた変数だけがクライアントに公開されますが、そこに秘密情報を置かないでください。Vite がその値を配布用の JavaScript に埋め込みます。
 
 ### 環境変数と`.env`
 
-Murasaki CLIはproject rootから次のファイルを自動で読み込みます。後のファイルほど優先され、
-terminal / CIから渡した既存の環境変数はすべての`.env`より優先されます。
+Murasaki CLI は、プロジェクトルートから次のファイルを自動的に読み込みます。後にあるファイルほど優先度が高く、ターミナルや CI からすでに渡されている環境変数は、すべての `.env` ファイルより優先されます。
 
 ```txt
 .env
@@ -538,8 +451,7 @@ terminal / CIから渡した既存の環境変数はすべての`.env`より優�
 .env.production.local
 ```
 
-Rendererへ渡す値にはMurasaki固有の`MURASAKI_PUBLIC_`を付け、`import.meta.env`から
-参照します。
+レンダラーへ渡す値には、Murasaki 固有の `MURASAKI_PUBLIC_` という名前空間を付け、`import.meta.env` から参照します。
 
 ```bash title=".env.local"
 MURASAKI_PUBLIC_API_ORIGIN=https://api.example.com
@@ -550,22 +462,17 @@ ACCOUNT_API_TOKEN=keep-this-private
 const apiOrigin = import.meta.env.MURASAKI_PUBLIC_API_ORIGIN
 ```
 
-prefixなしの値はrenderer bundleへ入りません。`murasaki.config.*`、plugin hook、Node Main、
-Server Actions、API Routesでは通常のNode環境変数として参照できます。
+プレフィックスのない値は、レンダラーのバンドルには一切含まれません。`murasaki.config.*`、プラグインフック、Node Main、Server Actions、API Routes では、通常の Node の環境変数として参照できます。
 
 ```ts title="src/main.ts"
 const token = process.env.ACCOUNT_API_TOKEN
 ```
 
-`MURASAKI_PUBLIC_`値はbuild時に配布JavaScriptへ埋め込まれるため、secretには使用しないで
-ください。packaged Node Mainはlauncherの環境を継承しますが、Murasakiは`.env`をappへ
-コピーしません。installed appのsecret / end-user runtime設定はdeployment環境、OSの
-credential store、`secureStorage`、または`context.paths.data`を使用してください。
+`MURASAKI_PUBLIC_` の値はビルド時に配布用の JavaScript へ埋め込まれるため、このプレフィックスを秘密情報には使用しないでください。パッケージ化された Node Main はランチャーの環境を継承しますが、Murasaki は `.env` ファイルをアプリへコピーしません。インストール済みアプリの秘密情報やエンドユーザー向けの実行時設定には、デプロイ環境、OS の認証情報ストア、`secureStorage`、または `context.paths.data` を使用してください。
 
 ## `security`
 
-Murasakiはframework shellとuser-owned `index.html`の両方へ、環境別のContent
-Security Policyを1つ注入します。完全な置き換え、または明示的なopt-outを設定できます。
+Murasaki は、フレームワークのシェルとユーザー所有の `index.html` の両方に、環境ごとの Content Security Policy を 1 つ注入します。完全な置き換えを設定することも、明示的にオプトアウトすることもできます。
 
 ```ts
 security: {
@@ -578,23 +485,15 @@ security: {
 
 | 値 | 動作 |
 | --- | --- |
-| 省略 | Murasakiのproduction / development既定値を使用。 |
-| `string` | 既定値を完全に置換。directiveはmergeされない。 |
-| `false` | framework注入を無効化。user-authored CSPは削除しない。 |
+| 省略 | Murasaki の本番／開発それぞれのデフォルト値を使用します。 |
+| `string` | デフォルト値を完全に置き換えます。ディレクティブはマージされません。 |
+| `false` | フレームワークによる注入を無効化します。ユーザーが記述した CSP は削除されません。 |
 
-`index.html`にCSPの`<meta http-equiv>`がすでにあれば、そのuser-owned policyを維持しつつ
-script / resourceより先に適用されるよう`<head>`先頭へ移動します。policyは必ず1か所で
-管理してください。既存tagと`security.csp` stringの併用はbuild errorです。設定値は空でない
-1行のstringに限り、control character、double quote、
-`<`、`>`は使えません。既定値、migration、meta配信CSPの制約は
-[セキュリティ](/ja/docs/building/security)を参照してください。
+`index.html` にすでに CSP の `<meta http-equiv>` タグがある場合、Murasaki はそのユーザー所有のポリシーを維持しつつ、スクリプトやリソースより先に適用されるよう `<head>` の先頭へ移動します。ポリシーは必ず 1 か所で管理してください。既存のタグと `security.csp` の文字列を併用すると、ビルドエラーになります。設定する値は、空でない 1 行の文字列に限られ、制御文字、二重引用符、`<`、`>` は使用できません。デフォルト値、移行方法、meta 配信 CSP の制約については、[セキュリティ](/ja/docs/building/security)を参照してください。
 
 ## `updater`
 
-`true` は、通常の OSS アプリにとって完全に動作する設定です — GitHub リポジトリは
-`package.json` の `repository` フィールドから、公開鍵は `.murasaki/update-key.pub`
-から推論され、チャンネルはデフォルトで `'stable'`、起動時に一度だけチェックします。
-オブジェクト形式では、これらのデフォルトに合わない部分だけを上書きすればよいです:
+`true` は、通常の OSS アプリにとって完全に動作する設定です — GitHub リポジトリは `package.json` の `repository` フィールドから、公開鍵は `.murasaki/update-key.pub` から推論され、チャンネルはデフォルトで `'stable'`、起動時に一度だけチェックします。オブジェクト形式では、これらのデフォルトに合わない部分だけを上書きすればよいです。
 
 ```ts
 type UpdaterConfig =
@@ -612,88 +511,64 @@ type UpdaterConfig =
     }
 ```
 
-意図的に `provider` フィールドはありません — GitHub かセルフホストかは、`repo` と
-`endpoint` のどちらが設定されているかから推論されるため、設定の他の部分とずれることが
-ありません。また、署名検証を無効化する方法もなく、セルフホストの `endpoint` はcredentialを埋め込まない
-`https:` である必要があります(`http:` は loopback host — `127.0.0.1`、`localhost`、
-`[::1]` — に対してのみ、ローカルテスト用に許可されます)。この制約はここと、fetch時の
-両方で強制されます。
-replay保護のため`generatedAt`はdefaultで必須です。legacy escape hatchは古い署名manifestの
-migration期間だけ有効にしてください。
+意図的に `provider` フィールドはありません — GitHub かセルフホストかは、`repo` と `endpoint` のどちらが設定されているかから推論されるため、設定の他の部分とずれることがありません。また、署名検証を無効化する方法もありません。セルフホストの `endpoint` は、認証情報を含まない `https:` である必要があります（`http:` はループバックホスト — `127.0.0.1`、`localhost`、`[::1]` — に対してのみ、ローカルテスト用に許可されます）。この制約は設定の読み込み時と、フェッチ時の両方で強制されます。リプレイ保護のため、`generatedAt` はデフォルトで必須です。レガシー向けの回避策は、古い署名済みマニフェストを移行する期間だけ有効にしてください。
 
-`checkOnStart` と `checkInterval` は更新エンジン自身が処理するため、UI 側で
-`check()` を呼ばなくても機能します。`useUpdate().check()` を手動で呼ぶこともできます —
-チェックが実行中のときに二重に走ることはありません。
+`checkOnStart` と `checkInterval` は更新エンジン自身が処理するため、UI 側で `check()` を呼ばなくても機能します。`useUpdate().check()` を手動で呼ぶこともできます — チェックが実行中のときに二重に走ることはありません。
 
-`useUpdate()` と `<UpdateButton />`(いずれも `murasaki` から)から利用されます —
-マニフェストの形式、署名、リリースの公開については、完全な
-[自動更新](/docs/guides/auto-update)ガイドを参照してください。
+`useUpdate()` と `<UpdateButton />`（どちらも `murasaki` からエクスポートされます）から利用されます。マニフェストの形式、署名、リリースの公開方法については、完全な[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 ## `installer`
 
-macOS DMG styling と Windows NSIS / MSI installer option です。省略時は Murasaki の
-既定値を使います。
+macOS の DMG のスタイリングと、Windows NSIS / MSI インストーラーのオプションです。省略した場合は Murasaki のデフォルト値が使われます。
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `background` | `string?` | カスタム DMG 背景 PNG への(プロジェクトルートからの相対)パス。Murasaki のデフォルトを上書きします。 |
-| `window` | `{ width: number; height: number }?` | DMG ウィンドウのコンテンツサイズ(ポイント単位)。デフォルトは `{ width: 640, height: 420 }`(デフォルトの背景に合わせています)。 |
+| `background` | `string?` | カスタム DMG 背景 PNG への（プロジェクトルートからの相対）パス。Murasaki のデフォルトを上書きします。 |
+| `window` | `{ width: number; height: number }?` | DMG ウィンドウのコンテンツサイズ（ポイント単位）。デフォルトは `{ width: 640, height: 420 }`（デフォルトの背景に合わせています）。 |
 | `iconSize` | `number?` | DMG ウィンドウ内のアイコンサイズ。デフォルトは `128`。 |
 
 ### `installer.windows`
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `installMode` | `'perUser' \| 'perMachine'` | NSIS install scope。既定 `perUser`。MSI は常に per-machine。 |
-| `publisher` | `string?` | installer / Add-Remove Programs の publisher。`authors`、`copyright`、`productName` の順に fallback。 |
-| `upgradeCode` | `string?` | 安定した MSI GUID。既定は `appId` 由来。release 後は変更しない。 |
-| `icon` | `string?` | installer / uninstaller / Add-Remove Programs 用 `.ico`。既定は生成済み app icon。 |
-| `banner` | `string?` | wizard header BMP。NSIS は 150×57、MSI は 493×58 を期待。 |
-| `sidebar` | `string?` | welcome / finish BMP。NSIS は 164×314、MSI は 493×312 を期待。 |
-| `license` | `string?` | NSIS `.txt` / `.rtf` または MSI `.rtf` license file。 |
+| `installMode` | `'perUser' \| 'perMachine'` | NSIS のインストールスコープ。デフォルトは `perUser`。MSI は常にマシン単位です。 |
+| `publisher` | `string?` | インストーラーや「プログラムの追加と削除」の発行元。`authors`、`copyright`、`productName` の順にフォールバックします。 |
+| `upgradeCode` | `string?` | 安定した MSI の GUID。デフォルトは `appId` に由来する決定的な値。リリース後は変更しないでください。 |
+| `icon` | `string?` | インストーラー、アンインストーラー、「プログラムの追加と削除」用の `.ico`。デフォルトは生成済みのアプリアイコン。 |
+| `banner` | `string?` | ウィザードヘッダーの BMP。NSIS は 150×57、MSI は 493×58 を想定しています。 |
+| `sidebar` | `string?` | ウェルカム／完了画面の BMP。NSIS は 164×314、MSI は 493×312 を想定しています。 |
+| `license` | `string?` | NSIS の `.txt` / `.rtf`、または MSI の `.rtf` 形式のライセンスファイル。 |
 
-built-in updaterを有効にしたWindows配布は、意図的にper-user NSISだけを使います。MSI生成は
-skipされ、`installMode: 'perMachine'`はconfig load時に拒否されます。MSIは`updater`を無効にし、
-MSI major upgradeで管理する配布に利用できます。必要なplatform packaging toolからinstallerが
-1つも生成されない場合、installer commandは失敗します。portable ZIPだけが必要なら
-`murasaki bundle`を使用してください。
+組み込みのアップデーターを有効にした Windows 配布では、意図的にユーザー単位の NSIS のみを使用します。MSI の生成はスキップされ、`installMode: 'perMachine'` は設定の読み込み時に拒否されます。MSI は `updater` を無効化し、MSI のメジャーアップグレードで管理する配布であれば引き続き利用できます。必要なプラットフォームのパッケージングツールからインストーラーが 1 つも生成されない場合、`murasaki installer` コマンドは失敗します。ポータブルな ZIP だけが必要な場合は `murasaki bundle` を使用してください。
 
 ## `sign`
 
-Murasaki は**あなた自身の**証明書または signing provider で署名し、独自の証明書は
-一切同梱しません。公証の認証情報と PFX password はこの設定ではなく、常に環境変数から
-読み取ります — 詳しくは
-[Distribution → Signing](/docs/building/distribution#signing--notarization)を参照
-してください。
+Murasaki は**あなた自身の**証明書または署名プロバイダーで署名し、独自の証明書は一切同梱しません。公証の認証情報と PFX のパスワードは、この設定ではなく常に環境変数から読み取ります — 詳しくは[Distribution → Signing](/docs/building/distribution#signing--notarization)を参照してください。
 
-### macOS fields
+### macOS のフィールド
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `identity` | `string?` | 署名 identity、例: `"Developer ID Application: Name (TEAMID)"`。デフォルトは `$MURASAKI_SIGN_IDENTITY`、次にキーチェーン内の最初の "Developer ID Application" identity。 |
-| `entitlements` | `string?` | main app executable用のカスタム`.plist`。既定では`systemPermissions`から必要最小限のhost権限を生成します。fileが存在しない、または無効ならbuildを停止します。 |
-| `helperEntitlements` | `string?` | 同梱Node helper用のカスタム`.plist`。既定ではNodeのJIT/library-loading権限を生成します。fileが存在しない、または無効ならbuildを停止します。 |
-| `appSandbox` | `boolean?` | 予約済み。現在の同梱Node構成では`true`をfail-closedで拒否します。defaultのhardened runtime署名を使用してください。既定`false`。 |
+| `identity` | `string?` | 署名アイデンティティ、例: `"Developer ID Application: Name (TEAMID)"`。デフォルトは `$MURASAKI_SIGN_IDENTITY`、その次にキーチェーン内で最初に見つかった "Developer ID Application" のアイデンティティ。 |
+| `entitlements` | `string?` | メインのアプリ実行ファイル用のカスタム `.plist`。デフォルトでは `systemPermissions` から必要最小限のホスト権限を生成します。ファイルが存在しない、または無効な場合はビルドを停止します。 |
+| `helperEntitlements` | `string?` | 同梱の Node ヘルパー用のカスタム `.plist`。デフォルトでは Node の JIT／ライブラリ読み込み権限を生成します。ファイルが存在しない、または無効な場合はビルドを停止します。 |
+| `appSandbox` | `boolean?` | 予約済みです。現在の同梱 Node 構成では、`true` を fail-closed で拒否します。デフォルトの Hardened Runtime による署名を使用してください。デフォルトは `false`。 |
 
 ### `sign.windows`
 
-`murasaki bundle --sign --target win32-x64` は portable ZIP 作成前に app executable を
-署名します。`murasaki installer --sign --target win32-x64`は生成されたinstaller（NSISと、
-updater無効時のMSI）も署名し、すべてをAuthenticode policyで検証します。Windowsと
-SignToolが必要です。
+`murasaki bundle --sign --target win32-x64` は、ポータブル ZIP を作成する前にアプリの実行ファイルへ署名します。`murasaki installer --sign --target win32-x64` は、生成された各インストーラー（NSIS と、アップデーターが無効な場合の MSI）にも署名し、すべての署名を Authenticode ポリシーで検証します。この処理には Windows と SignTool が必要です。
 
 | フィールド | 型 | 説明 |
 | --- | --- | --- |
-| `certificateFile` | `string?` | PFX/P12 のパス。password は `$MURASAKI_WINDOWS_CERTIFICATE_PASSWORD` からのみ読み取ります。 |
-| `certificateSubjectName` | `string?` | Windows の `My` store に import 済みの証明書を subject name で選択します。 |
-| `certificateSha1` | `string?` | `My` store 内の証明書の40文字 thumbprint。file / subject selector とは排他的です。 |
-| `certificateStore` | `'currentUser' \| 'localMachine'` | subject / thumbprint / 自動選択を行う store。デフォルトは `currentUser`。 |
-| `timestampUrl` | `string \| false` | RFC 3161 timestamp URL。`false` で無効。通常は DigiCert、Artifact Signing は Microsoft service がデフォルトです。 |
+| `certificateFile` | `string?` | PFX / P12 のパス。パスワードは `$MURASAKI_WINDOWS_CERTIFICATE_PASSWORD` からのみ読み取ります。 |
+| `certificateSubjectName` | `string?` | Windows の `My` ストアにインポート済みの証明書を、サブジェクト名で選択します。 |
+| `certificateSha1` | `string?` | `My` ストア内にある証明書の 40 文字のサムプリント。ファイル／サブジェクトによる選択とは排他的です。 |
+| `certificateStore` | `'currentUser' \| 'localMachine'` | サブジェクト／サムプリント／自動選択の対象となるストア。デフォルトは `currentUser`。 |
+| `timestampUrl` | `string \| false` | RFC 3161 タイムスタンプ URL。`false` で無効化します。通常は DigiCert、Artifact Signing の場合は Microsoft のサービスがデフォルトです。 |
 | `signToolPath` | `string?` | 明示的な `signtool.exe`。未指定なら PATH と Windows SDK から探索します。 |
-| `artifactSigning` | `{ dlib: string; metadata: string }?` | Microsoft Artifact Signing の provider path (`Azure.CodeSigning.Dlib.dll` と非secretの account/profile metadata JSON)。証明書 selector とは排他的です。 |
+| `artifactSigning` | `{ dlib: string; metadata: string }?` | Microsoft Artifact Signing のプロバイダーパス（`Azure.CodeSigning.Dlib.dll` と、秘密情報を含まないアカウント／プロファイルのメタデータ JSON）。証明書の選択方法とは排他的です。 |
 
-CI 用の環境変数 override は
-[Windows installer と signing](/ja/docs/building/distribution#windows-installers-and-signing)を参照してください。
+すべての選択方法には CI 用の環境変数によるオーバーライドも用意されています。詳しくは[Windows インストーラーと署名](/ja/docs/building/distribution#windows-installers-and-signing)を参照してください。
 
 ## 次へ
 

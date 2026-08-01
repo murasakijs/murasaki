@@ -3,28 +3,22 @@ title: 0.54 から 0.55 への移行
 description: 本番 Murasaki アプリを更新するための破壊的変更と検証チェックリスト。
 ---
 
-Murasaki 0.55 では runtime authority、update、packaging、browser data の identity を
-強化しました。多くのアプリは構造を変えずに compile できますが、以下は意図的な
-fail-closed 変更です。desktop build を公開する前に対応してください。
+Murasaki 0.55 では、ランタイムの権限管理、アップデート、パッケージング、ブラウザデータの識別情報まわりのセキュリティを強化しました。ほとんどのアプリは構造を変更せずにコンパイルできますが、以下は意図的なフェイルクローズの変更です。デスクトップビルドを公開する前に対応してください。
 
-## 1. renderer の環境変数を変更する
+## 1. レンダラーの環境変数名を変更する
 
-renderer JavaScript に埋め込んでよい値には `MURASAKI_PUBLIC_*` を使います。
+レンダラーの JavaScript に埋め込んでよい値には `MURASAKI_PUBLIC_*` を使用します。
 
 ```dotenv
 MURASAKI_PUBLIC_API_ORIGIN=https://api.example.com
 DATABASE_URL=postgresql://localhost/private
 ```
 
-renderer から見えるのは1つ目だけです。credential には prefix を付けないでください。
-既存アプリ固有の public prefix が必要なら `build.envPrefix` へ明示し、空 prefix は公開しないで
-ください。
+レンダラーから見えるのは1つ目の値だけです。認証情報にはこのプレフィックスを付けないでください。既存のアプリが別の公開用プレフィックスを使っている場合は、`build.envPrefix` に明示的に追加してください。空のプレフィックスを公開しないようにしてください。
 
-## 2. update manifest に `generatedAt` を追加する
+## 2. アップデートマニフェストに `generatedAt` を追加する
 
-`murasaki release --manifest` が作る新しい manifest には `generatedAt` が含まれます。
-これを持たない legacy manifest は既定で拒否されます。期間を区切った移行時だけ、次を設定
-できます。
+`murasaki release --manifest` で新規作成されるマニフェストには、すでに `generatedAt` が含まれています。`generatedAt` を持たない旧形式のマニフェストは、本番環境ではデフォルトで拒否されます。期間を区切った移行期間中に限り、次の設定を行えます。
 
 ```ts
 updater: {
@@ -32,13 +26,11 @@ updater: {
 }
 ```
 
-support 対象の全 installed version が新 manifest を読めるようになったら削除してください。
-0.55 は認証済み manifest の最高 timestamp / version も永続化し、古い署名済み manifest を
-replay / rollback として拒否します。
+サポート対象のインストール済みバージョンすべてが最新のマニフェストを読み込めるようになったら、このフラグを削除してください。0.55 では、認証済みマニフェストの最も新しいタイムスタンプとバージョンも永続化されるため、それより古い署名済みマニフェストを公開すると、リプレイ攻撃やロールバックとみなされて拒否されます。
 
-## 3. executable resource を宣言する
+## 3. 実行可能なリソースを宣言する
 
-sidecar や helper binary には structured resource を使います。
+sidecar やヘルパーバイナリには、構造化されたリソース形式を使用します。
 
 ```ts
 bundle: {
@@ -48,30 +40,20 @@ bundle: {
 }
 ```
 
-これにより app / installer を seal する前に helper も署名されます。宣言されていない Mach-O、
-PE、ELF、shebang resource は、後から Gatekeeper や Windows policy に拒否される artifact を
-生成せず、packaging 時点で停止します。
+これにより、Murasaki はアプリやインストーラーを封印する前にヘルパーにも署名するようになります。宣言されていない Mach-O、PE、ELF、shebang 形式のリソースがある場合、後から Gatekeeper や Windows のポリシーに拒否される成果物を生成するのではなく、パッケージング時点で処理を停止します。
 
-## 4. 永続化した app origin を利用可能に保つ
+## 4. 永続化されたアプリのオリジンを利用可能に保つ
 
-0.55 は packaged app の初回起動で loopback port を1つ選び、永続化します。次回以降にその
-port が使用中なら、別 origin へ移って localStorage / IndexedDB が空に見える動作をせず起動に
-失敗します。無関係な local service がこの port を占有しないようにしてください。collision が
-表示されたら競合 process を停止します。origin state の削除は新しい browser-data identity を
-作る操作であり、通常の復旧手順ではありません。
+0.55 では、パッケージ済みアプリの初回起動時にループバックポートを1つ選択し、永続化します。次回以降の起動時にそのポートが使用中の場合、別のオリジンへ移動して localStorage や IndexedDB が空に見えるような動作はせず、起動に失敗するようになりました。アプリが永続化したポートに、無関係なローカルサービスをバインドしないようにしてください。起動時に競合が報告された場合は、競合しているプロセスを停止してください。オリジンの状態を削除する操作は、新しいブラウザデータの識別情報を意図的に作成する操作であり、通常の復旧手順ではありません。
 
-## 5. capability 境界を見直す
+## 5. ケイパビリティの境界を見直す
 
-- native API と Node Main / API route は別々の default-deny surface です。
-- native grant は `capabilities`、Node / API grant は `backendCapabilities` に、可能なら window
-  単位で宣言します。
-- camera、microphone、geolocation の browser API は framework response policy が拒否します。
-  対応を追加する場合は app-owned native flow を用意し、同等の境界なしに header を弱めないで
-  ください。
-- `sign.appSandbox: true` は拒否されます。sandbox-compatible な Node helper model が文書化
-  されるまでは macOS Hardened Runtime + notarization を使用してください。
+- ネイティブ API と Node Main / API Routes は、それぞれ独立した「デフォルト拒否」の権限領域です。
+- レンダラーのネイティブ権限は `capabilities` に、Node / API 側の権限は `backendCapabilities` に、可能な限りウィンドウ単位で宣言します。
+- カメラ、マイク、位置情報のブラウザ API は、フレームワークのレスポンスポリシーによって拒否されます。これらの機能を追加する場合は、アプリ側で管理するネイティブフローを用意してください。同等の境界を定義せずに、ヘッダーをグローバルに緩めないでください。
+- `sign.appSandbox: true` は拒否されます。サンドボックスに対応した Node ヘルパーモデルが文書化されるまでは、macOS では Hardened Runtime と公証を使用してください。
 
-## 6. 実 target で release を検証する
+## 6. 実際のターゲットでリリースを検証する
 
 最低限、次を実行します。
 
@@ -83,6 +65,4 @@ pnpm exec murasaki bundle --target <platform-arch>
 pnpm exec murasaki installer --target <platform-arch> --sign
 ```
 
-macOS では codesign、Gatekeeper、staple 済み notarization ticket を検証します。Windows では
-Authenticode を検証し、security control を有効にしたまま installed app を起動します。
-Gatekeeper、SmartScreen、Smart App Control の無効化を利用者向け手順に含めないでください。
+macOS では、codesign、Gatekeeper、そしてステープルされた公証チケットを検証します。Windows では、Authenticode を検証し、セキュリティ機能を有効にしたままインストール済みのアプリを起動して確認します。Gatekeeper、SmartScreen、Smart App Control を無効化する手順を、利用者向けのインストール手順に含めないでください。

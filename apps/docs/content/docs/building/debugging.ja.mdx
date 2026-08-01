@@ -1,112 +1,56 @@
 ---
 title: デバッグ
-description: WebViewのinspectorを開き、browserでReact DevToolsを使い、dev error overlayを読み、構造化logと診断reportでNode Mainを診断する。
+description: WebView のインスペクターを開き、ブラウザで React DevTools を使い、開発時のエラーオーバーレイを読み、構造化ログと診断レポートで Node Main を診断する。
 ---
 
-`murasaki dev` は2つのものを同時に実行します。一方のprocessでは、Node Main
-lifecycleをpluginとして読み込んだVite dev serverが動き、もう一方ではmain
-thread上でnative WebView hostが動きます。それぞれdebugの勝手が異なります。
-このページではWebView / renderer、その中のReact tree、そして長寿命のNode
-Main processを扱います。packaging、signing、起動の障害は
-[トラブルシューティング](/docs/building/troubleshooting)を参照してください。
+`murasaki dev` は2つのプロセスを同時に実行します。一方のプロセスでは、Node Main のライフサイクルをプラグインとして読み込んだ Vite の開発サーバーが動作し、もう一方のプロセスでは、メインスレッド上でネイティブの WebView ホストが動作します。それぞれデバッグの方法が異なります。このページでは WebView とレンダラー、その中の React ツリー、そして長寿命の Node Main プロセスを扱います。パッケージング、署名、起動時の問題については、[トラブルシューティング](/docs/building/troubleshooting)を参照してください。
 
-## WebViewのdevtools
+## WebView の DevTools
 
-`murasaki dev` はnative binary自体がdebug buildかrelease buildかに関わらず、
-常にdevtoolsを有効にしてwindowを開きます。packaged appはその逆で、devtools
-は常にcompileから除かれ、配布物でdevtoolsを再度有効にするconfig flagはあり
-ません。
+`murasaki dev` は、ネイティブバイナリ自体がデバッグビルドかリリースビルドかに関わらず、常に DevTools を有効にしてウィンドウを開きます。パッケージ済みのアプリはその逆で、DevTools は常にコンパイル時に除去され、配布ビルドで DevTools を再度有効にするための設定フラグはありません。
 
-- **macOS** はWKWebViewを使用しており、devtools自体のUIを持ちません。
-  Safariの Develop menu を有効にし(Safari → 設定 → 詳細 →
-  **Show features for web developers**)、**Develop → \<あなたのMac\> →
-  localhost** から、実行中のwindowへSafariのWeb Inspectorをattachします。
-- **Windows** はWebView2を使用しており、Chromium自体のDevToolsを直接
-  embedしています — windowを右クリックして **Inspect** を選ぶか、
-  **F12** を押します。
+- **macOS** は WKWebView を使用しており、それ自体に DevTools の UI はありません。Safari の Develop メニューを有効にし（Safari → 設定 → 詳細 → **Show features for web developers**）、**Develop → \<あなたの Mac\> → localhost** から、実行中のウィンドウへ Safari の Web Inspector をアタッチします。
+- **Windows** は WebView2 を使用しており、Chromium 自身の DevTools を直接埋め込んでいます — ウィンドウを右クリックして **Inspect** を選ぶか、**F12** を押します。
 
-右クリックがOSのnative menu(**Inspect**を含む)を開くのは、windowが
-[`useContextMenu`](/docs/guides/context-menu)で独自menuを宣言していない
-場合だけです。window全体のcontext menuを宣言すると、そのwindowの右クリック
-はあなたのmenuを開くようになります。**F12**はWindowsではどちらの場合でも
-動作します。Murasakiは自分で宣言したshortcutに一致するkeyだけをintercept
-するため、該当しないkeyはそのままWebView2に届きます。
+右クリックで OS ネイティブのメニュー（**Inspect** を含む）が開くのは、ウィンドウが [`useContextMenu`](/docs/guides/context-menu) で独自のメニューを宣言していない場合だけです。ウィンドウ全体のコンテキストメニューを宣言すると、それ以降はそのウィンドウを右クリックすると自分のメニューが開くようになります。**F12** は Windows ではどちらの場合でも動作します。Murasaki は自分で宣言したショートカットに一致するキーだけをインターセプトするため、該当しないキーはそのまま WebView2 に渡されます。
 
 <Callout type="info">
-  native bindingにはWebView objectの`openDevtools()`methodもありますが、
-  Murasakiの現在のpublic APIはそれをどこからも呼び出していません。Node Main
-  やrendererからprogrammaticにdevtoolsを開く手段は今のところありません。
-  WebView自体の右クリックmenuかkeyboard shortcutを使ってください。
+  ネイティブバインディングには WebView オブジェクトの `openDevtools()` メソッドもありますが、Murasaki の現在の公開 API はこれをどこからも呼び出していません。Node Main やレンダラーからプログラムで DevTools を開く手段は、今のところサポートされていません。WebView 自体の右クリックメニューかキーボードショートカットを使用してください。
 </Callout>
 
-## browserでReact DevToolsを使う
+## ブラウザで React DevTools を使う
 
-`murasaki dev` はappをcustom protocolではなく実際のHTTP
-(`http://127.0.0.1:<port>/`)で配信するため、native windowと並べて同じURL
-をChromeで開けます。標準の **React DevTools** browser extensionは、他の
-普通のpageと同様にattachします — 特別な統合は不要です。
+`murasaki dev` はアプリをカスタムプロトコルではなく実際の HTTP（`http://127.0.0.1:<port>/`）で配信するため、同じ URL をネイティブウィンドウと並べて Chrome で開くことができます。標準の **React DevTools** ブラウザ拡張機能は、ほかの普通のページと同様にアタッチでき、特別な統合は不要です。
 
-ただし普通のbrowser tabはapp本体ではありません。`/api/*` と
-`/__murasaki/*` はnative WebViewのsessionで保護されているため、その
-Chrome tabからのServer Actions / API route呼び出しは正しく`403`になり
-ます。React treeの確認にはtabを、app自体の動作確認にはnative windowを
-使ってください。[Backend callが403](/docs/building/troubleshooting#backend-call-が-403)
-を参照してください。
+ただし、普通のブラウザタブはアプリ本体ではありません。`/api/*` と `/__murasaki/*` はネイティブ WebView のセッションによって保護されているため、その Chrome タブから行う Server Actions や API Routes の呼び出しは、正しく `403` になります。React ツリーの確認にはタブを使い、アプリ自体の動作確認にはネイティブウィンドウを使ってください。[Backend call が 403](/docs/building/troubleshooting#backend-call-が-403) を参照してください。
 
-## dev error overlay
+## 開発時のエラーオーバーレイ
 
-uncaught errorは、空白のwindowやconsoleだけのstack traceの代わりに、
-murasakiブランドのfull-screen overlayとして表示されます。次の3つの
-capture pathから供給されます:
+キャッチされなかったエラーは、空白のウィンドウやコンソールだけのスタックトレースの代わりに、murasaki ブランドのフルスクリーンオーバーレイとして表示されます。次の3つのキャプチャ経路から供給されます。
 
-- render error(error boundaryの`componentDidCatch`経由)
-- uncaught exception(`window.onerror`経由)
-- unhandled promise rejection(`unhandledrejection`経由)
+- レンダーエラー（エラーバウンダリの `componentDidCatch` 経由）
+- キャッチされなかった例外（`window.onerror` 経由）
+- 処理されなかった Promise の拒否（`unhandledrejection` 経由）
 
-overlayは常に最新のerrorを、そのstackと(render errorの場合は)React
-component stackとともに表示し、badgeでqueueされている以前のerror数を
-示します。連続する同一errorはdedupeされるため、React Strict Modeの
-double-invokeやrepeat-renderでoverlayが同じerrorだらけになることはあり
-ません。**Esc**または**Dismiss**buttonで閉じ、**Reload**でpageを再読み込み
-します。production buildではno-opです — overlay全体がcompileから除かれ
-ます。
+オーバーレイは常に最新のエラーを、そのスタックと（レンダーエラーの場合は）React コンポーネントスタックとともに表示し、バッジでキュー内に残っている以前のエラー数を示します。連続する同一のエラーは重複排除されるため、React Strict Mode の二重呼び出しや再レンダリングでオーバーレイが同じエラーだらけになることはありません。**Esc** または **Dismiss** ボタンで閉じ、**Reload** でページを再読み込みします。本番ビルドでは何もしません — オーバーレイ全体がコンパイル時に除去されます。
 
-## Node Mainをdebugする
+## Node Main をデバッグする
 
-Node Mainは`murasaki dev`が起動するdev-server processと同じprocess内で
-Vite pluginとして動くため、`ready()`、`shutdown()`、または任意の
-`'use main'`関数内の普通の`console.log`は、`murasaki dev`を実行した
-terminalへそのまま出力されます。
+Node Main は、`murasaki dev` が起動する開発サーバーと同じプロセス内で Vite プラグインとして動作します。そのため、`ready()`、`shutdown()`、または任意の `'use main'` 関数内で使う普通の `console.log` は、`murasaki dev` を実行したターミナルへそのまま出力されます。
 
-`context.log`はこれとは意図的に異なります。そのterminalへは一切echoされ
-ません。`log.info` / `warn` / `error` / `debug`の呼び出しはすべて、
-JSON Linesとして`paths.logs/murasaki-main.jsonl`にだけ書き込まれ、5 MiB
-でrotateし、過去5file(`.1`…`.5`)を保持します。構造化log出力をliveで見た
-い場合は、そのfile(またはOSのlog viewer)をtailしてください:
+`context.log` はこれとは意図的に異なる仕組みです。そのターミナルには一切出力されません。`log.info` / `warn` / `error` / `debug` の呼び出しはすべて、JSON Lines 形式で `paths.logs/murasaki-main.jsonl` にのみ書き込まれ、5 MiB でローテーションし、過去5世代分（`.1` … `.5`）を保持します。構造化ログの出力をリアルタイムで確認したい場合は、そのファイル（または OS のログビューアー）を tail してください。
 
 | OS | `paths.logs` |
 | --- | --- |
 | macOS | `~/Library/Logs/<appId>` |
 | Windows | `%LOCALAPPDATA%\<appId>\Logs` |
-| Linux | `$XDG_STATE_HOME/<appId>/logs`(既定は`~/.local/state/<appId>/logs`) |
+| Linux | `$XDG_STATE_HOME/<appId>/logs`（デフォルトは `~/.local/state/<appId>/logs`） |
 
-各行は`{ timestamp, level, message, fields? }`です。key名がcredentialに
-見えるfield値(`authorization`、`cookie`、`password`、`secret`、`token`、
-`apiKey`、`privateKey`など)は、書き込み前に`[redacted]`へ置き換えられ
-ます。完全なredaction / size制限と、bound付きlog tail + application /
-runtime metadataを1つの共有可能なJSON fileにまとめて`paths.logs/diagnostics/`
-以下へ出力する`createDiagnosticReport()`については、
-[Node Main → Logと診断report](/docs/guides/node-main#logと診断report)
-を参照してください。
+各行は `{ timestamp, level, message, fields? }` の形式です。キー名が認証情報らしく見えるフィールド値（`authorization`、`cookie`、`password`、`secret`、`token`、`apiKey`、`privateKey` など)は、書き込み前に `[redacted]` へ置き換えられます。完全なマスキングとサイズ制限のルール、および上限付きのログ末尾とアプリケーション / ランタイムのメタデータを1つの共有可能な JSON ファイルにまとめて `paths.logs/diagnostics/` 以下へ出力する `createDiagnosticReport()` については、[Node Main → ログと診断レポート](/docs/guides/node-main#ログと診断レポート)を参照してください。
 
-### Sidecarの出力
+### Sidecar の出力
 
-sidecarのstdout / stderrは
-[`sidecar.onEvent()`](/docs/guides/node-main#同梱sidecarを監督する)
-経由でしか届きません。各chunkは64 KiBで上限され、それを超えると
-`…[truncated]`が付きます。また、`murasaki-main.jsonl`へ自動的に書き込ま
-れることもありません。そこにも記録したい場合は、handler内で自分でlogして
-ください:
+sidecar の stdout / stderr は、[`sidecar.onEvent()`](/docs/guides/node-main#同梱sidecarを監督する)を通じてのみ受け取れます。各チャンクは 64 KiB で上限に達し、それを超えると末尾に `…[truncated]` が付きます。また、`murasaki-main.jsonl` へ自動的に書き込まれることもありません。そこにも記録したい場合は、ハンドラー内で自分でログしてください。
 
 ```ts
 indexer.onEvent((event) => {
@@ -114,40 +58,20 @@ indexer.onEvent((event) => {
 })
 ```
 
-### packaged Windows appをdebugする
+### パッケージ済みの Windows アプリをデバッグする
 
-packaged appには既定で見える consoleがありません。`murasaki.config.ts`で
-`window.console: true`を設定すると、Windowsでbackend Node console window
-を表示できます — 一時的なCLI / debug出力に有用です。あるいは、起動後に
-必要な情報は両platformとも`paths.logs`と`createDiagnosticReport()`に頼っ
-てください。この releaseではNode Mainに`--inspect` debugger portは配線
-されていません。`console.log`(dev時)と`context.log`が、現時点でsupport
-されている手段です。
+パッケージ済みのアプリには、デフォルトでは見えるコンソールがありません。`murasaki.config.ts` で `window.console: true` を設定すると、Windows でバックエンドの Node コンソールウィンドウを表示できます — 一時的な CLI やデバッグ出力に便利です。それ以外で起動後に必要な情報は、両プラットフォームとも `paths.logs` と `createDiagnosticReport()` を頼ってください。このリリースでは、Node Main 向けに Node の `--inspect` デバッガーポートは配線されていません。`console.log`（開発時）と `context.log` が、現時点でサポートされている手段です。
 
 ## よくある問題
 
-- **portがすでに使用中。** `murasaki dev`は`config.devPort`(既定`5178`)
-  を検査し、自動的に次の空きportへ進みます。
-  [開発ウィンドウが開かない](/docs/building/troubleshooting#開発ウィンドウが開かない)
-  と[`devPort`](/docs/building/configuration#トップレベルのフィールド)
-  を参照してください。dev server自体が起動に失敗する場合は、
-  `MURASAKI_DEBUG=1`を付けて再実行すると、branded一行の代わりに完全な
-  stack traceが得られます。
-- **WindowsでWebView2が無い / 古い。** MurasakiのWindows用WebViewは
-  bundleされたChromiumではなく Microsoft Edge WebView2です。現行の
-  WebView2 Runtimeが無い machineではwindowをまったくrenderできません。
-  Windows 11とupdate済みのWindows 10の大半にはすでに入っていますが、
-  そうでない場合は、他の何かをdebugする前にMicrosoftからEvergreen
-  Runtimeをinstallしてください。
-- **macOSで「壊れている」と表示される、または署名されていないbuildを
-  Gatekeeperがblockする。** ad-hoc署名のdevelopment artifactでは想定内
-  の挙動です。[トラブルシューティング](/docs/building/troubleshooting)
-  のmacOS関連の項を参照してください。
+- **ポートがすでに使用中。** `murasaki dev` は `config.devPort`（デフォルトは `5178`）を確認し、自動的に次の空きポートへ移ります。[開発ウィンドウが開かない](/docs/building/troubleshooting#開発ウィンドウが開かない)と[`devPort`](/docs/building/configuration#トップレベルのフィールド)を参照してください。開発サーバー自体が起動に失敗する場合は、`MURASAKI_DEBUG=1` を付けて再実行すると、ブランド付きの1行メッセージの代わりに完全なスタックトレースが得られます。
+- **Windows で WebView2 が見つからない、または古い。** Murasaki の Windows 用 WebView は、同梱の Chromium ではなく Microsoft Edge WebView2 です。現行の WebView2 Runtime がないマシンでは、ウィンドウをまったくレンダリングできません。Windows 11 と更新済みの Windows 10 の大半にはすでに入っていますが、入っていない場合は、ほかの問題を調べる前に Microsoft から Evergreen Runtime をインストールしてください。
+- **macOS で「壊れている」と表示される、または署名されていないビルドを Gatekeeper がブロックする。** ad-hoc 署名された開発用の成果物では想定内の挙動です。[トラブルシューティング](/docs/building/troubleshooting)の macOS 関連の項を参照してください。
 
 ## 次へ
 
 <Cards>
-  <Card title="トラブルシューティング" href="/docs/building/troubleshooting" description="packaging、signing、起動、updateの障害。" />
-  <Card title="Node Main" href="/docs/guides/node-main" description="lifecycle、log、診断report、sidecar。" />
-  <Card title="設定" href="/docs/building/configuration" description="devPortとmurasaki.config.tsのその他すべて。" />
+  <Card title="トラブルシューティング" href="/docs/building/troubleshooting" description="パッケージング、署名、起動、アップデートの障害。" />
+  <Card title="Node Main" href="/docs/guides/node-main" description="ライフサイクル、ログ、診断レポート、sidecar。" />
+  <Card title="設定" href="/docs/building/configuration" description="devPort と murasaki.config.ts のその他すべて。" />
 </Cards>

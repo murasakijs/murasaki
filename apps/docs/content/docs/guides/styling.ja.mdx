@@ -5,14 +5,7 @@ description: Tailwind CSS + @murasakijs/ui、React Aria ベースのアクセシ
 
 import { ButtonDemo } from "@/components/ui-demos/button-demo"
 
-スキャフォールドには Tailwind CSS と
-[`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) が同梱されています —
-React Aria を基盤とし、`cn()` + `class-variance-authority` の慣習でスタイリングされた
-コンポーネントライブラリです。アクセシブルな操作、フォーカス管理、キーボード操作、
-オーバーレイ配置を React Aria が提供し、Murasaki がビジュアルシステムと互換 API を
-提供します。すべてのコンポーネントは、
-[Components](/docs/components) セクションでライブに文書化されています — このガイド
-では、ライブラリがスキャフォールドされたアプリにどう組み込まれているかだけを扱います。
+スキャフォールドには Tailwind CSS と [`@murasakijs/ui`](https://www.npmjs.com/package/@murasakijs/ui) が同梱されています — React Aria を基盤とし、`cn()` + `class-variance-authority` の慣習でスタイリングされたコンポーネントライブラリです。アクセシブルな操作、フォーカス管理、キーボード操作、オーバーレイ配置を React Aria が提供し、Murasaki がビジュアルシステムと互換 API を提供します。すべてのコンポーネントは、[Components](/docs/components) セクションでライブに文書化されています — このガイドでは、ライブラリがスキャフォールドされたアプリにどう組み込まれているかだけを扱います。
 
 <ComponentPreview
   code={`import { Button } from "@murasakijs/ui";
@@ -26,8 +19,7 @@ export function ButtonDemo() {
 
 ## セットアップ
 
-スタイルシートを一度 import し(スキャフォールドはすでにルートレイアウトでこれを行って
-います)、共有プリセットで Tailwind の設定を拡張します:
+スタイルシートを一度インポートし（スキャフォールドはすでにルートレイアウトでこれを行っています）、共有プリセットで Tailwind の設定を拡張します:
 
 ```tsx title="src/app/layout.tsx"
 import '@murasakijs/ui/styles.css'
@@ -49,7 +41,7 @@ export default {
 
 ## コンポーネント
 
-コンポーネントは `@murasakijs/ui` から直接 import します:
+コンポーネントは `@murasakijs/ui` から直接インポートします:
 
 ```tsx
 import { Button, Card, CardHeader, CardTitle, CardContent } from '@murasakijs/ui'
@@ -70,28 +62,18 @@ function Example() {
 
 現時点でパッケージが提供しているのは:
 
-- **レイアウト & コンテンツ** — `Card`、`Separator`、`Accordion`、`Tabs`、
-  `ScrollArea`、`Table`、`Skeleton`
-- **フォーム & 入力** — `Button`、`Input`、`Textarea`、`Label`、`Checkbox`、
-  `Switch`、`RadioGroup`、`Select`
-- **オーバーレイ** — `Dialog`、`Sheet`、`Popover`、`Tooltip`、`DropdownMenu`、
-  `Command`(コマンドパレット）
-- **フィードバック** — `Alert`、`Badge`、`Progress`、`Toast` / `Toaster`
-  （+ `useToast`）
+- **レイアウト & コンテンツ** — `Card`、`Separator`、`Accordion`、`Tabs`、`ScrollArea`、`Table`、`Skeleton`
+- **フォーム & 入力** — `Button`、`Input`、`Textarea`、`Label`、`Checkbox`、`Switch`、`RadioGroup`、`Select`
+- **オーバーレイ** — `Dialog`、`Sheet`、`Popover`、`Tooltip`、`DropdownMenu`、`Command`（コマンドパレット）
+- **フィードバック** — `Alert`、`Badge`、`Progress`、`Toast` / `Toaster`（+ `useToast`）
 - **その他** — `Avatar`、`cn`（`clsx` + `tailwind-merge` のクラスヘルパー）
 
-`Button` は `variant`(`default` / `secondary` / `outline` / `ghost` /
-`destructive` / `link`）と `size`（`default` / `sm` / `lg` / `icon`）の props に加え
-て、Murasaki 独自の互換 Slot を通じて別の要素としてレンダーする `asChild` を
-サポートしています — ライブラリの他の部分と同じパターンです。
+`Button` は `variant`（`default` / `secondary` / `outline` / `ghost` / `destructive` / `link`）と `size`（`default` / `sm` / `lg` / `icon`）の props に加えて、Murasaki 独自の互換 Slot を通じて別の要素としてレンダリングする `asChild` をサポートしています — ライブラリの他の部分と同じパターンです。
 
-これらすべては、[Components](/docs/components) の下でそれぞれ専用ページとして文書化
-されており、上のリストだけでなく、ライブでインタラクティブなプレビューと完全な props
-テーブルが用意されています。
+これらすべては、[Components](/docs/components) の下でそれぞれ専用ページとして文書化されており、上のリストだけでなく、ライブでインタラクティブなプレビューと完全な props テーブルが用意されています。
 
 <Callout type="info">
-  `@murasakijs/ui` は必須ではありません。内部は Tailwind + React Aria で構成されており、
-  自作コンポーネントや別のライブラリへ差し替えることもできます。
+  `@murasakijs/ui` は必須ではありません。内部は Tailwind + React Aria で構成されており、自作コンポーネントや別のライブラリへ差し替えることもできます。
 </Callout>
 
 ## 次へ

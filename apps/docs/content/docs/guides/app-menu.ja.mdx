@@ -3,16 +3,9 @@ title: アプリメニュー
 description: useAppMenu でネイティブのアプリケーションメニューバーを定義する — macOS では NSMenu、Windows では HMENU。
 ---
 
-`useAppMenu` はアプリのメニューバー — macOS では画面上部のメニュー、Windows では
-ウィンドウのメニューバー — を宣言します。[`useContextMenu`](/docs/guides/context-menu)
-と同じく、マークアップではなくフックです。項目は Rust 側に投げられ、本物の OS メニュー
-(`NSMenu` / `HMENU`)が構築されます。Electron の `Menu.setApplicationMenu` や
-Tauri のメニュー API に相当する Murasaki の機能です。
+`useAppMenu` はアプリのメニューバー — macOS では画面上部のメニュー、Windows ではウィンドウのメニューバー — を宣言します。[`useContextMenu`](/docs/guides/context-menu)と同じく、マークアップではなくフックです。項目は Rust 側に投げられ、本物の OS メニュー(`NSMenu` / `HMENU`)が構築されます。Electron の `Menu.setApplicationMenu` や Tauri のメニュー API に相当する Murasaki の機能です。
 
-これは **opt-in** です。呼ばなくても、アプリには Murasaki の標準メニュー(About/Quit
-を持つアプリメニュー + Edit + Window)が付きます。独自のメニューが欲しいときだけ
-`useAppMenu` を呼びます。application menuはprocess-globalなのでprimary `main` renderer
-だけが差し替えでき、そのrendererへ `menu:application` が必要です。
+これは **オプトイン** の機能です。呼ばなくても、アプリには Murasaki の標準メニュー（About / Quit を含むアプリケーションメニューに加えて Edit と Window）が付きます。独自のメニューにしたいときだけ `useAppMenu` を呼び出します。アプリケーションメニューはプロセス全体で共有されるため、置き換えられるのはプライマリの `main` レンダラーだけであり、そのレンダラーには `menu:application` が必要です。
 
 ```ts title="murasaki.config.ts"
 window: {
@@ -25,14 +18,11 @@ window: {
 }
 ```
 
-native roleには対応するcapabilityも必要です。上のlistは、例に含まれる
-`{ role: 'close' }` と完全な `{ role: 'editMenu' }` submenuの両方を許可します。
+ネイティブロールには、それぞれ対応するケイパビリティも必要です。上記のリストは、例に含まれる `{ role: 'close' }` と、完全な `{ role: 'editMenu' }` サブメニューの両方をカバーしています。
 
 ## メニューを宣言する
 
-ルートレイアウトで一度だけ呼び出します。メニューは `{ label, items }` のグループか、
-標準の `{ role }` サブメニューのいずれかです。各項目はカスタムエントリ、標準の
-`{ role }`、または区切り線です:
+ルートレイアウトで一度だけ呼び出します。メニューは `{ label, items }` のグループか、標準の `{ role }` サブメニューのいずれかです。各項目はカスタムエントリ、標準の `{ role }`、または区切り線です:
 
 ```tsx title="src/app/layout.tsx"
 import { useAppMenu, Action } from 'murasaki'
@@ -54,27 +44,21 @@ useAppMenu([
 ])
 ```
 
-macOS では標準のアプリ名メニュー(About / Hide / Quit)が常にあなたのメニューの前に
-追加されるので、`Cmd+Q` などはそのまま機能します — 自分で宣言する必要はありません。
+macOS では標準のアプリ名メニュー(About / Hide / Quit)が常にあなたのメニューの前に追加されるので、`Cmd+Q` などはそのまま機能します — 自分で宣言する必要はありません。
 
 ## ロール
 
-`role` は標準の項目やサブメニューを取り込みます。ローカライズ済みで、ネイティブの
-挙動(macOS では `NSMenu` のレスポンダチェーン)に配線されるため、`action` を渡す
-必要はありません。
+`role` は標準の項目やサブメニューを呼び出します。ローカライズ済みで、ネイティブの挙動（macOS では `NSMenu` のレスポンダーチェーン）に配線されるため、`action` を渡す必要はありません。
 
 - **項目ロール**: `quit`, `close`, `minimize`, `zoom`, `undo`, `redo`, `cut`,
   `copy`, `paste`, `selectAll`, `reload`。
-- **メニューロール**: `editMenu` と `windowMenu` — 標準の Edit / Window サブメニューを
-  1 行で。
+- **メニューロール**: `editMenu` と `windowMenu` — 標準の Edit / Window サブメニューを1 行で。
 
-標準的なものにはロールを使い(特に Edit 項目 — `copy`/`paste` はフォーカス中の欄に届く
-ネイティブ挙動が必要です)、それ以外は `action` を持つカスタムエントリを使います。
+標準的なものにはロールを使い（特に Edit 項目 — `copy` / `paste` はフォーカス中の欄に届くネイティブの挙動が必要です）、それ以外は `action` を持つカスタムエントリを使います。
 
-custom application menuには常に `menu:application` が必要です。使用するnative roleに
-応じて、次のcapabilityも追加します。
+カスタムのアプリケーションメニューには常に `menu:application` が必要です。使用するネイティブロールに応じて、以下のケイパビリティも追加してください。
 
-| role | 追加で必要なcapability |
+| ロール | 追加で必要なケイパビリティ |
 | --- | --- |
 | `quit` | `app:quit` |
 | `close` | `window:close` |
@@ -86,8 +70,7 @@ custom application menuには常に `menu:application` が必要です。使用�
 | `windowMenu` | `window:minimize` と `window:toggleMaximize` の両方 |
 | `undo`, `redo`, `selectAll`, `reload` | `menu:application` 以外は不要 |
 
-必要なcapabilityが1つでも欠けている場合、Murasakiは置換全体を拒否します。一部だけが
-動くmenuをinstallせず、現在のapplication menuを維持します。
+必要なケイパビリティが1つでも欠けている場合、Murasaki は置き換え全体を拒否します。一部だけが動作するメニューをインストールせず、現在のアプリケーションメニューを維持します。
 
 ## 形
 
@@ -107,28 +90,17 @@ interface AppMenuEntry {
 }
 ```
 
-項目の形と `action` は [`useContextMenu`](/docs/guides/context-menu#actions) と
-同じです。`action` は自作の関数か組み込みの `<Action.*/>`、`shortcut` はネイティブの
-アクセラレータラベルを設定します。アプリのアクションは
-[`createActions`](/docs/guides/context-menu#reusable-actions-with-createactions)
-で再利用できます。
+項目の形と `action` は [`useContextMenu`](/docs/guides/context-menu#actions) と同じです。`action` は自作の関数か組み込みの `<Action.*/>`、`shortcut` はネイティブのアクセラレーターラベルを設定します。アプリのアクションは[`createActions`](/docs/guides/context-menu#reusable-actions-with-createactions)で再利用できます。
 
 <Callout type="info">
-  `useAppMenu` はprimary layoutで一度だけmountします。hidden rendererがprocess-global
-  native chromeを置換しないよう、secondary windowからのcallは無視されます。呼ばなければ
-  Murasakiのdefault menuのままです。
+  `useAppMenu` はプライマリレイアウトで一度だけマウントしてください。隠れたレンダラーがプロセス全体で共有されるネイティブ UI を置き換えてしまわないよう、セカンダリウィンドウからの呼び出しは無視されます。呼び出さなければ Murasaki のデフォルトメニューのままです。
 </Callout>
 
 ## プラットフォームメモ
 
 - **macOS** — 画面上部の `NSMenu`。アプリ名メニューが常に先頭に追加されます。
-- **Windows** — ウィンドウ内の `HMENU` バー。OS のクラシックなスタイルを引き継ぎ、
-  ダークモードには追従しません。`close` roleはsecondaryをhideして再open可能にし、
-  primaryの `main` closeと`quit`はapp lifecycleへ進みます。
-- **Linux** — ウィンドウ内の GTK メニューバー。Windows と同じ File/Edit/Window の
-  プレーンな構成で、macOS のような太字のアプリ名サブメニューはありません。Edit role の
-  項目はネイティブのレスポンダーチェーンではなく、フォーカス中の webview で
-  `document.execCommand` を実行します。
+- **Windows** — ウィンドウ内の `HMENU` バー。OS のクラシックなスタイルを引き継ぎ、ダークモードには追従しません。`close` ロールはセカンダリウィンドウでは非表示にするだけで再び開けるようにします。プライマリの `main` ウィンドウを閉じる操作と `quit` は、アプリのライフサイクル処理に進みます。
+- **Linux** — ウィンドウ内の GTK メニューバー。Windows と同じシンプルな File / Edit / Window 構成で、macOS のような太字のアプリ名サブメニューはありません。Edit ロールの項目は、ネイティブのレスポンダーチェーンではなく、フォーカス中の WebView で `document.execCommand` を実行します。
 
 ## 次へ
 

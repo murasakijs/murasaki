@@ -3,8 +3,7 @@ title: メタデータ
 description: ルートごとのドキュメントタイトル、description、Open Graph タグ。
 ---
 
-ページやレイアウトは、静的な `metadata` オブジェクトをエクスポートするか、ルートパラメ
-ータに依存する値のために非同期の `generateMetadata()` をエクスポートできます:
+ページやレイアウトは、静的な `metadata` オブジェクトをエクスポートするか、ルートパラメータに依存する値のために非同期の `generateMetadata()` をエクスポートできます:
 
 ```tsx title="src/app/blog/[slug]/page.tsx"
 import type { Metadata } from 'murasaki'
@@ -23,9 +22,7 @@ export const generateMetadata: GenerateMetadata = async ({ params }) => {
 }
 ```
 
-`generateMetadata` は `{ params }` を受け取ります — `useParams()` がクライアント側で読
-み取るのと同じ動的セグメントの params です — なので、CMS や API ルート、その他の非同期
-処理からタイトルを取得できます。
+`generateMetadata` は `{ params }` を受け取ります — `useParams()` がクライアント側で読み取るのと同じ動的セグメントのパラメータです — なので、CMS や API ルート、その他の非同期処理からタイトルを取得できます。
 
 ## `Metadata` の形
 
@@ -47,19 +44,12 @@ interface Metadata {
 ```
 
 <Callout type="warn">
-  `icons` のうち、実際にドキュメントへレンダーされるのは `icon`(`<link
-  rel="icon">` として)だけです — `shortcut` と `apple` は将来の互換性のために型
-  だけ用意されていて、まだ適用されません。DOM に現れることを当てにしないでくださ
-  い。
+  `icons` のうち、実際にドキュメントへレンダリングされるのは `icon`（`<link rel="icon">` として）だけです — `shortcut` と `apple` は将来の互換性のために型だけ用意されていて、まだ適用されません。DOM に現れることを当てにしないでください。
 </Callout>
 
 ## レイアウトがデフォルトを設定し、ページがそれを上書きする
 
-レイアウトの `metadata`(とページのそれ)はルートからリーフへとマージされます —
-各祖先レイアウトのフィールドが先に適用され、その上にマッチしたページのものが適用
-されます — なので、レイアウトはフォールバックの `description` や
-`openGraph.images` を設定でき、その配下のすべてのページは自分で設定しない限りそ
-れを継承します:
+レイアウトの `metadata`（とページのそれ）はルートからリーフへとマージされます — 各祖先レイアウトのフィールドが先に適用され、その上にマッチしたページのものが適用されます — なので、レイアウトはフォールバックの `description` や `openGraph.images` を設定でき、その配下のすべてのページは自分で設定しない限りそれを継承します:
 
 ```tsx title="src/app/layout.tsx"
 export const metadata: Metadata = {
@@ -76,37 +66,23 @@ export const metadata: Metadata = {
 }
 ```
 
-このマージはオブジェクト全体ではなくフィールド単位です: `icons` と `openGraph`
-はキーごとにマージされ(ページが `openGraph.title` を設定しても、レイアウトの
-`openGraph.images` は失われません)、`title` のようなトップレベルのフィールドは単
-純に上書きされます。
+このマージはオブジェクト全体ではなくフィールド単位です: `icons` と `openGraph` はキーごとにマージされ（ページが `openGraph.title` を設定しても、レイアウトの `openGraph.images` は失われません）、`title` のようなトップレベルのフィールドは単純に上書きされます。
 
-ページの `generateMetadata`(存在する場合)は await され、この静的なチェーン全体
-の上に最後にマージされます — なので、レイアウトのものを含め、静的エクスポートが
-設定したどのフィールドも上書きできます。
+ページの `generateMetadata`（存在する場合）は await され、この静的なチェーン全体の上に最後にマージされます — なので、レイアウトのものを含め、静的エクスポートが設定したどのフィールドも上書きできます。
 
 ## 適用される仕組み
 
-ナビゲーションのたびに、`<AppRouter>` はこのチェーン全体を解決し、ドキュメントに
-適用します:
+ナビゲーションのたびに、`<AppRouter>` はこのチェーン全体を解決し、ドキュメントに適用します:
 
-- `document.title`(タイトルが実際に解決されたときだけ変更されます — 空にされる
-  ことはありません)
+- `document.title`（タイトルが実際に解決されたときだけ変更されます — 空にされることはありません）
 - `<meta name="description">`
-- Open Graph の `<meta property="og:...">` タグ(`openGraph` フィールドが省略され
-  た場合は `title` / `description` にフォールバックします)
+- Open Graph の `<meta property="og:...">` タグ（`openGraph` フィールドが省略された場合は `title` / `description` にフォールバックします）
 - `icons.icon` からの `<link rel="icon">`
 
-Murasaki が以前追加したタグは、新しいタグが適用される前に削除されるため、ルート
-間を移動しても前のルートの古いタグが蓄積されるのではなく、きれいに置き換えられま
-す。`applyMetadata`(これを行う関数で、自分で呼び出す必要がある場合のためにエク
-スポートされています)は DOM 環境の外では no-op です。
+Murasaki が以前追加したタグは、新しいタグが適用される前に削除されるため、ルート間を移動しても前のルートの古いタグが蓄積されるのではなく、きれいに置き換えられます。`applyMetadata`（これを行う関数で、自分で呼び出す必要がある場合のためにエクスポートされています）は DOM 環境の外では no-op です。
 
 <Callout type="warn">
-  これが設定するのは**ドキュメント**のタイトル/meta タグであり、ネイティブウィンドウの
-  タイトルバーではありません — ウィンドウのタイトルは `murasaki.config.ts` の
-  `window.title`(詳しくは[Configuration](/docs/building/configuration)を参照)から取
-  得され、起動時に一度だけ設定されます。
+  これが設定するのは**ドキュメント**のタイトル/meta タグであり、ネイティブウィンドウのタイトルバーではありません — ウィンドウのタイトルは `murasaki.config.ts` の `window.title`（詳しくは[設定](/docs/building/configuration)を参照）から取得され、起動時に一度だけ設定されます。
 </Callout>
 
 ## 次へ

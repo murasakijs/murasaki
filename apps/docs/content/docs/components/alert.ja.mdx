@@ -42,7 +42,7 @@ import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
 
 ## バリアント
 
-`variant` プロパティで、エラーや警告向けの destructive スタイルに切り替えられます。
+`variant` プロパティで、エラーや警告向けの `destructive` スタイルに切り替えられます。
 
 <ComponentPreview
   code={`import { Alert, AlertDescription, AlertTitle } from "@murasakijs/ui";
@@ -71,6 +71,4 @@ export function AlertDestructiveDemo() {
 | --- | --- | --- |
 | `variant` | `"default"` \| `"destructive"` | `"default"` |
 
-`Alert`・`AlertTitle`・`AlertDescription` はいずれも、対応するネイティブ HTML 要素の
-属性を拡張しています。先頭の `<svg>` 子要素(`lucide-react` のアイコンなど)は、CSS
-によって自動的に左上に配置されます。
+`Alert`・`AlertTitle`・`AlertDescription` はいずれも、対応するネイティブ HTML 要素の属性を拡張しています。先頭の `<svg>` 子要素（`lucide-react` のアイコンなど）は、CSS によって自動的に左上に配置されます。

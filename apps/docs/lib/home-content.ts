@@ -956,7 +956,7 @@ const lpJa: LpExtra = {
   converge: { left: "ネイティブアプリ。", right: "Web の開発体験。" },
   manifesto:
     "ファイルベースルーティング、Server Actions、React 19 を使ってデスクトップアプリを構築。Electron の Chromium ではなく OS 標準の WebView を使い、Rust を書かずに開発できます。",
-  manifestoCounterLabel: "表示",
+  manifestoCounterLabel: "点灯",
   scrollCue: "スクロール",
   playground: {
     eyebrow: "試してみる",
@@ -975,7 +975,7 @@ const lpJa: LpExtra = {
     eyebrow: "実行できるサンプル",
     heading: "説明だけでなく、動作するアプリで確認する。",
     intro:
-      "標準スキャフォールドに加え、実際の要件から設計した3つの独立したアプリを、それぞれCLIの1コマンドで起動できます。",
+      "標準スキャフォールドに加え、実際の要件から設計した3つの独立したアプリを、それぞれ CLI の1コマンドで起動できます。",
     defaultDemo: {
       label: "開発者プレビュー · CLI",
       heading: "標準スキャフォールドを、そのまま実行。",
@@ -989,7 +989,7 @@ const lpJa: LpExtra = {
     sourceLabel: "ソース",
     downloadsLabel: "すべてのソースを見る",
     runner: {
-      note: "各macOS開発者プレビューは、CPUに合うビルドを選択し、公開済みSHA-256とad-hoc署名を検証してから隔離属性を解除し、起動します。ソースも確認できますが、公証済みの一般利用者向けダウンロードとしては案内しません。",
+      note: "各 macOS 開発者プレビューは、CPU に合うビルドを選択し、公開済みの SHA-256 と ad-hoc 署名を検証してから隔離属性を解除し、起動します。ソースも確認できますが、公証済みの一般利用者向けダウンロードとしては案内しません。",
       label: "macOS 開発者プレビュー",
       copy: "デモ用コマンドをコピー",
       copied: "コピーしました",

@@ -1,6 +1,6 @@
 ---
 title: Tabs
-description: 一度に1つずつ表示される、タブパネルと呼ばれる階層化されたコンテンツのセットです。
+description: タブパネルと呼ばれる、階層化された複数のコンテンツ領域を1つずつ切り替えて表示します。
 ---
 
 import { TabsDemo } from "@/components/ui-demos/tabs-demo";
@@ -51,8 +51,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@murasakijs/ui";
 | --- | --- |
 | `Tabs` | ルートプリミティブ。`value`・`defaultValue`・`onValueChange`・`orientation` を受け取ります。 |
 | `TabsList` | トリガーを並べる行です。 |
-| `TabsTrigger` | タブボタンです。`value`(必須)と `disabled` を受け取ります。 |
+| `TabsTrigger` | タブボタンです。`value`（必須）と `disabled` を受け取ります。 |
 | `TabsContent` | 対応する `value` がアクティブなときに表示されるパネルです。 |
 
-選択状態、矢印キー操作、タブとパネルの関連付けは React Aria Components が
-提供します。
+選択状態、矢印キー操作、タブとパネルの関連付けは React Aria Components が提供します。

@@ -3,9 +3,7 @@ title: プロジェクト構成
 description: Murasaki アプリの中で何がどこにあるか。
 ---
 
-スキャフォールドされたアプリは、Next.js プロジェクトのように見えます。触るのは
-`src/` と `murasaki.config.ts` だけです — アプリシェルとクライアントのブートストラップ
-は Murasaki が管理するため、`index.html` やエントリファイルを管理する必要はありません。
+スキャフォールドされたアプリは、Next.js プロジェクトのように見えます。触るのは `src/` と `murasaki.config.ts` だけです — アプリシェルとクライアントのブートストラップは Murasaki が管理するため、`index.html` やエントリーファイルを管理する必要はありません。
 
 ```txt
 my-app/
@@ -29,38 +27,24 @@ my-app/
 ```
 
 <Callout type="info">
-  スキャフォールド自体に `src/actions.ts` は含まれていませんが、`'use server'`
-  関数を置く一般的な場所です — 詳しくは[Server Actions](/docs/guides/server-actions)
-  を参照してください。`'use server'` ファイルは `src/` 配下のどこにでも置け、
-  `src/app/` や `src/api/` に縛られません。
+  スキャフォールド自体に `src/actions.ts` は含まれていませんが、`'use server'` 関数を置く一般的な場所です — 詳しくは[Server Actions](/docs/guides/server-actions)を参照してください。`'use server'` ファイルは `src/` 配下のどこにでも置け、`src/app/` や `src/api/` に縛られません。
 </Callout>
 
 ## `src/app/` — ルート
 
-`src/app/**/page.tsx` を対象にしたファイルベースルーティングで、`layout.tsx`、動的な
-`[param]` セグメント、`loading` / `error` / `not-found` バウンダリを備えています。ルー
-トレイアウトはすべてを `<App>` でラップします。詳しくは
-[ルーティング](/docs/guides/routing)を参照してください。
+`src/app/**/page.tsx` を対象にしたファイルベースルーティングで、`layout.tsx`、動的な `[param]` セグメント、`loading` / `error` / `not-found` バウンダリを備えています。ルートレイアウトはすべてを `<App>` でラップします。詳しくは[ルーティング](/docs/guides/routing)を参照してください。
 
 ## `src/api/` — API ルート
 
-`src/api/<path>/route.ts` は HTTP メソッドごとに1つの関数をエクスポートし、
-`/api/<path>` として提供されます。これらは開発時・本番時ともサーバー(Node)上で実行さ
-れます。詳しくは[API Routes](/docs/guides/api-routes)を参照してください。
+`src/api/<path>/route.ts` は HTTP メソッドごとに1つの関数をエクスポートし、`/api/<path>` として提供されます。これらは開発時・本番時ともサーバー(Node)上で実行されます。詳しくは[API Routes](/docs/guides/api-routes)を参照してください。
 
-## サーバーアクション
+## Server Actions
 
-`src/app/` や `src/api/` と違い、専用のフォルダはありません — `'use server'`
-関数はファイルをどこに置いてもサーバー上で実行され、クライアントからは
-`useAction` で呼び出します。詳しくは
-[Server Actions](/docs/guides/server-actions)を参照してください。
+`src/app/` や `src/api/` と違い、専用のフォルダはありません — `'use server'` 関数はファイルをどこに置いてもサーバー上で実行され、クライアントからは `useAction` で呼び出します。詳しくは[Server Actions](/docs/guides/server-actions)を参照してください。
 
 ## Node Main と `'use main'`
 
-`src/main.ts` は長寿命 Node resource と graceful shutdown を所有します。top-level に
-`'use main'` を持つ module は型付き renderer-to-Node function を公開し、`src/` 以下の
-どこにでも配置できます。`src/backend/` は便宜的な規約です。
-[Node Main](/ja/docs/guides/node-main)を参照してください。
+`src/main.ts` は、長寿命の Node.js リソースと安全な終了処理を管理します。トップレベルに `'use main'` ディレクティブを持つモジュールは、レンダラーから Node.js を呼び出す型付き関数を公開し、`src/` 以下のどこにでも配置できます。`src/backend/` は便宜的な規約にすぎません。詳しくは[Node Main](/ja/docs/guides/node-main)を参照してください。
 
 ## `murasaki.config.ts`
 
@@ -78,13 +62,12 @@ export default defineConfig({
 })
 ```
 
-すべてのフィールドについては[Configuration](/docs/building/configuration)を参照してく
-ださい。
+すべてのフィールドについては[設定](/docs/building/configuration)を参照してください。
 
 ## 次へ
 
 <Cards>
   <Card title="ルーティング" href="/ja/docs/guides/routing" description="ファイルベースルーティング、レイアウト、ナビゲーション。" />
-  <Card title="Node Main" href="/ja/docs/guides/node-main" description="長寿命 backend state と型付き renderer call。" />
+  <Card title="Node Main" href="/ja/docs/guides/node-main" description="長寿命のバックエンド状態と型付きレンダラー呼び出し。" />
   <Card title="設定" href="/ja/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
 </Cards>

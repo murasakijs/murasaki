@@ -1,71 +1,40 @@
 ---
 title: セキュリティ
-description: Murasaki の信頼境界、組み込み runtime protection、アプリ側の責務。
+description: Murasaki の信頼境界、組み込みのランタイム保護、アプリ側の責務。
 ---
 
-デスクトップセキュリティはプロセス境界から始まります。Murasaki は Node を renderer
-から分離し、アプリWebViewの遷移先を自身のoriginに制限し、特権loopback endpoint
-をnative hostが発行するwindow別authorityで保護します。通常のrenderer bugの影響を減らしますが、完全な
-権限システムではありません。
+デスクトップセキュリティは、プロセス境界から始まります。Murasaki は Node をレンダラーから切り離し、アプリの WebView の遷移先を自身のオリジンに制限し、特権を持つループバックエンドポイントを、ネイティブホストが発行するウィンドウ別の権限情報で保護します。これらの対策により、通常のレンダラーのバグによる影響は小さくなりますが、完全な権限システムというわけではありません。
 
 <Callout type="warn">
-  renderer native commandはdeny-by-defaultで、型付き`capabilities` listから許可
-  します。rendererからNode/APIへのアクセスも`backendCapabilities`で別にdeny-by-default
-  です。宣言windowごとに独立したallowlistがあり、resourceを受け取るcommandでは
-  URL、path、target window、OS permissionをscopeできます。renderer-to-Node関数も
-  privileged application codeとして扱い、surfaceを
-  小さく保ってください。
+  レンダラーのネイティブコマンドはデフォルトですべて拒否され(deny-by-default)、型付きの `capabilities` リストで明示的に許可したものだけが実行できます。レンダラーから Node/API へのアクセスも、`backendCapabilities` によって別途、デフォルトで拒否されます。宣言したウィンドウごとに独立した許可リストがあり、リソースを受け取るコマンドでは URL、パス、対象ウィンドウ、OS の権限といった単位で範囲を絞り込めます。レンダラーから呼び出す Node の関数はすべて特権を持つアプリケーションコードとして扱い、その公開範囲を小さく保ってください。
 </Callout>
 
 ## 信頼境界
 
 | 境界 | 組み込み保護 | アプリ側の責務 |
 | --- | --- | --- |
-| Remote URL → app WebView | app origin と完全一致する遷移だけを window 内で許可。off-origin HTTP(S) は system browser で開き、`file:` / `data:` / `javascript:` は拒否 | navigation behavior を弱めず、remote script を renderer に注入しない |
-| Renderer → Rust native command | exact-origin IPC checkと、call元windowごとに評価するtyped / deny-by-default allowlist | そのrendererが使うcommandだけをgrant。`window:manage`など広い操作のapp-level intentを検証 |
-| Renderer → local Node | `/api/*` と `/__murasaki/*` はnative windowのlabelからHMACで導出したidentityと、そのwindowの`backendCapabilities`を要求。Host / Origin / Fetch Metadataとwire上限も検証 | 必要なmodule export、method/path、updater、event、diagnosticsだけを許可し、handler内でもobject単位の認可を行う |
-| OS URL / file activation → Node Main | 設定済み scheme / extension だけを normalize して `openRequested()` target にし、認証付き app-local channel で配送 | URL / path をすべて attacker-controlled として扱い、操作前に intent、identifier、host、file content を検証 |
-| App → update host | manifest raw bytes の Ed25519 signature、その後 payload の SHA-256 を検証 | private update key を保護し、hash/signature を同時に公開 |
-| OS → installed app | macOS Developer ID / notarization と Windows Authenticode orchestration が最終 app-owned artifact を署名・検証 | platform certificate / provider を用意して保護し、clean machine で trust policy と installed artifact をテスト |
+| リモート URL → アプリの WebView | アプリのオリジンと完全に一致する遷移だけをウィンドウ内で許可。オリジンが異なる HTTP(S) はシステムのブラウザで開き、`file:` / `data:` / `javascript:` への遷移は拒否 | ナビゲーションの挙動を弱めず、リモートのスクリプトをレンダラーに注入しないこと |
+| レンダラー → Rust のネイティブコマンド | 厳密なオリジン一致による IPC チェックと、呼び出し元のウィンドウごとに評価される、型付きでデフォルト拒否の許可リスト | そのレンダラーが実際に使うコマンドだけを許可すること。`window:manage` など影響範囲の広い操作では、アプリレベルの意図を検証すること |
+| レンダラー → ローカルの Node | `/api/*` と `/__murasaki/*` は、ネイティブウィンドウのラベルから HMAC で導出した ID と、そのウィンドウの `backendCapabilities` の両方を要求。Host / Origin / Fetch Metadata と通信データの上限も検証 | 必要なモジュールのエクスポート、メソッド/パス、updater、イベント、診断情報だけを許可し、ハンドラー内でもオブジェクト単位の認可を行うこと |
+| OS の URL / ファイルのアクティベーション → Node Main | 設定済みのスキーム/拡張子だけを正規化して `openRequested()` のターゲットにし、認証付きのアプリローカルなチャネルで配送 | URL / パスはすべて攻撃者に制御されうるものとして扱い、操作前に意図、識別子、ホスト、ファイルの内容を検証すること |
+| アプリ → 更新ホスト | マニフェストの生バイト列に対する Ed25519 署名を検証し、続いてペイロードの SHA-256 を検証 | 秘密の更新鍵を保護し、ハッシュと署名を同時に公開すること |
+| OS → インストール済みアプリ | macOS の Developer ID / 公証と、Windows の Authenticode オーケストレーションが、最終的なアプリ所有の成果物を署名・検証 | プラットフォームの証明書/プロバイダーを用意して保護し、クリーンな環境で信頼ポリシーとインストール済みの成果物をテストすること |
 
-本番は全interfaceではなく`127.0.0.1`だけでlistenします。開発時はloopbackの
-`localhost` / `127.0.0.1` / `[::1]`を許可し、cross-site Fetch Metadataを拒否します。
-static document responseにはruntime bearer credentialを含めません。native hostはdocument
-startで、そのwindow専用のderived identityだけを注入します。packaged identityはlabelと
-native generationの両方にbindされ、windowを閉じるとNode側で失効し、同じlabelを再作成しても
-別HMACになります。どちらかを書き換えると検証に失敗し、secondary windowはbackend grantを
-継承しません。subframe、またはdocument originが
-正確なapp loopback originと異なる場合、credentialを定義する前にidentity bootstrapを終了します。
-main-frame-only指定でもWebView2がframeへscriptを注入するWindowsでも、このcheckを適用します。
-native lifecycle endpointはrenderer JavaScriptへ渡さない別tokenを使用します。
+本番環境では、すべてのインターフェースではなく `127.0.0.1` だけでリッスンします。開発時はループバックの `localhost` / `127.0.0.1` / `[::1]` を許可し、クロスサイトの Fetch Metadata は拒否します。静的なドキュメントレスポンスには、ランタイムのベアラー認証情報を含めません。ネイティブホストは、ドキュメント開始時にそのウィンドウ専用の導出 ID だけを注入します。パッケージ化された ID はラベルとネイティブ側の世代値の両方に紐付けられ、ウィンドウを閉じると Node 側で失効し、同じラベルを再作成しても別の HMAC になります。どちらか一方でも書き換えると検証に失敗し、セカンダリウィンドウはバックエンドの許可を継承しません。サブフレーム内、またはドキュメントのオリジンが正確なアプリのループバックオリジンと異なる場合は、認証情報を定義する前に ID のブートストラップを終了します。この検査は、`main-frame-only` を指定していても WebView2 がフレームへスクリプトを注入する Windows でも適用されます。ネイティブのライフサイクルエンドポイントは、レンダラーの JavaScript には渡さない別のトークンを使用します。
 
-## WebView network and private sessions
+## WebView のネットワークとプライベートセッション [#webview-network-and-private-sessions]
 
-`webview.userAgent`、`webview.incognito`、`webview.proxy`はapp-wide native browser
-設定で、renderer permissionではありません。native command allowlistを拡張せず、Murasakiの
-same-origin navigation / IPC checkも緩和しません。
+`webview.userAgent`、`webview.incognito`、`webview.proxy` は、アプリ全体に適用されるネイティブブラウザの設定であり、レンダラーの権限ではありません。ネイティブコマンドの許可リストを拡張することも、Murasaki の同一オリジンナビゲーション/IPC チェックを緩めることもありません。
 
-- private / incognito sessionはWebViewがappのpersistent browser profileを使わないように
-  します。userのIP addressを隠さず、Node Mainが書いたfileを消さず、app serverに対する
-  anonymityも提供しません。
-- WebContext / profileはwindow labelごとに分離します。secondary windowのService Worker、
-  SharedWorker、cookie、Web Storageからprimary windowの認証済みbackend requestを観測できません。
-  同じlabelをprocess内で再作成した場合はcontextを再利用します。incognito labelはnon-persistentで、
-  custom persistent storeを使えないmacOS 11〜13のsecondary labelもnon-persistentです。
-- custom User-Agentはappがrequestするoriginへ送られ、fingerprinting情報を増やす場合が
-  あります。platform User-Agentの置換でserver compatibility / authentication flowが壊れる
-  可能性もあります。
-- HTTP CONNECT / SOCKSv5 proxyはdestinationとtraffic metadataを観測でき、暗号化されない
-  HTTP trafficも読めます。proxy operatorを信頼できる場合だけ使い、OS WebViewのTLS検証を
-  維持してください。
-- proxy credentialは受け付けません。`host`やbundle metadataへsecretを埋め込まないで
-  ください。Murasakiはstartup前にURL、credential、未知のproxy fieldを拒否し、Rustでも
-  endpointを再検証します。
+- プライベート（シークレット）セッションは、WebView がアプリの永続的なブラウザプロファイルを使わないようにするものです。ユーザーの IP アドレスを隠すものではなく、Node Main が書き込んだファイルを消すものでもなく、アプリのサーバーに対する匿名性を提供するものでもありません。
+- WebContext/プロファイルは、ウィンドウラベルごとに分離されます。これにより、セカンダリウィンドウの Service Worker、SharedWorker、Cookie、Web Storage から、プライマリウィンドウの認証済みバックエンドリクエストを観測することはできません。同じラベルを同一プロセス内で再作成した場合は、そのコンテキストを再利用します。シークレットのラベルは非永続であり、カスタムの永続ストアを使えない macOS 11〜13 では、セカンダリのラベルも非永続になります。
+- カスタム User-Agent は、アプリがリクエストするオリジンへ送信されるため、フィンガープリンティングに使える情報を増やす場合があります。プラットフォームの User-Agent を置き換えることで、サーバーとの互換性や認証フローが壊れる可能性もあります。
+- HTTP CONNECT や SOCKSv5 のプロキシは、宛先や通信のメタデータを観測でき、暗号化されていない HTTP 通信の内容も読み取れます。信頼できるプロキシ運用者の場合にのみ使用し、OS の WebView による TLS 検証は維持してください。
+- プロキシの認証情報は受け付けません。`host` やバンドルのメタデータにシークレットを埋め込まないでください。Murasaki は起動前に URL、認証情報、未知のプロキシフィールドを拒否し、Rust 側でもエンドポイントを再検証します。
 
-size limitとmacOS / WebView2 version要件は
-[設定](/ja/docs/building/configuration#webview)を参照してください。
+サイズ上限や macOS / WebView2 のバージョン要件については、[設定](/ja/docs/building/configuration#webview)を参照してください。
 
-## Native command を明示的に許可する
+## ネイティブコマンドを明示的に許可する
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -96,30 +65,21 @@ export default defineConfig({
 })
 ```
 
-capabilityを省略すると何も許可されません。ただしprimaryは`window.capabilities`がない
-場合だけlegacy top-level listへfallbackし、secondaryは継承しません。未知の文字列も何も
-許可せず、bridgeはtrusted app originと完全一致するcallだけを受け付けます。allowlistは
-次のresource fieldをscopeできます。
+ケイパビリティを省略すると、何も許可されません。ただしプライマリウィンドウは `window.capabilities` が無い場合に限り、従来のトップレベルのリストへフォールバックします（セカンダリウィンドウはこのリストを継承しません）。未知の文字列も何も許可せず、ブリッジは信頼されたアプリのオリジンと完全に一致する呼び出しだけを受け付けます。許可リストでは、次のリソースフィールド単位で範囲を指定できます。
 
 | Permission | Scope field |
 | --- | --- |
-| `shell:openExternal`、`webview:readCookies`、`webview:writeCookies` | exact URL、またはHTTP(S)末尾`/**` subtreeの`urls` |
-| `shell:showItemInFolder` | absoluteかつ非traversalの`paths`。exactまたは末尾`/**` |
-| `window:open`、`window:manage` | 宣言済みlabelと完全一致する`windows` |
-| `systemPermission:status`、`systemPermission:request` | 完全一致する`permissions`名 |
-| `secureStorage:get`、`secureStorage:set`、`secureStorage:delete` | exact `keys`、または末尾が1つの`*`で終わるkey prefix |
+| `shell:openExternal`、`webview:readCookies`、`webview:writeCookies` | 完全一致の URL、または HTTP(S) で末尾が `/**` となるサブツリーを指定する `urls` |
+| `shell:showItemInFolder` | パストラバーサルにならない絶対パスの `paths`。完全一致、または末尾 `/**` |
+| `window:open`、`window:manage` | 宣言済みのラベルと完全一致する `windows` |
+| `systemPermission:status`、`systemPermission:request` | `permissions` の名前と完全一致 |
+| `secureStorage:get`、`secureStorage:set`、`secureStorage:delete` | 完全一致の `keys`、または末尾が1つの `*` で終わるキーのプレフィックス |
 
-明示`deny`は`allow`より優先します。`deny`だけのstructured grantはそれ以外を許可し、
-従来のstring grantはそのcommandのtargetを制限しません。dialogなど他のcommandは引き続き
-command単位です。広いgrantは信頼するrendererだけへ付与し、より狭いintentはNode側でも
-強制します。application全体のprogrammatic shutdownは
-`app:quit` で別に制御されます。
+明示的な `deny` は `allow` より優先されます。`deny` だけを指定した構造化された許可は、それ以外をすべて許可したことになり、従来の文字列形式の許可は、そのコマンドの対象を制限しません。ダイアログなど他のコマンドは、引き続きコマンド単位です。広い許可は信頼するレンダラーだけに付与し、より狭い意図は Node 側でも強制してください。アプリケーション全体のプログラムによるシャットダウンは、`app:quit` で別途制御されます。
 
-## backend resourceを明示的に許可する
+## バックエンドリソースを明示的に許可する [#backend-resourceを明示的に許可する]
 
-native capabilityとbackend capabilityは異なる境界を保護します。rendererからNode Main、
-Server Action、API Route、updater route、event stream、renderer diagnosticsへアクセスする
-場合は`backendCapabilities`を使います。
+ネイティブケイパビリティとバックエンドケイパビリティは、それぞれ異なる境界を保護します。レンダラーから Node Main、Server Actions、API Routes、updater ルート、イベントストリーム、レンダラーの診断情報へアクセスする場合は、`backendCapabilities` を使います。
 
 ```ts title="murasaki.config.ts"
 window: {
@@ -136,52 +96,29 @@ windows: {
 },
 ```
 
-grantは末尾が1つの`*`で終わる場合だけprefix wildcardとなり、それ以外は完全一致です。
-API grantには大文字のHTTP methodを含めます。primaryは
-`window.backendCapabilities ?? backendCapabilities ?? []`を使い、secondaryはすべて既定`[]`
-です。`main:*`、`action:*`、`api:*`、`updater:*`、`events:*`は便利ですが広範囲なので、
-本番ではexact resourceを優先してください。shutdown、activation、window controlのnative-only
-endpointをrendererへgrantすることはできません。
+許可は、末尾が1つの `*` で終わる場合だけプレフィックスワイルドカードとして扱われ、それ以外は完全一致です。API の許可には、大文字の HTTP メソッドを含めます。プライマリウィンドウは `window.backendCapabilities ?? backendCapabilities ?? []` を使用し、セカンダリウィンドウはすべてデフォルトで `[]` です。`main:*`、`action:*`、`api:*`、`updater:*`、`events:*` は便利ですが範囲が広いため、本番環境では完全一致のリソースを優先してください。シャットダウン、アクティベーション、ウィンドウ制御といったネイティブ専用のエンドポイントは、レンダラーへ許可することはできません。
 
-runtime window作成は信頼されたNode Mainだけが、configで宣言したlabelに対して実行できます。
-private native transportが運ぶのはmethodとlabelだけで、URLやcapability listは受け取りません。
-Rust hostは設定済みtemplateのimmutableなrouteとpolicyを使用します。rendererの
-`windows.open()`はshow-onlyのままで、dormant / destroyed windowを生成できません。
+実行時のウィンドウ作成は、信頼された Node Main だけが、設定で宣言したラベルに対してのみ実行できます。プライベートなネイティブトランスポートが運ぶのはメソッドとラベルだけで、URL やケイパビリティのリストは受け取りません。Rust ホストは、設定済みテンプレートの不変なルートとポリシーを使用します。レンダラーの `windows.open()` は表示専用のままで、休眠状態や破棄済みのウィンドウを生成することはできません。
 
-global shortcutもaccelerator scopeではなくcommand単位です。
-`globalShortcut:register`は上限付きnative parserが受理する任意acceleratorをrequestでき、
-`globalShortcut:unregister`は呼び出したrendererが所有する登録だけを解除できます。Murasakiは
-重複・予約chordを拒否しowner close時に登録を解放しますが、他appが取得済みのchordを奪う
-ことはできません。登録はtrusted rendererに置き、stable idを使い、availability errorを
-通常の競合として処理してください。
+グローバルショートカットも、アクセラレーター単位ではなくコマンド単位です。`globalShortcut:register` では、上限付きのネイティブパーサーが受理する任意のアクセラレーターをリクエストでき、`globalShortcut:unregister` では、呼び出したレンダラーが所有する登録だけを解除できます。Murasaki は重複や予約済みのキーの組み合わせを拒否し、所有者のウィンドウを閉じると登録を解放しますが、他のアプリがすでに取得しているキーの組み合わせを奪うことはできません。登録は信頼できるレンダラーに任せ、安定した ID を使い、登録できない場合のエラーは通常の競合として扱ってください。
 
-## rendererが必要とするsecretをOS credential storeへ保存する
+## レンダラーが必要とするシークレットを OS の認証情報ストアへ保存する
 
-`murasaki/native`の`secureStorage.get/set/delete`は、信頼済みrendererが必要とする短い
-string値向けです。native hostはmacOS KeychainまたはWindows Credential Managerだけへ
-保存します。service / account identifierは`appId`とkeyから導出し、空文字・NUL・UTF-8
-byte上限を検証します。plaintext fallbackはありません。未登録値は`null`、未登録keyの
-deleteも成功し、Linuxでは`unsupported`を返します。
+`murasaki/native` の `secureStorage.get/set/delete` は、信頼済みのレンダラーが必要とする短い文字列値のためのものです。ネイティブホストは、macOS Keychain または Windows Credential Manager だけに保存します。サービス/アカウントの識別子は `appId` とキーから導出し、空文字・NUL・UTF-8 バイト数の上限を検証します。平文へのフォールバックはありません。未登録の値は `null` を返し、未登録キーの削除も成功として扱われ、Linux では `unsupported` を返します。
 
-`secureStorage:get`、`secureStorage:set`、`secureStorage:delete`は別々にgrantしてください。
-structured key scopeを使い、そのrendererが所有するentryだけへ限定することを推奨します。
+`secureStorage:get`、`secureStorage:set`、`secureStorage:delete` は、それぞれ個別に許可してください。構造化されたキーの範囲指定を使い、そのレンダラーが所有するエントリだけに限定することを推奨します。
 
 ```ts
 { permission: 'secureStorage:get', allow: { keys: ['account:*', 'theme'] } }
 ```
 
-互換性のためstring grantはkey無制限です。OS credential storeはat-rest dataを保護しますが、
-grantされたkey scopeで実行中のXSSからは保護しません。
+互換性のため、文字列形式の許可はキーを無制限に扱います。OS の認証情報ストアは保存データを保護しますが、許可されたキーの範囲内で実行される XSS からは保護しません。
 
-keyは256 UTF-8 byte以下、valueは2,048 UTF-8 byte以下で、どちらも空文字とNULを拒否します。
-native IPC body全体にも256 KiB上限があります。`appId`を変更すると新namespaceから既存entryを
-発見できなくなるため、release間で維持してください。
+キーは 256 UTF-8 バイト以下、値は 2,048 UTF-8 バイト以下で、どちらも空文字と NUL を拒否します。ネイティブ IPC のボディ全体にも 256 KiB の上限があります。`appId` を変更すると、新しい名前空間からは既存のエントリを見つけられなくなるため、リリースをまたいで同じ値を維持してください。
 
-## server-only secretはNodeに置く
+## サーバー専用のシークレットは Node に置く
 
-renderer code から import したものは public client JavaScript になり得ます。API token、
-private key、DB credential、license validation は `src/main.ts`、`'use main'`、
-`'use server'`、server-only API route module に置きます。
+レンダラーのコードからインポートしたものは、公開されるクライアント JavaScript になり得ます。API トークン、秘密鍵、DB の認証情報、ライセンス検証は、`src/main.ts`、`'use main'`、`'use server'`、またはサーバー専用の API Route モジュールに置いてください。
 
 ```ts title="src/backend/account.ts"
 'use main'
@@ -204,24 +141,16 @@ export async function loadAccount(accountId: string) {
 ```
 
 <Callout type="info">
-  window authorityはrequestが宣言windowのrendererから来たことを示しますが、そのrendererが
-  侵害されていないことは保証しません。XSSはそのwindowにgrantされたbackend resourceを
-  実行できます。handler内でもuser/session/object単位の認可を行ってください。
+  ウィンドウの権限情報は、リクエストが宣言済みウィンドウのレンダラーから送られてきたことを示しますが、そのレンダラーが侵害されていないことまでは保証しません。XSS は、そのウィンドウに許可されたバックエンドリソースを引き続き実行できます。ハンドラー内でも、ユーザー/セッション/オブジェクト単位の認可を必ず行ってください。
 </Callout>
 
-## Path と URL を検証する
+## パスと URL を検証する
 
-renderer input を無制限の filesystem path に連結しないでください。app-owned directory
-配下に resolve し、結果がその内側に留まることを確認します。raw path より opaque ID
-を優先してください。
+レンダラーからの入力を、無制限のファイルシステムパスへそのまま連結しないでください。アプリが所有するディレクトリ配下に解決し、その結果が本当にディレクトリの内側に収まっていることを確認します。生のパスより不透明な ID を優先してください。
 
-Node 関数が `fetch()` / URL open を行う前には protocol と host を allowlist します。
-これは意図しない local-network access と SSRF を防ぎます。renderer の request header
-をそのまま remote service に転送しないでください。
+同様に、Node の関数が `fetch()` や URL のオープンを行う前には、プロトコルとホストを許可リストに登録してください。これにより、意図しないローカルネットワークへのアクセスや SSRF を防げます。レンダラーのリクエストヘッダーを、そのままリモートのサービスへ転送しないでください。
 
-同じ rule は `openRequested()` にも適用されます。登録済み scheme は dispatch の仕組みであり、
-認証の仕組みではありません。local process、browser、document のいずれからも open を
-試行できます。file association も path を示すだけで、trusted file を示すものではありません。
+同じルールは `openRequested()` にも適用されます。登録済みのスキームはディスパッチの仕組みであって、認証の仕組みではありません。ローカルプロセス、ブラウザ、ドキュメントのいずれからも、オープンを試みることができます。ファイル関連付けもパスを示すだけであり、信頼できるファイルであることを示すものではありません。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -244,28 +173,15 @@ export default defineMain({
 })
 ```
 
-deep-link URL へ renderer を自動 navigation させたり、query 値を HTML に埋め込んだり、
-登録済み extension があるという理由で file を実行したりしないでください。renderer に
-結果が必要なら、Main event API から狭く検証済みの値だけを渡します。
+ディープリンク URL へレンダラーを自動的にナビゲーションさせたり、クエリ値を HTML に埋め込んだり、登録済みの拡張子があるという理由だけでファイルを実行したりしないでください。レンダラー側で結果が必要な場合は、Main のイベント API から、狭く検証済みの値だけを渡すようにします。
 
 ## Content Security Policy
 
-Murasaki は document に `X-Content-Type-Options: nosniff` と `Referrer-Policy:
-no-referrer`を設定し、解決済みのCSPを2つの経路で配信します。1つは配信されるHTML
-documentすべてに付く`Content-Security-Policy` response header(developmentのVite
-middlewareとpackaged appのNode serverの両方が設定します)、もう1つはframework-owned /
-user-owned HTMLへ注入するCSP meta tagです。どちらも同じ解決済みpolicyから生成されるため
-乖離しません。production既定値は`script-src 'self'`を使い、object、frame、base URL変更、
-inline script attribute、他originへのform送信を遮断し、このappのdocumentを他documentへ
-frameさせません(`frame-ancestors 'none'`)。一方remote-backed appのHTTPS / WSS接続は
-許可し、image / font / mediaには一般的なHTTPS / data / blob sourceを許可します。
-Reactのstyle attributeとruntime CSS互換性のため、`style-src 'self' 'unsafe-inline'`は
-残しています。
+Murasaki はドキュメントに `X-Content-Type-Options: nosniff` と `Referrer-Policy: no-referrer` を設定し、解決済みの CSP を 2 つの経路で配信します。1 つは配信されるすべての HTML ドキュメントに付く `Content-Security-Policy` レスポンスヘッダーで（開発時の Vite ミドルウェアと、パッケージ済みアプリの Node サーバーの両方が設定します）、もう 1 つはフレームワーク側が管理する HTML とユーザー側が管理する HTML へ注入する CSP の meta タグです。どちらも同じ解決済みポリシーから生成されるため、内容が食い違うことはありません。本番環境のデフォルト値は `script-src 'self'` を使い、オブジェクト要素、フレーム、base URL の変更、インラインスクリプト属性、他オリジンへのフォーム送信を遮断し、このアプリのドキュメントを他のドキュメントへフレーム化させません(`frame-ancestors 'none'`)。一方で、リモートに依存するアプリの HTTPS/WSS 接続は許可し、画像・フォント・メディアには一般的な HTTPS/data/blob のソースを許可します。React の style 属性とランタイムの CSS 互換性のため、`style-src 'self' 'unsafe-inline'` は残しています。
 
-developmentでは別policyを使い、Vite / React Refreshが注入するinline scriptとHMR用の
-`ws:`を追加で許可します。`'unsafe-eval'`は追加せず、この緩和はproductionには入りません。
+開発時には別のポリシーを使い、Vite / React Refresh が注入するインラインスクリプトと、HMR 用の `ws:` を追加で許可します。`'unsafe-eval'` は追加しません。この緩和は本番環境には含まれません。
 
-policy全体のoverride、または別layerが管理する場合のopt-outを設定できます。
+ポリシー全体の上書き、または別のレイヤーが管理する場合の無効化を設定できます。
 
 ```ts
 export default defineConfig({
@@ -280,98 +196,51 @@ export default defineConfig({
 // security: { csp: false }
 ```
 
-stringはdirective mergeではなく完全なoverrideであり、header・meta tagの両方に同一に
-適用されます。user-owned `index.html`にCSP metaがあればそれを維持して`<head>`先頭へ
-移動します。このケース(`security.csp`未設定でCSP meta tagが存在する場合)では、
-Murasakiはmeta tagだけでpolicyを配信し、`Content-Security-Policy` response headerは
-送信しません。両方送ってしまうとbrowser側でcumulativeに強制され、userが完全に把握して
-いるはずのmeta tagのpolicyを暗黙に上書き(実質的にさらに制限)してしまうためです。
-既存tagと`security.csp` stringの両方を設定すると、片方を暗黙に選ばずbuild errorに
-します。blockされたsourceはbrowser consoleのCSP violationで確認し、その
-sourceだけを追加するかapp originへ移してください。
+文字列を指定した場合、それはディレクティブのマージではなく完全な上書きとなり、ヘッダーと meta タグの両方に同一に適用されます。ユーザー側が管理する `index.html` に CSP の meta タグがあれば、それを維持したまま `<head>` の先頭へ移動します。このケース（`security.csp` が未設定で CSP の meta タグが存在する場合）では、Murasaki は meta タグだけでポリシーを配信し、`Content-Security-Policy` レスポンスヘッダーは送信しません。両方を送ってしまうと、ブラウザ側で累積的に強制され、ユーザーが完全に把握しているはずの meta タグのポリシーを暗黙のうちに上書き（実質的にはさらに制限）してしまうためです。既存の meta タグと `security.csp` の文字列指定の両方を設定した場合は、どちらか一方を暗黙に選ぶのではなく、ビルドエラーとします。ブロックされたソースは、ブラウザコンソールの CSP 違反ログで確認し、そのソースだけを追加するか、アプリのオリジンへ移してください。
 
-既存appを移行するときはproductionのinline scriptをexternal moduleへ移します。remote
-script / frameは既定でblockされるため、必要なら明示的にoverrideしてください。HTTPS / WSS
-backendは既定で利用できます。remoteのplain HTTP backendにはoverrideが必要です
-（same-origin loopback callは許可されます）。
+既存アプリを移行する際は、本番環境のインラインスクリプトを外部モジュールへ移してください。リモートのスクリプトやフレームはデフォルトでブロックされるため、必要であれば明示的に上書きしてください。HTTPS/WSS のバックエンドはデフォルトで利用できます。リモートの平文 HTTP バックエンドには上書きが必要です（同一オリジンのループバック呼び出しは許可されます）。
 
-一部のdirectiveはresponse headerでしか有効になりません。browserは`<meta>`tag内の
-`frame-ancestors`や`sandbox`を無視し、`report-to` / `report-uri`もreporting endpointを
-紐付けるための実HTTP responseを必要とします。そのためMurasakiはこれらのdirectiveを
-meta向けpolicyから自動的に取り除き(engineによっては無視したdirectiveへconsole警告を
-出すため)、headerだけに残します。これによりmeta tagはspec的にcleanなまま、headerは
-policy全体を運びます。既定policyに`frame-ancestors 'none'`を含めているのはこのためで、
-developmentでもpackaged appでもheaderによって強制されます。meta tagはこれらの
-directiveを強制できないままfallbackとして残り、live HTTP responseではなくbuild済みの
-`file://`出力を直接検査するtooling向けに有用です。CSPはHTMLをsanitizeせず、Node関数を
-authorizeしません。既定のinline style許可も互換性上のtradeoffであり、XSS安全性の保証
-ではありません。引き続き`dangerouslySetInnerHTML`を避け、user-authored HTMLをsanitizeし、
-third-party codeを固定してください。
+一部のディレクティブは、レスポンスヘッダーでしか有効になりません。ブラウザは `<meta>` タグ内の `frame-ancestors` や `sandbox` を無視し、`report-to` / `report-uri` もレポート先エンドポイントを紐付けるために実際の HTTP レスポンスを必要とします。そのため Murasaki は、これらのディレクティブを meta 用のポリシーから自動的に取り除き（エンジンによっては、無視したディレクティブに対してコンソール警告を出すため）、ヘッダーだけに残します。これにより、meta タグは仕様上クリーンなまま保たれ、ヘッダーがポリシー全体を運びます。デフォルトのポリシーに `frame-ancestors 'none'` を含めているのはこのためで、開発時でもパッケージ済みアプリでも、ヘッダーによって強制されます。meta タグは、これらのディレクティブを強制できないままフォールバックとして残り、ライブの HTTP レスポンスではなく、ビルド済みの `file://` 出力を直接検査するツール向けに有用です。CSP は HTML をサニタイズするものではなく、Node の関数を認可するものでもありません。デフォルトのインラインスタイル許可も互換性上のトレードオフであり、XSS に対する安全性を保証するものではありません。引き続き `dangerouslySetInnerHTML` を避け、ユーザーが作成した HTML をサニタイズし、サードパーティのコードをバージョン固定してください。
 
 ## 実ネットワークサービスを公開する場合
 
-Murasaki API route は app-local で、public service としては到達できません。Main から
-Node の TCP / WebSocket / HTTP listener を作れますが、Murasaki runtime-session 保護の
-外側に新しい security boundary ができます。
+Murasaki の API Route は、設計上アプリローカルであり、公開サービスとして外部から到達することはできません。Main プロセスから Node を使って TCP / WebSocket / HTTP のリスナーを作成することはできますが、その場合 Murasaki のランタイムセッション保護の外側に、新しいセキュリティ境界が生まれます。
 
-- remote client が明示的な製品機能でなければ `127.0.0.1` に bind
-- message 処理前に認証
-- message / payload 上限を定義
-- 高コスト処理を rate limit
-- `shutdown()` で listener を閉じる
-- Murasaki runtime token を独自 protocol の credential に再利用しない
+- リモートクライアントへの対応が明示的な製品機能でない限り、`127.0.0.1` にバインドする
+- メッセージを処理する前に認証する
+- メッセージ/ペイロードの上限を定義する
+- 負荷の高い処理はレート制限する
+- `shutdown()` でリスナーを閉じる
+- Murasaki のランタイムトークンを、独自プロトコルの認証情報として再利用しない
 
-## In-page permission requests(getUserMedia、geolocation)
+## ページ内の権限リクエスト（getUserMedia / geolocation） [#in-page-permission-requests-getusermedia-geolocation]
 
-developmentとpackaged appのrenderer documentには、次のresponse headerを付与します。
+開発時とパッケージ済みアプリのレンダラードキュメントには、次のレスポンスヘッダーを付与します。
 
 ```http
 Permissions-Policy: camera=(), microphone=(), geolocation=()
 ```
 
-そのため、影響の大きいbrowser APIはWebKit/WebView2固有のprompt挙動へ流れず、
-fail-closedになります。これはnative featureのhost OS consentを管理する
-`systemPermission:*`とは別の境界です。Wry 0.55にはcross-platformなper-window
-permission callbackがないため、rendererのcamera / microphone / geolocationを許可する
-config escape hatchは現在提供しません。一貫した境界をnative側で強制できるまでは、
-capability-checked native featureまたは別途保護したserviceを使用してください。
+そのため、影響の大きいブラウザ API は WebKit/WebView2 固有のプロンプト挙動には流れず、フェイルクローズで拒否されます。これは、ネイティブ機能に対するホスト OS の同意を管理する `systemPermission:*` とは別の境界です。Wry 0.55 にはクロスプラットフォームなウィンドウ単位の権限コールバックが無いため、レンダラーの camera / microphone / geolocation を許可する設定エスケープハッチは現時点で提供していません。この境界をネイティブ側で一貫して強制できるようになるまでは、ケイパビリティで検査されるネイティブ機能を使うか、別途保護したサービスを利用してください。
 
-## Code signing と update key は別物
+## コード署名と更新キーは別物
 
-Code signing は OS に「誰がこの executable を作ったか」を示します。Ed25519 update
-signature は Murasaki に「この manifest を app の update key 保有者が承認したか」を
-示します。本番 updater は両方を使ってください。OS artifact は Developer ID +
-notarization または Murasaki の Windows Authenticode `--sign` flow、更新は manifest signature
-と payload hash で保護します。
+コード署名は、「この実行ファイルを作ったのは誰か」を OS に示します。Ed25519 の更新署名は、「このマニフェストをアプリの更新キー保有者が承認したか」を Murasaki に示します。本番環境のアップデーターでは、両方を使ってください。OS の成果物は Developer ID + 公証、または Murasaki の Windows Authenticode `--sign` フローで保護し、更新はマニフェスト署名とペイロードのハッシュで保護します。
 
-## 既知の security gap
+## 既知のセキュリティ上の制限事項
 
-- Native capabilityはwindow別で、URL、filesystem path、secure-storage key、target window、
-  OS permissionをscopeできる。dialog default、clipboard content、tray menu content、
-  elevated processのargumentなどはまだcommand単位で、policyは独立署名fileではなくconfig管理
-- backend capabilityはServer Action、`'use main'`、API/updater route、event、diagnosticsを
-  native window別に隔離する。browser profileもwindow別に分離され、同一originのService Workerや
-  browser stateがauthority境界をまたぐことはできない。primaryは従来profileを維持し、secondaryの
-  永続化はmacOS 14+が必要（macOS 11–13は分離されたnon-persistent storeへfail closed）である。
-  XSSは自身のwindowへgrantされたresourceを使えるため、handlerでuser/session/objectを認可する
-- incognitoはpersistent profileを使わないが、複数incognito windowが同じin-memory
-  sessionを共有する保証はない
-- Linux package signing(`murasaki installer --sign`)はGPGによるdetached署名で、
-  apt/dnf keyringやdistro-repositoryのtrust統合はない。Windows Authenticode には
-  developer が用意した certificate / Artifact Signing provider と Windows SDK
-  SignTool が必要
+- ネイティブケイパビリティはウィンドウ別で、URL、ファイルシステムパス、secureStorage のキー、対象ウィンドウ、OS の権限といった単位で範囲を指定できます。一方、ダイアログのデフォルト値、クリップボードの内容、トレイメニューの内容、権限昇格したプロセスの引数などは、まだコマンド単位のままで、ポリシーは独立した署名済みファイルではなく設定で管理されています
+- バックエンドケイパビリティは、Server Actions、`'use main'`、API/updater route、イベント、診断情報を、ネイティブウィンドウ別に隔離します。ブラウザプロファイルもウィンドウ別に分離されており、同一オリジンの Service Worker やブラウザの状態が、この権限情報の境界をまたぐことはできません。プライマリウィンドウは従来のプロファイルを維持し、セカンダリウィンドウの永続化には macOS 14 以降が必要です（macOS 11〜13 では、分離された非永続ストアへフェイルクローズします）。XSS は自身のウィンドウに許可されたリソースを引き続き使えるため、ハンドラー側でユーザー/セッション/オブジェクトを認可してください
+- シークレット(incognito)モードは永続プロファイルを使いませんが、複数のシークレットウィンドウが同じインメモリセッションを共有する保証はありません
+- Linux のパッケージ署名(`murasaki installer --sign`)は GPG による分離署名であり、apt/dnf のキーリングや distro リポジトリとの信頼統合はありません。Windows Authenticode には、開発者が用意した証明書または Artifact Signing プロバイダーと、Windows SDK の SignTool が必要です
 - Linux の `.deb` は `.desktop` の `MimeType` を使ってプロトコルとファイル関連付けを登録する。展開しただけの AppDir / AppImage と Windows のポータブルアーカイブは、意図的に OS へ自己登録しない
-- renderer native APIは `src/main.ts` から直接呼べない
+- レンダラー用のネイティブ API は、`src/main.ts` から直接呼び出すことはできない
 
-正確な状況は[プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)
-で確認できます。
+正確な状況は[プラットフォームと機能の状況](/ja/docs/core-concepts/platform-feature-status)で確認できます。
 
 ## 脆弱性を報告する
 
-public issue を作らないでください。[private GitHub Security
-Advisory](https://github.com/murasakijs/murasaki/security/advisories/new) または
-`murasaki@ichi10.com` を利用してください。1.0 未満では最新 minor release が
-サポート対象です。
+公開の issue は作らないでください。[GitHub の非公開セキュリティアドバイザリ](https://github.com/murasakijs/murasaki/security/advisories/new)を作成するか、`murasaki@ichi10.com` 宛てにメールしてください。1.0 未満では、最新のマイナーリリースがサポート対象です。
 
 ## 次へ
 

@@ -1,15 +1,13 @@
 ---
-title: Deep Link と File Association
-description: URL scheme と document type を登録し、すべての open request を Node Main で処理します。
+title: ディープリンクとファイル関連付け
+description: URL スキームとドキュメントタイプを登録し、すべてのオープンリクエストを Node Main で処理します。
 ---
 
-Murasaki は packaged macOS / Windows / Linux app の custom URL scheme と
-document extension を登録できます。cold launch と起動済み app への request は、
-どちらも同じ Node Main の `openRequested()` hook に届きます。
+Murasaki は、パッケージ化された macOS / Windows / Linux アプリに対して、カスタム URL スキームとドキュメントの拡張子を登録できます。コールドスタートと、起動済みのアプリへのリクエストは、どちらも同じ Node Main の `openRequested()` フックに届きます。
 
-## Handler を設定する
+## ハンドラーを設定する
 
-アプリが扱う scheme と extension を `murasaki.config.ts` に宣言します。
+アプリが扱うスキームと拡張子を `murasaki.config.ts` に宣言します。
 
 ```ts title="murasaki.config.ts"
 import { defineConfig } from 'murasaki'
@@ -34,15 +32,11 @@ export default defineConfig({
 })
 ```
 
-extension は先頭のドットなしで指定します。scheme と extension は lowercase に
-正規化されます。重複値、予約済みbrowser/OS scheme (`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki`など)、
-不正な scheme / extension / MIME type は build 時に拒否されます。全 field と default は
-[設定リファレンス](/ja/docs/building/configuration#protocols)を参照してください。
+拡張子は先頭のドットなしで指定します。スキームと拡張子は小文字に正規化されます。重複した値、予約済みのブラウザ / OS スキーム（`blob`、`file`、`http`、`https`、`javascript`、`mailto`、`ms-settings`、`tel`、`murasaki` など）、不正なスキーム / 拡張子 / MIME タイプは、ビルド時に拒否されます。すべてのフィールドとデフォルト値は[設定リファレンス](/ja/docs/building/configuration#protocols)を参照してください。
 
-## Open request を処理する
+## オープンリクエストを処理する
 
-Node Main entry を作り、`openRequested(context, event)` を実装します。platform や
-transport ではなく、各 target の `kind` で分岐してください。
+Node Main のエントリを作成し、`openRequested(context, event)` を実装します。プラットフォームやトランスポートではなく、各ターゲットの `kind` で分岐してください。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -70,11 +64,9 @@ export default defineMain({
 })
 ```
 
-Murasaki は `ready()` の完了後に `openRequested()` を呼びます。DB などの長寿命
-resource を一度初期化してから、cold-start と running-app request を同じ handler で
-処理できます。
+Murasaki は `ready()` の完了後に `openRequested()` を呼びます。DB などの長寿命リソースを一度初期化しておけば、コールドスタート時と実行中のアプリへのリクエストを、同じハンドラーで処理できます。
 
-## Event reference
+## イベントリファレンス
 
 ```ts
 type OpenTarget =
@@ -89,37 +81,31 @@ interface OpenRequestEvent {
 }
 ```
 
-| Field | 意味 |
+| フィールド | 意味 |
 | --- | --- |
-| `activation` | 最初の launch に伴う request、2つ目の process から転送された request、native OS event のいずれか。 |
-| `transport` | native delivery mechanism。診断用であり、通常の app logic は `target.kind` を使います。 |
-| `targets` | 設定済み scheme / extension と一致した URL / file のみ。1 event に複数 file が入る場合があります。 |
-| `cwd` | argv-based launch の working directory。native OS event ではありません。 |
+| `activation` | 最初の起動に伴うリクエスト、2つ目のプロセスから転送されたリクエスト、ネイティブの OS イベントのいずれか。 |
+| `transport` | ネイティブの配信メカニズム。診断用であり、通常のアプリケーションロジックは `target.kind` を使います。 |
+| `targets` | 設定済みのスキーム / 拡張子と一致した URL / ファイルのみ。1 つのイベントに複数のファイルが含まれる場合があります。 |
+| `cwd` | argv ベースの起動における作業ディレクトリ。ネイティブの OS イベントの場合は含まれません。 |
 
-2つ目の executable launch では、`secondInstance()` に raw `argv` / `cwd` が届き、
-`openRequested()` には認識済み URL / file target が届きます。同じ open operation を
-両方の hook で実行しないでください。一般的な activation behavior は
-`secondInstance()`、link / file の意味的な処理は `openRequested()` に置きます。
+2 つ目の実行ファイルの起動では、`secondInstance()` に生の `argv` / `cwd` が届き、`openRequested()` には認識済みの URL / ファイルターゲットが届きます。同じオープン処理を両方のフックで実行しないでください。一般的なアクティベーションの挙動は `secondInstance()` に、リンク / ファイルの意味的な処理は `openRequested()` に置いてください。
 
-## Packaging の動作
+## パッケージングの動作
 
-| Artifact | 登録と delivery |
+| アーティファクト | 登録と配信 |
 | --- | --- |
-| macOS `.app` | `murasaki bundle` が URL / document metadata を app の `Info.plist` に書き込みます。Launch Services は起動済み app を含めて URL / file open を配送します。`.dmg` はこの `.app` を収録します。最終テスト前に Applications へ移動してください。 |
-| Windows NSIS `.exe` | installer が `installer.windows.installMode` に従い per-user / per-machine の protocol / file association を登録します。起動された URL / file は argv から正規化されます。 |
-| Windows MSI | MSI が per-machine の protocol / file association を登録します。起動された URL / file は argv から正規化されます。 |
-| Windows portable archive | registry entry を作りません。`protocols` / `fileAssociations` を設定しても OS handler にはなりません。 |
-| Linux AppDir / `.AppImage` / `.deb` | `murasaki bundle` が `x-scheme-handler/<scheme>` と `application/x-<extension>` の `MimeType=` エントリを `.desktop` ファイルに書き込みます。`.deb` は `usr/share/applications/` にインストールし、インストール/削除時に desktop database を更新します(`update-desktop-database`)。手動展開した AppDir/`.AppImage` には同等の OS レベル登録手順はありませんが、直接起動した場合でも cold-start 時の argv(`.desktop` の `Exec=` 行が展開する `%U`/`%F`)と 2 回目起動時の activation は動作します。 |
-| `murasaki dev` | system handler metadata を install しません。OS integration は install/package 済み artifact でテストしてください。 |
+| macOS `.app` | `murasaki bundle` が URL / ドキュメントのメタデータをアプリの `Info.plist` に書き込みます。Launch Services は、起動済みのアプリを含めて URL / ファイルのオープンを配送します。`.dmg` はこの `.app` を収録しています。最終テスト前に Applications へ移動してください。 |
+| Windows NSIS `.exe` | インストーラーが `installer.windows.installMode` に従い、ユーザー単位 / マシン単位のプロトコル / ファイル関連付けを登録します。起動された URL / ファイルは argv から正規化されます。 |
+| Windows MSI | MSI がマシン単位のプロトコル / ファイル関連付けを登録します。起動された URL / ファイルは argv から正規化されます。 |
+| Windows ポータブルアーカイブ | レジストリエントリを作成しません。`protocols` / `fileAssociations` を設定しても、OS のハンドラーにはなりません。 |
+| Linux AppDir / `.AppImage` / `.deb` | `murasaki bundle` が `x-scheme-handler/<scheme>` と `application/x-<extension>` の `MimeType=` エントリを `.desktop` ファイルに書き込みます。`.deb` は `usr/share/applications/` にインストールし、インストール / 削除時にデスクトップデータベースを更新します(`update-desktop-database`)。手動展開した AppDir/`.AppImage` には同等の OS レベルの登録手順はありませんが、直接起動した場合でも、コールドスタート時の argv（`.desktop` の `Exec=` 行が展開する `%U`/`%F`）と、2 回目起動時のアクティベーションはどちらも機能します。 |
+| `murasaki dev` | システムのハンドラーメタデータをインストールしません。OS との統合は、インストール済み / パッケージ化済みのアーティファクトでテストしてください。 |
 
-Windows の登録は app を利用可能な handler に追加しますが、user の現在の default app を
-勝手に変更しません。release 間で `appId` を維持し、installer ownership と association
-identifier を安定させてください。
+Windows の登録は、アプリを利用可能なハンドラーに追加しますが、ユーザーの現在のデフォルトアプリを勝手に変更することはありません。リリース間で `appId` を維持し、インストーラーの所有権と関連付け識別子を安定させてください。
 
-## Packaged handler をテストする
+## パッケージ済みハンドラーをテストする
 
-installer を実行するか packaged app を Applications へ移動した後、cold launch と
-起動済み app の両方をテストします。
+インストーラーを実行するか、パッケージ化されたアプリを Applications へ移動したあと、コールドスタートと起動済みのアプリの両方をテストします。
 
 ```bash title="macOS"
 open 'violet://open/note-42'
@@ -131,25 +117,20 @@ Start-Process 'violet://open/note-42'
 Start-Process '.\example.vnote'
 ```
 
-clean machine で NSIS / MSI の実際の uninstall / upgrade path もテストしてください。
-実行ファイルへ argument を直接渡す方法は handler code の確認には使えますが、OS registration
-が正しく install されたことの確認にはなりません。
+クリーンな環境で、NSIS / MSI の実際のアンインストール / アップグレードの経路もテストしてください。実行ファイルへ引数を直接渡す方法は、ハンドラーのコードを確認するには使えますが、OS への登録が正しくインストールされたことの確認にはなりません。
 
-## Security
+## セキュリティ
 
 <Callout type="warn">
-  URL、file path、launch argument はすべて信頼できない input です。任意の local process が
-  偽の URL / path で executable を起動できます。custom scheme は送信元を証明しません。
+  URL、ファイルパス、起動引数は、すべて信頼できない入力です。任意のローカルプロセスが、偽の URL / パスで実行ファイルを起動できます。カスタムスキームは、送信元を証明するものではありません。
 </Callout>
 
-- 期待する URL host、path、action、parameter shape を allowlist で検証する
-- bearer token や長期 credential を Deep Link URL に入れない。sign-in callback には
-  one-time code、`state`、PKCE を使う
-- query string、fragment、機密性のある path を log / crash report から除外する
-- file parse 前に size、permission、format、content を確認する。期待した extension だけでは
-  安全性を証明できない
-- symlink と、検証から使用までの間に file が変化する可能性を考慮する
-- 処理は Node Main に置き、検証済みの最小限の data だけを renderer へ送る
+- 期待する URL のホスト、パス、アクション、パラメーターの形を許可リストで検証する
+- ベアラートークンや長期的な認証情報をディープリンクの URL に含めない。サインインのコールバックには、ワンタイムコード、`state`、PKCE を使う
+- クエリ文字列、フラグメント、機密性の高いパスは、ログ / クラッシュレポートから除外する
+- ファイルをパースする前に、サイズ、パーミッション、フォーマット、内容を確認する。期待した拡張子だけでは安全性を証明できない
+- シンボリックリンクや、検証から使用までの間にファイルが変化する可能性を考慮する
+- 処理は Node Main に置き、検証済みの最小限のデータだけをレンダラーへ送る
 
 ## 次へ
 

@@ -3,8 +3,7 @@ title: Server Actions
 description: "Node 上で実行され、React からは useAction で呼び出される 'use server' 関数。"
 ---
 
-React 19 スタイルのサーバーアクションです — `useActionState` と同じ形です。`'use
-server'` 関数は、実際にはブラウザではなく **Node** 上で実行されます。
+React 19 スタイルのサーバーアクションです — `useActionState` と同じ形です。`'use server'` 関数は、実際にはブラウザではなく **Node** 上で実行されます。
 
 ## アクションを定義する
 
@@ -21,9 +20,7 @@ export const greet = defineAction(
 )
 ```
 
-`defineAction` は型付きのパススルーです — `'use server'` のセマンティクスが
-TypeScript を通じて伝わるようにするためだけに存在します。実際のコード分割は、そのディ
-レクティブを検出する Vite プラグインの中で行われます。
+`defineAction` は型付きのパススルーです — `'use server'` のセマンティクスが TypeScript を通じて伝わるようにするためだけに存在します。実際のコード分割は、そのディレクティブを検出する Vite プラグインの中で行われます。
 
 ## ページから呼び出す
 
@@ -48,30 +45,19 @@ export default function Home() {
 }
 ```
 
-`useAction` は React 19 の `useActionState` を直接ラップしているため、`[state, run,
-isPending]` は Next.js ですでにおなじみの形そのままです。`<form>` の外(例えばボタンの
-`onClick` など)からアクションを呼び出すには、直接呼び出します —
-`callAction(fn, ...args)` はそのための薄いパススルーです。
+`useAction` は React 19 の `useActionState` を直接ラップしているため、`[state, run, isPending]` は Next.js ですでにおなじみの形そのままです。`<form>` の外（例えばボタンの `onClick` など）からアクションを呼び出すには、直接呼び出します — `callAction(fn, ...args)` はそのための薄いパススルーです。
 
 ## 実行の仕組み
 
-Vite プラグインは `'use server'` モジュールを2つに分割します。クライアントバンドルに
-は型付きの `fetch` スタブ(`fetch('/__murasaki/action/…')`)が入り、関数の本体はサー
-バー側に残ります。
+Vite プラグインは `'use server'` モジュールを2つに分割します。クライアントバンドルには型付きの `fetch` スタブ(`fetch('/__murasaki/action/…')`)が入り、関数の本体はサーバー側に残ります。
 
-- **開発時** — Vite ミドルウェアがスタブのリクエストを受け取り、`ssrLoadModule` 経由で
-  実際の関数を呼び出します。
-- **本番時** — `murasaki bundle` が自己完結型のアクションレジストリ
-  (`dist/server`)をコンパイルし、(ネイティブランチャーによって起動される)バンドル
-  済みの Node 子サーバーが、同じ `/__murasaki/action/…` リクエストをそれに対して処理し
-  ます。
+- **開発時** — Vite ミドルウェアがスタブのリクエストを受け取り、`ssrLoadModule` 経由で実際の関数を呼び出します。
+- **本番時** — `murasaki bundle` が自己完結型のアクションレジストリ(`dist/server`)をコンパイルし、ネイティブランチャーによって起動されるバンドル済みの Node 子サーバーが、同じ `/__murasaki/action/…` リクエストをそれに対して処理します。
 
-いずれの場合も、アクション本体そのものがクライアントに配信されることはなく、スタブだけ
-が配信されます。
+いずれの場合も、アクション本体そのものがクライアントに配信されることはなく、スタブだけが配信されます。
 
 <Callout type="info">
-  `'use server'` ファイルは `src/` 配下のどこにでも置けます(`src/actions.ts` が一般的
-  な慣習です)— `src/app/` や `src/api/` に紐づく必要はありません。
+  `'use server'` ファイルは `src/` 配下のどこにでも置けます（`src/actions.ts` が一般的な慣習です）— `src/app/` や `src/api/` に紐づく必要はありません。
 </Callout>
 
 ## 次へ

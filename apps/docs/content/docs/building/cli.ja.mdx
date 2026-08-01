@@ -16,19 +16,12 @@ murasaki help        このヘルプを表示する
 ```
 
 <Callout type="info">
-  開発とパッケージングは macOS、Windows、Linux に対応しています。Linux の `bundle` は
-  AppDir と `.AppImage` を、`installer` は `.deb` も生成します。Linux の `--sign` は
-  `.AppImage`、`.deb`、まとめた `SHA256SUMS` にGPG署名します。RPM、パッケージ
-  リポジトリ用メタデータは未対応です。`--sign`を明示的に渡すとどのplatformでも
-  出力前にfail-closedで停止し、未署名artifactを成功扱いにはしません。
+  開発とパッケージングは macOS、Windows、Linux に対応しています。Linux の `bundle` は AppDir と `.AppImage` を生成し、`installer` はさらに `.deb` も生成します。Linux の `--sign` は `.AppImage`、`.deb`、まとめた `SHA256SUMS` に GPG 署名します。RPM パッケージやリポジトリ用メタデータへの対応はまだありません。`--sign` を明示的に指定した場合は、すべてのプラットフォームで出力前に処理を停止します（フェイルクローズ）。未署名の成果物を黙って生成することはありません。
 </Callout>
 
 ## `murasaki dev`
 
-子プロセスで Vite の開発サーバーを起動し、それを指すネイティブウィンドウをアタッチしま
-す — React Fast Refresh + HMR は通常どおり動作します。編集して保存すると、ウィンドウが
-更新されます。`config.devPort`(デフォルト `5178`)で実行され、そのポートが使用中なら
-自動的にインクリメントされます。
+子プロセスで Vite の開発サーバーを起動し、それを指すネイティブウィンドウをアタッチします。React Fast Refresh と HMR は通常どおり動作し、編集して保存するとウィンドウが更新されます。`config.devPort`（デフォルトは `5178`）で実行され、そのポートが使用中の場合は自動的にインクリメントされます。
 
 ## `murasaki build`
 
@@ -36,10 +29,7 @@ murasaki help        このヘルプを表示する
 
 ## `murasaki bundle`
 
-`dist/client` + コンパイル済みのサーバーアクションレジストリ + ポータブルな Node ラン
-タイム + ネイティブランチャーバイナリを `dist/bundle/` にパッケージングします —
-macOS では `<productName>.app`、Windows では `<productName>.exe` を含む
-`<productName>/` フォルダー、Linux では AppDir と `.AppImage` になります。
+`dist/client` + コンパイル済みのサーバーアクションレジストリ + ポータブルな Node ランタイム + ネイティブランチャーバイナリを `dist/bundle/` にパッケージングします — macOS では `<productName>.app`、Windows では `<productName>.exe` を含む `<productName>/` フォルダー、Linux では AppDir と `.AppImage` になります。
 
 ```bash
 murasaki bundle                       # ホストのプラットフォーム + アーキテクチャ、未署名
@@ -50,24 +40,13 @@ murasaki bundle --sign                # macOS Developer ID / Windows Authenticod
 murasaki bundle --no-build            # 既存の dist/client を再利用する
 ```
 
-- **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — 対象アーキテクチャ /
-  プラットフォーム（デフォルトはホスト）。`darwin-arm64`、`darwin-x64`、
-  `win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` を指定できます。
-- **`--sign`** — macOS では `.app` を Developer ID 署名し、Windows では
-  portable ZIP 作成前に app executable を Authenticode 署名し、Linux では
-  生成された `.AppImage` をGPG署名します。Windows 署名は
-  SignTool がある Windows 上で実行します。詳しくは
-  [Distribution](/ja/docs/building/distribution#signing--notarization)を参照してください。
-- **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップする。
+- **`--arch arm64|x64`** / **`--target <platform>-<arch>`** — 対象アーキテクチャ / プラットフォーム（デフォルトはホスト）。`darwin-arm64`、`darwin-x64`、`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64` を指定できます。
+- **`--sign`** — macOS では `.app` を Developer ID で署名し、Windows ではポータブル ZIP の作成前にアプリの実行ファイルを Authenticode で署名し、Linux では生成された `.AppImage` に GPG 署名します。Windows での署名は SignTool がある Windows 上で実行する必要があります。詳しくは [配布](/ja/docs/building/distribution#signing--notarization)を参照してください。
+- **`--no-build`** — `dist/client` がすでに存在する場合、Vite の再ビルドをスキップします。
 
 ## `murasaki installer`
 
-`bundle` の出力を、対象プラットフォーム向けの配布可能なインストーラに変換します:
-macOS ではドラッグインストール用のスタイル付き `.dmg`
-(`dist/<productName>-<version>.dmg`、Finder のスタイリングに失敗した場合はプレーンな
-DMGにフォールバック）、WindowsではNSIS `.exe`と、built-in updater無効時だけMSI `.msi`、
-Linuxでは`.deb`を生成します。portable Windows ZIPはbundle stepの出力です。LinuxのAppDirと
-`.AppImage`もバンドル出力に残ります。
+`bundle` の出力を、対象プラットフォーム向けの配布可能なインストーラーに変換します。macOS ではドラッグインストール用のスタイル付き `.dmg`（`dist/<productName>-<version>.dmg`。Finder のスタイル適用に失敗した場合はプレーンな DMG にフォールバックします）、Windows では NSIS の `.exe`、さらに内蔵の自動更新機能が無効な場合のみ MSI の `.msi`、Linux では `.deb` を生成します。ポータブルな Windows 用 ZIP は `bundle` の出力です。Linux の AppDir と `.AppImage` も `bundle` の出力として残ります。
 
 ```bash
 murasaki installer                     # ホストプラットフォーム向けインストーラ(最初に再バンドル)
@@ -79,22 +58,13 @@ murasaki installer --no-build          # 既存の dist/bundle を再利用す�
 ```
 
 - **`--target <platform>-<arch>`** / **`--arch arm64|x64`** — `bundle` に転送されます。
-- **`--sign`** — macOS の Developer ID、Windows の Authenticode、または
-  Linux の GPG 署名。Windowsではapp executableと生成されたすべてのinstallerを
-  署名・検証します。updater有効時は per-user NSISを必須とし、MSIをskipします。
-  Linuxでは `.AppImage`、`.deb`、まとめた `SHA256SUMS` にGPG署名します。詳しくは
-  [Distribution](/ja/docs/building/distribution)の「GPG detached 署名」を
-  参照してください。
-- platform packaging toolからinstallerを1つも生成できなければcommandは失敗します。
-  portable ZIP / AppImageが目的なら`murasaki bundle`を使ってください。
-- **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の notary サービスに
-  提出し、チケットをステープルします(`--notarize` は `--sign` が必須)。
+- **`--sign`** — macOS では Developer ID、Windows では Authenticode、Linux では GPG による署名を行います。Windows ではアプリの実行ファイルと生成されたすべてのインストーラーに署名・検証を行います。自動更新が有効なビルドではユーザーごとの NSIS が必須となり、MSI はスキップされます。Linux では `.AppImage`、`.deb`、まとめた `SHA256SUMS` に GPG 署名します。詳しくは [配布](/ja/docs/building/distribution)の「GPG 分離署名」の項を参照してください。
+- プラットフォームのパッケージングツールがインストーラーを1つも生成できなかった場合、コマンドは失敗します。ポータブル ZIP や AppImage が目的の出力であれば `murasaki bundle` を使用してください。
+- **`--notarize`** — macOS のみ。署名済みの `.dmg` を Apple の公証サービスに提出し、チケットをステープルします（`--notarize` の使用には `--sign` が必須です）。
 
 ## `murasaki demo`
 
-パッケージ済みのmacOS開発者プレビューを1コマンドで取得して起動します。Apple silicon / Intel
-に合うビルドを自動選択し、公開済みSHA-256と厳密なad-hocコード署名を検証してキャッシュした
-後にだけ、隔離属性を解除します。
+パッケージ済みの macOS 開発者プレビューを1コマンドで取得して起動します。Apple silicon と Intel のどちらかを自動選択し、公開済みの SHA-256 と厳密な ad-hoc コード署名でリリースアセットを検証してキャッシュした後、はじめて隔離属性を解除します。
 
 ```bash
 pnpm dlx murasaki@latest demo papelle
@@ -105,17 +75,13 @@ pnpm dlx murasaki@latest demo orglia
 - `murasaki demo --list` で利用可能なプレビューを一覧表示します。
 - `--refresh` で検証済みキャッシュを使わず、再ダウンロードします。
 - `--no-open` でアプリを起動せず、取得と検証だけを実行します。
-- 名前を省略した `murasaki demo` は、パッケージ済みの標準
-  create-murasakiスキャフォールドを起動します。
+- 名前を省略して `murasaki demo` を実行すると、パッケージ済みのデフォルトの create-murasaki スキャフォールドを起動します。
 
-これらはCLI利用者向けのad-hoc署名済み開発者プレビューであり、公証済みの一般利用者向け
-ダウンロードではありません。本番アプリは各公開者が署名・公証してください。
+これらは CLI 利用者向けの ad-hoc 署名済み開発者プレビューであり、公証済みの一般ユーザー向けダウンロードではありません。本番アプリは、公開者自身が署名・公証してください。
 
 ## `murasaki init`
 
-`rustc` の有無を確認し、見つからない場合はインストールコマンドを表示します。
-`@murasakijs/native` 自体をいじる場合にのみ必要です。Murasaki のエンドユーザーが Rust
-を必要とすることは決してありません — ビルド済みバイナリが npm から降ってきます。
+`rustc` の有無を確認し、見つからない場合はインストールコマンドを表示します。`@murasakijs/native` 自体をいじる場合にのみ必要です。Murasaki のエンドユーザーが Rust を必要とすることは決してありません — ビルド済みバイナリが npm から降ってきます。
 
 ## `murasaki icon`
 
@@ -123,16 +89,9 @@ pnpm dlx murasaki@latest demo orglia
 murasaki icon assets/logo.png
 ```
 
-1つの正方形の 1024px PNGからplatform icon resourceを生成します。full Xcodeがある
-macOSでは、`AppIcon` assetを収めた`Assets.car`と`icon.icns`を出力します。現在の
-macOSはasset catalog側にOSのmaskとappearance renderingを適用し、`.icns`は古い
-macOS / tooling向けfallbackとして残ります。Command Line Toolsのみの場合は警告を
-表示し、`.icns` fallbackを生成します。macOS以外では現時点でPNGのみです。
+1つの正方形の 1024px PNG からプラットフォーム向けのアイコンリソースを生成します。フル版の Xcode がインストールされた macOS では、`AppIcon` アセットを収めた `Assets.car` と `icon.icns` を出力します。現在の macOS はアセットカタログ側で OS のマスクと外観のレンダリングを適用し、`.icns` は古い macOS やツール向けのフォールバックとして残ります。Command Line Tools のみの環境では警告を表示したうえで `.icns` フォールバックを生成します。macOS 以外では現時点で PNG のみに対応しています。
 
-通常、このcommandを直接実行する必要はありません。`murasaki bundle`が`config.icon`
-から同じresourceを自動生成・埋め込みします。canonical source imageへmacOSの角丸maskを
-焼き込まず、正方形のdesignを渡してasset catalog版のmaskをOSに任せてください。
-Windowsでは`.ico`を生成して`.exe`へ埋め込みます。
+通常、このコマンドを直接実行する必要はありません。`murasaki bundle` が `config.icon` から同じリソースを自動生成し、埋め込みます。macOS の角丸マスクを元画像に焼き込まないでください。正方形のデザインを渡し、アセットカタログ版へのマスク適用は OS に任せます。Windows では `.ico` を生成して `.exe` に埋め込みます。
 
 ## `murasaki release`
 
@@ -142,25 +101,11 @@ murasaki release --manifest --base-url <url> --version <v> [--notes <md>] [--man
 murasaki release --sign
 ```
 
-署名付き自動更新を公開するための、3つの独立したモードです — 全体の流れについては
-[自動更新](/docs/guides/auto-update)ガイドを参照してください。
+署名付き自動更新を公開するための、3つの独立したモードです — 全体の流れについては [自動更新](/docs/guides/auto-update) ガイドを参照してください。
 
-- **`--keygen`** — 更新マニフェストの署名に使う Ed25519 の鍵ペアを生成します。
-  `.murasaki/update-key.pub`(コミットしてください)と `.murasaki/update-key`
-  (mode `0600`、自動的にgitignore)を書き出します。秘密鍵は表示せず、stdin経由で
-  `MURASAKI_UPDATE_KEY`というGitHub secretへ登録する手順を案内します。
-  `--force` を指定しない限り、既存の鍵を上書きすることはありません。
-- **`--manifest`** — `dist/` 配下からこのバージョンの成果物(macOS の `.app.zip`、
-  Windows の `-setup-<arch>.exe`（win32-x64 では接尾辞のない旧 `-setup.exe` も認識）と、
-  Linux の `-linux-<arch>.AppImage` を探してハッシュ化し、`generatedAt` タイムスタンプ付きで
-  `dist/latest.json` を書き出します。Linux の `.deb` はシステムのパッケージマネージャーが
-  更新を管理するため、更新ペイロードには含めません。見つからないターゲットは
-  エラーではなくスキップされます。`--rollout <0-100>` は、任意の段階的
-  ロールアウト率(%)を書き込みます。
-- **`--sign`** — `dist/latest.json` を署名して `dist/latest.json.sig` を生成します。
-  鍵は `$MURASAKI_UPDATE_KEY`、なければ `.murasaki/update-key` から読み込まれます。
-  `.murasaki/update-key.pub` が利用可能な場合、`keyId` rotationヒントもマニフェスト
-  へ書き込みます。
+- **`--keygen`** — 更新マニフェストの署名に使う Ed25519 の鍵ペアを生成します。`.murasaki/update-key.pub`（コミットしてください）と `.murasaki/update-key`（モード `0600`、自動的に gitignore されます）を書き出します。秘密鍵は表示せず、`MURASAKI_UPDATE_KEY` という GitHub シークレットに標準入力経由で登録する手順を案内します。`--force` を指定しない限り、既存の鍵を上書きすることはありません。
+- **`--manifest`** — `dist/` 配下からこのバージョンの成果物（macOS の `.app.zip`、Windows の `-setup-<arch>.exe`（win32-x64 では接尾辞なしの旧 `-setup.exe` も認識されます）、Linux の `-linux-<arch>.AppImage`）を探し、見つかったものをハッシュ化して、`generatedAt` タイムスタンプ付きの `dist/latest.json` を書き出します。Linux の `.deb` は、システムのパッケージマネージャーが更新を管理するため、意図的に更新ペイロードへ含めていません。見つからないターゲットはエラーにならずスキップされます。`--rollout <0-100>` は、任意の段階的ロールアウト率（%）を書き込みます。
+- **`--sign`** — `dist/latest.json` に署名して `dist/latest.json.sig` を生成します。鍵は `$MURASAKI_UPDATE_KEY`、なければ `.murasaki/update-key` から読み込まれます。`.murasaki/update-key.pub` が利用可能な場合は、`keyId` のローテーションヒントもマニフェストに書き込みます。
 
 `--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作します。
 

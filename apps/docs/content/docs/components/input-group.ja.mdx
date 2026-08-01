@@ -1,6 +1,6 @@
 ---
 title: Input Group
-description: 入力欄とテキスト、アイコン、操作ボタンを一体化します。
+description: 入力欄とインラインのテキスト、アイコン、操作を一体化します。
 ---
 
 <ComponentPlayground name="input-group" />
@@ -17,9 +17,6 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '
 </InputGroup>
 ```
 
-`InputGroupAddon` の `align` は `"inline-start"` または `"inline-end"` です。一つの
-グループに主要な入力欄は一つだけ置き、必ずラベルを付けます。アイコンだけの
-`InputGroupButton` には `aria-label` が必要です。操作できない短い値には
-`InputGroupText` を使います。
+`InputGroupAddon` の `align` は `"inline-start"` または `"inline-end"` です。一つのグループに主要な入力欄は一つだけ置き、必ずラベルを付けます。アイコンだけの `InputGroupButton` には `aria-label` が必要です。操作できない短い値には `InputGroupText` を使います。
 
 入力欄には標準の `<input>` 属性、ボタンには `Button` の props を渡せます。

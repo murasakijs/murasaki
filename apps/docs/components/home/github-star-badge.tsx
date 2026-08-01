@@ -27,7 +27,7 @@ export function GitHubStarBadge({
   className,
 }: GitHubStarBadgeProps) {
   const label =
-    lang === "ja" ? "GitHubでMurasakiにスター" : "Star Murasaki on GitHub";
+    lang === "ja" ? "GitHub で Murasaki にスター" : "Star Murasaki on GitHub";
 
   return (
     <span

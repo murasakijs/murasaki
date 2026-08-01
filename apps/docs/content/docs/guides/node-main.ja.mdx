@@ -1,15 +1,13 @@
 ---
 title: Node Main
-description: 長寿命 Node lifecycle と 'use main' による型付き renderer-to-Node 関数。
+description: 長寿命な Node のライフサイクルと、'use main' によるレンダラーから Node への型付き関数呼び出し。
 ---
 
-Node Main はデスクトップアプリと同じ期間生存する処理に使います。DB connection、
-filesystem watcher、socket、worker pool、background queue、ネイティブホスト終了前に
-完了すべき cleanup が対象です。
+Node Main は、デスクトップアプリケーションと同じ期間生存する処理のために使います。データベース接続、ファイルシステムウォッチャー、ソケット、ワーカープール、バックグラウンドキュー、そしてネイティブホストが終了する前に完了させておく必要があるクリーンアップ処理などが対象です。
 
 ## ライフサイクルを定義する
 
-`src/main.ts` を作り、`defineMain()` を default export します。
+`src/main.ts` を作成し、`defineMain()` をデフォルトエクスポートします。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -49,7 +47,7 @@ export default defineMain({
 })
 ```
 
-既定で `src/main.ts` を検出します。別 entry や cleanup 上限は設定できます。
+Murasaki はデフォルトで `src/main.ts` を検出します。別のエントリファイルやクリーンアップ期限は `murasaki.config.ts` で設定できます。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -66,31 +64,28 @@ export default defineConfig({
 
 ## コンテキスト
 
-| Field | 意味 |
+| フィールド | 意味 |
 | --- | --- |
-| `appId`, `productName`, `version` | 解決済みのアプリ情報 |
-| `isPackaged` | `murasaki dev` では `false`、bundle では `true` |
+| `appId`, `productName`, `version` | 解決済みのアプリケーション識別情報 |
+| `isPackaged` | `murasaki dev` では `false`、バンドル時は `true` |
 | `platform`, `arch` | 実行環境 (`process.platform` / `process.arch`) |
 | `projectRoot` | 開発時はプロジェクトルート、本番では同梱リソースの作業ディレクトリ |
-| `resourcesPath` | 読み取り専用のアプリリソース |
-| `launch.argv`, `launch.cwd` | 最初の起動で渡された上限付きの未加工引数と作業ディレクトリ |
+| `resourcesPath` | 読み取り専用のアプリケーションリソースのパス |
+| `launch.argv`, `launch.cwd` | 最初の起動で渡された、上限付きの未加工引数と作業ディレクトリ |
 | `paths.data` | 永続アプリデータ |
 | `paths.cache` | 再生成できるキャッシュ |
 | `paths.logs` | ログファイル |
 | `paths.temp` | 一時ファイルの保存先 |
 | `log` | ローテーション対応の構造化ログと診断レポート生成 |
-| `diagnostics` | ローカルのクラッシュレポート — [クラッシュレポート](#crash-report)参照 |
-| `sidecars` | アプリ同梱の実行ファイルを管理する上限付き supervisor |
-| `signal` | `beforeQuit` の後、`shutdown` の前に abort |
+| `diagnostics` | ローカルのクラッシュレポート — [クラッシュレポート](#クラッシュレポート)参照 |
+| `sidecars` | アプリに同梱された実行ファイルを管理する、上限付きのスーパーバイザー |
+| `signal` | `beforeQuit` の後、`shutdown` の前に中断します |
 
-終了理由は `window-close`、`app-quit`、`signal`、`restart`、`dev-reload`、
-`startup-failure` です。順序とキャンセルは
-[プロセスモデル](/ja/docs/core-concepts/process-model)を参照してください。
+終了理由は `window-close`、`app-quit`、`signal`、`restart`、`dev-reload`、`startup-failure` です。順序とキャンセルの扱いは[プロセスモデル](/ja/docs/core-concepts/process-model)を参照してください。
 
 ## 最初の起動引数を読む
 
-最初のアプリプロセスに渡された未加工の引数は `context.launch` から取得できます。
-登録済みの deep link やファイル形式ではない、アプリ独自のフラグにも使えます。
+最初のアプリケーションプロセスに渡された未加工の引数は、`context.launch` から取得できます。これには、登録済みの Deep Link やファイル形式に該当しない、アプリ独自のフラグも含まれます。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -104,24 +99,17 @@ export default defineMain({
 })
 ```
 
-bundle では実行ファイルへ直接フラグを渡します。開発時は、Murasaki 自身の CLI
-オプションと混同しないよう、単独の `--` より後ろにアプリ用引数を書きます。
+バンドルされたアプリでは、実行ファイルへ直接フラグを渡します。開発時は、Murasaki 自身の CLI オプションと混同されないよう、単独の `--` より後ろにアプリケーション用の引数を書きます。
 
 ```bash
 murasaki dev -- --no-sample-data
 ```
 
-`launch.argv` が保持するのは最大64個の完全な引数です。8 KiBを超える引数、JSON配列として
-16 KiBを超えた部分、件数上限を超えた入力は、開発時とbundle後で同じ規則により破棄されます。
-すべての値と `launch.cwd` を、信頼できないローカル入力として
-検証してください。登録済みの URL とファイルは正規化後に `openRequested()` へも届くため、
-同じ対象を両方で処理しないでください。2つ目のプロセスの引数は、最初の `launch`
-スナップショットを置き換えず `secondInstance()` へ渡されます。
+`launch.argv` が保持するのは最大 64 個の完全な引数です。8 KiB を超える引数、JSON 配列としてエンコードした場合に 16 KiB を超える部分、件数の上限を超えた入力は、開発時・バンドル後のいずれでも同じ規則で破棄されます。すべての値と `launch.cwd` は、信頼できないローカル入力として検証してください。登録済みの URL とファイルは、正規化された形式で `openRequested()` にも届くため、同じ対象を両方で処理しないでください。2 つ目のプロセスの引数は、最初の `launch` スナップショットを置き換えるのではなく、`secondInstance()` へ渡されます。
 
 ## ログと診断レポート
 
-アプリ独自のfile loggerを作る代わりに`context.log`を使用します。recordはJSON Linesとして
-`paths.logs/murasaki-main.jsonl`へ書かれ、既定では5 MiBでrotateし、過去5fileを保持します。
+アプリ独自のファイルロガーを作る代わりに `context.log` を使用します。レコードは JSON Lines として `paths.logs/murasaki-main.jsonl` に書き込まれ、デフォルトでは 5 MiB でローテーションし、直近 5 ファイルを保持します。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -136,8 +124,7 @@ export default defineMain({
 })
 ```
 
-ユーザーが明示的に同意した後だけ、共有用の上限付き診断snapshotを生成してください。
-application/runtime metadata、上限付きlog末尾、任意のapp-owned stateを含められます。
+ユーザーが明示的に同意した場合にのみ、共有可能な上限付きの診断スナップショットを生成してください。アプリケーション / ランタイムのメタデータ、上限付きのログ末尾、任意のアプリ管理下の状態を含められます。
 
 ```ts
 const reportPath = await context.log.createDiagnosticReport({
@@ -145,27 +132,19 @@ const reportPath = await context.log.createDiagnosticReport({
 })
 ```
 
-`authorization`、`cookie`、`password`、`secret`、`token`、`apiKey`、
-`privateKey`などcredentialに見えるfield名はredactされます。値、nest、array、同梱する
-log末尾には上限があり、OSが対応する場合reportはowner-only permissionで作成されます。
-ただしredactionは安全網であり、secretを記録してよいという意味ではありません。access
-token、file content、個人情報をmessageや非構造化stringへ書かないでください。通常の
-上限付きshutdownではMurasakiがloggerをflushします。app独自のcrash/restart境界で全record
-を永続化したい場合は先に`await log.flush()`を呼びます。
+`authorization`、`cookie`、`password`、`secret`、`token`、`apiKey`、`privateKey` など、認証情報に見えるフィールド名は自動的にマスクされます。値、ネスト、配列、含まれるログ末尾にはそれぞれ上限があり、OS が対応していればレポートは所有者のみが読めるパーミッションで作成されます。ただし、このマスク処理は安全網であって、機密情報を記録してよいという意味ではありません。アクセストークン、ファイルの内容、個人情報を、メッセージや非構造化文字列に書き込まないでください。通常の上限付きシャットダウンでは Murasaki がロガーをフラッシュします。アプリ独自のクラッシュ / 再起動の境界ですべてのレコードを確実に永続化したい場合は、事前に `await log.flush()` を呼び出してください。
 
-## Crash report
+## クラッシュレポート
 
-上記のopt-in snapshotとは別に、Murasakiは3つのdomainにわたってversioned local
-crash reportを自動captureします。`context.log`と同じ方法でbound・redactされ、
-`<paths.data>/crash-reports`へ書かれます。
+上記のオプトイン方式のスナップショットとは別に、Murasaki は 3 つのドメインにわたって、バージョン管理されたローカルのクラッシュレポートを自動的にキャプチャします。`context.log` と同じ方法で上限が設けられ、マスク処理された上で `<paths.data>/crash-reports` に書き込まれます。
 
-| Domain | Captureされるタイミング |
+| ドメイン | キャプチャされるタイミング |
 | --- | --- |
-| `node` | Node Mainでuncaught exceptionまたはunhandled rejectionが発生したとき。reportはprocessがcrashする前に同期的に書かれます — Murasakiがなくても起きるcrashそのものは変わりません。 |
-| `native` | native launcherがpanicした、または同梱Node processが予期せずexit（crash、force-kill）したとき。exit code/signalのmetadata付き。 |
-| `renderer` | **本番build**のrendererでuncaughtなerrorまたはunhandled promise rejectionが発生したとき。`murasaki dev`では no-op です（同じ2つのeventは`DevErrorOverlay`が既にsurfaceしています）。 |
+| `node` | Node Main で未処理の例外または未処理の Promise の拒否が発生したとき。レポートはプロセスがクラッシュする前に同期的に書き込まれます — Murasaki の有無にかかわらず、クラッシュ自体の挙動は変わりません。 |
+| `native` | ネイティブランチャーがパニックした、または同梱の Node プロセスが予期せず終了（クラッシュ、強制終了）したとき。終了コード / シグナルのメタデータを伴います。 |
+| `renderer` | **本番ビルド**のレンダラーで未処理のエラーまたは未処理の Promise 拒否が発生したとき。`murasaki dev` では何も行いません（同じ 2 つのイベントは、すでに `DevErrorOverlay` が表示しているためです）。 |
 
-既定で有効です。retentionの調整や無効化は`murasaki.config.ts`で行います。
+デフォルトで有効になっています。保持件数の調整や無効化は `murasaki.config.ts` で行います。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -178,7 +157,7 @@ export default defineConfig({
 })
 ```
 
-Captureされたreportは`context.diagnostics`経由で読み戻せます。
+キャプチャされたレポートは `context.diagnostics` 経由で読み戻せます。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -191,11 +170,7 @@ export default defineMain({
 })
 ```
 
-reportは`{ reportVersion, domain, timestamp, appVersion, frameworkVersion, os,
-arch, message, stack?, extra? }`という形です。minidump captureやnative
-symbolicationはありません — `message`/`stack`はfailした processが観測した
-そのままの値です。Murasakiはreportをどこへもuploadしません。crash-reporting
-serviceへ流し込みたい場合はapplication codeの責務です。例えばlaunch時に：
+レポートは `{ reportVersion, domain, timestamp, appVersion, frameworkVersion, os, arch, message, stack?, extra? }` という形式です。minidump のキャプチャやネイティブのシンボリケーションは行いません — `message` / `stack` は、失敗したプロセスがそのまま観測した値です。Murasaki はレポートをどこにもアップロードしません。クラッシュレポーティングサービスへ流し込みたい場合は、アプリケーションコード側の責務です。たとえば起動時に次のように実装します。
 
 ```ts title="src/main.ts"
 import { defineMain } from 'murasaki/main'
@@ -219,11 +194,9 @@ export default defineMain({
 })
 ```
 
-## 同梱sidecarを監督する
+## 同梱サイドカーを監督する [#同梱sidecarを監督する]
 
-helper executableを`bundle.resources`へ置き、`context.sidecars`から起動します。Murasakiは
-実体pathが`resourcesPath`配下にあることを確認し、shellを使わず、argument / environment /
-restart回数を上限化し、shutdown時にlive helperをすべて停止します。
+ヘルパー実行ファイルを `bundle.resources` に配置し、`context.sidecars` から起動します。Murasaki は実体のパスが `resourcesPath` 配下にあることを検証し、シェルを経由せずに起動し、引数 / 環境変数 / 再起動回数の上限を設け、シャットダウン時には稼働中のヘルパーをすべて停止します。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -259,54 +232,31 @@ export default defineMain({
 })
 ```
 
-`resource`はrelative pathだけを受け付け、解決後の実体がpackaged resource root内に残る
-必要があります。symlink escapeとtraversalは拒否し、POSIXではexecutable bitも要求します。
-必要ならtarget別buildで`search-indexer.exe`のようなplatform固有filenameを使います。
-helper binaryには`executable: true`が必須です。これによりapp/installerをsealする前にnested
-Mach-O / PEを署名します。未指定の`bundle.resources`が実行可能fileに見える場合、署名
-packagingはfail-closedで停止します。
-working directoryは`resources`、`data`、`cache`、`temp`だけです。sidecarはNode Mainの
-environmentと明示`env`を継承しますが、Murasakiのruntime authorityと署名secretは除外します。
-`MURASAKI_RUNTIME_TOKEN`、`MURASAKI_DEV_LAUNCH`、`MURASAKI_UPDATE_KEY`、
-`MURASAKI_WINDOWS_CERTIFICATE_PASSWORD`、`APPLE_APP_PASSWORD`は明示`env`にも指定できません。
-信頼できないexecutableを起動せず、renderer由来のargumentは検証してください。Windowsの
-子孫processはlauncher Job Objectにも含まれ、通常
-stopはterminationを送り、上限時間後に強制終了へ進みます。
+`resource` は相対パスのみを受け付け、解決後の実体がパッケージ済みリソースルートの内側に収まっている必要があります。シンボリックリンクによる脱出やパストラバーサルは拒否され、POSIX では実行可能ビットも要求されます。必要に応じて、ターゲット別ビルドで `search-indexer.exe` のようなプラットフォーム固有のファイル名を使用してください。ヘルパーバイナリには `executable: true` の指定が必須です。これにより、アプリ / インストーラーを封印する前にネストした Mach-O / PE へ署名します。`executable` を指定していない `bundle.resources` が実行可能ファイルに見える場合、署名処理は fail-closed（安全側に倒して停止）します。
+作業ディレクトリとして指定できるのは `resources`、`data`、`cache`、`temp` のみです。サイドカーは Node Main の環境変数と明示的な `env` を継承しますが、Murasaki のランタイム権限用トークンと署名用シークレットは除外されます。`MURASAKI_RUNTIME_TOKEN`、`MURASAKI_DEV_LAUNCH`、`MURASAKI_UPDATE_KEY`、`MURASAKI_WINDOWS_CERTIFICATE_PASSWORD`、`APPLE_APP_PASSWORD` は、明示的な `env` にも指定できません。信頼できない実行ファイルを起動せず、レンダラー由来の引数は必ず検証してください。Windows では子孫プロセスもランチャーの Job Object に含まれ、通常の停止処理はまず終了シグナルを送り、上限時間を超えると強制終了に進みます。
 
 ### `secondInstance(context, event)`
 
-packaged macOS / Windows / Linux app は per-user / per-`appId` lock を使います。別 launch が
-primary app に転送されると、Murasaki は window を focus して次の値で
-`secondInstance()` を呼びます。
+パッケージ化された macOS / Windows / Linux アプリは、ユーザーごと・`appId` ごとのロックを使用します。別の起動がプライマリアプリへリダイレクトされると、Murasaki はそのウィンドウをフォーカスし、次の値を渡して `secondInstance()` を呼び出します。
 
 | フィールド | 意味 |
 | --- | --- |
-| `event.argv` | 2 回目の launcher に渡された argument。caller が渡した URL / file argument を含む |
-| `event.cwd` | 2 回目の launch の working directory |
+| `event.argv` | 2 回目のランチャーに渡された引数。呼び出し元が渡した URL / ファイル引数を含む |
+| `event.cwd` | 2 回目の起動の作業ディレクトリ |
 
-使用前にすべての argument を検証してください。`secondInstance()` は low-level の
-process activation hook です。登録済み URL scheme / file type と一致するかに関係なく、
-raw launch argument を受け取ります。`murasaki dev` ではこの hook は配信されません。
+使用前に、すべての引数を検証してください。`secondInstance()` は低レベルなプロセスアクティベーションフックであり、登録済みの URL スキームやファイルタイプに一致するかどうかに関わらず、未加工の起動引数をそのまま受け取ります。`murasaki dev` ではこのフックは配信されません。
 
 ### `openRequested(context, event)`
 
-設定済み URL scheme / file association には `openRequested()` を使います。cold-start
-argv、second-instance argv、native URL / file event を型付き URL / file target に
-正規化し、`ready()` の完了後にだけ実行します。
+設定済みの URL スキームやファイルアソシエーションには `openRequested()` を使用します。コールドスタート時の argv、2 回目のインスタンス起動時の argv、ネイティブの URL / ファイルイベントを、型付きの URL / ファイルターゲットへ正規化し、`ready()` の完了後にだけ実行されます。
 
-認識済み target を伴う2回目の launch では、`secondInstance()` と
-`openRequested()` の両方が実行されます。同じ item を両方で開かないでください。
-一般的な activation behavior は `secondInstance()`、URL / file の意味的な処理は
-`openRequested()` に置きます。
+認識済みのターゲットを伴う 2 回目の起動では、`secondInstance()` と `openRequested()` の両方が実行されます。同じ項目を両方で開かないようにしてください。汎用的なアクティベーション処理は `secondInstance()` に、URL / ファイルの意味的な処理は `openRequested()` に置きます。
 
-event shape、設定、packaging behavior、security requirement は
-[Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
+イベントの形状、設定、パッケージング時の挙動、セキュリティ要件については、[Deep Link と File Association](/ja/docs/guides/deep-links)を参照してください。
 
-## Node Mainから宣言windowを操作する
+## Node Main から宣言済みウィンドウを操作する [#node-mainから宣言windowを操作する]
 
-`windows`は`murasaki.config.*`で宣言したlabelだけを操作します。呼び出しはlaunchごとの
-runtime tokenで認証されたnative-host-onlyのloopback channelを通り、rendererへ追加の
-native capabilityを付与しません。
+`windows` は `murasaki.config.*` で宣言したラベルだけを操作します。呼び出しは、起動ごとのランタイムトークンで認証された、ネイティブホスト専用のループバックチャネルを経由し、レンダラーに追加のネイティブケイパビリティを付与することはありません。
 
 ```ts title="src/main.ts"
 import { defineMain, windows } from 'murasaki/main'
@@ -331,36 +281,19 @@ export default defineMain({
 })
 ```
 
-`list()`、`get(label)`、`create(label)`、`show(label)`、`hide(label)`、`focus(label)`、
-`destroy(label)`を提供します。`create()`は設定済みで現在dormantなsecondary labelだけを
-受け付け、URLやruntime capability listは受け取りません。`destroy()`でlive secondaryの
-native resourceを解放すると、同じ宣言を再作成できます。primaryはこのAPIでcreate / destroy
-できません。
+このマネージャーは `list()`、`get(label)`、`create(label)`、`show(label)`、`hide(label)`、`focus(label)`、`destroy(label)` を提供します。`create()` が受け付けるのは、設定済みで現在休止中のセカンダリラベルだけであり、URL やランタイムケイパビリティのリストは受け取りません。`destroy()` で稼働中のセカンダリのネイティブリソースを解放すれば、同じ宣言を再作成できます。プライマリはこの API で作成・破棄できません。
 
-`subscribe()`には`created`、`shown`、`hidden`、`focused`、`blurred`、`closed` eventが
-届きます。state snapshotとeventには、そのlabelのnative instanceを表す単調増加の
-`generation`が含まれます。destroy / recreateをまたぐ長時間処理の対応付けではlabelと
-generationの両方を使用してください。snapshotにはprimary、visible、focused、minimized、
-maximizedも含まれます。
+`subscribe()` には `created`、`shown`、`hidden`、`focused`、`blurred`、`closed` の各イベントが届きます。状態のスナップショットとイベントには、そのラベルのネイティブインスタンスを表す、単調増加する `generation` が含まれます。destroy / recreate をまたぐ長時間処理を対応付ける際は、ラベルと generation の両方を使用してください。スナップショットには、プライマリ、表示、フォーカス、最小化、最大化の各状態も含まれます。
 
 <Callout type="warn">
-  `ready()`内で購読はできますが、この初期releaseではwindow commandをawaitしないで
-  ください。native windowは`ready()`完了後に接続されるため、startup deadlockを避ける
-  目的でhook内のcommandはrejectされます。後続のlifecycle callback、background処理、
-  または`'use main'`関数から実行してください。
+  `ready()` 内で購読すること自体は可能ですが、この初期リリースでは、その中でウィンドウコマンドを await しないでください。ネイティブウィンドウは `ready()` の完了後に接続されるため、起動時のデッドロックを避ける目的で、このフック内のコマンドは reject されます。後続のライフサイクルコールバック、バックグラウンド処理、または `'use main'` 関数から実行してください。
 </Callout>
 
-windowは引き続き宣言式で、未宣言labelを作成したり、route・network設定・capability policyを
-runtime overrideしたりできません。起動時に作らないsecondaryには`createOnLaunch: false`を
-設定します。再表示するlive windowには`hide()`、native resourceを解放する場合は
-`destroy()`を使用してください。primaryのcloseは通常のapp終了lifecycleです。lifecycle
-eventはcreate、visibility、focus、closeを対象とし、move、resize、minimize、maximize通知は
-含みません。
+ウィンドウは引き続き宣言的な仕組みであり、未宣言のラベルを作成したり、ルート・ネットワーク設定・ケイパビリティポリシーを実行時に上書きしたりすることはできません。起動時に作成しないセカンダリには `createOnLaunch: false` を設定してください。再表示する稼働中のウィンドウには `hide()` を、ネイティブリソースを解放する場合は `destroy()` を使用してください。プライマリのクローズは、通常のアプリケーション終了ライフサイクルの一部です。ライフサイクルイベントが対象とするのは作成・表示状態・フォーカス・クローズであり、移動・リサイズ・最小化・最大化の通知は含まれません。
 
-## `'use main'` で renderer から Node を呼ぶ
+## `'use main'` でレンダラーから Node を呼ぶ
 
-top-level の `'use main'` directive は export 関数を `src/main.ts` と同じ Node module
-graph 上の型付き呼び出しとして公開します。
+トップレベルの `'use main'` ディレクティブは、そのモジュールがエクスポートする関数を、`src/main.ts` と同じ Node モジュールグラフ上の型付き呼び出しとして公開します。
 
 ```ts title="src/backend/checksum.ts"
 'use main'
@@ -375,8 +308,7 @@ export async function sha256(text: string): Promise<string> {
 }
 ```
 
-client component から通常どおり import します。renderer bundle には fetch stub だけが
-入り、Node 実装は WebView に配信されません。
+クライアントコンポーネントから通常どおり import します。レンダラーのバンドルには fetch のスタブだけが含まれ、Node 側の実装は WebView に配信されません。
 
 ```tsx title="src/app/page.tsx"
 'use client'
@@ -395,10 +327,9 @@ export default function Page() {
 }
 ```
 
-## Main event を renderer へストリームする
+## Main イベントをレンダラーへストリームする
 
-接続状態、進捗、device event、watcher出力など、長寿命Node処理から発生する値には
-型付きevent channelを使います。
+接続状態、進捗、デバイスイベント、ウォッチャーの出力など、長寿命な Node 処理から発生する値には、型付きのイベントチャネルを使用します。
 
 ```ts title="src/main.ts"
 import { defineMain, emitMainEvent } from 'murasaki/main'
@@ -413,7 +344,7 @@ export default defineMain({
 })
 ```
 
-client componentで購読します。
+クライアントコンポーネントで購読します。
 
 ```tsx
 'use client'
@@ -431,63 +362,38 @@ export function RelayStatus() {
 }
 ```
 
-eventは`'use main'`と同じrich-value wire codecを使い、認証済みapp-local SSEで届きます。
-一時切断後はEventSourceが再接続しますが、eventはlive-onlyでreplay bufferやdurable queueは
-ありません。取りこぼしを復元する必要がある場合、永続状態をNodeに保存し、`'use main'`
-のsnapshot関数も公開してください。
+イベントは `'use main'` と同じ rich-value wire codec を使用し、認証済みのアプリローカル SSE 経由で届きます。一時的な切断のあとは EventSource が再接続しますが、イベントはライブ配信のみであり、リプレイバッファや永続キューはありません。取りこぼしを復旧する必要がある場合は、永続的な状態を Node 側に保存したうえで、`'use main'` のスナップショット関数も公開してください。
 
 <Callout type="warn">
-  `'use main'` は RPC 境界であり、認可境界ではありません。すべての
-  引数を信頼できない renderer input として扱い、型検証、filesystem path の正規化、
-  app data へのアクセス認可を Node 関数内で実施してください。
+  `'use main'` は RPC 境界であり、認可境界ではありません。すべての引数を、信頼できないレンダラー入力として扱い、型の検証、ファイルシステムパスの正規化、アプリデータへのアクセス認可を Node 関数内で実施してください。
 </Callout>
 
-## Wire value と上限
+## Wire 値と上限
 
-version 付き wire codec は primitive、`undefined`、`bigint`、`Date`、`Map`、`Set`、
-循環する plain object / array、`ArrayBuffer`、typed array、`Blob`、`File`、
-`FormData`、構造化 `Error` を扱えます。
+バージョン管理された wire codec は、プリミティブ値、`undefined`、`bigint`、`Date`、`Map`、`Set`、循環参照を含む通常のオブジェクトや配列、`ArrayBuffer`、型付き配列、`Blob`、`File`、`FormData`、構造化された `Error` を扱えます。
 
-- request / response の最大サイズ: **32 MiB**
-- function、symbol、custom prototype を持つ instance は拒否
-- call自体はrequest/response。live pushにはMain eventを使います。`'use main'` callから
-  `AsyncIterable`を直接返すことは未実装
-- named `function` / `async function` / `const` / `let` / `var` を export 可能。
-  実行時に選択された export は callable である必要があります
+- リクエスト / レスポンスの最大サイズ: **32 MiB**
+- 関数、シンボル、カスタムプロトタイプを持つインスタンスは拒否されます
+- 呼び出し自体はリクエスト / レスポンス形式です。ライブプッシュには Main イベントを使用してください。`'use main'` の呼び出しから `AsyncIterable` を直接返すことは未実装です
+- 名前付きの `function` / `async function` / `const` / `let` / `var` をエクスポートできます。実行時に選択されたエクスポートは呼び出し可能である必要があります
 
-大きなファイルの bytes を RPC に通さないでください。検証済みの app-owned id / path
-だけを渡し、Node 内で完結して stream します。
+大きなファイルのバイト列を RPC 経由で送らないでください。検証済みの、アプリが管理する id やパスだけを渡し、Node 内で完結してストリーム処理します。
 
-## `'use main'` / `'use server'` / API route
+## `'use main'` / `'use server'` / API Routes
 
 | 選択 | 用途 |
 | --- | --- |
-| `'use main'` | 長寿命 app backend への型付き imperative call |
-| `'use server'` | `ActionState` を使う React action / form 形式の mutation |
-| `src/api/**/route.ts` | Request/Response、streaming body、HTTP method routing |
+| `'use main'` | 長寿命なアプリケーションバックエンドへの型付き命令的呼び出し |
+| `'use server'` | `ActionState` を使う React action / form 形式のミューテーション |
+| `src/api/**/route.ts` | Request / Response、ストリーミングボディ、HTTP メソッドによるルーティング |
 
-いずれもapp-local Node runtimeで実行され、public network serverではありません。Murasakiは
-exact native windowを認証し、そのwindowの`main:*`、`action:*`、または
-`api:METHOD:/path` backend grantを確認してからdispatchします。
+これら 3 つはいずれもアプリローカルの Node ランタイムで実行され、パブリックなネットワークサーバーではありません。Murasaki は接続元のネイティブウィンドウを厳密に認証し、そのウィンドウが `main:*`、`action:*`、`api:METHOD:/path` のいずれかのバックエンド許可を持っていることを確認してからディスパッチします。
 
 ## 現在の制限
 
-Node Mainは`murasaki.config.*`に宣言したsecondary window templateだけをcreate / destroy
-できます。runtimeでad-hoc URL、capability policy、未宣言native windowを構築することは
-できません。宣言windowはNode Mainの`windows` manager、またはtrusted rendererから
-`murasaki/native` で操作します。tray menu はその renderer API から利用できますが、
-Node Main 自体に直接の tray menu / global shortcut API はまだありません。
-packaged macOS / Windows / Linux の single-instance delivery は
-`secondInstance()`、設定済み URL scheme / file association は
-`openRequested()` で利用できます。macOS bundle と Windows installer は宣言済みの
-association を登録し、Linux `.deb` は生成された desktop metadata をインストール
-します。手動展開した Windows portable archive、AppDir / AppImage、`murasaki dev`
-は OS への登録処理を行いません。
-renderer-safe な dialog、clipboard、notification、shell、
-基本 window command は `capabilities` allowlist の下で別途 `murasaki/native` から利用
-できます。computed import、dynamic native addon、runtime-discovered asset を使う Node
-package は明示的な `bundle.external` / `bundle.resources` が必要な場合があります。
-`murasaki dev` だけでなく clean machine で installed artifact を必ずテストしてください。
+Node Main が作成・破棄できるのは、`murasaki.config.*` に宣言したセカンダリウィンドウのテンプレートだけです。実行時にアドホックな URL、ケイパビリティポリシー、未宣言のネイティブウィンドウを構築することはできません。宣言済みのウィンドウは、Node Main の `windows` マネージャー、または信頼されたレンダラーから `murasaki/native` を通じて操作します。トレイメニューはそのレンダラー API から利用できますが、Node Main 自体には、トレイメニューやグローバルショートカットを直接扱う API はまだありません。
+パッケージ化された macOS / Windows / Linux でのシングルインスタンス配信は `secondInstance()`、設定済みの URL スキームやファイルアソシエーションは `openRequested()` で利用できます。macOS のバンドルと Windows のインストーラーは宣言済みのアソシエーションを登録し、Linux の `.deb` は生成されたデスクトップメタデータをインストールします。手動で展開した Windows のポータブルアーカイブ、AppDir / AppImage、および `murasaki dev` は、この OS への登録処理を行いません。
+レンダラーセーフなダイアログ、クリップボード、通知、シェル、基本的なウィンドウコマンドは、`capabilities` の許可リストのもとで、別途 `murasaki/native` から利用できます。動的に算出されたインポート、動的なネイティブアドオン、実行時に検出されるアセットを使用する Node パッケージでは、明示的な `bundle.external` / `bundle.resources` の指定が必要になる場合があります。`murasaki dev` だけでなく、クリーンな環境にインストールした成果物でも必ずテストしてください。
 
 ## 次へ
 

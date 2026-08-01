@@ -3,33 +3,21 @@ title: ネイティブ API
 description: 現時点で、Murasaki のネイティブサーフェスからアプリに公開されているもの。
 ---
 
-Murasaki のネイティブウィンドウ、メニュー、OS 統合は
-[`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) —
-自社製の Rust バインディング(tao/wry/muda)— によって支えられているため、Rust を書く
-ことは一切ありません。このページでは、**あなたの React アプリから**実際に到達可能なも
-のを説明します。
+Murasaki のネイティブウィンドウ、メニュー、OS 統合は [`@murasakijs/native`](https://www.npmjs.com/package/@murasakijs/native) — 自社製の Rust バインディング (tao/wry/muda) によって支えられているため、Rust を書くことは一切ありません。このページでは、**あなたの React アプリから**実際に到達可能なものを説明します。
 
 ## ウィンドウとネイティブメニューバー
 
-windowのshape（サイズ、title、route、表示、permission、macOS vibrancy）は
-`murasaki.config.ts` で宣言します。`window` はprimaryの`main`、`windows` はlabel付き
-secondaryです。全体像は[ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
+ウィンドウの形状（サイズ、タイトル、ルート、表示、権限、macOS の vibrancy）は `murasaki.config.ts` で宣言します。`window` はプライマリの `main` ウィンドウ、`windows` はラベル付きのセカンダリウィンドウです。全体像は[ウィンドウと権限](/ja/docs/guides/windows)を参照してください。
 
-macOS では、標準的な App/Edit/Window メニューバー(About、Services、Hide、Quit、
-Edit、Window)が自動的に生成され、`config.locales` からローカライズされます — コード
-は不要です。
+macOS では、標準的な App/Edit/Window メニューバー (About、Services、Hide、Quit、Edit、Window) が自動的に生成され、`config.locales` からローカライズされます — コードは不要です。
 
 ## コンテキストメニュー
 
-右クリックのコンテキストメニューは、マークアップではなくフックである
-`useContextMenu` で宣言し、Rust 側に投げられて macOS / Windows では本物の
-`NSMenu` / `HMENU` がポップアップします。詳しくは専用の
-[コンテキストメニュー](/docs/guides/context-menu)ガイドを参照してください。
+右クリックのコンテキストメニューは、マークアップではなくフックである `useContextMenu` で宣言し、Rust 側に投げられて macOS / Windows では本物の `NSMenu` / `HMENU` がポップアップします。詳しくは専用の[コンテキストメニュー](/docs/guides/context-menu)ガイドを参照してください。
 
-## ダイアログ、クリップボード、通知、shell、ウィンドウ操作
+## ダイアログ、クリップボード、通知、シェル、ウィンドウ操作
 
-レンダラーから安全に使えるネイティブ機能は `murasaki/native` から import します。
-すべて Promise ベースで、リクエストID付きIPCをRustホストが直接処理します。
+レンダラーから安全に使えるネイティブ機能は `murasaki/native` からインポートします。すべて Promise ベースで、リクエスト ID 付きの IPC メッセージを Rust ホストが直接処理します。
 
 ```tsx
 'use client'
@@ -50,65 +38,36 @@ await shell.showItemInFolder(files[0])
 
 | API | 操作 |
 | --- | --- |
-| `app` | `quit`（gracefulなapplication shutdown）、`isElevated`（read-onlyな自己query） |
-| `autostart` | packaged app向けのユーザー単位ログイン起動 `status`, `enable`, `disable` |
-| `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage`(ネイティブOSメッセージボックス) |
+| `app` | `quit`（アプリケーションの正常終了）、`isElevated`（読み取り専用の自己照会） |
+| `autostart` | パッケージ化されたアプリ向けの、ユーザー単位のログイン起動 `status`、`enable`、`disable` |
+| `dialog` | `openFile`, `openDirectory`, `saveFile`, `showMessage`（ネイティブな OS のメッセージボックス） |
 | `clipboard` | `readText`, `writeText`, `readImage`, `writeImage`, `writeHtml` |
-| `notification` | `show`(ローカル生成idを返す) |
-| `shell` | `openExternal`（安全なURLスキームのみ）、`showItemInFolder`, `trashItem`, `openPath`, `runElevated`（Windows限定のUAC起動） |
-| `secureStorage` | string値向けのOS-backed `get`, `set`, `delete` |
-| `systemPermission` | macOSのcamera / microphone / screen recording / accessibility / input monitoring / location / full disk access / photos / contacts / calendar / reminders / speech recognition / Bluetooth / Apple Events (automation) / local network向け`status`, `request` |
+| `notification` | `show`（ローカルで生成した ID を返す） |
+| `shell` | `openExternal`（安全な URL スキームのみ）、`showItemInFolder`, `trashItem`, `openPath`, `runElevated`（Windows 限定の UAC 起動） |
+| `secureStorage` | 文字列値向けの、OS に保存される `get`, `set`, `delete` |
+| `systemPermission` | macOS のカメラ / マイク / 画面収録 / アクセシビリティ / 入力監視 / 位置情報 / フルディスクアクセス / 写真 / 連絡先 / カレンダー / リマインダー / 音声認識 / Bluetooth / Apple Events（自動化） / ローカルネットワーク向けの `status`, `request` |
 | `appWindow` | `getLabel`, `setTitle`, `setSize`, `minimize`, `toggleMaximize`, `show`, `hide`, `focus`, `close`, `setAlwaysOnTop`、状態取得 |
-| `windows` | 宣言label向け`open`, `list`, `show`, `hide`, `focus`, `close` |
-| `globalShortcut` | process-wideな`register`, `unregister`, `unregisterAll`, `onTriggered` |
+| `windows` | 宣言されたラベル向けの `open`, `list`, `show`, `hide`, `focus`, `close` |
+| `globalShortcut` | プロセス全体の `register`, `unregister`, `unregisterAll`, `onTriggered` |
 | `tray` | `create`, `remove`, `setTooltip`, `setIcon`, `setMenu`, `onClick`, `onMenuItem` |
 
-`app.quit()` とrootの `quit()` helperはいずれも `app:quit` が必要です。権限のない
-secondary rendererからapplication全体を終了することはできません。
+`app.quit()` とルートの `quit()` ヘルパーは、いずれも `app:quit` が必要です。権限のないセカンダリレンダラーから、アプリケーション全体を終了することはできません。
 
-`dialog.showMessage({ title?, message, level?, buttons? })` はネイティブな
-main-thread message boxを表示します(`level`は既定`'info'`、`buttons`は既定`'ok'`)。
-押されたbuttonに解決されます(`'ok' | 'cancel' | 'yes' | 'no'`)。`title`は256
-UTF-8 byte、`message`は4096 UTF-8 byteまでで、どちらも制御文字は拒否されます
-(改行は`message`のみ許可)。`dialog:message`が必要です。
+`dialog.showMessage({ title?, message, level?, buttons? })` はネイティブなメインスレッドのメッセージボックスを表示します（`level` のデフォルト値は `'info'`、`buttons` のデフォルト値は `'ok'` です）。押されたボタンに解決されます（`'ok' | 'cancel' | 'yes' | 'no'`）。`title` は 256 UTF-8 バイト、`message` は 4096 UTF-8 バイトまでで、どちらも制御文字は拒否されます（改行は `message` のみ許可されます）。`dialog:message` が必要です。
 
-`clipboard.readImage()` は `{ width, height, pngBase64 }` または、clipboardに
-imageがない場合は`null`を返します。`clipboard.writeImage({ pngBase64 })`
-はデコードしてclipboard imageを置き換えます(デコード後のpixelは64 MiB、各辺は
-16,384pxまで)。`clipboard.writeHtml({ html, altText? })` はHTMLと任意の
-plain-text fallbackを書き込みます(`html`は1 MiB、`altText`は64 KiBまで)。
-それぞれ `clipboard:readImage`, `clipboard:writeImage`, `clipboard:writeHtml`
-が必要です。
+`clipboard.readImage()` は `{ width, height, pngBase64 }` を返すか、クリップボードに画像がない場合は `null` を返します。`clipboard.writeImage({ pngBase64 })` はデコードしてクリップボードの画像を置き換えます（デコード後のピクセルデータは 64 MiB、各辺は 16,384 px まで）。`clipboard.writeHtml({ html, altText? })` は HTML と任意のプレーンテキストのフォールバックを書き込みます（`html` は 1 MiB、`altText` は 64 KiB まで）。それぞれ `clipboard:readImage`、`clipboard:writeImage`、`clipboard:writeHtml` が必要です。
 
-`shell.trashItem(path)` は既存のfile / directoryをOSのtrash・recycle binへ
-移動します。`shell.openPath(path)` は既存のlocal file / directoryをOSの既定
-handlerで開きます(ダブルクリックと同様)。どちらもabsoluteでtraversalしない、
-実在するpathが必要です。`shell.showItemInFolder`と同様、`shell:trashItem` /
-`shell:openPath` capabilityは許可するpath subtreeへscopeできます。
-`shell.openPath` はURLとしてparseできるものやUNCのnetwork / device pathも
-拒否します。URLを開く場合は`shell.openExternal`を使ってください。scoped grantでは
-symlinkを解決し、要求pathと実targetの両方がgrant内に残る場合だけ開きます。
-`showItemInFolder`と`trashItem`も親directoryをすべて実体解決して再度scopeを検査します。
-末尾自体がsymlinkの場合は解決せず、link自身を選択・削除対象にします。
+`shell.trashItem(path)` は、既存のファイルまたはディレクトリを OS のごみ箱へ移動します。`shell.openPath(path)` は、既存のローカルファイルまたはディレクトリを OS のデフォルトハンドラーで開きます（ダブルクリックした場合と同様です）。どちらも絶対パスで、パストラバーサルを含まない、実在するパスが必要です。`shell.showItemInFolder` と同様、`shell:trashItem` / `shell:openPath` のケイパビリティは許可するパスのサブツリーにスコープできます。`shell.openPath` は、URL としてパースできるものや UNC のネットワーク／デバイスパスも拒否します。URL を開く場合は `shell.openExternal` を使ってください。スコープ付きの許可では、シンボリックリンクを解決したうえで、要求されたパスと実際のターゲットの両方が許可範囲内に残る場合のみ開きます。`showItemInFolder` と `trashItem` も、すべての親ディレクトリを実体解決して同じスコープ検査を再度行います。末尾自体がシンボリックリンクの場合は解決せず、リンク自体を選択・削除対象とします。
 
 <Callout type="warning">
-  **0.50 migration:** 以前の`quit()`はpermissionなしのraw IPCを送っていました。
-  既存のnon-updater appで使用しているwindowには`app:quit`を追加してください。
-  built-in updaterを有効にした場合だけ、検証済みinstall / restart handshakeの後方互換性を
-  保つためprimary windowへ自動付与されます。
+  **0.50 マイグレーション:** 以前の `quit()` は権限チェックなしで生の IPC を送信していました。既存の、アップデーター機能を使わないアプリで `quit()` を呼んでいるウィンドウには `app:quit` を追加してください。組み込みのアップデーターを有効にした場合のみ、検証済みインストール／再起動ハンドシェイクの後方互換性を保つため、プライマリウィンドウへ自動的に付与されます。
 </Callout>
 
 <Callout type="info">
-  これらは `src/main.ts` から直接呼ぶAPIではなく、信頼済みレンダラー向けです。
-  ブリッジはアプリと完全一致するoriginだけを受け付け、固定allowlistのコマンドだけを
-  公開します。各rendererが使うcommandだけを `window.capabilities` /
-  `windows[label].capabilities` で許可してください。structured grantではshell URL/path、
-  elevation対象の正確なexecutable/argv組、target window label、OS permission名、
-  secure-storage key、WebView cookie URLをallow/denyでscopeできます。他のargumentは
-  command単位なので、権限を持つwindowに信頼できないremote contentを読み込まないでください。
+  これらは `src/main.ts` から直接呼び出す API ではなく、信頼済みのレンダラー向けです。ブリッジはアプリと完全に一致するオリジンだけを受け付け、固定された許可リストのコマンドだけを公開します。各レンダラーが実際に使うコマンドだけを `window.capabilities` / `windows[label].capabilities` で許可してください。構造化された許可では、シェルの URL / パス、権限昇格対象の正確な実行ファイルと引数の組、対象ウィンドウのラベル、OS 権限名、セキュアストレージのキー、WebView の cookie URL を allow / deny でスコープできます。それ以外の引数はコマンド単位のままなので、権限を持つウィンドウに信頼できないリモートコンテンツを読み込ませないでください。
 </Callout>
 
-## 権限昇格(Windows)
+## 権限昇格 (Windows)
 
 ```ts
 import { app, shell } from 'murasaki/native'
@@ -143,45 +102,19 @@ export default defineConfig({
 })
 ```
 
-`app.isElevated()` は、native hostプロセスがすでにelevatedで実行されているかを
-問い合わせる、read-onlyでcapability-gatedな(`app:isElevated`)queryです。
-Windowsではprocess tokenのelevation状態を読み取り、macOS/Linuxでは「elevated」
-はeffective rootとして実行されていることを意味します — GUIアプリでは稀かつ
-非推奨ですが、最も近い代替として対応しています。すべてのplatformで動作し
-capabilityが必要で、失敗することはありません。基盤となるqueryがエラーになった
-場合も単に`false`に解決されます。elevationを判定できなかったqueryは、
-すでに非特権のrendererにとって新しい情報を何も伝えていないためです。
+`app.isElevated()` は、ネイティブホストプロセスがすでに権限昇格された状態で実行されているかどうかを問い合わせる、読み取り専用でケイパビリティにより制御された（`app:isElevated`）クエリです。Windows ではプロセストークンの権限昇格状態を読み取り、macOS / Linux では「権限昇格」は実効的に root として実行されていることを意味します — GUI アプリでは稀かつ非推奨ですが、もっとも近い代替として対応しています。すべてのプラットフォームで動作し、ケイパビリティが必要で、失敗することはありません。基盤となるクエリがエラーになった場合も、単に `false` に解決されます。権限昇格の有無を判定できなかったクエリは、すでに非特権のレンダラーにとって新しい情報を何も伝えていないためです。
 
-`shell.runElevated({ executable, args? })` はWindowsの「管理者として実行」
-(UAC)の同意プロンプトを通じて`executable`を新しいプロセスとして起動します。
-Windows限定です — macOSの`SMJobBless`/`AuthorizationExecuteWithPrivileges`は
-非推奨で、Linuxには単一の同等機構が存在しないため、他のplatformはすべて
-`unsupported` errorを返します。`executable`はabsoluteでtraversalしない、
-実在するfileへのpathである必要があります。structured `shell:runElevated` grantは、
-executableと順序を含む完全なargument listを1つの正確な`executions` entryとして照合します。
-任意argument付きのpath subtreeを許可するものではありません。symlinkを解決した実
-executable / argument組もgrantされている必要があり、scope内linkによるelevation先の
-すり替えを防ぎます。
-`args`(最大64件、各要素は最大4096 UTF-8 byte、制御文字は不可)はshellを
-経由せず直接elevatedプロセスへ渡され、`CommandLineToArgvW`と同じルールで
-quoteされます。呼び出しはfire-and-forgetです — elevatedプロセスが起動した
-時点でresolveし、終了を待ちません。
+`shell.runElevated({ executable, args? })` は、Windows の「管理者として実行」（UAC）の同意プロンプトを通じて、`executable` を新しいプロセスとして起動します。Windows 限定です — macOS の `SMJobBless` / `AuthorizationExecuteWithPrivileges` は非推奨で、Linux には単一の同等機構が存在しないため、それ以外のすべてのプラットフォームは `unsupported` エラーを返します。`executable` は絶対パスかつパストラバーサルを含まない、実在するファイルへのパスである必要があります。構造化された `shell:runElevated` の許可は、実行ファイルと順序を含む完全な引数リストを、1 つの正確な `executions` エントリとして照合します。任意の引数を伴うパスのサブツリーを許可するものではありません。シンボリックリンクを解決した実際の実行ファイルと引数の組も許可されている必要があり、スコープ内のリンクによって権限昇格先がすり替えられることを防ぎます。`args`（最大 64 件、各要素は最大 4096 UTF-8 バイト、制御文字は不可）はシェルを経由せず直接、権限昇格されたプロセスへ渡され、`CommandLineToArgvW` と同じルールでクオートされます。この呼び出しは fire-and-forget です — 権限昇格されたプロセスが起動した時点で解決し、終了を待ちません。
 
-ユーザーが同意プロンプトを拒否した場合、`shell.runElevated`は正確に
-`"elevation was cancelled by the user"`というmessageのerrorでrejectされます。
-これにより、拒否されたプロンプトを他の失敗とは区別して処理できます。
+ユーザーが同意プロンプトを拒否した場合、`shell.runElevated` は、メッセージが正確に `"elevation was cancelled by the user"` であるエラーで拒否されます。これにより、プロンプトが拒否された場合を他の失敗と区別して処理できます。
 
 <Callout type="warn">
-  `shell:runElevated`は強力なcapabilityです — 付与すると、rendererが許可された
-  実行ファイルをelevatedで実行するUACプロンプトをtriggerできるようになります。
-  structuredな正確なexecutable/argv grantを推奨します。互換性のためstring形式は
-  unrestrictedです。elevated helperが本当に必要なwindowにのみ付与してください。
+  `shell:runElevated` は強力なケイパビリティです — 付与すると、レンダラーが許可された実行ファイルを権限昇格して実行する UAC プロンプトをトリガーできるようになります。構造化された、正確な実行ファイル／引数の許可を推奨します。互換性のため、文字列形式は無制限です。権限昇格されたヘルパーが本当に必要なウィンドウにのみ付与してください。
 </Callout>
 
 ## ログイン時の自動起動
 
-packaged appではplatform固有のhelperを用意せず、ユーザーがログイン時の自動起動を
-選べるようにできます。
+パッケージ化されたアプリでは、プラットフォーム固有のヘルパーを用意しなくても、ユーザーがログイン時の自動起動を選べるようにできます。
 
 ```ts
 import { autostart } from 'murasaki/native'
@@ -194,12 +127,7 @@ if ((await autostart.status()) === 'disabled') {
 await autostart.disable()
 ```
 
-現在の登録状態を確認するには`autostart:read`、有効化・無効化には
-`autostart:write`をgrantします。`murasaki dev`では3つの操作をすべて拒否するため、
-一時的な開発用Node executableが永続的なログイン項目として登録されることはありません。
-登録先はユーザー単位で、macOSはLaunchAgent、Windowsはcurrent-user Run key、Linuxは
-XDG Autostart desktop entryです。`status()`は保存された登録が現在のpackaged executableと
-完全に一致する場合だけ`'enabled'`を返し、それ以外は`'disabled'`を返します。
+現在の登録状態を確認するには `autostart:read` を、有効化・無効化には `autostart:write` を許可します。`murasaki dev` ではこの 3 つの操作をすべて拒否するため、一時的な開発用の Node 実行ファイルが永続的なログイン項目として登録されることはありません。登録先はユーザー単位で、macOS では LaunchAgent、Windows では現在のユーザーの Run キー、Linux では XDG Autostart のデスクトップエントリです。`status()` は、保存された登録が現在のパッケージ化された実行ファイルと完全に一致する場合だけ `'enabled'` を返し、それ以外は `'disabled'` を返します。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -209,21 +137,11 @@ export default defineConfig({
 })
 ```
 
-`enable()`は明示的なユーザー向け設定からのみ呼び出してください。ユーザー、端末管理、
-OS policyは登録を削除・無効化できます。
-現在のmacOS実装はLaunchAgentを使うため、App Sandbox buildとは互換性がありません。
-sandboxed distributionには別途署名したlogin-item helperが必要で、このAPIでは
-まだ対応していません。
+`enable()` は、明示的なユーザー向け設定画面からのみ呼び出してください。ユーザー、端末管理、OS ポリシーはいずれも登録を削除・無効化できます。現在の macOS 実装は LaunchAgent を使うため、App Sandbox ビルドとは互換性がありません。サンドボックス化された配布には別途署名したログイン項目ヘルパーが必要で、この API ではまだ対応していません。
 
 ## セキュアストレージ
 
-信頼済みrendererがrefresh token、license値などの短いstringを永続化する必要があり、plain
-fileへ保存したくない場合は`secureStorage`を使います。macOSではKeychain、Windowsでは
-Credential Manager、Linuxではfreedesktop.orgのSecret Service D-Bus API
-(gnome-keyring、KWallet、KeePassXCなど)を使用します。Linuxでは稼働中のSecret Service
-providerが必要で、到達できない場合はすべての呼び出しがstructured errorで失敗します。その他の
-未対応platformは明示的な`unsupported` errorを返します。どのplatformでもMurasakiが
-plaintext fileへfallbackすることはありません。
+信頼済みのレンダラーがリフレッシュトークンやライセンス値などの短い文字列を永続化する必要があり、プレーンテキストファイルへ保存したくない場合は `secureStorage` を使います。macOS では Keychain、Windows では Credential Manager、Linux では freedesktop.org の Secret Service D-Bus API（gnome-keyring、KWallet、KeePassXC など）を使用します。Linux では稼働中の Secret Service プロバイダーが必要で、到達できない場合はすべての呼び出しが構造化されたエラーで失敗します。その他の未対応プラットフォームは明示的な `unsupported` エラーを返します。どのプラットフォームでも、Murasaki がプレーンテキストファイルへフォールバックすることはありません。
 
 ```ts
 import { secureStorage } from 'murasaki/native'
@@ -233,7 +151,7 @@ const saved = await secureStorage.get('refresh-token') // string | null
 await secureStorage.delete('refresh-token')            // 未登録でも成功
 ```
 
-必要なwindowだけへ操作ごとに独立してgrantし、exact keyまたは末尾prefix scopeを推奨します。
+必要なウィンドウだけへ操作ごとに独立して許可し、完全一致のキーまたは末尾プレフィックスによるスコープを推奨します。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -249,21 +167,13 @@ export default defineConfig({
 })
 ```
 
-entryは`appId`とkeyからSHA-256で導出したidentifierでnamespace分離されるため、release間で
-`appId`を維持してください。keyは空でない256 UTF-8 byte以下、valueは空でない2,048
-UTF-8 byte以下です。NULは拒否され、native IPC bodyにも256 KiB上限があります。保存済み
-dataが破損、非UTF-8、上限超過なら暗黙変換せずerrorを返します。
+エントリは `appId` とキーから SHA-256 で導出した識別子で名前空間分離されるため、リリースをまたいで `appId` を維持してください。キーは空でない 256 UTF-8 バイト以下、値は空でない 2,048 UTF-8 バイト以下です。NUL は拒否され、ネイティブ IPC のボディにも 256 KiB の上限があります。保存済みデータが破損している、非 UTF-8 である、または上限を超えている場合は、暗黙に変換せずエラーを返します。
 
-互換性のためstring capabilityはkey無制限です。structured `keys` listは通常exact matchで、
-末尾が1つの`*`で終わるentryだけprefix matchになります。Keychain / Credential Managerは
-at-restのplaintext fileを避ける仕組みですが、認可済みscope内のXSSからsecretを守るものでは
-ありません。rendererが必要としないsecretはNode / server-only codeに置いてください。
+互換性のため、文字列形式のケイパビリティはキーに制限がありません。構造化された `keys` リストは通常、完全一致で、末尾が 1 つの `*` で終わるエントリだけがプレフィックス一致になります。Keychain / Credential Manager は保存時のプレーンテキストファイルを避ける仕組みであり、許可されたスコープ内で実行される XSS からシークレットを守るものではありません。レンダラーが必要としないシークレットは、Node またはサーバー専用のコードに置いてください。
 
 ## トレイアイコン
 
-client componentから1つのsystem tray iconを作成できます。既定では
-`config.icon` を使い、明示指定する場合は8-bit RGB/RGBA PNGを渡します。
-操作ごとに独立したpermissionが必要です。
+クライアントコンポーネントから、1 つのシステムトレイアイコンを作成できます。デフォルトでは `config.icon` を使い、明示的に指定する場合は 8-bit RGB/RGBA PNG を渡します。操作ごとに独立した権限が必要です。
 
 ```ts
 import { tray } from 'murasaki/native'
@@ -308,23 +218,15 @@ export default defineConfig({
 })
 ```
 
-`template` はmacOS専用です。もう一度 `create` すると既存アイコンを置き換えます。
-tray menuはevent駆動で、click可能な項目には一意な`id`が必要です。quitなどのprivileged
-actionは、それぞれ本来のnative capabilityを通過します。process-wide iconを作成した
-rendererを閉じるとiconも削除されます。
+`template` は macOS 専用です。もう一度 `create` すると既存のアイコンを置き換えます。トレイメニューはイベント駆動で、クリック可能な項目には一意な `id` が必要です。終了などの特権アクションは、それぞれ本来のネイティブケイパビリティを経由します。プロセス全体のアイコンを作成したレンダラーを閉じると、アイコンも削除されます。
 
 <Callout type="warn">
-  Linuxのtrayはlibappindicatorを使うため、AppIndicatorをホストする環境が必要です
-  (GNOMEではAppIndicator/KStatusNotifierItem Shell拡張機能が必要)。tray menuのclickと
-  動的なicon/menu差し替えはmacOS/Windowsと同様に動作しますが、tray icon自体の
-  click/double-click eventはLinuxでは発火しません — AppIndicatorには「attach済みmenuを
-  表示する」以外のsignalがないためです。
+  Linux のトレイは libappindicator を使うため、AppIndicator をホストする環境が必要です（GNOME では AppIndicator/KStatusNotifierItem Shell 拡張機能が必要です）。トレイメニューのクリックと動的なアイコン／メニューの差し替えは macOS / Windows と同様に動作しますが、トレイアイコン自体のクリック／ダブルクリックイベントは Linux では発火しません — AppIndicator には「アタッチされたメニューを表示する」以外のシグナルがないためです。
 </Callout>
 
 ## グローバルショートカット
 
-信頼済みclient componentから、macOS / Windows / Linux(X11/XWayland)の
-process-wide shortcutを登録できます。登録と解除は別々のdeny-by-default capabilityです。
+信頼済みのクライアントコンポーネントから、macOS / Windows / Linux（X11/XWayland）でプロセス全体のショートカットを登録できます。登録と解除は、それぞれ独立したデフォルト拒否のケイパビリティです。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -368,40 +270,23 @@ export function CaptureShortcut() {
 }
 ```
 
-`register(accelerator, id?)`は`{ id, accelerator }`を返します。返されるacceleratorは
-platform解決済みのcanonical値で、`CmdOrCtrl`はmacOSでCommand、Windows/LinuxでControlに
-なります。`id`省略時はcanonical acceleratorがidです。`unregisterAll()`が解除するのは
-呼び出したrendererの登録だけで、他windowの登録には触れません。
+`register(accelerator, id?)` は `{ id, accelerator }` に解決されます。返される accelerator はプラットフォームごとに解決済みの正規値で、`CmdOrCtrl` は macOS では Command、Windows / Linux では Control になります。`id` を省略した場合は、この正規化された accelerator が id になります。`unregisterAll()` が解除するのは呼び出したレンダラー自身の登録だけで、他のウィンドウの登録には影響しません。
 
-acceleratorは上限付きASCII stringで、1〜4個のmodifierの後に既知のkeyを1個置きます。
-modifier重複、keyだけのshortcut、不正・未知のkey、lifecycle / OS予約chord（Command+Q、
-Alt+F4など。LinuxにはOS-levelの予約listがありません — desktop環境ごとに異なるためです）、
-重複id、重複accelerator、他appが取得済みのchordは拒否されます。同時登録は
-processあたり64件までです。idは1〜128文字で、英数字と`.`、`_`、`:`、`-`、`+`を使えます。
+accelerator は上限付きの ASCII 文字列で、1〜4 個の modifier の後に既知の key を 1 個置きます。modifier の重複、key だけのショートカット、不正・未知の key、ライフサイクル／OS 予約済みの組み合わせ（Command+Q、Alt+F4 など。Linux には OS レベルの予約リストがありません — デスクトップ環境ごとに異なるためです）、id の重複、accelerator の重複、他のアプリがすでに取得済みの組み合わせは拒否されます。同時登録はプロセスあたり 64 件までです。id は 1〜128 文字で、英数字と `.`、`_`、`:`、`-`、`+` を使えます。
 
-所有権はrenderer windowに紐づき、close / disposeでその登録を自動解除し、app shutdownで
-全登録を解除します。trigger eventはlive-onlyかつownerだけに届き、reload後のreplayは
-ありません。
+所有権はレンダラーウィンドウに紐づき、クローズまたは破棄でその登録が自動的に解除され、アプリのシャットダウンで全登録が解除されます。トリガーイベントはライブのみで、所有者にだけ届きます。リロード後のリプレイはありません。
 
 <Callout type="warn">
-  LinuxのグローバルショートカットはX11またはXWayland必須です(内部で使用するcrateに
-  ネイティブなWayland backendがないため)。純粋なWaylandセッション(`WAYLAND_DISPLAY`が
-  設定され`DISPLAY`が未設定)では、`register`は何も登録せず失敗するのではなく、
-  structuredな`unsupported` errorを返します。
+  Linux のグローバルショートカットは X11 または XWayland が必須です（内部で使用する crate にネイティブな Wayland バックエンドがないため）。純粋な Wayland セッション（`WAYLAND_DISPLAY` が設定され `DISPLAY` が未設定）では、`register` は何も登録せず失敗するのではなく、構造化された `unsupported` エラーを返します。
 </Callout>
 
 <Callout type="info">
-  parser、所有権、capability、macOS build、Windows x64/arm64 buildは自動検証します。
-  OS-levelの利用可否は他のinstalled app、keyboard layout、remote desktop software、OS予約
-  bindingにも依存するため、release前に各対応OSのpackaged appで実際のchordをsmoke test
-  してください。
+  パーサー、所有権、ケイパビリティ、macOS ビルド、Windows x64/arm64 ビルドは自動検証しています。OS レベルでの利用可否は、他のインストール済みアプリ、キーボードレイアウト、リモートデスクトップソフトウェア、OS 予約済みバインディングにも依存するため、リリース前に各対応 OS のパッケージ化されたアプリで、実際の組み合わせをスモークテストしてください。
 </Callout>
 
 ## システム権限
 
-OSの同意とMurasaki renderer capabilityは別物です。packaged macOS appでは、用途説明と
-任意の起動時requestをconfigに宣言できます。用途説明は`Info.plist`へ書き込まれ、
-用途説明が欠けた状態でpromptしてappがcrashすることを防ぎます。
+OS の同意と Murasaki のレンダラーケイパビリティは別物です。パッケージ化された macOS アプリでは、用途説明と任意の起動時リクエストを設定に宣言できます。用途説明は `Info.plist` へ書き込まれます。用途説明が不足している場合は拒否されるため、説明のないままプロンプトが表示されてアプリがクラッシュすることはありません。
 
 ```ts title="murasaki.config.ts"
 export default defineConfig({
@@ -440,7 +325,7 @@ export default defineConfig({
 })
 ```
 
-client componentから文脈に合わせて要求する場合:
+クライアントコンポーネントから文脈に応じて要求する場合:
 
 ```ts
 const status = await systemPermission.status('microphone')
@@ -451,123 +336,68 @@ if (status === 'notDetermined') {
 
 | 種類 | 形態 | 補足 |
 | --- | --- | --- |
-| `camera` | request可能 | `NSCameraUsageDescription`。 |
-| `microphone` | request可能 | `NSMicrophoneUsageDescription`。 |
-| `location` | request可能 | `NSLocationWhenInUseUsageDescription`(`mode: 'always'`では`NSLocationAlwaysAndWhenInUseUsageDescription`も追加)。 |
-| `photos` | request可能 | `NSPhotoLibraryUsageDescription`。read-writeのlibraryアクセス。 |
-| `contacts` | request可能 | `NSContactsUsageDescription`。 |
-| `calendar` | request可能 | `NSCalendarsUsageDescription` + `NSCalendarsFullAccessUsageDescription`(常に両方書き込み — 下記参照)。 |
-| `reminders` | request可能 | `NSRemindersUsageDescription` + `NSRemindersFullAccessUsageDescription`(下記参照)。 |
-| `speechRecognition` | request可能 | `NSSpeechRecognitionUsageDescription`。 |
-| `bluetooth` | request可能、明示的なrequest呼び出しなし | `NSBluetoothAlwaysUsageDescription`。下記参照。 |
-| `screenRecording` | prompt形式、用途説明なし | granted / notGrantedのみ。 |
-| `accessibility` | prompt形式、用途説明なし | granted / notGrantedのみ。 |
-| `inputMonitoring` | prompt形式、用途説明なし | granted / notGrantedのみ。 |
-| `fullDiskAccess` | guidance-only | 下記参照。 |
-| `appleEvents` | guidance-only、declaration-only | `NSAppleEventsUsageDescription`。下記参照。 |
-| `localNetwork` | declaration-only | `NSLocalNetworkUsageDescription`。下記参照。 |
+| `camera` | リクエスト可能 | `NSCameraUsageDescription`。 |
+| `microphone` | リクエスト可能 | `NSMicrophoneUsageDescription`。 |
+| `location` | リクエスト可能 | `NSLocationWhenInUseUsageDescription`（`mode: 'always'` では `NSLocationAlwaysAndWhenInUseUsageDescription` も追加）。 |
+| `photos` | リクエスト可能 | `NSPhotoLibraryUsageDescription`。読み書き可能なライブラリアクセス。 |
+| `contacts` | リクエスト可能 | `NSContactsUsageDescription`。 |
+| `calendar` | リクエスト可能 | `NSCalendarsUsageDescription` + `NSCalendarsFullAccessUsageDescription`（常に両方書き込まれます — 下記参照）。 |
+| `reminders` | リクエスト可能 | `NSRemindersUsageDescription` + `NSRemindersFullAccessUsageDescription`（下記参照）。 |
+| `speechRecognition` | リクエスト可能 | `NSSpeechRecognitionUsageDescription`。 |
+| `bluetooth` | リクエスト可能、明示的なリクエスト呼び出しなし | `NSBluetoothAlwaysUsageDescription`。下記参照。 |
+| `screenRecording` | プロンプト形式、用途説明なし | granted / notGranted のみ。 |
+| `accessibility` | プロンプト形式、用途説明なし | granted / notGranted のみ。 |
+| `inputMonitoring` | プロンプト形式、用途説明なし | granted / notGranted のみ。 |
+| `fullDiskAccess` | ガイダンスのみ | 下記参照。 |
+| `appleEvents` | ガイダンスのみ、宣言のみ | `NSAppleEventsUsageDescription`。下記参照。 |
+| `localNetwork` | 宣言のみ | `NSLocalNetworkUsageDescription`。下記参照。 |
 
-camera / microphone / location / photos / contacts / calendar / reminders /
-speech recognitionのOS promptは非同期で完了するため、`request()`が最初は
-`notDetermined`を返す場合があります。protected featureを有効にする前に、appが再び
-focusされた時点で`status()`を再確認してください。
+カメラ / マイク / 位置情報 / 写真 / 連絡先 / カレンダー / リマインダー / 音声認識の OS プロンプトは非同期に完了するため、`request()` が最初は `notDetermined` を返す場合があります。保護対象の機能を有効にする前に、アプリが再びフォーカスされた時点で `status()` を再確認してください。
 
-`requestOnLaunch`はpackaged macOS appと、`appleEvents` / `localNetwork`(下記の
-declaration-only)を除く全種類に適用されます。developmentはterminal / Node hostの
-identityで動くため、TCCの実動作はpackage buildから確認してください。Windowsの
-unpackaged desktop appではdeviceに紐づく種類を利用するdevice API側が同意を要求し、
-汎用的な起動時promptはありません。そのためMurasakiは権限取得を装わず`unsupported`を
-返します。macOSのscreen recording / accessibility / input monitoringは初回とdenyを
-区別できない場合`notGranted`です。15種類すべてmacOS専用です — WindowsとLinuxには
-これらTCC管理下のpromptに相当するOSレベルの機能がないため、権限取得を装わず全呼び出しで
-`unsupported`を返します。
+`requestOnLaunch` は、パッケージ化された macOS アプリと、`appleEvents` / `localNetwork`（下記の宣言のみの種類）を除くすべての種類に適用されます。開発時はターミナル／Node ホストの ID で動作するため、TCC の実際の挙動はパッケージ化されたビルドで確認してください。Windows のパッケージ化されていないデスクトップアプリでは、デバイスに紐づく種類の同意はそれを利用するデバイス API 側が要求するため、汎用的な起動時プロンプトはありません。そのため Murasaki は許可されたと偽ることなく `unsupported` を返します。macOS の screen recording / accessibility / input monitoring は、初回と拒否を区別できない場合に `notGranted` を返します。15 種類すべてが macOS 専用です — Windows と Linux には、これらの TCC 管理下のプロンプトに相当する OS レベルの機能がないため、許可されたと偽ることなく、すべての呼び出しで `unsupported` を返します。
 
-`location.usageDescription`はcamera / microphoneと同様必須で、
-`NSLocationWhenInUseUsageDescription`へ書き込まれます。`mode: 'always'`を指定すると
-`NSLocationAlwaysAndWhenInUseUsageDescription`も追加で書き込み(Appleはalways requestでも
-when-in-useキーの存在を要求します)、when-in-useではなくalways-authorizationを要求します。
+`location.usageDescription` は camera / microphone と同様に必須で、`NSLocationWhenInUseUsageDescription` へ書き込まれます。`mode: 'always'` を指定すると `NSLocationAlwaysAndWhenInUseUsageDescription` も追加で書き込まれ（Apple は always リクエストでも when-in-use キーの存在を要求するため）、when-in-use ではなく常時許可（always-authorization）を要求します。
 
 <Callout type="info">
-  `calendar` / `reminders`はmacOS 14+ではfull accessをrequestし、それより古いsystemでは
-  非推奨のpre-14 EventKit APIにfallbackします。これはbuild machineではなく、
-  request時点で動いている「実際の」systemに対してcheckされるため、1つのpackaged appが
-  どちらのsystemでも正しく動作します。そのためInfo.plistには、buildしたsystemに関係なく
-  常にlegacyの用途説明キーと14+のfull accessキーの両方が書き込まれます。
+  `calendar` / `reminders` は macOS 14 以降では full access をリクエストし、それより古いシステムでは非推奨の 14 未満向け EventKit API にフォールバックします。この判定はビルドマシンではなく、リクエスト時点で実際に動いているシステムに対して行われるため、1 つのパッケージ化されたアプリがどちらのシステムでも正しく動作します。そのため Info.plist には、ビルドしたシステムに関係なく、常にレガシーの用途説明キーと 14 以降の full access キーの両方が書き込まれます。
 </Callout>
 
 <Callout type="info">
-  `bluetooth`には明示的なrequest呼び出しがありません — CoreBluetoothはcentral managerが
-  最初に作成された時点で暗黙的に同意を確定します。`status()`は`CBManager.authorization`
-  (live managerを必要としないclassレベルのproperty)を読むだけなので、他のどの種類の
-  status確認とも同じくらい低コストです。`request()`はそのOS側の判定をtriggerするためだけに
-  managerを作成します。
+  `bluetooth` には明示的なリクエスト呼び出しがありません — CoreBluetooth は central manager が最初に作成された時点で暗黙的に同意を確定します。`status()` は `CBManager.authorization`（ライブの manager を必要としないクラスレベルのプロパティ）を読むだけなので、他のどの種類の status 確認とも同じくらい低コストです。`request()` は、その OS 側の判定をトリガーするためだけに manager を作成します。
 </Callout>
 
 <Callout type="warn">
-  `fullDiskAccess`はguidance-onlyです。macOSにはFull Disk AccessのTCC request APIが
-  存在しないため、`request()`はSystem SettingsのFull Disk Accessペインを開いて
-  userに自分で許可してもらうことしかできません — 権限取得を装うことは決してありません。
-  `status()`はbest-effortのheuristicです(Full Disk Access自体で保護されている
-  `~/Library/Application Support/com.apple.TCC/TCC.db`が読めるかを確認します)。
-  通常の`granted` / `notGranted`に加え、heuristicで確信を持てない場合は
-  `unknown`を返すことがあります。
+  `fullDiskAccess` はガイダンスのみです。macOS には Full Disk Access 用の TCC リクエスト API が存在しないため、`request()` はシステム設定の Full Disk Access ペインを開いて、ユーザー自身に許可してもらうことしかできません — 許可が得られたと偽ることは決してありません。`status()` はベストエフォートのヒューリスティックです（Full Disk Access 自体で保護されている `~/Library/Application Support/com.apple.TCC/TCC.db` が読めるかどうかを確認します）。通常の `granted` / `notGranted` に加えて、ヒューリスティックで確信が持てない場合は `unknown` を返すことがあります。
 </Callout>
 
 <Callout type="warn">
-  `appleEvents`と`localNetwork`はdeclaration-onlyです — どちらにも`requestOnLaunch`
-  フィールドはなく、Murasakiの役割は用途説明を書き込むことだけです。automationの同意は
-  対象appごとに付与され、実際にApple Eventを送信して初めて判定できるため、
-  `appleEvents`の`status()`は常に`unknown`を返し、`request()`は(上記の`fullDiskAccess`
-  と同様)確認できない許可を主張する代わりに、guidanceとしてSystem SettingsのAutomation
-  paneを開くだけです。`localNetwork`にはquery/request APIが一切存在しません —
-  appが実際にlocal networkへアクセスした最初のタイミングでmacOSが自動的にpromptするため、
-  `status()`と`request()`はどちらも静的な`unknown`のno-opです。
+  `appleEvents` と `localNetwork` は宣言のみです — どちらにも `requestOnLaunch` フィールドはなく、Murasaki の役割は用途説明を書き込むことだけです。オートメーションの同意は対象アプリごとに付与され、実際に Apple Event を送信して初めて判定できるため、`appleEvents` の `status()` は常に `unknown` を返し、`request()` は（上記の `fullDiskAccess` と同様）確認できない許可を主張する代わりに、ガイダンスとしてシステム設定の Automation ペインを開くだけです。`localNetwork` には照会／リクエストの API が一切存在しません — アプリが実際にローカルネットワークへアクセスした最初のタイミングで macOS が自動的にプロンプトを表示するため、`status()` と `request()` はどちらも静的な `unknown` を返すだけの no-op です。
 </Callout>
 
-### EntitlementsとApp Sandbox
+### Entitlements と App Sandbox
 
-`murasaki bundle --sign`は、`sign.entitlements` / `sign.helperEntitlements`を指定
-しない限り、main appと同梱Node helperに別々のentitlements plistを生成します。
+`murasaki bundle --sign` は、`sign.entitlements` / `sign.helperEntitlements` を指定しない限り、メインアプリと同梱の Node ヘルパーに対して、それぞれ別々の entitlements plist を生成します。
 
-- Murasakiのdefaultであるhardened-runtime-only(App Sandboxなし)の姿勢では、署名appに
-  Info.plist用途説明と対応するhost resource entitlementの両方が必要です。camera
-  (`com.apple.security.device.camera`)、microphone
-  (`com.apple.security.device.audio-input`)、location、photos、contacts、
-  calendar/reminders、Apple Eventsのentitlementを`systemPermissions.macOS`から生成します。
-  Bluetoothのdevice entitlementはApp Sandbox専用で、speech recognitionにはHardened
-  Runtime用resource entitlementがないため、この2種類には用途説明だけを使用します。
-- NodeだけにJIT、unsigned executable memory、library validation無効化を付与します。
-  `.node` addonはexecutable entitlementなしで署名します。app所有の実行可能な
-  `bundle.resources`は`executable: true`を指定すると、outer appより先に署名されます。
-- `sign.appSandbox: true`は現在fail-closedで拒否します。Appleのsandbox継承helperは
-  `app-sandbox` + `inherit`だけのentitlementを要求し、現在の同梱Node/JIT processとは
-  両立しません。署名・公証を含むend-to-end経路が成立するまで、App Sandbox対応とは
-  表記しません。
-- カスタムmain/helper plistはそのまま使います。指定pathが存在しない、fileでない、または
-  plistとして無効な場合、生成権限へ黙ってfallbackせずrelease buildを停止します。
+- Murasaki のデフォルトである hardened-runtime-only（App Sandbox なし）の姿勢では、署名済みアプリに Info.plist の用途説明と、対応するホストリソースの entitlement の両方が必要です。camera（`com.apple.security.device.camera`）、microphone（`com.apple.security.device.audio-input`）、location、photos、contacts、calendar/reminders、Apple Events の entitlement を `systemPermissions.macOS` から生成します。Bluetooth のデバイス entitlement は App Sandbox 専用で、speech recognition には Hardened Runtime 用のリソース entitlement がないため、この 2 種類には用途説明だけを使用します。
+- Node にのみ JIT、署名されていない実行可能メモリ、ライブラリ検証の無効化を付与します。`.node` アドオンは executable entitlement なしで署名します。アプリが所有する実行可能な `bundle.resources` は、`executable: true` を指定すると、外側のアプリより先に署名されます。
+- `sign.appSandbox: true` は、現在はフェイルクローズで拒否されます。Apple のサンドボックス継承ヘルパーは `app-sandbox` + `inherit` のみの entitlement を要求しますが、これは現在の同梱 Node / JIT プロセスとは両立しません。署名・公証を含む一連の経路が確立するまで、App Sandbox に対応しているとは表記しません。
+- カスタムの main / helper plist はそのまま使用します。指定したパスが存在しない、ファイルでない、または plist として無効な場合は、生成された権限へ黙ってフォールバックせず、リリースビルドを停止します。
 
 ## 組み込みのメニューアクション
 
-項目の `action` は、関数の代わりに組み込みの `<Action.*/>` 要素の1つにできます —
-これらは(OS 自身が処理する)ネイティブロール、または小さなクライアントサイドの挙動を
-実行します:
+項目の `action` は、関数の代わりに組み込みの `<Action.*/>` 要素の 1 つにできます — これらは（OS 自身が処理する）ネイティブロールか、または小さなクライアントサイドの挙動を実行します:
 
 | Action | 挙動 |
 | --- | --- |
 | `<Action.Copy />`, `<Action.Paste />`, `<Action.Cut />`, `<Action.SelectAll />`, `<Action.Undo />`, `<Action.Redo />` | ネイティブ OS の編集ロール |
 | `<Action.Quit />` | ネイティブの終了ロール |
-| `<Action.Reload />` | ウィンドウをリロードします(`location.reload()`） |
+| `<Action.Reload />` | ウィンドウをリロードします (`location.reload()`) |
 | `<Action.Navigate to="/path" />` | ルーター経由のクライアントサイドナビゲーション |
-| `<Action.Run action={fn} />` | 通常の関数を実行します(関数を直接渡すのと同じです） |
+| `<Action.Run action={fn} />` | 通常の関数を実行します（関数を直接渡すのと同じです） |
 
 ## 自動更新
 
-`useUpdate()` は、更新の確認・ダウンロード・インストールを行います — その確認/ダウン
-ロードのロジックは Node 上で動作し、コンテキストメニューやアプリメニューが使う IPC
-ブリッジではなく、アプリの他の部分を配信しているのと同じローカル HTTP サーバー(Server
-Actions や API Routes と同じ仕組み)経由でアクセスされます。`<UpdateButton />`
-(こちらも `murasaki` から、`@murasakijs/ui` でスタイリング)は、それをラップした
-すぐに使えるボタンです:
+`useUpdate()` は、更新の確認・ダウンロード・インストールを行います — その確認・ダウンロードのロジックは Node 上で動作し、コンテキストメニューやアプリメニューが使う IPC ブリッジではなく、アプリの他の部分を配信しているのと同じローカル HTTP サーバー （Server Actions や API Routes と同じ仕組み） 経由でアクセスされます。`<UpdateButton />` （こちらも `murasaki` から、`@murasakijs/ui` でスタイリング） は、それをラップしたすぐに使えるボタンです:
 
 ```tsx
 import { useUpdate } from 'murasaki'
@@ -575,23 +405,16 @@ import { useUpdate } from 'murasaki'
 const { status, latest, check, download, install } = useUpdate()
 ```
 
-`status` は `idle → checking → available → downloading → ready`(または
-`not-available` / `error`)と遷移します。セットアップはコマンド2つだけです — マニフェ
-ストの形式、セキュリティモデル、GitHub Actions でのリリースワークフローについては、専
-用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
+`status` は `idle → checking → available → downloading → ready`（または `not-available` / `error`）と遷移します。セットアップはコマンド 2 つだけです — マニフェストの形式、セキュリティモデル、GitHub Actions でのリリースワークフローについては、専用の[自動更新](/docs/guides/auto-update)ガイドを参照してください。
 
 <Callout type="warn">
-  structured capability scopeはshell URL/path、正確なelevated executable/argv組、
-  target window label、OS permission名、secure-storage key、WebView cookie URLを扱います。
-  global shortcut accelerator、dialog defaultなど他のargumentはcommand単位です。
-  設計前に
-  [プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。
+  構造化されたケイパビリティのスコープは、シェルの URL / パス、正確な権限昇格の実行ファイルと引数の組、対象ウィンドウのラベル、OS 権限名、セキュアストレージのキー、WebView の cookie URL を扱います。グローバルショートカットの accelerator、ダイアログのデフォルト値など、それ以外の引数はコマンド単位です。設計に着手する前に、[プラットフォーム機能状況](/docs/core-concepts/platform-feature-status)を確認してください。
 </Callout>
 
 ## 次へ
 
 <Cards>
-  <Card title="ウィンドウと権限" href="/ja/docs/guides/windows" description="宣言windowとrenderer別capability list。" />
+  <Card title="ウィンドウと権限" href="/ja/docs/guides/windows" description="宣言されたウィンドウと、レンダラーごとのケイパビリティ一覧。" />
   <Card title="自動更新" href="/docs/guides/auto-update" description="マニフェストの形式、署名、リリースの公開。" />
   <Card title="コンテキストメニュー" href="/docs/guides/context-menu" description="useContextMenu API の全体像。" />
   <Card title="設定" href="/docs/building/configuration" description="ウィンドウ、署名、インストーラーの設定。" />
