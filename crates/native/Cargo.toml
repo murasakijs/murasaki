@@ -144,6 +144,11 @@ lto = true
 strip = "symbols"
 codegen-units = 1
 
+# gtk3-rs is unmaintained and its final `gtk` 0.18 release requires `glib`
+# 0.18, while GHSA-wrw7-89jp-8q8g is only fixed upstream starting in glib
+# 0.20. Vendor glib 0.18.5 and backport the two-token mutability fix so the
+# current Tao/Wry GTK3 backend remains buildable without the unsound write.
+#
 # wayland-scanner 0.31.10's published manifest selects vulnerable quick-xml
 # 0.39.x. The upstream fix landed after unreleased breaking Wayland API changes,
 # so pinning that repository revision makes released consumers such as ashpd
@@ -161,5 +166,6 @@ codegen-units = 1
 # `is_child`, matching every other method in the same file. See
 # vendor/wry/PATCH.md for details.
 [patch.crates-io]
+glib = { path = "vendor/glib" }
 wayland-scanner = { path = "vendor/wayland-scanner" }
 wry = { path = "vendor/wry" }

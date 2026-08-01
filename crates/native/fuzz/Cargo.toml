@@ -29,3 +29,11 @@ path = "fuzz_targets/fuzz_update_journal.rs"
 test = false
 doc = false
 bench = false
+
+[patch.crates-io]
+# Keep the standalone fuzz workspace on the same security-backported GTK3
+# glib source as the native crate. Patches in dependency manifests do not
+# propagate to a separate Cargo workspace root.
+glib = { path = "../vendor/glib" }
+wayland-scanner = { path = "../vendor/wayland-scanner" }
+wry = { path = "../vendor/wry" }
