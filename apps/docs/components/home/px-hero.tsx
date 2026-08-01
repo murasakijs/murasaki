@@ -5,7 +5,7 @@ import { ArrowRight, Star } from "lucide-react";
 import Link from "next/link";
 import { useLayoutEffect, useRef } from "react";
 import { CopyCommand } from "@/components/copy-command";
-import { ProductHuntBadge } from "./product-hunt-badge";
+import { GitHubStarBadge } from "./github-star-badge";
 import { PixelButterfly } from "./px-pixel";
 
 interface PxHeroProps {
@@ -203,12 +203,7 @@ export function PxHero({
           </div>
 
           <div className="mt-6 flex items-center justify-center gap-3 md:justify-start">
-            <ProductHuntBadge
-              lang={lang}
-              variant="follow"
-              showLaunchTimer
-              accent
-            />
+            <GitHubStarBadge lang={lang} accent />
           </div>
         </div>
       </div>

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ButterflyMark } from "@/components/home/butterfly-mark";
 import { localizeDocsHref } from "@/lib/localize-href";
 import { localizedHomePath } from "@/lib/seo";
-import { ProductHuntBadge } from "./product-hunt-badge";
+import { GitHubStarBadge } from "./github-star-badge";
 
 interface FooterColumn {
   heading: string;
@@ -87,7 +87,7 @@ export function SiteFooter({
               Murasaki
             </span>
           </Link>
-          <ProductHuntBadge lang={lang} variant="review" lazy />
+          <GitHubStarBadge lang={lang} />
           <p className="text-xs text-muted-foreground">{license}</p>
         </div>
       </div>
