@@ -336,7 +336,11 @@ export async function executeNetwork(input: RequestInput, extraVariables: Record
   if (input.bearerToken) headers.set('authorization', `Bearer ${input.bearerToken}`)
   if (input.protocol === 'GraphQL') headers.set('content-type', 'application/json')
   const method = input.protocol === 'GraphQL' ? 'POST' : input.method.toUpperCase()
-  const response = await fetch(url, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : interpolate(input.body, variables), signal: AbortSignal.timeout(15_000) })
+  // An API workbench must send to the destination the local user entered.
+  // Do not automatically follow a server-controlled redirect, however: that
+  // could silently retarget an inspected public endpoint at a loopback or
+  // private-network service. The 3xx response remains visible to the user.
+  const response = await fetch(url, { method, headers, body: ['GET', 'HEAD'].includes(method) ? undefined : interpolate(input.body, variables), redirect: 'manual', signal: AbortSignal.timeout(15_000) })
   const body = await readBoundedResponseBody(response)
   const latencyMs = Math.round(performance.now() - started)
   const record: ResponseRecord = { requestId, status: response.status, statusText: response.statusText, latencyMs, sizeBytes: Buffer.byteLength(body), headers: Object.fromEntries(response.headers.entries()), body, receivedAt: new Date().toISOString(), ok: response.ok }

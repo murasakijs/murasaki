@@ -29,8 +29,8 @@
 // move to another private port and report the selected fallback.
 import http from 'node:http'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { readFile, realpath, rm, stat } from 'node:fs/promises'
-import { extname, join, resolve, sep } from 'node:path'
+import { readFile, readdir, realpath, rm } from 'node:fs/promises'
+import { extname, join, relative, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { pathToFileURL } from 'node:url'
@@ -102,6 +102,7 @@ const {
   portAttempts,
 } = parseArgs()
 const canonicalClientDir = await realpath(clientDir)
+const { files: staticFiles, forbiddenPaths: forbiddenStaticPaths } = await indexStaticFiles(canonicalClientDir)
 let listeningPort = port
 const runtimeToken = process.env.MURASAKI_RUNTIME_TOKEN ?? randomBytes(32).toString('hex')
 
@@ -829,9 +830,11 @@ async function handleApiRoute(req, res, pathname) {
     const response = await handler(request, { params: match.params })
     await sendWebResponse(res, response, method === 'HEAD')
   } catch (err) {
+    const error = ensureError(err)
+    process.stderr.write(`murasaki API route failed: ${error.stack ?? error.message}\n`)
     res.statusCode = 500
     res.setHeader('content-type', 'application/json')
-    res.end(JSON.stringify({ error: String(err?.message ?? err) }))
+    res.end(JSON.stringify({ error: 'Internal server error' }))
   }
 }
 
@@ -921,30 +924,24 @@ async function serveStatic(req, res) {
     res.end('invalid path')
     return
   }
-  const requested = resolve(canonicalClientDir, `.${urlPath}`)
-  // A plain startsWith(clientDir) also accepts siblings such as
-  // `<clientDir>-secrets`. Require a real path boundary after the configured
-  // client directory so encoded `../` segments cannot escape static assets.
-  if (requested !== canonicalClientDir && !requested.startsWith(`${canonicalClientDir}${sep}`)) {
+  if (
+    !urlPath.startsWith('/') ||
+    urlPath.includes('\0') ||
+    urlPath.split('/').some((segment) => segment === '.' || segment === '..') ||
+    forbiddenStaticPaths.has(urlPath)
+  ) {
     res.statusCode = 403
     res.end()
     return
   }
 
-  let target = requested
-  if (!(await isFile(target))) target = join(canonicalClientDir, 'index.html')
-  if (!(await isFile(target))) {
+  // Only serve paths discovered while indexing the trusted client directory.
+  // Request data is used exclusively as a Map key and never reaches a
+  // filesystem API, which prevents traversal and symlink escapes by design.
+  const target = staticFiles.get(urlPath) ?? staticFiles.get('/index.html')
+  if (!target) {
     res.statusCode = 404
     res.end('not found')
-    return
-  }
-
-  // Lexical confinement rejects `..`; canonical confinement also rejects a
-  // symlink placed inside the packaged client tree that points at host data.
-  target = await realpath(target)
-  if (target !== canonicalClientDir && !target.startsWith(`${canonicalClientDir}${sep}`)) {
-    res.statusCode = 403
-    res.end()
     return
   }
 
@@ -970,12 +967,25 @@ async function serveStatic(req, res) {
   res.end(req.method === 'HEAD' ? undefined : data)
 }
 
-async function isFile(path) {
-  try {
-    return (await stat(path)).isFile()
-  } catch {
-    return false
+async function indexStaticFiles(rootDir) {
+  const files = new Map()
+  const forbiddenPaths = new Set()
+  const visit = async (directory) => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolutePath = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        await visit(absolutePath)
+      } else if (entry.isFile()) {
+        const urlPath = `/${relative(rootDir, absolutePath).split(sep).join('/')}`
+        files.set(urlPath, absolutePath)
+      } else {
+        const urlPath = `/${relative(rootDir, absolutePath).split(sep).join('/')}`
+        forbiddenPaths.add(urlPath)
+      }
+    }
   }
+  await visit(rootDir)
+  return { files, forbiddenPaths }
 }
 
 function parseArgs() {

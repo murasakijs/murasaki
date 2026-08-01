@@ -20,7 +20,19 @@ import {
 const frameworkHtml = '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div></body></html>'
 
 function cspMetaCount(html) {
-  const withoutComments = html.replace(/<!--[\s\S]*?-->/g, '')
+  let withoutComments = ''
+  let cursor = 0
+  while (cursor < html.length) {
+    const start = html.indexOf('<!--', cursor)
+    if (start === -1) {
+      withoutComments += html.slice(cursor)
+      break
+    }
+    withoutComments += html.slice(cursor, start)
+    const end = html.indexOf('-->', start + 4)
+    if (end === -1) break
+    cursor = end + 3
+  }
   return (withoutComments.match(/<meta\b[^>]*>/gi) ?? [])
     .filter((tag) => /\bhttp-equiv\s*=\s*["']content-security-policy["']/i.test(tag))
     .length

@@ -57,14 +57,12 @@ export function resolveUpdater(
   if (opts.endpoint) {
     manifestUrl = opts.endpoint
   } else {
-    // normalizeRepo also covers an explicit `repo` written as
-    // "github:owner/repo" (or a URL) rather than bare "owner/repo" — falls
-    // back to the raw value for anything it doesn't recognize, so an
-    // already-correct explicit repo is never rejected.
-    const repo =
-      (opts.repo && normalizeRepo(opts.repo)) ||
-      opts.repo ||
-      normalizeRepo(readPackageRepository(ctx.projectRoot))
+    // normalizeRepo covers an explicit `repo` written as
+    // "github:owner/repo" (or a URL) rather than bare "owner/repo". Invalid
+    // explicit values fail closed instead of being interpolated into a URL.
+    const repo = opts.repo
+      ? normalizeRepo(opts.repo)
+      : normalizeRepo(readPackageRepository(ctx.projectRoot))
     if (!repo) {
       throw new Error(
         'murasaki: updater is enabled but no GitHub repo could be resolved — set updater.repo ' +
@@ -116,15 +114,44 @@ function normalizeRepo(repository: unknown): string | null {
         : null
   if (!raw) return null
 
-  if (raw.startsWith('github:')) return raw.slice('github:'.length)
+  const parsePath = (value: string): string | null => {
+    const withoutLeadingSlash = value.startsWith('/') ? value.slice(1) : value
+    const withoutTrailingSlash = withoutLeadingSlash.endsWith('/')
+      ? withoutLeadingSlash.slice(0, -1)
+      : withoutLeadingSlash
+    const parts = withoutTrailingSlash.split('/')
+    if (parts.length !== 2) return null
+    const owner = parts[0]!
+    const repo = parts[1]!.endsWith('.git') ? parts[1]!.slice(0, -4) : parts[1]!
+    const validPart = (part: string) =>
+      part.length > 0 &&
+      part.length <= 100 &&
+      [...part].every((character) =>
+        (character >= 'a' && character <= 'z') ||
+        (character >= 'A' && character <= 'Z') ||
+        (character >= '0' && character <= '9') ||
+        character === '-' || character === '_' || character === '.',
+      )
+    return validPart(owner) && validPart(repo) ? `${owner}/${repo}` : null
+  }
 
-  // Bare "owner/repo" shorthand: no scheme/colon, exactly one slash.
-  if (/^[^\s/:]+\/[^\s/]+$/.test(raw)) return raw
+  if (raw.startsWith('github:')) return parsePath(raw.slice('github:'.length))
 
-  // Any github.com URL (https://, git+https://, ssh git@github.com:, with or
-  // without a trailing .git) — covers the `{ url: "git+https://…" }` form.
-  const match = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/.exec(raw)
-  return match ? `${match[1]}/${match[2]}` : null
+  // Bare "owner/repo" shorthand: exactly two validated path components.
+  if (!raw.includes(':')) return parsePath(raw)
+
+  // Git's SCP-like SSH form is not accepted by URL(), so handle its exact
+  // trusted prefix separately before parsing normal URL forms.
+  const scpPrefix = 'git@github.com:'
+  if (raw.startsWith(scpPrefix)) return parsePath(raw.slice(scpPrefix.length))
+
+  try {
+    const url = new URL(raw.startsWith('git+') ? raw.slice(4) : raw)
+    if (url.hostname !== 'github.com' || url.search || url.hash) return null
+    return parsePath(url.pathname)
+  } catch {
+    return null
+  }
 }
 
 function resolvePublicKey(explicit: string | undefined, projectRoot: string): string {
