@@ -4,34 +4,6 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
-## 0.55.8 — privacy-first usage measurement (2026-07-31)
-
-This patch adds an explicit opt-in signal for understanding real Murasaki CLI
-use without treating npm downloads, bots, or CI traffic as users.
-
-### Added
-
-- **Anonymous CLI usage measurement.** `murasaki telemetry enable|disable|status`
-  controls three successful lifecycle events: project creation, development
-  startup, and bundle completion. Collection is off by default, honors
-  `DO_NOT_TRACK`, `CI`, and `MURASAKI_TELEMETRY_DISABLED`, and never includes
-  project names, paths, source code, command arguments, account data, or
-  environment values.
-- **Scaffolder consent.** Interactive `create-murasaki` asks once with **No** as
-  the default. Automated runs stay disabled unless `--telemetry` is supplied or
-  the user already opted in.
-- **Self-hosted aggregate store.** The documentation service accepts the
-  documented events and writes only daily aggregates and hashed installation
-  identifiers to a persistent SQLite volume. Raw identifiers are not retained,
-  and aggregate rows expire after 90 days.
-
-### Notes
-
-- Measurement failures never fail development or packaging commands and use a
-  one-second request timeout.
-- The private summary endpoint requires a separate bearer token; the public
-  collector does not expose usage totals.
-
 ## 0.55.7 — React Aria UI foundation (2026-07-24)
 
 Murasaki's default UI foundation now uses React Aria Components throughout.

@@ -37,7 +37,6 @@ import { loadUserConfig } from './load-config.js'
 import { signWindowsArtifact } from './windows-signing.js'
 import { signLinuxArtifact } from './linux-signing.js'
 import { preparePlugins, runPluginHooks } from '../plugin-runtime.js'
-import { recordTelemetry } from './telemetry.js'
 
 export { loadUserConfig } from './load-config.js'
 
@@ -108,7 +107,6 @@ export default async function bundle(argv: string[]) {
   if (target.platform === 'win32') {
     await bundleWin32(cwd, config, target.arch, shouldSign)
     await runPluginHooks(prepared, 'after', hookOptions)
-    await recordTelemetry('bundle_completed')
     return
   }
 
@@ -119,7 +117,6 @@ export default async function bundle(argv: string[]) {
   if (target.platform === 'linux') {
     await bundleLinux(cwd, config, target.arch, shouldSign)
     await runPluginHooks(prepared, 'after', hookOptions)
-    await recordTelemetry('bundle_completed')
     return
   }
 
@@ -284,7 +281,6 @@ export default async function bundle(argv: string[]) {
 
   if (!shouldSign) process.stdout.write(unsignedNote(appDir))
   await runPluginHooks(prepared, 'after', hookOptions)
-  await recordTelemetry('bundle_completed')
 }
 
 /**

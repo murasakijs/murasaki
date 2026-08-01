@@ -8,11 +8,6 @@ import { cp, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
-import {
-  getTelemetryPreference,
-  recordCreateCompleted,
-  setTelemetryEnabled,
-} from './telemetry.mjs'
 
 // ── ANSI truecolor (Oomurasaki palette) ────────────────────────────────
 const BRIGHT = '\x1b[38;2;168;85;247m'
@@ -219,17 +214,6 @@ async function promptForLinter() {
   }
 }
 
-async function promptForTelemetry() {
-  log(
-    c(DIM) +
-      '  Sends only version, OS/arch, timestamp, and a random install ID. ' +
-      'Details: https://murasaki.ichi10.com/docs/building/cli#murasaki-telemetry' +
-      c(RESET),
-  )
-  const answer = (await ask('Share anonymous CLI usage to help improve Murasaki? y/N', 'N')).toLowerCase()
-  return answer === 'y' || answer === 'yes'
-}
-
 function startSpinner(text) {
   const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
   let frame = 0
@@ -376,14 +360,11 @@ function parseArgs(argv) {
   let noGit = false
   let yes = false
   let linter
-  let telemetry
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === '--skip-install') skipInstall = true
     else if (arg === '--no-git') noGit = true
     else if (arg === '--yes' || arg === '-y') yes = true
-    else if (arg === '--telemetry') telemetry = true
-    else if (arg === '--no-telemetry') telemetry = false
     else if (arg === '--linter') linter = argv[++i]
     else if (arg.startsWith('--linter=')) linter = arg.slice('--linter='.length)
     else if (!arg.startsWith('-') && name === undefined) name = arg
@@ -392,7 +373,7 @@ function parseArgs(argv) {
     log(c(RED) + `  ✗ --linter must be one of: ${LINTERS.join(', ')}` + c(RESET))
     process.exit(1)
   }
-  return { name, skipInstall, noGit, yes, linter, telemetry }
+  return { name, skipInstall, noGit, yes, linter }
 }
 
 async function readCliVersion(dir) {
@@ -414,28 +395,17 @@ async function main() {
     `  ${c(DIM)}create-murasaki${c(RESET)}${version ? ` ${c(BRIGHT)}v${version}${c(RESET)}` : ''}\n\n`,
   )
 
-  const {
-    name: argName,
-    skipInstall,
-    noGit,
-    yes,
-    linter: linterArg,
-    telemetry: telemetryArg,
-  } = parseArgs(process.argv.slice(2))
+  const { name: argName, skipInstall, noGit, yes, linter: linterArg } = parseArgs(process.argv.slice(2))
 
   const validName = argName && isValidPackageName(argName) ? argName : undefined
   const name = validName ?? (yes ? 'my-app' : await promptForName())
   const linter = linterArg ?? (yes ? 'biome' : await promptForLinter())
-  const storedTelemetry = await getTelemetryPreference()
-  const telemetry = telemetryArg ?? storedTelemetry ?? (yes ? false : await promptForTelemetry())
 
   const target = resolve(process.cwd(), name)
   if (existsSync(target)) {
     log(c(RED) + `  ✗ ${name} already exists.` + c(RESET))
     process.exit(1)
   }
-
-  if (telemetryArg !== undefined || storedTelemetry === null) await setTelemetryEnabled(telemetry)
 
   const templateDir = join(__dirname, 'templates', 'default')
   await copyTemplate(templateDir, target, name)
@@ -471,7 +441,6 @@ async function main() {
   if (!installed) log(`    ${pm} install`)
   log(`    ${pm} run dev`)
   log('')
-  await recordCreateCompleted(version)
 }
 
 main().catch((err) => {

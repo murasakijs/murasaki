@@ -12,7 +12,6 @@ murasaki demo        チェックサム検証済みmacOS開発者プレビュー
 murasaki init        Rust ツールチェーンをインストールする(@murasakijs/native 自体をいじる場合のみ)
 murasaki icon        1つの PNG から .icns / .ico / .png を生成する
 murasaki release     自動更新マニフェストのヘルパー
-murasaki telemetry   匿名CLI利用計測の設定を確認・変更する
 murasaki help        このヘルプを表示する
 ```
 
@@ -164,32 +163,6 @@ murasaki release --sign
   へ書き込みます。
 
 `--generate-manifest` は、`--manifest` の非推奨エイリアスとして引き続き動作します。
-
-## `murasaki telemetry`
-
-Murasakiの匿名CLI利用計測は**初期状態で無効**です。npmのdownload botやCI trafficと
-実利用を区別するための計測に協力する場合だけ、有効にしてください。
-
-```bash
-murasaki telemetry status
-murasaki telemetry enable
-murasaki telemetry disable
-```
-
-対話形式の`create-murasaki`では初回だけ質問し、既定値は**No**です。非対話の`--yes`
-では、保存済みの設定がない限り無効のままです。scriptから明示する場合は
-`--telemetry`または`--no-telemetry`を使えます。
-
-計測するのは、成功した`create_completed`、`dev_started`、`bundle_completed`の3イベント
-だけです。各イベントに含まれるのはMurasakiのversion、OS種別、CPU architecture、日時、
-ランダムなinstallation IDです。project名・path・source code・command引数・Git identity・
-account名・環境変数は含めません。受信側はランダムIDをすぐにhash化し、日別event数・
-platform別件数・unique installation数を90日保持します。hosting基盤が通常のrequest metadataを
-運用logとして別途保持する場合はありますが、Murasakiのevent本文には取り込みません。
-
-同意後でも`DO_NOT_TRACK=1`、`CI`環境、`MURASAKI_TELEMETRY_DISABLED=1`のいずれかがあれば
-送信しません。収集に失敗してもdev/build commandは失敗せず、request timeoutは1秒です。
-設定は`~/.murasaki/telemetry.json`に保存され、上記commandでいつでも変更できます。
 
 ## 次へ
 

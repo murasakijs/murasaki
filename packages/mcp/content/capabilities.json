@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "frameworkVersion": "0.55.8",
+  "frameworkVersion": "0.55.7",
   "features": [
     {
       "id": "file-routing",

@@ -4,29 +4,6 @@ Murasaki は 1.0 に達するまで semantic versioning に従います。minor 
 破壊的変更が記載される場合があります。production application を更新する前に、
 対応する migration guide を確認してください。
 
-## 0.55.8 — privacy-first usage measurement (2026-07-31)
-
-npm download、bot、CI traffic を user と誤認せず、実際の Murasaki CLI 利用を
-把握するための、明示的な opt-in 計測を追加しました。
-
-### 追加
-
-- **匿名 CLI 利用計測。** `murasaki telemetry enable|disable|status` で、project
-  作成完了、development 起動、bundle 完了の3つの成功 eventを制御できます。既定では
-  無効で、`DO_NOT_TRACK`、`CI`、`MURASAKI_TELEMETRY_DISABLED`を尊重します。
-  project名、path、source code、command引数、account情報、環境変数の値は送信しません。
-- **scaffolder の同意確認。** 対話形式の `create-murasaki` は初回だけ質問し、既定値は
-  **No**です。自動実行では`--telemetry`を明示するか、すでにuserが同意している場合を
-  除き、無効のままです。
-- **self-hosted aggregate store。** documentation serviceが文書化されたeventを受け取り、
-  日別aggregateとhash化したinstallation IDだけをpersistent SQLite volumeへ保存します。
-  raw IDは保持せず、aggregate rowは90日後に削除します。
-
-### 補足
-
-- 計測失敗でdevelopmentやpackaging commandが失敗することはなく、request timeoutは1秒です。
-- private summary endpointは専用bearer tokenを要求し、public collectorから利用件数は読めません。
-
 ## 0.55.7 — React Aria UI 基盤 (2026-07-24)
 
 Murasaki の標準 UI 基盤を全面的に React Aria Components へ移行しました。

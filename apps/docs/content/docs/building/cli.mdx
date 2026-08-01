@@ -12,7 +12,6 @@ murasaki demo        Run a checksum-verified macOS developer preview
 murasaki init        Install the Rust toolchain (only if you're hacking on @murasakijs/native)
 murasaki icon        Generate .icns / .ico / .png from a single PNG
 murasaki release     Auto-update manifest helpers
-murasaki telemetry   Manage anonymous CLI usage measurement
 murasaki help        Show this help
 ```
 
@@ -171,39 +170,6 @@ Three independent modes for publishing signed auto-updates — see the
   `.murasaki/update-key.pub` is available.
 
 `--generate-manifest` still works as a deprecated alias of `--manifest`.
-
-## `murasaki telemetry`
-
-Murasaki's anonymous CLI usage measurement is **off by default**. Enable it
-only if you want to help the maintainers distinguish real usage from npm
-download bots and CI traffic:
-
-```bash
-murasaki telemetry status
-murasaki telemetry enable
-murasaki telemetry disable
-```
-
-The interactive `create-murasaki` flow asks once, defaulting to **No**. An
-unattended `--yes` run remains disabled unless a preference was already saved.
-Use `--telemetry` or `--no-telemetry` to make the choice explicitly in a
-script.
-
-Only three successful lifecycle events are measured: `create_completed`,
-`dev_started`, and `bundle_completed`. Each event contains the Murasaki
-version, operating-system family, CPU architecture, timestamp, and a random
-installation identifier. It does **not** contain the project name or path,
-source code, command arguments, Git identity, account name, or environment
-variables. The collector immediately hashes the random identifier before
-aggregation and retains daily event, platform, and unique-installation counts
-for 90 days. Hosting infrastructure may retain ordinary request metadata in
-its operational logs independently of this event body.
-
-`DO_NOT_TRACK=1`, any `CI` environment, or
-`MURASAKI_TELEMETRY_DISABLED=1` prevents sending even after opt-in. Collection
-failures never fail or delay a development/build command beyond a one-second
-request timeout. The preference lives at `~/.murasaki/telemetry.json` and can
-be changed at any time with the commands above.
 
 ## Next
 

@@ -13,7 +13,6 @@ import { serializeWindowTemplates } from './window-metadata.js'
 import { resolveInitScripts } from './init-scripts.js'
 import { parseDevAppArgv, encodeDevLaunchArgv, DEV_LAUNCH_ENV } from '../runtime/launch.js'
 import { createWindowAuthInitScript } from '../runtime/window-auth.js'
-import { recordTelemetry } from './telemetry.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -94,7 +93,6 @@ export default async function dev(argv: string[]) {
       } catch {}
     }
 
-    await recordTelemetry('dev_started')
     app.run()
   } finally {
     await stopViteChild(vite)

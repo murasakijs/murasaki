@@ -67,12 +67,6 @@ ENV HOSTNAME=0.0.0.0
 RUN groupadd --gid 1001 nodejs \
   && useradd --uid 1001 --gid nodejs --no-create-home --shell /usr/sbin/nologin nextjs
 
-# Optional self-hosted CLI measurement store. Dokploy should mount a persistent
-# volume at /data and set MURASAKI_TELEMETRY_DB_PATH=/data/murasaki-telemetry.sqlite.
-# Pre-creating it here gives the unprivileged runtime user write access when a
-# named volume inherits the image directory ownership.
-RUN mkdir -p /data && chown nextjs:nodejs /data
-
 # `output: "standalone"` traces the minimal `node_modules` subset this
 # server needs into `.next/standalone` (alongside a `server.js` entrypoint),
 # mirroring the app's path inside the workspace (`apps/docs/...`) because

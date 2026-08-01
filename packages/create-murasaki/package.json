@@ -1,6 +1,6 @@
 {
   "name": "create-murasaki",
-  "version": "0.55.8",
+  "version": "0.55.7",
   "description": "Scaffolder for Murasaki apps.",
   "license": "MIT",
   "repository": {
@@ -12,12 +12,8 @@
   "bin": {
     "create-murasaki": "./index.mjs"
   },
-  "scripts": {
-    "test": "node --test test/*.test.mjs"
-  },
   "files": [
     "index.mjs",
-    "telemetry.mjs",
     "templates"
   ],
   "dependencies": {}
