@@ -45,7 +45,7 @@ export function GitHubStarBadge({
         target="_blank"
         rel="noopener noreferrer"
         aria-label={label}
-        className="group inline-flex h-[54px] w-[250px] max-w-full items-stretch overflow-hidden rounded-xl border border-[#d0d7de] bg-white text-[#111014] shadow-sm transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[#7c3aed] hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#7c3aed]"
+        className="group inline-flex h-[54px] w-[250px] max-w-full items-stretch overflow-hidden rounded-xl border border-[#d0d7de] bg-white text-[#111014] shadow-sm transition-colors hover:border-[#7c3aed] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#7c3aed]"
       >
         <span className="flex min-w-0 flex-1 items-center gap-3 px-4">
           <GitHubMark className="size-7" />
