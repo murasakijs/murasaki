@@ -25,23 +25,29 @@ export function baseOptions(
       ),
       url: localizedHomePath(lang),
     },
-    // A `type: "button"` link renders as a real fumadocs secondary button in a
-    // valid <li>, and `secondary: true` places it in the header's right-hand
-    // cluster alongside search / theme / language (rather than out by the
-    // logo). Only shown on the landing page — the docs pages pass
-    // docsLink: false since they already have the sidebar.
+    // Primary links sit directly beside the wordmark. Their text stays visibly
+    // underlined so they read as navigation rather than secondary buttons;
+    // search, theme, language, and GitHub remain in the utility cluster on the
+    // right. Only shown on the landing page — the docs pages pass docsLink:
+    // false since they already have the sidebar.
     links: docsLink
       ? [
           {
-            type: "button",
-            secondary: true,
-            text: "Docs",
+            type: "main",
+            text: (
+              <span className="underline decoration-current underline-offset-4 transition-colors hover:decoration-fd-primary">
+                Docs
+              </span>
+            ),
             url: localizedDocsPath(lang),
           },
           {
-            type: "button",
-            secondary: true,
-            text: "Changelog",
+            type: "main",
+            text: (
+              <span className="underline decoration-current underline-offset-4 transition-colors hover:decoration-fd-primary">
+                Changelog
+              </span>
+            ),
             url: localizedChangelogPath(lang),
           },
         ]

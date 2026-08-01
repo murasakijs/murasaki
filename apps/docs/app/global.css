@@ -140,6 +140,24 @@ html > body[data-scroll-locked] {
   --removed-body-scroll-bar-size: 0px !important;
 }
 
+/*
+ * Keep the two primary landing-page links on one row inside Fumadocs'
+ * compact mobile menu. The utility controls remain a separate full-width row
+ * below them; desktop navigation is unaffected.
+ */
+@media (max-width: 639px) {
+  #nd-nav div:has(> a[href$="/docs"]):has(> a[href$="/changelog"]) {
+    flex-flow: row wrap;
+    column-gap: 1rem;
+  }
+
+  #nd-nav
+    div:has(> a[href$="/docs"]):has(> a[href$="/changelog"])
+    > div:last-child {
+    flex-basis: 100%;
+  }
+}
+
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: var(--font-sans);
