@@ -15,10 +15,12 @@ export function PxVersus({
   t,
   rows,
   footnote,
+  indexLabel,
 }: {
   t: HomeContent["whyMurasaki"];
   rows: HomeContent["comparisonRows"];
   footnote: string;
+  indexLabel: string;
 }) {
   const ref = useRef<HTMLElement>(null);
   const heads = [
@@ -91,7 +93,7 @@ export function PxVersus({
         {/* Sticky rail. */}
         <div className="min-w-0 lg:sticky lg:top-28 lg:self-start">
           <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-[#111014]/50">
-            <span className="text-[#7c3aed]">05</span> · vs Electron / Tauri
+            <span className="text-[#7c3aed]">05</span> · {indexLabel}
           </p>
 
           <div className="mt-6 overflow-hidden">

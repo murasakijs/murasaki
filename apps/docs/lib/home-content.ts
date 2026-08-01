@@ -557,7 +557,7 @@ const ja: HomeContent = {
       {
         label: "署名・公証する",
         command: "murasaki bundle --sign",
-        note: "任意 — ご自身の Apple Developer ID 証明書を使用します",
+        note: "任意 — ご自身の Apple Developer ID 証明書を使用します（Murasaki は証明書を同梱しません）",
       },
       {
         label: "インストーラーを作る",
@@ -697,6 +697,14 @@ export interface LpExtra {
   /** Pinned converging headline — the two halves slide together while the
    * viewport holds (the madewithgsap hero move). */
   converge: { left: string; right: string };
+  /** Silkscreen rail labels for the sections whose eyebrow is not part of
+   * HomeContent (01/02/05/07) — keeps the "NN · label" rail fully localized. */
+  rail: {
+    showcase: string;
+    manifesto: string;
+    versus: string;
+    artifacts: string;
+  };
   /** Word/character-illuminated manifesto (scroll-linked, pinned). */
   manifesto: string;
   /** Silkscreen progress counter shown while the manifesto is pinned. */
@@ -828,6 +836,12 @@ const lpEn: LpExtra = {
     tryHint: "Try the menus — View → Reload works.",
   },
   converge: { left: "Native apps.", right: "Web DX." },
+  rail: {
+    showcase: "Native proof",
+    manifesto: "Why it exists",
+    versus: "vs Electron / Tauri",
+    artifacts: "Artifacts",
+  },
   manifesto:
     "Build native desktop apps with file-based routing, server actions, and React 19 — in a Rust-native window, not Electron's Chromium. Without writing Rust.",
   manifestoCounterLabel: "Lit",
@@ -954,6 +968,12 @@ const lpJa: LpExtra = {
     tryHint: "メニューを操作できます。View → Reload も試してみてください。",
   },
   converge: { left: "ネイティブアプリ。", right: "Web の開発体験。" },
+  rail: {
+    showcase: "ネイティブの証明",
+    manifesto: "なぜ作ったか",
+    versus: "vs Electron / Tauri",
+    artifacts: "配布物",
+  },
   manifesto:
     "ファイルベースルーティング、Server Actions、React 19 を使ってデスクトップアプリを構築。Electron の Chromium ではなく OS 標準の WebView を使い、Rust を書かずに開発できます。",
   manifestoCounterLabel: "点灯",

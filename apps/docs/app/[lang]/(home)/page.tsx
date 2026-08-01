@@ -151,11 +151,13 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           demo={x.demo}
           codeHtml={appMenuHtml}
           codeLabel={t.nativeDeepDive.codeLabel}
+          indexLabel={x.rail.showcase}
         />
 
         <PxManifesto
           text={x.manifesto}
           counterLabel={x.manifestoCounterLabel}
+          indexLabel={x.rail.manifesto}
         />
 
         <DitherDivider from={INKFIELD} to={PAPER} />
@@ -173,6 +175,7 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           t={t.whyMurasaki}
           rows={t.comparisonRows}
           footnote={t.comparisonFootnote}
+          indexLabel={x.rail.versus}
         />
 
         <DitherDivider from={PAPER} to={PURPLE} />
@@ -184,6 +187,7 @@ export default async function HomePage(props: PageProps<"/[lang]">) {
           caption={t.mockup.caption}
           platforms={t.distribution.platforms}
           dmgDemo={x.dmgDemo}
+          indexLabel={x.rail.artifacts}
         />
 
         <DitherDivider from={PAPER} to={INKFIELD} />

@@ -18,9 +18,11 @@ gsap.registerPlugin(ScrollTrigger);
 export function PxManifesto({
   text,
   counterLabel,
+  indexLabel,
 }: {
   text: string;
   counterLabel: string;
+  indexLabel: string;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const counterRef = useRef<HTMLSpanElement>(null);
@@ -105,7 +107,7 @@ export function PxManifesto({
         <div data-px-sticky>
           <div data-px-content className="mx-auto w-full max-w-5xl px-6 py-28">
             <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
-              <span className="text-[#a78bfa]">02</span> · Why it exists
+              <span className="text-[#a78bfa]">02</span> · {indexLabel}
             </p>
             <p className="lp-display mt-9 text-[clamp(1.7rem,4vw,3.4rem)] font-semibold leading-[1.25] tracking-tight">
               {tokens.map((token, i) => (

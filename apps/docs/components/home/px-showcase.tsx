@@ -23,6 +23,7 @@ interface PxShowcaseProps {
   demo: LpExtra["demo"];
   codeHtml: string;
   codeLabel: string;
+  indexLabel: string;
 }
 
 function MenuBar({
@@ -121,7 +122,13 @@ function MenuBar({
   );
 }
 
-export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
+export function PxShowcase({
+  t,
+  demo,
+  codeHtml,
+  codeLabel,
+  indexLabel,
+}: PxShowcaseProps) {
   const sectionRef = useRef<HTMLElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState<number | null>(null);
@@ -236,7 +243,7 @@ export function PxShowcase({ t, demo, codeHtml, codeLabel }: PxShowcaseProps) {
         <div data-px-sticky>
           <div data-px-content className="mx-auto w-full max-w-6xl px-6 py-20">
             <p className="lp-pixel text-[11px] uppercase tracking-[0.25em] text-white/45">
-              <span className="text-[#a78bfa]">01</span> · Native proof
+              <span className="text-[#a78bfa]">01</span> · {indexLabel}
             </p>
 
             <h2
