@@ -476,14 +476,14 @@ const ja: HomeContent = {
       electron: "Electron",
       tauri: "Tauri",
     },
-    statValue: "約1/5",
+    statValue: "約 1/5",
     statLabel: "Electron に対するアイドル時メモリ使用量の目安",
   },
   comparisonRows: [
     {
       label: "UI ランタイム",
       murasaki: "OS WebView (wry)",
-      electron: "Bundled Chromium",
+      electron: "Chromium を同梱",
       tauri: "OS WebView",
     },
     {
@@ -493,19 +493,19 @@ const ja: HomeContent = {
       tauri: "TypeScript + Rust",
     },
     {
-      label: "DX",
+      label: "開発体験",
       murasaki: "Next.js に近い構成（Vite HMR）",
-      electron: "手動配線",
-      tauri: "手動配線",
+      electron: "手動で構成",
+      tauri: "手動で構成",
     },
     {
-      label: "メモリ(アイドル時)",
-      murasaki: "Electron の約1/5*",
+      label: "メモリ（アイドル時）",
+      murasaki: "Electron の約 1/5*",
       electron: "基準値",
-      tauri: "小",
+      tauri: "小さい傾向",
     },
     {
-      label: "サーバーアクション",
+      label: "Server Actions",
       murasaki: "defineAction / useAction",
       electron: "手動 IPC",
       tauri: "手動 IPC / コマンド",
@@ -545,7 +545,7 @@ const ja: HomeContent = {
       "開発用ウィンドウの起動から、複数アーキテクチャ向けのバンドル、署名・公証、インストーラー生成までを Murasaki CLI で実行できます。",
     steps: [
       {
-        label: "足場を作る",
+        label: "プロジェクトを作成する",
         command: "pnpm create murasaki@latest my-app",
       },
       { label: "開発する", command: "pnpm dev" },
@@ -607,7 +607,7 @@ const ja: HomeContent = {
   },
   changelog: {
     eyebrow: "Changelog",
-    heading: "出荷した。日付入りで、正直に。",
+    heading: "何を、いつ出したか。ありのままに。",
     viewAll: "更新履歴をすべて見る",
   },
   footer: {
@@ -907,7 +907,7 @@ const lpJa: LpExtra = {
     "Next.js の開発体験をデスクトップへ",
     "ネイティブウィンドウ",
     "ネイティブメニュー",
-    "メモリは Electron の約1/5",
+    "メモリは Electron の約 1/5",
     "React 19",
     "Vite HMR",
     "軽量な Rust ホスト",
@@ -973,7 +973,7 @@ const lpJa: LpExtra = {
   },
   examples: {
     eyebrow: "実行できるサンプル",
-    heading: "説明だけでなく、動作するアプリで確認する。",
+    heading: "売り文句ではなく、動くアプリで。",
     intro:
       "標準スキャフォールドに加え、実際の要件から設計した3つの独立したアプリを、それぞれ CLI の1コマンドで起動できます。",
     defaultDemo: {

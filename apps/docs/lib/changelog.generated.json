@@ -236,27 +236,27 @@
       "date": "2026-07-24",
       "title": "React Aria UI 基盤",
       "intro": [
-        "Murasaki の標準 UI 基盤を全面的に React Aria Components へ移行しました。`@murasakijs/ui` の公開 component 名と従来の value ベース props は維持しつつ、focus 管理、keyboard 操作、選択、overlay の挙動は Radix UI や `cmdk` に依存しなくなりました。"
+        "Murasaki の標準 UI 基盤は、全面的に React Aria Components を使用するようになりました。`@murasakijs/ui` の公開コンポーネント名と、従来からの値ベースの props はそのまま利用できます。一方で、フォーカス管理、キーボード操作、選択、オーバーレイの挙動は、Radix UI や `cmdk` に依存しなくなりました。"
       ],
       "sections": [
         {
           "kind": "added",
           "label": "追加",
           "items": [
-            "**React Aria component 基盤。** `@murasakijs/ui` 0.3.0 から Radix UI と `cmdk` の直接依存をすべて削除しました。interactive control と overlay は React Aria Components を使用し、React Aria に直接対応する primitive がない場合は、Radix を内部に残さず、小さくアクセシブルな Murasaki adapter を使用します。",
-            "**framework と scaffold の統合。** `murasaki` の完成済み `UpdateButton` と、新しく生成される application は、React Aria ベースの UI package を既定で使用します。",
-            "**live component documentation。** すべての component 詳細 page に interactive playground を追加しました。updater guide には unavailable、available、downloading、ready、error の各状態を確認できる stateful playground も追加しています。",
-            "**AI 向け documentation。** 生成される MCP documentation corpus と framework guide を、React Aria が現在の UI 基盤である内容へ同期しました。"
+            "**React Aria コンポーネント基盤。** `@murasakijs/ui` 0.3.0 では、Radix UI と `cmdk` への直接依存をすべて削除しました。インタラクティブなコントロールとオーバーレイには React Aria Components を使用し、React Aria に直接対応するプリミティブがない場合は、内部に Radix を抱え込む代わりに、小さくアクセシブルな Murasaki アダプターを使用します。",
+            "**フレームワークとスキャフォールドの統合。** `murasaki` に用意されている `UpdateButton` と、新規に生成されるアプリケーションは、React Aria ベースの UI パッケージをデフォルトで使用します。",
+            "**ライブなコンポーネントドキュメント。** すべてのコンポーネント詳細ページに、インタラクティブなプレイグラウンドを追加しました。アップデーターガイドには、unavailable、available、downloading、ready、error の各状態を確認できる、状態を持つプレイグラウンドも追加しています。",
+            "**AI 向けドキュメント。** 生成される MCP ドキュメントコーパスとフレームワークガイダンスは、React Aria を現行の UI 基盤として明示するようになりました。"
           ]
         },
         {
           "kind": "notes",
           "label": "補足",
           "items": [
-            "`@murasakijs/ui` からの既存 import はそのまま利用できます。未文書化の Radix DOM 構造、Radix 固有の data attribute、`cmdk` 内部実装を直接参照していた application は、文書化された Murasaki component API に selector と style を移してください。",
-            "`asChild` は Murasaki 独自の互換 Slot で引き続き利用できます。`@radix-ui/react-slot` はインストールされません。",
-            "Hover Card を非 modal にし、focus を trigger に維持するようにしました。trigger から card 内へ pointer を移すと遅延 close が取り消されるため、React Aria 移行後に発生し得た表示・非表示の反復を防ぎます。",
-            "documentation application を Next.js 16.2.11、shadcn 4.14.1、および修正版の `sharp` / `fast-uri` resolution へ更新しました。release の security gate で high / critical の npm advisory は 0 件です。"
+            "`@murasakijs/ui` からの既存のインポートは、引き続き動作するはずです。文書化されていない Radix の DOM 構造、Radix 固有の data 属性、`cmdk` の内部実装を対象にしていたアプリケーションは、それらのスタイルとセレクターを、文書化された Murasaki コンポーネント API に移行する必要があります。",
+            "`asChild` は、Murasaki 独自の互換 Slot を通じて引き続き利用できます。`@radix-ui/react-slot` はインストールされなくなりました。",
+            "Hover Card は非モーダルとし、フォーカスをトリガー上に維持するようにしました。トリガーからカード内へポインターを移動すると、遅延クローズがキャンセルされるため、React Aria 移行後に発生し得た開閉の反復を防ぎます。",
+            "ドキュメントアプリケーションは、Next.js 16.2.11、shadcn 4.14.1、および修正済みの `sharp` / `fast-uri` の解決バージョンを使用するようになりました。このリリースのセキュリティゲートでは、high または critical の npm アドバイザリは 0 件です。"
           ]
         }
       ],
@@ -267,30 +267,30 @@
       "date": "2026-07-20",
       "title": "安定性の宣言",
       "intro": [
-        "capability manifest にある 26 個の機能すべてが `status: stable` になりました — これは単なる label 変更ではなく、引用された test evidence に裏付けられた、現行 release 系列に対する互換性の約束です。OS レベルの gap が実際に存在する場合、platform label は正直な表示のままです。"
+        "機能マニフェストに含まれる 26 個の機能すべてが `status: stable` になりました。これは単なるラベルの変更ではなく、引用された検証根拠に裏付けられた、現行リリース系列に対する互換性の約束です。OS レベルのギャップが実際に存在する箇所では、プラットフォームラベルは正直な表示のままです。"
       ],
       "sections": [
         {
           "kind": "added",
           "label": "追加",
           "items": [
-            "**設定可能な About panel。** `about` config を指定すると、macOS、Windows、Linux で、custom な本文段落、label/value の詳細行(Build、Commit など)、external link button、サイズ調整を備えた native About panel を有効にできます。省略した場合、各 platform はコンパクトな標準 About dialog のままです。",
-            "**response header として配信される CSP。** 解決済みの Content Security Policy は、meta tag に加えて、単一の resolver から生成される HTTP `Content-Security-Policy` response header(development の middleware と packaged な production server の両方)としても配信されるようになりました。これにより、新しい既定値である `frame-ancestors 'none'` のような header 専用の directive が実際に強制されます。`index.html` 内の user-owned な CSP meta tag は引き続き優先されます。その場合 Murasaki は header を送信せず完全に tag に委ね、development では live file をリクエストごとに再チェックします。"
+            "**設定可能な About パネル。** `about` 設定を指定すると、macOS、Windows、Linux で、カスタムの本文段落、ラベルと値からなる詳細行（Build、Commit など）、外部リンクボタン、サイズ調整を備えたネイティブな About パネルを有効にできます。省略した場合、各プラットフォームはコンパクトな標準 About ダイアログのままです。",
+            "**レスポンスヘッダーとして配信される CSP。** 解決済みの Content Security Policy は、単一のリゾルバーから、meta タグに加えて、HTTP の `Content-Security-Policy` レスポンスヘッダー（開発時のミドルウェアとパッケージ化されたプロダクションサーバーの両方）としても配信されるようになりました。これにより、新しいデフォルト値である `frame-ancestors 'none'` のような、ヘッダー専用のディレクティブが実際に強制されるようになります。`index.html` 内にユーザー自身が用意した CSP meta タグがある場合は、そちらが引き続き優先されます。この場合 Murasaki はヘッダーを送信せず、すべてをそのタグに委ね、開発時にはリクエストごとに実ファイルを再チェックします。"
           ]
         },
         {
           "kind": "fixed",
           "label": "修正",
           "items": [
-            "**Linux の cookie 削除。** WebKitGTK では `webview.deleteCookie()` が resolve されても cookie が実際には削除されませんでした。WebKit は削除対象の cookie を value を含む完全一致で照合しますが、呼び出し側はその value を持っていません。vendored な wry patch により、macOS や Windows と同様に、保存済みの cookie を name、domain、path で検索するようになり、削除結果が次回の read に反映されるようになりました(`@murasakijs/native` 0.43.2、packaged された AppImage で検証済み)。",
-            "Orglia の sample form の styling を改善しました。"
+            "**Linux での cookie 削除。** WebKitGTK では、`webview.deleteCookie()` の呼び出しは解決されるものの、cookie は実際には削除されていませんでした。WebKit は削除対象の cookie を、値を含めた完全一致で照合しますが、呼び出し側はその値を持っていません。同梱した wry パッチにより、macOS や Windows と同様に、保存済みの cookie を name、domain、path で検索するようになったため、削除結果が次回の読み取りに反映されるようになりました（`@murasakijs/native` 0.43.2、パッケージ化された AppImage で検証済み）。",
+            "Orglia のサンプルフォームのスタイリングを改善しました。"
           ]
         },
         {
           "kind": "notes",
           "label": "補足",
           "items": [
-            "`webview-session-network` は Linux で `supported` になりました。残っている正直な platform gap は次のとおりです。system permission は Linux で `unsupported`、Windows で `partial` のままです(macOS の TCC prompt に相当する OS 機能がないため)。また Linux の tray には引き続き AppIndicator host が必要で、global shortcut には X11/XWayland が必要です。"
+            "`webview-session-network` が Linux で `supported` になりました。残っている正直なプラットフォームギャップは次のとおりです。システム権限は Linux で `unsupported`、Windows で `partial` のままです（macOS の TCC プロンプトに相当する OS の機能がないため）。また、Linux のトレイには引き続き AppIndicator host が必要で、グローバルショートカットには X11/XWayland が必要です。"
           ]
         }
       ],
@@ -301,33 +301,33 @@
       "date": "2026-07-20",
       "title": "Linux 機能パリティ",
       "intro": [
-        "OS レベルの gap によって阻まれていないすべての機能について、Linux は macOS や Windows と同等の立ち位置になりました。26 個中 16 個の capability が Linux で `supported` になり(従来の 2 個から増加)、それぞれ packaged された AppImage で end to end 検証済みです。"
+        "OS レベルのギャップによって阻まれていないすべての機能について、Linux は macOS や Windows と同等の立ち位置になりました。26 個中 16 個のケイパビリティが Linux で `supported` になり（従来の 2 個から増加）、それぞれパッケージ化された AppImage を使い、エンドツーエンドで検証済みです。"
       ],
       "sections": [
         {
           "kind": "added",
           "label": "追加",
           "items": [
-            "**Linux 機能パリティ。** file routing、navigation middleware、route metadata、server action、API route、Node Main lifecycle、content security policy、capability permission、diagnostics/crash report、build-time plugin SDK、native window、declarative multi-window が Linux で `supported` になりました。CI 上の Xvfb で動作する packaged AppImage の feature probe によって証明されています。",
-            "**Linux code signing。** `murasaki installer --sign` は `.AppImage`、`.deb`、および統合された `SHA256SUMS` に対して detached かつ armored な GPG 署名を生成します(可能であれば `dpkg-sig` 経由で Debian-native な署名も埋め込みます)。key は `$MURASAKI_GPG_KEY` または `sign.linux.gpgKey` で選択し、passphrase は `$MURASAKI_GPG_PASSPHRASE` または gpg-agent からのみ取得します。",
-            "`murasaki demo` に、Papelle、Oscilla、Orglia の sample preview を one-command で起動する機能が追加されました。"
+            "**Linux 機能パリティ。** ファイルルーティング、ナビゲーションミドルウェア、ルートメタデータ、Server Actions、API Routes、Node Main のライフサイクル、Content Security Policy、ケイパビリティ権限、診断とクラッシュレポート、ビルド時プラグイン SDK、ネイティブウィンドウ、宣言的なマルチウィンドウが Linux で `supported` になりました。CI 上の Xvfb で動作する、パッケージ化された AppImage による機能プローブによって証明されています。",
+            "**Linux でのコード署名。** `murasaki installer --sign` は、`.AppImage`、`.deb`、および両者をまとめた `SHA256SUMS` に対して、分離した ASCII-armored 形式の GPG 署名を生成します（`dpkg-sig` が使える場合は、Debian ネイティブの署名も追加で埋め込みます）。署名鍵は `$MURASAKI_GPG_KEY` または `sign.linux.gpgKey` で選択し、パスフレーズは `$MURASAKI_GPG_PASSPHRASE` または gpg-agent からのみ取得します。",
+            "`murasaki demo` に、Papelle、Oscilla、Orglia のサンプルプレビューをワンコマンドで起動する機能が追加されました。"
           ]
         },
         {
           "kind": "fixed",
           "label": "修正",
           "items": [
-            "**macOS の About panel の icon 描画。** 標準の About panel は、生の source PNG を受け取る代わりに LaunchServices が解決した application icon を継承するようになりました。そのため mask、corner radius、shadow、見た目が Finder や Dock に表示される icon と一致します。",
-            "**Linux での multi-window 再生成 crash。** runtime に secondary window を破棄して再生成すると、packaged された process が X11 の `BadWindow` error で abort していました。積み重なった 2 つの原因を修正しています。window ごとの `WebContext` を破棄時に解放し、再生成時には新しいものを構築するようにしたこと、そして vendored な 1 行の wry patch (`crates/native/vendor/wry`)により、non-child embedding path で `Drop for X11Data` が親 window の X resource を破棄してしまうのを止めたことです。",
-            "Windows で、初回起動時の bind において OS に除外された(`EACCES`) deterministic な origin port を、起動失敗にせずに retry するようになりました。"
+            "**macOS の About パネルにおけるアイコン描画。** 標準の About パネルは、生の PNG ファイルをそのまま受け取るのではなく、LaunchServices が解決したアプリケーションアイコンを継承するようになりました。そのため、マスク、コーナー半径、シャドウ、見た目が、Finder や Dock に表示されるアイコンと一致します。",
+            "**Linux でのマルチウィンドウ再生成時のクラッシュ。** 実行時にセカンダリウィンドウを破棄して再生成すると、パッケージ化されたプロセスが X11 の `BadWindow` エラーで強制終了していました。積み重なっていた 2 つの原因を修正しています。ウィンドウごとの `WebContext` を破棄時に解放するようにし、再生成時には新しいものを構築するようにしたこと、そして同梱した 1 行の wry パッチ (`crates/native/vendor/wry`)により、non-child embedding path で `Drop for X11Data` が親ウィンドウの X リソースを破棄してしまうのを止めたことです。",
+            "Windows では、初回起動時のバインドで OS に除外された(`EACCES`)決定論的なオリジンポートを、起動失敗にせずリトライするようになりました。"
           ]
         },
         {
           "kind": "notes",
           "label": "補足",
           "items": [
-            "OS 側の gap が実際に存在する箇所では、Linux は `partial` のままです。secure storage には Secret Service provider が必要、`.deb` の update は package manager が所有、rpm や distribution repository の trust 統合はない、tray には AppIndicator host が必要で global shortcut には X11/XWayland が必要、`webview.deleteCookie()` は WebKitGTK では確実には反映されません。system permission は Linux で `unsupported` のままです — macOS の TCC prompt に相当する OS レベルの機能がないためです。",
-            "どの platform でも `planned` のままの機能はもうありません。"
+            "OS レベルのギャップが実際に存在する箇所では、Linux は `partial` のままです。セキュアストレージには Secret Service プロバイダーが必要で、`.deb` のアップデートはパッケージマネージャーが管理し、rpm や distro リポジトリとの信頼統合はありません。トレイには AppIndicator host が必要で、グローバルショートカットには X11/XWayland が必要です。`webview.deleteCookie()` は WebKitGTK では確実には反映されません。システム権限は Linux で `unsupported` のままです — macOS の TCC プロンプトに相当する OS レベルの機能がないためです。",
+            "どのプラットフォームでも `planned` のままの機能はもうありません。"
           ]
         }
       ],
@@ -336,15 +336,15 @@
     {
       "version": "0.55.4",
       "date": "2026-07-20",
-      "title": "依存ゼロの scaffolder",
+      "title": "依存ゼロのスキャフォールダー",
       "intro": [],
       "sections": [
         {
           "kind": "changes",
           "label": "",
           "items": [
-            "scaffolder の runtime dependency tree を削除し、Node 組み込みの prompt と spinner の primitive を使うようにしました。これにより CLI が起動する前に package-store の link failure が発生することを防ぎます。",
-            "unattended な `--yes --skip-install` path が、依存を install せずに packed tarball から直接実行できることを保証します。"
+            "スキャフォールダーのランタイム依存関係ツリーを削除し、Node に組み込まれたプロンプトとスピナーのプリミティブを使うようにしました。これにより、CLI が起動する前に、パッケージストアのリンク失敗が発生することを防ぎます。",
+            "非対話の `--yes --skip-install` パスが、依存関係をインストールせずに、パッケージ化された tarball から直接実行できることを保証します。"
           ]
         }
       ],
@@ -360,8 +360,8 @@
           "kind": "changes",
           "label": "",
           "items": [
-            "release gate が、published git commit が ancestor であり、かつ package directory が現行 release まで変更されていない場合に限り、既に publish 済みの workspace package を再利用できるようにしました。",
-            "tag によって publish される package については、integrity、provenance、current-commit の厳格な check を維持します。"
+            "リリースゲートが、公開済みの git コミットが祖先であり、かつパッケージディレクトリが現行リリースまで変更されていない場合に限り、公開済みのワークスペースパッケージを再利用できるようにしました。",
+            "タグによって公開されるパッケージについては、integrity、provenance、current-commit の厳格なチェックを維持します。"
           ]
         }
       ],
@@ -370,16 +370,16 @@
     {
       "version": "0.55.2",
       "date": "2026-07-20",
-      "title": "信頼できる新規 scaffold",
+      "title": "信頼できる新規スキャフォールド",
       "intro": [],
       "sections": [
         {
           "kind": "changes",
           "label": "",
           "items": [
-            "既定の Biome 設定が、install済みの schema と現行の recommended-rule preset を使うようにしました。",
-            "scaffold される Biome CLI を pin し、新規生成された app が時間が経っても lint-clean な状態を保つようにしました。",
-            "CI で、新規に packed された scaffold に対して lint、type-check、production build による検証を行います。"
+            "デフォルトの Biome 設定が、インストール済みのスキーマと、現行の推奨ルールプリセットを使うようにしました。",
+            "スキャフォールドで生成される Biome CLI のバージョンを固定し、新規に生成されるアプリケーションが、時間が経っても lint エラーのない状態を保つようにしました。",
+            "CI では、パッケージ化された CLI から生成した新規スキャフォールドを、lint、type-check、プロダクションビルドで検証します。"
           ]
         }
       ],
@@ -395,9 +395,9 @@
           "kind": "changes",
           "label": "",
           "items": [
-            "npm payload の inspection が pnpm workspace root から動作するようにしました。",
-            "依存順に行う publish の間で、npm registry への伝播を待つようにしました。",
-            "最終的な integrity、git-head、SLSA provenance の検証が Node.js 24 上で正しく実行されるようにしました。"
+            "npm パッケージペイロードの検査が、pnpm ワークスペースルートから動作するようにしました。",
+            "依存関係の順序に沿って行う公開処理の間で、npm レジストリへの伝播を待つようにしました。",
+            "最終的な integrity、git-head、SLSA provenance の検証を、Node.js 24 上で正しく実行できるようにしました。"
           ]
         }
       ],
@@ -406,43 +406,43 @@
     {
       "version": "0.55.0",
       "date": "2026-07-20",
-      "title": "production 候補の基盤",
+      "title": "プロダクション候補の基盤",
       "intro": [],
       "sections": [
         {
           "kind": "added",
           "label": "追加",
           "items": [
-            "typed な `'use main'` call、lifecycle hook、sidecar supervision、crash report、declarative な multi-window control を備えた、長期稼働する Node Main runtime。",
-            "app ごとに安定した browser origin と、window ごとに分離された browser profile。",
-            "default-deny な capability policy の下にある、native tray、global shortcut、autostart、secure storage、notification、dialog、clipboard、file/system shell、WebView、permission、updater の各 API。",
-            "macOS arm64/x64、Windows arm64/x64、Linux arm64/x64 の packaging path。文書化された host tool が利用可能な場合の DMG、NSIS、MSI、AppImage、deb の生成を含みます。",
-            "key rotation、staged rollout、永続的な replay protection、rollback journal、health acknowledgement を備えた署名済み update manifest。",
-            "`MURASAKI_PUBLIC_*` renderer environment variable、`llms.txt` endpoint、read-only な MCP documentation server、拡張された UI component library。",
-            "3 つの独立した application example: Papelle、Oscilla、Orglia。"
+            "型付きの `'use main'` 呼び出し、ライフサイクルフック、sidecar の管理、クラッシュレポート、宣言的なマルチウィンドウ制御を備えた、長期稼働する Node Main ランタイム。",
+            "アプリごとに安定したブラウザオリジンと、ウィンドウごとに分離されたブラウザプロファイル。",
+            "デフォルト拒否のケイパビリティポリシーの下にある、ネイティブトレイ、グローバルショートカット、自動起動、セキュアストレージ、通知、ダイアログ、クリップボード、ファイル / システムシェル、WebView、システム権限、アップデーターの各 API。",
+            "macOS arm64/x64、Windows arm64/x64、Linux arm64/x64 のパッケージングパス。ドキュメント化されたホストツールが利用できる場合の、DMG、NSIS、MSI、AppImage、deb の生成を含みます。",
+            "鍵のローテーション、段階的ロールアウト、永続的なリプレイ保護、ロールバックジャーナル、正常性の確認を備えた、署名済みのアップデートマニフェスト。",
+            "`MURASAKI_PUBLIC_*` レンダラー環境変数、`llms.txt` エンドポイント、読み取り専用の MCP ドキュメントサーバー、拡張された UI コンポーネントライブラリ。",
+            "3 つの独立したサンプルアプリケーション、Papelle、Oscilla、Orglia。"
           ]
         },
         {
           "kind": "security",
           "label": "セキュリティ",
           "items": [
-            "renderer/native と renderer/backend の authority は分離されており、既定ですべて deny です。packaged された window credential は origin、label、generation に bind されており、native window の lifecycle に合わせて失効します。",
-            "production と development の response は、`Permissions-Policy` を通じて既定で camera、microphone、geolocation の Web API を deny します。",
-            "bundle された Node の download は、archive の checksum を信頼する前に Node の OpenPGP 署名付き checksum document を検証します。",
-            "updater manifest は既定で `generatedAt` を要求し、restart をまたいだ replay や、より低い version の authenticated manifest を拒否します。",
-            "app が所有する executable resource は、platform の inner-to-outer な signing pass に組み込まれます。"
+            "レンダラー/ネイティブ、レンダラー/バックエンドの権限領域は分離されており、デフォルトですべて拒否です。パッケージ化されたウィンドウの認証情報は、オリジン、ラベル、世代値に紐付けられており、ネイティブウィンドウのライフサイクルに合わせて失効します。",
+            "プロダクションおよび開発時のレスポンスは、`Permissions-Policy` を通じて camera、microphone、geolocation の Web API をデフォルトで拒否します。",
+            "同梱された Node のダウンロードは、アーカイブのチェックサムを信頼する前に、Node の OpenPGP 署名付きチェックサムファイルを検証します。",
+            "アップデーターマニフェストは、デフォルトで `generatedAt` を要求し、再起動をまたいだリプレイや、より低いバージョンの認証済みマニフェストを拒否します。",
+            "アプリが所有する実行可能なリソースは、プラットフォームの内側から外側への署名パスに組み込まれます。"
           ]
         },
         {
           "kind": "breaking",
           "label": "0.54 からの破壊的変更",
           "items": [
-            "renderer から見える environment value には `MURASAKI_PUBLIC_*` を使ってください。private な値は Node/config にのみ留まります。追加の prefix を使うには明示的な `build.envPrefix` の entry が必要です。",
-            "`generatedAt` を持たない update manifest は、一時的な `allowLegacyManifestsWithoutGeneratedAt` migration flag を有効にしない限り拒否されます。",
-            "executable な bundle resource には `{ from, to, executable: true }` を使う必要があります。宣言されていない Mach-O、PE、ELF、shebang resource は packaging に失敗します。",
-            "永続化された application-origin port が使用中の場合、暗黙に fallback しなくなりました。代わりに startup が失敗し、既存の Web Storage と IndexedDB の identity を保持します。",
-            "bundle された Node helper が有効な sandbox architecture を持つまで、macOS App Sandbox の設定は拒否されます。Hardened Runtime signing は引き続き対応しています。",
-            "Node.js 22.12.0 が対応する development runtime の最小 version です。"
+            "レンダラーから見える環境変数の値には `MURASAKI_PUBLIC_*` を使用してください。非公開の値は Node または設定ファイルの中にのみ留まります。追加のプレフィックスを使うには、明示的な `build.envPrefix` のエントリが必要です。",
+            "`generatedAt` を持たないアップデートマニフェストは、一時的な `allowLegacyManifestsWithoutGeneratedAt` 移行フラグを有効にしない限り拒否されます。",
+            "実行可能なバンドルリソースには `{ from, to, executable: true }` を使う必要があります。宣言されていない Mach-O、PE、ELF、shebang 形式のリソースは、パッケージングに失敗します。",
+            "永続化されたアプリケーションオリジンのポートが使用中の場合に、暗黙のうちにフォールバックすることはなくなりました。代わりに起動が失敗し、既存の Web Storage と IndexedDB の識別情報を保持します。",
+            "同梱された Node ヘルパーが有効なサンドボックスアーキテクチャを備えるまで、macOS の App Sandbox 設定は拒否されます。Hardened Runtime による署名には引き続き対応しています。",
+            "Node.js 22.12.0 が対応する開発ランタイムの最小バージョンです。"
           ]
         }
       ],
@@ -455,7 +455,7 @@
       "date": "2026-07-18",
       "title": "初の一般公開リリース",
       "intro": [
-        "この framework の最初の npm release です。React 19 + Vite 上での file routing、Server Actions、API route、typed な `'use main'` call。default-deny な capability policy の下にある native window、menu、tray、global shortcut、dialog、clipboard、notification、WebView の各 API。macOS の system-permission(TCC)request と Windows の elevation。Ed25519 署名による automatic update を備えた `.dmg`、NSIS、MSI packaging。そして Papelle、Oscilla、Orglia の sample application です。"
+        "このフレームワークの最初の npm リリースです。React 19 + Vite 上でのファイルルーティング、Server Actions、API Routes、型付きの `'use main'` 呼び出し。デフォルト拒否のケイパビリティポリシーの下にあるネイティブウィンドウ、メニュー、トレイ、グローバルショートカット、ダイアログ、クリップボード、通知、WebView の各 API。macOS のシステム権限(TCC)リクエストと Windows の権限昇格。Ed25519 署名による自動アップデートを備えた `.dmg`、NSIS、MSI パッケージング。そして Papelle、Oscilla、Orglia のサンプルアプリケーションです。"
       ],
       "sections": [],
       "outro": []

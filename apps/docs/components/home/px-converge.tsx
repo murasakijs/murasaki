@@ -118,6 +118,32 @@ function MatrixRain() {
  */
 export function PxConverge({ left, right }: { left: string; right: string }) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  const headRef = useRef<HTMLHeadingElement>(null);
+
+  // The headline is sized for the Latin copy; CJK glyphs are ~2× wider, so
+  // the Japanese line overflows the nowrap desktop layout. Measure the
+  // finished line and scale the font down (never up) until it fits.
+  useLayoutEffect(() => {
+    const head = headRef.current;
+    const host = head?.parentElement;
+    if (!head || !host) return;
+    const fit = () => {
+      head.style.setProperty("--cv-scale", "1");
+      // The h2's own horizontal padding doesn't scale with font-size, so
+      // fit the text portion into the space left after the padding.
+      const cs = getComputedStyle(head);
+      const pad = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+      const text = head.scrollWidth - pad;
+      const ratio = Math.min(1, (host.clientWidth - pad) / text);
+      head.style.setProperty("--cv-scale", ratio.toFixed(4));
+    };
+    fit();
+    // Re-measure once the display font arrives — fallback metrics differ.
+    document.fonts?.ready.then(fit).catch(() => {});
+    const ro = new ResizeObserver(fit);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, []);
 
   useLayoutEffect(() => {
     const wrap = wrapRef.current;
@@ -174,7 +200,10 @@ export function PxConverge({ left, right }: { left: string; right: string }) {
           className="relative flex items-center justify-center overflow-hidden py-24"
         >
           <MatrixRain />
-          <h2 className="lp-display relative z-10 flex flex-col items-center gap-3 px-6 text-center text-[clamp(2.4rem,7.5vw,7rem)] font-extrabold leading-[0.95] tracking-tight lg:flex-row lg:gap-[0.35em] lg:whitespace-nowrap">
+          <h2
+            ref={headRef}
+            className="lp-display relative z-10 flex flex-col items-center gap-3 px-6 text-center text-[calc(clamp(2.4rem,7.5vw,7rem)*var(--cv-scale,1))] font-extrabold leading-[0.95] tracking-tight lg:flex-row lg:gap-[0.35em] lg:whitespace-nowrap"
+          >
             <span data-cv-left className="inline-block will-change-transform">
               {left}
             </span>
