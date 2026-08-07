@@ -32,7 +32,7 @@ serde_json = "1"
 # unconditional (not GUI-stack/platform gated) since it's pure Rust with no
 # native deps of its own.
 sha2 = "0.10"
-hmac = "0.12"
+hmac = "0.13"
 getrandom = "0.3"
 fs2 = "0.4"
 
