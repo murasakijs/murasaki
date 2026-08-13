@@ -4,6 +4,13 @@ Murasaki follows semantic versioning while it is pre-1.0: minor releases may
 contain documented breaking changes. See the matching migration guide before
 upgrading production applications.
 
+## 0.55.8 — Security hardening across the production server, updater, and MCP (2026-08-13)
+
+- The bundled production server no longer returns internal error details to API clients, and static files are served from an allowlist built at startup, eliminating the path-traversal bug class by construction.
+- Auto-update manifest resolution now validates GitHub owner/repo input strictly and fails closed on malformed or SCP-style URLs.
+- `@murasakijs/mcp`: pinned vulnerable transitive dependencies (`fast-uri`, `hono`, `ip-address`) and updated `@modelcontextprotocol/sdk` to 1.30.
+- `@murasakijs/native` 0.43.3: the vendored glib used by the Linux GTK backend carries the upstream fix for GHSA-wrw7-89jp-8q8g.
+
 ## 0.55.7 — React Aria UI foundation (2026-07-24)
 
 Murasaki's default UI foundation now uses React Aria Components throughout.

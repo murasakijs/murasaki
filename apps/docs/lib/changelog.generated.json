@@ -1,6 +1,25 @@
 {
   "en": [
     {
+      "version": "0.55.8",
+      "date": "2026-08-13",
+      "title": "Security hardening across the production server, updater, and MCP",
+      "intro": [],
+      "sections": [
+        {
+          "kind": "changes",
+          "label": "",
+          "items": [
+            "The bundled production server no longer returns internal error details to API clients, and static files are served from an allowlist built at startup, eliminating the path-traversal bug class by construction.",
+            "Auto-update manifest resolution now validates GitHub owner/repo input strictly and fails closed on malformed or SCP-style URLs.",
+            "`@murasakijs/mcp`: pinned vulnerable transitive dependencies (`fast-uri`, `hono`, `ip-address`) and updated `@modelcontextprotocol/sdk` to 1.30.",
+            "`@murasakijs/native` 0.43.3: the vendored glib used by the Linux GTK backend carries the upstream fix for GHSA-wrw7-89jp-8q8g."
+          ]
+        }
+      ],
+      "outro": []
+    },
+    {
       "version": "0.55.7",
       "date": "2026-07-24",
       "title": "React Aria UI foundation",
@@ -231,6 +250,25 @@
     }
   ],
   "ja": [
+    {
+      "version": "0.55.8",
+      "date": "2026-08-13",
+      "title": "本番サーバー・自動更新・MCP のセキュリティ強化",
+      "intro": [],
+      "sections": [
+        {
+          "kind": "changes",
+          "label": "",
+          "items": [
+            "同梱の本番サーバーが API クライアントに内部エラーの詳細を返さなくなりました。静的ファイルは起動時に構築した許可リストから配信する方式に変わり、パストラバーサル系の不具合を構造的に排除しています。",
+            "自動更新のマニフェスト解決で GitHub の owner/repo 指定を厳密に検証し、不正な入力や SCP 形式の URL は安全側で失敗するようにしました。",
+            "`@murasakijs/mcp`: 脆弱な間接依存（`fast-uri`、`hono`、`ip-address`）を修正版に固定し、`@modelcontextprotocol/sdk` を 1.30 に更新しました。",
+            "`@murasakijs/native` 0.43.3: Linux GTK バックエンドが使用する同梱 glib に、GHSA-wrw7-89jp-8q8g の上流修正を適用しています。"
+          ]
+        }
+      ],
+      "outro": []
+    },
     {
       "version": "0.55.7",
       "date": "2026-07-24",
