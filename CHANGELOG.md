@@ -10,6 +10,7 @@ upgrading production applications.
 - Auto-update manifest resolution now validates GitHub owner/repo input strictly and fails closed on malformed or SCP-style URLs.
 - `@murasakijs/mcp`: pinned vulnerable transitive dependencies (`fast-uri`, `hono`, `ip-address`) and updated `@modelcontextprotocol/sdk` to 1.30.
 - `@murasakijs/native` 0.43.3: the vendored glib used by the Linux GTK backend carries the upstream fix for GHSA-wrw7-89jp-8q8g.
+- `@murasakijs/ui` 0.3.1: includes the hover-card interaction stability fix and dependency updates since 0.3.0.
 
 ## 0.55.7 — React Aria UI foundation (2026-07-24)
 

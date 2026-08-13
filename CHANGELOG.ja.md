@@ -8,6 +8,7 @@ Murasaki は 1.0 に達するまでの間、セマンティックバージョニ
 - 自動更新のマニフェスト解決で GitHub の owner/repo 指定を厳密に検証し、不正な入力や SCP 形式の URL は安全側で失敗するようにしました。
 - `@murasakijs/mcp`: 脆弱な間接依存（`fast-uri`、`hono`、`ip-address`）を修正版に固定し、`@modelcontextprotocol/sdk` を 1.30 に更新しました。
 - `@murasakijs/native` 0.43.3: Linux GTK バックエンドが使用する同梱 glib に、GHSA-wrw7-89jp-8q8g の上流修正を適用しています。
+- `@murasakijs/ui` 0.3.1: 0.3.0 以降のホバーカード操作の安定化修正と依存関係の更新を含みます。
 
 ## 0.55.7 — React Aria UI 基盤 (2026-07-24)
 
