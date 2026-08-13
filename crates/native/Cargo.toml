@@ -49,7 +49,7 @@ open = "5"
 png = "0.17"
 url = "2"
 # clipboard.readImage/writeImage's PNG<->base64 wire encoding (see clipboard.rs).
-base64 = "0.22"
+base64 = "0.23"
 # shell.trashItem — moves a file/directory to the OS trash/recycle bin.
 trash = "5"
 
