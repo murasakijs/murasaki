@@ -7,9 +7,11 @@ export default {
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'ui-vendor': ['@murasakijs/ui', 'lucide-react'],
-          'murasaki-runtime': ['murasaki'],
+        // Vite 8's default bundler (Rolldown) dropped the object form of
+        // manualChunks — only the function form remains supported.
+        manualChunks(id: string) {
+          if (id.includes('node_modules/@murasakijs/ui/') || id.includes('node_modules/lucide-react/')) return 'ui-vendor'
+          if (id.includes('node_modules/murasaki/')) return 'murasaki-runtime'
         },
       },
     },

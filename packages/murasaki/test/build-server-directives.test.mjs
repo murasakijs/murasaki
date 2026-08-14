@@ -16,7 +16,7 @@ test('stripLeadingMainDirective removes only a leading use main directive withou
   assert.equal(stripLeadingMainDirective(`'use custom'\nexport const value = 1\n`), `'use custom'\nexport const value = 1\n`)
 })
 
-test('server build consumes use main without emitting Rollup ignored-directive warnings', async (t) => {
+test('server build consumes use main without emitting a bundler ignored-directive warning', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'murasaki-main-directive-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   await mkdir(join(root, 'src'), { recursive: true })
@@ -44,7 +44,10 @@ test('server build consumes use main without emitting Rollup ignored-directive w
   }
 
   assert.doesNotMatch(output, /"use main".*was ignored/)
-  assert.match(output, /"use custom".*was ignored/)
+  // Vite 8's default bundler (Rolldown) has no equivalent of Rollup's
+  // MODULE_LEVEL_DIRECTIVE warning, so an unrecognized directive like
+  // "use custom" is silently dropped rather than reported — nothing left
+  // here to assert beyond the build completing without error.
   const registry = await readFile(join(root, 'dist/server/main-actions.mjs'), 'utf8')
   assert.match(registry, /workspace\.ts/)
 })
