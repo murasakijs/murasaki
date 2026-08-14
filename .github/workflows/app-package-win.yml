@@ -74,9 +74,9 @@ jobs:
         with:
           node-version: '24'
 
-      # No version pin: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v4 reads it from the root
+      # No version pin: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v4 reads it from the root
       # package.json "packageManager" field (specifying both errors).
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
       # Both matrix runners are native for their arch (windows-latest is
       # x86_64, windows-11-arm is aarch64) — no cross-target flag is needed
