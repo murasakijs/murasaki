@@ -79,7 +79,7 @@
   },
   "devDependencies": {
     "@microsoft/api-extractor": "7.58.12",
-    "@types/node": "^22",
+    "@types/node": "^26",
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
