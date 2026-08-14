@@ -5,6 +5,7 @@ updates:
   # single root `directory`, so every package under apps/*, packages/*,
   # examples/*, and crates/native's package.json is covered from here.
   - package-ecosystem: "npm"
+    rebase-strategy: "disabled"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -19,6 +20,7 @@ updates:
     # each lands as its own individually reviewable pull request.
 
   - package-ecosystem: "cargo"
+    rebase-strategy: "disabled"
     directory: "/crates/native"
     schedule:
       interval: "weekly"
@@ -31,6 +33,7 @@ updates:
           - "patch"
 
   - package-ecosystem: "github-actions"
+    rebase-strategy: "disabled"
     directory: "/"
     schedule:
       interval: "weekly"
