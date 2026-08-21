@@ -77,11 +77,11 @@ jobs:
 
       # GitHub-owned actions are pinned too: a mutable major tag is still a
       # supply-chain boundary in a workflow that writes security results.
-      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           languages: javascript-typescript
 
-      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
 
   fuzz-smoke:
     name: Fuzz smoke / crates/native (PR)
