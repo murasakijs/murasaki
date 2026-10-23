@@ -23,19 +23,19 @@
   },
   "dependencies": {
     "@murasakijs/ui": "workspace:*",
-    "lucide-react": "1.31.0",
+    "lucide-react": "1.59.0",
     "murasaki": "workspace:*",
-    "pg": "8.23.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
-    "@types/pg": "8.21.0",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.4",
+    "@types/node": "26.6.5",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "typescript": "5.9.3",
-    "vite": "^8.2.1",
+    "vite": "^8.3.4",
     "vitest": "^4.1.10"
   }
 }
